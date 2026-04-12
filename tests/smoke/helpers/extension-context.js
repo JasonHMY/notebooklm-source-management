@@ -151,7 +151,7 @@ async function launchExtensionContext(repoRoot) {
     ensurePlaywrightArtifactDirs();
     const context = await chromium.launchPersistentContext(userDataDir, {
         executablePath: resolveChromiumExecutablePath(),
-        headless: false,
+        headless: process.env.PLAYWRIGHT_HEADLESS !== 'false',
         ignoreDefaultArgs: ['--disable-extensions'],
         args: [
             `--disable-extensions-except=${repoRoot}`,
