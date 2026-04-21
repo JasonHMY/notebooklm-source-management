@@ -23,6 +23,18 @@
     "popup_badge_attention": {
         "message": "需处理"
     },
+    "popup_toggle_label": {
+        "message": "插件状态"
+    },
+    "popup_toggle_state_enabled": {
+        "message": "已启用"
+    },
+    "popup_toggle_state_disabled": {
+        "message": "已关闭"
+    },
+    "popup_toggle_help": {
+        "message": "关闭页面内管理器时不会丢失已保存的分组或标签。"
+    },
     "popup_title_ready": {
         "message": "当前笔记本中的来源管理器已就绪"
     },
@@ -59,8 +71,17 @@
     "popup_body_refresh_needed": {
         "message": "请刷新这个笔记本页面后重新打开启动器。如果仍然失败，可能是 NotebookLM 页面结构发生了变化。"
     },
+    "popup_title_disabled": {
+        "message": "来源管理器当前已关闭"
+    },
+    "popup_body_disabled": {
+        "message": "重新启用插件后，NotebookLM 来源管理器会再次挂载到当前页面。"
+    },
     "popup_cta_open_manager": {
         "message": "打开来源管理器"
+    },
+    "popup_cta_enable_extension": {
+        "message": "启用插件"
     },
     "popup_cta_go_to_notebooklm": {
         "message": "前往 NotebookLM"
@@ -94,6 +115,9 @@
     },
     "popup_reason_notebook_missing": {
         "message": "请先打开 NotebookLM 的具体笔记本页面，再访问来源管理器。"
+    },
+    "popup_reason_extension_disabled": {
+        "message": "来源管理器已在扩展弹窗中关闭。"
     },
     "popup_reason_generic": {
         "message": "当前页面暂时无法使用来源管理器。"
@@ -285,6 +309,15 @@
     },
     "ui_source_actions": {
         "message": "来源操作"
+    },
+    "ui_view_source": {
+        "message": "查看来源"
+    },
+    "ui_view_source_details": {
+        "message": "查看来源详情"
+    },
+    "ui_source_details_unavailable": {
+        "message": "当前无法打开该来源详情"
     },
     "ui_open_native_menu": {
         "message": "打开 NotebookLM 菜单"

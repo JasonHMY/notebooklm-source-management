@@ -10,22 +10,33 @@
     <main class="popup-shell">
         <section class="popup-panel" aria-labelledby="popup-title">
             <header class="popup-header">
-                <div class="popup-brand-row">
-                    <div class="popup-icon-frame" aria-hidden="true">
-                        <img class="popup-icon" src="../assets/icons/icon48.png" alt="">
-                    </div>
-                    <p class="popup-eyebrow" id="popup-badge"></p>
-                </div>
+                <p class="popup-eyebrow" id="popup-badge"></p>
                 <h1 class="popup-title" id="popup-title"></h1>
             </header>
 
             <div class="popup-content">
                 <p class="popup-body" id="popup-body"></p>
+            </div>
 
-                <div class="popup-status-stack">
-                    <p class="popup-note" id="popup-note"></p>
-                    <p class="popup-detail" id="popup-detail" aria-live="polite" hidden></p>
+            <section class="popup-toggle" aria-labelledby="popup-toggle-label popup-toggle-state" aria-describedby="popup-toggle-help">
+                <div class="popup-toggle-row">
+                    <div class="popup-toggle-copy">
+                        <p class="popup-toggle-label" id="popup-toggle-label"></p>
+                        <p class="popup-toggle-state" id="popup-toggle-state"></p>
+                    </div>
+
+                    <label class="popup-switch">
+                        <input class="popup-switch-input" id="popup-toggle-input" type="checkbox" role="switch" aria-labelledby="popup-toggle-label popup-toggle-state">
+                        <span class="popup-switch-track" aria-hidden="true"></span>
+                    </label>
                 </div>
+
+                <p class="popup-toggle-help" id="popup-toggle-help"></p>
+            </section>
+
+            <div class="popup-status-stack">
+                <p class="popup-note" id="popup-note"></p>
+                <p class="popup-detail" id="popup-detail" aria-live="polite" hidden></p>
             </div>
 
             <div class="popup-actions">

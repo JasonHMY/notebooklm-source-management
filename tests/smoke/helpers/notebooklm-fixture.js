@@ -33,8 +33,11 @@ function normalizeSources(notebookId, sources) {
     return defaultSourcesForNotebook(notebookId);
 }
 
-function renderNotebookHtml(notebookId, sources) {
+function renderNotebookHtml(notebookId, sources, options = {}) {
     const renderedSources = normalizeSources(notebookId, sources);
+    const initialOptions = {
+        stagedHydration: Boolean(options.stagedHydration)
+    };
 
     return `<!doctype html>
 <html lang="en">
@@ -109,8 +112,27 @@ function renderNotebookHtml(notebookId, sources) {
         (function () {
             const initialNotebookId = ${JSON.stringify(notebookId)};
             const initialSources = ${JSON.stringify(renderedSources)};
+            const initialOptions = ${JSON.stringify(initialOptions)};
+            let hydrationTimerIds = [];
 
-            function createSourceItem(source) {
+            function clearHydrationTimers() {
+                hydrationTimerIds.forEach((timerId) => window.clearTimeout(timerId));
+                hydrationTimerIds = [];
+            }
+
+            function setHydrationPhase(nextPhase) {
+                window.__fixtureHydrationState = nextPhase;
+            }
+
+            function scheduleHydrationPhase(callback, delayMs) {
+                const timerId = window.setTimeout(() => {
+                    hydrationTimerIds = hydrationTimerIds.filter((id) => id !== timerId);
+                    callback();
+                }, delayMs);
+                hydrationTimerIds.push(timerId);
+            }
+
+            function createSourceItem(source, phase) {
                 const wrapper = document.createElement('div');
                 wrapper.className = 'single-source-container';
                 wrapper.setAttribute('data-testid', 'source-item');
@@ -128,29 +150,61 @@ function renderNotebookHtml(notebookId, sources) {
                 title.setAttribute('data-testid', 'source-title');
                 title.textContent = source.title;
 
-                const checkbox = document.createElement('input');
-                checkbox.type = 'checkbox';
-                checkbox.setAttribute('aria-label', source.title);
-
-                const moreButton = document.createElement('button');
-                moreButton.type = 'button';
-                moreButton.setAttribute('aria-label', 'More options');
-
-                const moreIcon = document.createElement('mat-icon');
-                moreIcon.textContent = 'more_vert';
-                moreButton.appendChild(moreIcon);
-
                 row.appendChild(icon);
                 row.appendChild(title);
-                row.appendChild(checkbox);
-                row.appendChild(moreButton);
+
+                if (phase === 'full') {
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.setAttribute('aria-label', source.title);
+
+                    const moreButton = document.createElement('button');
+                    moreButton.type = 'button';
+                    moreButton.setAttribute('aria-label', 'More options');
+
+                    const moreIcon = document.createElement('mat-icon');
+                    moreIcon.textContent = 'more_vert';
+                    moreButton.appendChild(moreIcon);
+
+                    row.appendChild(checkbox);
+                    row.appendChild(moreButton);
+                }
+
                 wrapper.appendChild(row);
 
                 return wrapper;
             }
 
-            function renderNotebook(nextNotebookId, nextSources) {
+            function renderSources(scrollArea, sources, phase) {
+                scrollArea.replaceChildren();
+                sources.forEach((source) => {
+                    scrollArea.appendChild(createSourceItem(source, phase));
+                });
+            }
+
+            function hydrateSources(scrollArea, sources, options) {
+                clearHydrationTimers();
+                if (!options || !options.stagedHydration) {
+                    renderSources(scrollArea, sources, 'full');
+                    setHydrationPhase('full');
+                    return;
+                }
+
+                setHydrationPhase('empty');
+                renderSources(scrollArea, [], 'full');
+                scheduleHydrationPhase(() => {
+                    renderSources(scrollArea, sources, 'partial');
+                    setHydrationPhase('partial');
+                }, 40);
+                scheduleHydrationPhase(() => {
+                    renderSources(scrollArea, sources, 'full');
+                    setHydrationPhase('full');
+                }, 120);
+            }
+
+            function renderNotebook(nextNotebookId, nextSources, nextOptions) {
                 const sources = Array.isArray(nextSources) && nextSources.length > 0 ? nextSources : initialSources;
+                const options = Object.assign({}, initialOptions, nextOptions || {});
                 const title = nextNotebookId ? 'Notebook ' + nextNotebookId : 'Notebook';
 
                 document.title = title;
@@ -171,21 +225,22 @@ function renderNotebookHtml(notebookId, sources) {
                 scrollArea.className = 'scroll-area';
                 scrollArea.setAttribute('data-testid', 'scroll-area');
 
-                sources.forEach((source) => {
-                    scrollArea.appendChild(createSourceItem(source));
-                });
-
                 sourcePanel.appendChild(header);
                 sourcePanel.appendChild(scrollArea);
                 appShell.appendChild(sourcePanel);
                 document.body.appendChild(appShell);
+
+                hydrateSources(scrollArea, sources, options);
             }
 
             window.__swapNotebook = function swapNotebook(nextNotebook) {
                 const notebookId = nextNotebook && nextNotebook.notebookId ? String(nextNotebook.notebookId) : initialNotebookId;
                 const sources = nextNotebook && Array.isArray(nextNotebook.sources) ? nextNotebook.sources : initialSources;
+                const options = nextNotebook && typeof nextNotebook === 'object'
+                    ? { stagedHydration: Boolean(nextNotebook.stagedHydration) }
+                    : initialOptions;
                 history.pushState({}, '', '/notebook/' + encodeURIComponent(notebookId));
-                renderNotebook(notebookId, sources);
+                renderNotebook(notebookId, sources, options);
                 return { notebookId, sourceCount: Array.isArray(sources) ? sources.length : 0 };
             };
 
@@ -193,8 +248,23 @@ function renderNotebookHtml(notebookId, sources) {
                 return document.title.replace(/^Notebook\\s+/, '');
             };
 
+            window.__waitForFixtureHydration = function waitForFixtureHydration(targetPhase) {
+                const desiredPhase = targetPhase || 'full';
+                const phaseOrder = { empty: 0, partial: 1, full: 2 };
+                return new Promise((resolve) => {
+                    const check = () => {
+                        if ((phaseOrder[window.__fixtureHydrationState] || 0) >= (phaseOrder[desiredPhase] || 0)) {
+                            resolve(window.__fixtureHydrationState);
+                            return;
+                        }
+                        window.setTimeout(check, 10);
+                    };
+                    check();
+                });
+            };
+
             function renderInitialNotebook() {
-                renderNotebook(initialNotebookId, initialSources);
+                renderNotebook(initialNotebookId, initialSources, initialOptions);
             }
 
             if (document.readyState === 'loading') {
@@ -277,7 +347,9 @@ async function installNotebookFixture(context) {
         await route.fulfill({
             status: 200,
             contentType: 'text/html',
-            body: renderNotebookHtml(notebookId)
+            body: renderNotebookHtml(notebookId, null, {
+                stagedHydration: url.searchParams.get('fixture') === 'staged'
+            })
         });
     });
 }

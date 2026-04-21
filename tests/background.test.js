@@ -30,6 +30,9 @@ describe('background.js message listener', () => {
                 update: jest.fn((tabId, updateInfo, cb) => {
                     if (cb) cb({ id: tabId, url: 'https://notebooklm.google.com/notebook/123' });
                 }),
+                sendMessage: jest.fn((tabId, message, cb) => {
+                    if (cb) cb();
+                }),
                 create: jest.fn((createProperties, cb) => {
                     if (cb) cb({ id: 99, url: createProperties.url });
                 })
@@ -93,17 +96,48 @@ describe('background.js message listener', () => {
         const request = {
             type: 'SAVE_STATE',
             key: 'sourcesPlusState_123',
-            data: { test: 123 }
+            data: {
+                groups: ['group1'],
+                groupsById: { group1: { id: 'group1', children: [{ type: 'source', key: 'source_1' }] } },
+                ungrouped: [],
+                sourceStateById: { source_1: { enabled: true } }
+            }
         };
 
         const result = listener(request, validSender, mockSendResponse);
 
         expect(global.chrome.storage.local.set).toHaveBeenCalledWith(
-            { 'sourcesPlusState_123': { test: 123 } },
+            {
+                'sourcesPlusState_123': request.data,
+                'sourcesPlusState_123__backup': request.data
+            },
             expect.any(Function)
         );
         expect(mockSendResponse).toHaveBeenCalledWith({ success: true });
         expect(result).toBe(true); // Should return true to keep channel open
+    });
+
+    it('should not overwrite the backup snapshot when SAVE_STATE receives an empty payload', () => {
+        const request = {
+            type: 'SAVE_STATE',
+            key: 'sourcesPlusState_123',
+            data: {
+                groups: [],
+                groupsById: {},
+                ungrouped: [],
+                sourceStateById: {},
+                tagsById: {},
+                tagOrder: [],
+                sourceTagsById: {}
+            }
+        };
+
+        listener(request, validSender, mockSendResponse);
+
+        expect(global.chrome.storage.local.set).toHaveBeenCalledWith(
+            { 'sourcesPlusState_123': request.data },
+            expect.any(Function)
+        );
     });
 
     it('should reject SAVE_STATE with invalid key', () => {
@@ -158,20 +192,59 @@ describe('background.js message listener', () => {
 
         // Mock get to return some data
         global.chrome.storage.local.get.mockImplementationOnce((key, cb) => {
-            cb({ 'sourcesPlusState_123': { loadedData: true } });
+            cb({ 'sourcesPlusState_123': { loadedData: true, sourceStateById: { source_1: { enabled: true } } } });
         });
 
         const result = listener(request, validSender, mockSendResponse);
 
         expect(global.chrome.storage.local.get).toHaveBeenCalledWith(
-            'sourcesPlusState_123',
+            ['sourcesPlusState_123', 'sourcesPlusState_123__backup'],
             expect.any(Function)
         );
         expect(mockSendResponse).toHaveBeenCalledWith({
             success: true,
-            data: { loadedData: true }
+            data: { loadedData: true, sourceStateById: { source_1: { enabled: true } } }
         });
         expect(result).toBe(true); // Should return true to keep channel open
+    });
+
+    it('should fall back to the local backup snapshot when the primary state is empty', () => {
+        const request = {
+            type: 'LOAD_STATE',
+            key: 'sourcesPlusState_123'
+        };
+
+        global.chrome.storage.local.get.mockImplementationOnce((key, cb) => {
+            cb({
+                'sourcesPlusState_123': {
+                    groups: [],
+                    groupsById: {},
+                    ungrouped: [],
+                    sourceStateById: {},
+                    tagsById: {},
+                    tagOrder: [],
+                    sourceTagsById: {}
+                },
+                'sourcesPlusState_123__backup': {
+                    groups: ['group1'],
+                    groupsById: { group1: { id: 'group1', children: [{ type: 'source', key: 'source_1' }] } },
+                    ungrouped: [],
+                    sourceStateById: { source_1: { enabled: true } }
+                }
+            });
+        });
+
+        listener(request, validSender, mockSendResponse);
+
+        expect(mockSendResponse).toHaveBeenCalledWith({
+            success: true,
+            data: {
+                groups: ['group1'],
+                groupsById: { group1: { id: 'group1', children: [{ type: 'source', key: 'source_1' }] } },
+                ungrouped: [],
+                sourceStateById: { source_1: { enabled: true } }
+            }
+        });
     });
 
     it('should reject LOAD_STATE when storage get fails', () => {
@@ -189,7 +262,7 @@ describe('background.js message listener', () => {
         const result = listener(request, validSender, mockSendResponse);
 
         expect(global.chrome.storage.local.get).toHaveBeenCalledWith(
-            'sourcesPlusState_123',
+            ['sourcesPlusState_123', 'sourcesPlusState_123__backup'],
             expect.any(Function)
         );
         expect(console.error).toHaveBeenCalledWith(
@@ -257,6 +330,100 @@ describe('background.js message listener', () => {
         expect(mockSendResponse).toHaveBeenCalledWith({
             success: true,
             data: null
+        });
+    });
+
+    it('returns enabled=true when extensionEnabled is missing', () => {
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({});
+        });
+
+        listener({ type: 'GET_EXTENSION_ENABLED' }, {}, mockSendResponse);
+
+        expect(mockSendResponse).toHaveBeenCalledWith({
+            success: true,
+            enabled: true
+        });
+    });
+
+    it('returns enabled=false when extensionEnabled is stored as false', () => {
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({ extensionEnabled: false });
+        });
+
+        listener({ type: 'GET_EXTENSION_ENABLED' }, {}, mockSendResponse);
+
+        expect(mockSendResponse).toHaveBeenCalledWith({
+            success: true,
+            enabled: false
+        });
+    });
+
+    it('persists extensionEnabled=false and forwards DISABLE_MANAGER to the active NotebookLM tab', () => {
+        const sender = {};
+
+        listener({
+            type: 'SET_EXTENSION_ENABLED',
+            enabled: false,
+            tabId: 42
+        }, sender, mockSendResponse);
+
+        expect(global.chrome.storage.local.set).toHaveBeenCalledWith(
+            { extensionEnabled: false },
+            expect.any(Function)
+        );
+        expect(global.chrome.tabs.sendMessage).toHaveBeenCalledWith(
+            42,
+            { type: 'DISABLE_MANAGER' },
+            expect.any(Function)
+        );
+    });
+
+    it('persists extensionEnabled=true and forwards ENABLE_MANAGER to the active NotebookLM tab', () => {
+        const sender = {};
+
+        listener({
+            type: 'SET_EXTENSION_ENABLED',
+            enabled: true,
+            tabId: 42
+        }, sender, mockSendResponse);
+
+        expect(global.chrome.storage.local.set).toHaveBeenCalledWith(
+            { extensionEnabled: true },
+            expect.any(Function)
+        );
+        expect(global.chrome.tabs.sendMessage).toHaveBeenCalledWith(
+            42,
+            { type: 'ENABLE_MANAGER' },
+            expect.any(Function)
+        );
+    });
+
+    it('keeps the persisted enabled state even if tab forwarding fails', () => {
+        global.chrome.tabs.sendMessage.mockImplementationOnce((tabId, message, cb) => {
+            global.chrome.runtime.lastError = { message: 'Could not establish connection' };
+            cb();
+            global.chrome.runtime.lastError = undefined;
+        });
+
+        listener({
+            type: 'SET_EXTENSION_ENABLED',
+            enabled: true,
+            tabId: 42
+        }, {}, mockSendResponse);
+
+        expect(global.chrome.storage.local.set).toHaveBeenCalledWith(
+            { extensionEnabled: true },
+            expect.any(Function)
+        );
+        expect(global.chrome.storage.local.set.mock.invocationCallOrder[0]).toBeLessThan(
+            global.chrome.tabs.sendMessage.mock.invocationCallOrder[0]
+        );
+        expect(mockSendResponse).toHaveBeenCalledWith({
+            success: true,
+            enabled: true,
+            forwarded: false,
+            forwardErrorCode: 'tab_message_failed'
         });
     });
 

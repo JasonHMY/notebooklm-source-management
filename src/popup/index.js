@@ -6,7 +6,8 @@
     const ERROR_MESSAGE_KEYS = {
         invalid_storage_key: 'popup_error_invalid_storage_key',
         runtime_failure: 'popup_reason_generic',
-        tabs_query_failed: 'popup_reason_tabs_query_failed'
+        tabs_query_failed: 'popup_reason_tabs_query_failed',
+        extension_disabled: 'popup_reason_extension_disabled'
     };
 
     function getUiLanguage() {
@@ -64,7 +65,8 @@
             tab_message_failed: 'popup_reason_tab_message_failed',
             tabs_query_failed: 'popup_reason_tabs_query_failed',
             notebook_missing: 'popup_reason_notebook_missing',
-            not_on_notebook_page: 'popup_reason_notebook_missing'
+            not_on_notebook_page: 'popup_reason_notebook_missing',
+            extension_disabled: 'popup_reason_extension_disabled'
         };
 
         return reasonMap[reason] || 'popup_reason_generic';
@@ -136,6 +138,17 @@
         };
     }
 
+    function buildDisabledPopupState() {
+        return {
+            badgeKey: 'popup_badge_launcher',
+            titleKey: 'popup_title_disabled',
+            bodyKey: 'popup_body_disabled',
+            buttonKey: 'popup_cta_enable_extension',
+            detailKey: 'popup_reason_extension_disabled',
+            action: 'enable-extension'
+        };
+    }
+
     function queryNotebookLmTabs() {
         return new Promise((resolve, reject) => {
             chrome.tabs.query({ url: `${NOTEBOOKLM_HOME_URL}*` }, (tabs) => {
@@ -166,6 +179,54 @@
         });
     }
 
+    function queryExtensionEnabled() {
+        return new Promise((resolve, reject) => {
+            chrome.runtime.sendMessage({ type: 'GET_EXTENSION_ENABLED' }, (response) => {
+                if (chrome.runtime.lastError) {
+                    const error = new Error(chrome.runtime.lastError.message || 'Extension enabled query failed');
+                    error.errorCode = 'runtime_failure';
+                    reject(error);
+                    return;
+                }
+
+                if (response && response.success === false) {
+                    resolve(true);
+                    return;
+                }
+
+                resolve(response ? response.enabled !== false : true);
+            });
+        });
+    }
+
+    function setExtensionEnabled(enabled, tabId) {
+        return new Promise((resolve, reject) => {
+            chrome.runtime.sendMessage({
+                type: 'SET_EXTENSION_ENABLED',
+                enabled,
+                tabId
+            }, (response) => {
+                if (chrome.runtime.lastError) {
+                    reject(new Error(chrome.runtime.lastError.message));
+                    return;
+                }
+
+                resolve(response || { success: true, enabled });
+            });
+        });
+    }
+
+    function shouldReloadAfterToggle(tab) {
+        const context = getPageContext(tab && tab.url);
+        return context === 'notebook' || context === 'notebook-home';
+    }
+
+    function shouldReloadAfterSoftToggleFailure(tab, response) {
+        if (!shouldReloadAfterToggle(tab)) return false;
+        if (!response || response.success === false) return false;
+        return response.forwarded === false || Boolean(response.forwardErrorCode);
+    }
+
     function sendMessageToTab(tabId, message) {
         return new Promise((resolve, reject) => {
             chrome.tabs.sendMessage(tabId, message, (response) => {
@@ -175,6 +236,58 @@
                 }
 
                 resolve(response || null);
+            });
+        });
+    }
+
+    function reloadTabAndWaitForCompletion(tabId, timeoutMs = 5000) {
+        if (typeof tabId !== 'number') {
+            return Promise.resolve({ success: true, reloaded: false });
+        }
+
+        if (
+            !chrome.tabs ||
+            !chrome.tabs.onUpdated ||
+            typeof chrome.tabs.onUpdated.addListener !== 'function' ||
+            typeof chrome.tabs.onUpdated.removeListener !== 'function'
+        ) {
+            return reloadTab(tabId);
+        }
+
+        return new Promise((resolve, reject) => {
+            let timeoutId = null;
+
+            const cleanup = () => {
+                if (timeoutId !== null) {
+                    clearTimeout(timeoutId);
+                }
+                chrome.tabs.onUpdated.removeListener(handleUpdated);
+            };
+
+            const handleUpdated = (updatedTabId, changeInfo) => {
+                if (updatedTabId !== tabId || !changeInfo || changeInfo.status !== 'complete') {
+                    return;
+                }
+
+                cleanup();
+                resolve({ success: true, reloaded: true });
+            };
+
+            timeoutId = setTimeout(() => {
+                cleanup();
+                const error = new Error('Tab reload timed out');
+                error.errorCode = 'runtime_failure';
+                reject(error);
+            }, timeoutMs);
+
+            chrome.tabs.onUpdated.addListener(handleUpdated);
+
+            chrome.tabs.reload(tabId, {}, () => {
+                if (chrome.runtime.lastError) {
+                    const error = new Error(chrome.runtime.lastError.message);
+                    cleanup();
+                    reject(error);
+                }
             });
         });
     }
@@ -229,6 +342,10 @@
 
     function getElements(doc) {
         return {
+            toggleLabel: doc.getElementById('popup-toggle-label'),
+            toggleState: doc.getElementById('popup-toggle-state'),
+            toggleHelp: doc.getElementById('popup-toggle-help'),
+            toggleInput: doc.getElementById('popup-toggle-input'),
             badge: doc.getElementById('popup-badge'),
             title: doc.getElementById('popup-title'),
             body: doc.getElementById('popup-body'),
@@ -238,8 +355,15 @@
         };
     }
 
-    function renderPopup(doc, state) {
+    function renderPopup(doc, state, extensionEnabled) {
         const elements = getElements(doc);
+        const isEnabled = extensionEnabled !== false;
+
+        elements.toggleLabel.textContent = getMessage('popup_toggle_label');
+        elements.toggleState.textContent = getMessage(isEnabled ? 'popup_toggle_state_enabled' : 'popup_toggle_state_disabled');
+        elements.toggleHelp.textContent = getMessage('popup_toggle_help');
+        elements.toggleInput.checked = isEnabled;
+        elements.toggleInput.disabled = false;
         elements.badge.textContent = getMessage(state.badgeKey);
         elements.title.textContent = getMessage(state.titleKey);
         elements.body.textContent = getMessage(state.bodyKey);
@@ -281,7 +405,32 @@
         };
     }
 
-    async function performPrimaryAction(state, tab, launchContext) {
+    async function applyExtensionEnabledState(doc, tab, enabled) {
+        const tabId = tab && typeof tab.id === 'number' ? tab.id : null;
+        const response = await setExtensionEnabled(enabled, tabId);
+        let syncErrorCode = null;
+
+        if (response && response.success === false) {
+            return response;
+        }
+
+        if (shouldReloadAfterSoftToggleFailure(tab, response)) {
+            try {
+                await reloadTabAndWaitForCompletion(tabId);
+            } catch (error) {
+                syncErrorCode = error && error.errorCode ? error.errorCode : 'runtime_failure';
+            }
+        }
+
+        await initializePopup(doc);
+        return { success: true, refreshed: true, enabled, syncErrorCode };
+    }
+
+    async function performPrimaryAction(doc, state, tab, launchContext) {
+        if (state.action === 'enable-extension') {
+            return applyExtensionEnabledState(doc, tab, true);
+        }
+
         if (state.action === 'focus-manager') {
             return sendMessageToTab(tab.id, { type: 'FOCUS_MANAGER' });
         }
@@ -298,47 +447,55 @@
         });
     }
 
-    async function initializePopup(doc = document) {
-        applyDocumentLocalization(doc);
+    function bindPopupInteractions(doc, activeTab, state, launchContext) {
         const elements = getElements(doc);
-        let activeTab = null;
-        let activeTabQueryFailed = false;
-        let notebookTabsQueryFailed = false;
 
-        try {
-            activeTab = await queryActiveTab();
-        } catch (error) {
-            activeTabQueryFailed = true;
-        }
+        elements.toggleInput.onchange = async () => {
+            const nextEnabled = Boolean(elements.toggleInput.checked);
+            elements.toggleInput.disabled = true;
+            elements.primaryButton.disabled = true;
 
-        const context = getPageContext(activeTab && activeTab.url);
-        let notebookLmTabs = [];
-
-        if (context !== 'notebook') {
             try {
-                notebookLmTabs = await queryNotebookLmTabs();
+                const result = await applyExtensionEnabledState(doc, activeTab, nextEnabled);
+                if (result && result.success === false) {
+                    elements.toggleInput.checked = !nextEnabled;
+                    elements.toggleInput.disabled = false;
+                    elements.primaryButton.disabled = false;
+                    elements.detail.hidden = false;
+                    elements.detail.textContent = resolveErrorMessage(result);
+                    return;
+                }
+
+                if (result && result.syncErrorCode) {
+                    elements.detail.hidden = false;
+                    elements.detail.textContent = resolveErrorMessage({
+                        errorCode: result.syncErrorCode
+                    });
+                }
             } catch (error) {
-                notebookTabsQueryFailed = true;
+                elements.toggleInput.checked = !nextEnabled;
+                elements.toggleInput.disabled = false;
+                elements.primaryButton.disabled = false;
+                elements.detail.hidden = false;
+                elements.detail.textContent = resolveErrorMessage({
+                    errorCode: error && error.errorCode ? error.errorCode : 'runtime_failure'
+                });
             }
-        }
-
-        const launchContext = context === 'notebook' ? null : deriveLaunchContext(activeTab, notebookLmTabs);
-        const managerStatus = context === 'notebook' ? await inspectManagerStatus(activeTab) : null;
-        const state = (activeTabQueryFailed || notebookTabsQueryFailed)
-            ? buildTabsQueryFailureState()
-            : buildPopupState({ context, managerStatus, launchContext });
-
-        renderPopup(doc, state);
+        };
 
         elements.primaryButton.onclick = async () => {
             elements.primaryButton.disabled = true;
 
             try {
-                const result = await performPrimaryAction(state, activeTab, launchContext);
+                const result = await performPrimaryAction(doc, state, activeTab, launchContext);
                 if (result && result.success === false) {
                     elements.detail.hidden = false;
                     elements.detail.textContent = resolveErrorMessage(result);
                     elements.primaryButton.disabled = false;
+                    return;
+                }
+
+                if (result && result.refreshed) {
                     return;
                 }
 
@@ -353,8 +510,57 @@
                 elements.primaryButton.disabled = false;
             }
         };
+    }
 
-        return { context, launchContext, managerStatus, state };
+    async function initializePopup(doc = document) {
+        applyDocumentLocalization(doc);
+        let activeTab = null;
+        let activeTabQueryFailed = false;
+        let notebookTabsQueryFailed = false;
+        let extensionEnabled = true;
+
+        try {
+            activeTab = await queryActiveTab();
+        } catch (error) {
+            activeTabQueryFailed = true;
+        }
+
+        try {
+            extensionEnabled = await queryExtensionEnabled();
+        } catch (error) {
+            extensionEnabled = true;
+        }
+
+        const context = getPageContext(activeTab && activeTab.url);
+        const disabled = !extensionEnabled;
+        let launchContext = null;
+        let managerStatus = null;
+        let state = disabled
+            ? buildDisabledPopupState()
+            : buildPopupState({ context, managerStatus: null, launchContext: null });
+
+        if (!disabled) {
+            let notebookLmTabs = [];
+
+            if (context !== 'notebook') {
+                try {
+                    notebookLmTabs = await queryNotebookLmTabs();
+                } catch (error) {
+                    notebookTabsQueryFailed = true;
+                }
+            }
+
+            launchContext = context === 'notebook' ? null : deriveLaunchContext(activeTab, notebookLmTabs);
+            managerStatus = context === 'notebook' ? await inspectManagerStatus(activeTab) : null;
+            state = (activeTabQueryFailed || notebookTabsQueryFailed)
+                ? buildTabsQueryFailureState()
+                : buildPopupState({ context, managerStatus, launchContext });
+        }
+
+        renderPopup(doc, state, extensionEnabled);
+        bindPopupInteractions(doc, activeTab, state, launchContext);
+
+        return { context, launchContext, managerStatus, state, extensionEnabled };
     }
 
     if (typeof document !== 'undefined' && document && typeof document.addEventListener === 'function') {

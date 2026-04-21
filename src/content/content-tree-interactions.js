@@ -1,0 +1,772 @@
+(function () {
+    'use strict';
+
+    function createContentTreeInteractions(deps = {}) {
+        const runtime = deps.runtime || deps;
+
+        const getState = typeof deps.getState === 'function'
+            ? deps.getState
+            : () => (deps.state || runtime.state || {});
+        const getGroupsById = typeof deps.getGroupsById === 'function'
+            ? deps.getGroupsById
+            : () => (deps.groupsById || runtime.groupsById || new Map());
+        const getSourcesByKey = typeof deps.getSourcesByKey === 'function'
+            ? deps.getSourcesByKey
+            : () => (deps.sourcesByKey || runtime.sourcesByKey || new Map());
+        const getPendingBatchKeys = typeof deps.getPendingBatchKeys === 'function'
+            ? deps.getPendingBatchKeys
+            : () => (deps.pendingBatchKeys || runtime.pendingBatchKeys || new Set());
+        const getParentMap = typeof deps.getParentMap === 'function'
+            ? deps.getParentMap
+            : () => (deps.parentMap || runtime.parentMap || new Map());
+        const getClickQueue = typeof deps.getClickQueue === 'function'
+            ? deps.getClickQueue
+            : () => (deps.clickQueue || runtime.clickQueue || []);
+        const getKeyByElement = typeof deps.getKeyByElement === 'function'
+            ? deps.getKeyByElement
+            : () => (deps.keyByElement || runtime.keyByElement || new WeakMap());
+        const getShadowRoot = typeof deps.getShadowRoot === 'function'
+            ? deps.getShadowRoot
+            : () => (deps.shadowRoot || runtime.shadowRoot || null);
+        const getDocument = typeof deps.getDocument === 'function'
+            ? deps.getDocument
+            : () => (deps.document || runtime.document || globalThis.document || null);
+        const getWindow = typeof deps.getWindow === 'function'
+            ? deps.getWindow
+            : () => (deps.window || runtime.window || globalThis.window || null);
+        const getSetTimeout = typeof deps.getSetTimeout === 'function'
+            ? deps.getSetTimeout
+            : () => (deps.setTimeout || runtime.setTimeout || globalThis.setTimeout || null);
+        const getDEPS = typeof deps.getDEPS === 'function'
+            ? deps.getDEPS
+            : () => (deps.DEPS || runtime.DEPS || {});
+        const getSourceCheckboxSelector = typeof deps.getSourceCheckboxSelector === 'function'
+            ? deps.getSourceCheckboxSelector
+            : () => (deps.SOURCE_CHECKBOX_SELECTOR || runtime.SOURCE_CHECKBOX_SELECTOR || '.sp-checkbox');
+        const getMessage = typeof deps.getMessage === 'function'
+            ? deps.getMessage
+            : (key, args) => {
+                if (typeof runtime.getMessage === 'function') return runtime.getMessage(key, args);
+                return key;
+            };
+        const showToast = typeof deps.showToast === 'function'
+            ? deps.showToast
+            : (typeof runtime.showToast === 'function' ? runtime.showToast : () => {});
+        const render = typeof deps.render === 'function'
+            ? deps.render
+            : (typeof runtime.render === 'function' ? runtime.render : () => {});
+        const saveState = typeof deps.saveState === 'function'
+            ? deps.saveState
+            : (typeof runtime.saveState === 'function' ? runtime.saveState : () => {});
+        const buildParentMap = typeof deps.buildParentMap === 'function'
+            ? deps.buildParentMap
+            : (typeof runtime.buildParentMap === 'function' ? runtime.buildParentMap : () => {});
+        const isSourceEffectivelyEnabled = typeof deps.isSourceEffectivelyEnabled === 'function'
+            ? deps.isSourceEffectivelyEnabled
+            : (typeof runtime.isSourceEffectivelyEnabled === 'function' ? runtime.isSourceEffectivelyEnabled : () => true);
+        const collectEffectiveSourceStates = typeof deps.collectEffectiveSourceStates === 'function'
+            ? deps.collectEffectiveSourceStates
+            : (typeof runtime.collectEffectiveSourceStates === 'function' ? runtime.collectEffectiveSourceStates : () => new Map());
+        const syncSourcesToEffectiveState = typeof deps.syncSourcesToEffectiveState === 'function'
+            ? deps.syncSourcesToEffectiveState
+            : (typeof runtime.syncSourcesToEffectiveState === 'function' ? runtime.syncSourcesToEffectiveState : () => {});
+        const executeBatchDelete = typeof deps.executeBatchDelete === 'function'
+            ? deps.executeBatchDelete
+            : (typeof runtime.executeBatchDelete === 'function' ? runtime.executeBatchDelete : () => {});
+        const renderMoveToFolderModal = typeof deps.renderMoveToFolderModal === 'function'
+            ? deps.renderMoveToFolderModal
+            : (typeof runtime.renderMoveToFolderModal === 'function' ? runtime.renderMoveToFolderModal : () => {});
+        const getSourceActionInvokers = typeof deps.getSourceActionInvokers === 'function'
+            ? deps.getSourceActionInvokers
+            : () => (deps.sourceActionInvokers || runtime.sourceActionInvokers || {});
+        const handleSourceActionSelection = typeof deps.handleSourceActionSelection === 'function'
+            ? deps.handleSourceActionSelection
+            : (typeof runtime.handleSourceActionSelection === 'function' ? runtime.handleSourceActionSelection : () => {});
+        const toggleSourceActionMenu = typeof deps.toggleSourceActionMenu === 'function'
+            ? deps.toggleSourceActionMenu
+            : (typeof runtime.toggleSourceActionMenu === 'function' ? runtime.toggleSourceActionMenu : () => {});
+        const closeSourceActionMenu = typeof deps.closeSourceActionMenu === 'function'
+            ? deps.closeSourceActionMenu
+            : (typeof runtime.closeSourceActionMenu === 'function' ? runtime.closeSourceActionMenu : () => {});
+        const findFreshCheckbox = typeof deps.findFreshCheckbox === 'function'
+            ? deps.findFreshCheckbox
+            : (typeof runtime.findFreshCheckbox === 'function' ? runtime.findFreshCheckbox : () => null);
+        const resolveFreshRowEntry = typeof deps.resolveFreshRowEntry === 'function'
+            ? deps.resolveFreshRowEntry
+            : (typeof runtime.resolveFreshRowEntry === 'function' ? runtime.resolveFreshRowEntry : null);
+        const setSourceTagIds = typeof deps.setSourceTagIds === 'function'
+            ? deps.setSourceTagIds
+            : (typeof runtime.setSourceTagIds === 'function' ? runtime.setSourceTagIds : () => {});
+        const renderTagModal = typeof deps.renderTagModal === 'function'
+            ? deps.renderTagModal
+            : (typeof runtime.renderTagModal === 'function' ? runtime.renderTagModal : () => false);
+        const isDescendant = typeof deps.isDescendant === 'function'
+            ? deps.isDescendant
+            : (typeof runtime.isDescendant === 'function' ? runtime.isDescendant : () => false);
+        const getIsProcessingQueue = typeof deps.getIsProcessingQueue === 'function'
+            ? deps.getIsProcessingQueue
+            : () => Boolean(deps.isProcessingQueue ?? runtime.isProcessingQueue);
+        const setIsProcessingQueue = typeof deps.setIsProcessingQueue === 'function'
+            ? deps.setIsProcessingQueue
+            : (value) => {
+                if (deps.runtime && Object.prototype.hasOwnProperty.call(deps.runtime, 'isProcessingQueue')) {
+                    deps.runtime.isProcessingQueue = Boolean(value);
+                } else {
+                    deps.isProcessingQueue = Boolean(value);
+                }
+            };
+        const getIsSyncingState = typeof deps.getIsSyncingState === 'function'
+            ? deps.getIsSyncingState
+            : () => Boolean(deps.isSyncingState ?? runtime.isSyncingState);
+        const setIsSyncingState = typeof deps.setIsSyncingState === 'function'
+            ? deps.setIsSyncingState
+            : (value) => {
+                if (deps.runtime && Object.prototype.hasOwnProperty.call(deps.runtime, 'isSyncingState')) {
+                    deps.runtime.isSyncingState = Boolean(value);
+                } else {
+                    deps.isSyncingState = Boolean(value);
+                }
+            };
+        const getActiveIsolationGroupId = typeof deps.getActiveIsolationGroupId === 'function'
+            ? deps.getActiveIsolationGroupId
+            : () => (deps.activeIsolationGroupId ?? runtime.activeIsolationGroupId ?? null);
+        const setActiveIsolationGroupId = typeof deps.setActiveIsolationGroupId === 'function'
+            ? deps.setActiveIsolationGroupId
+            : (value) => {
+                if (deps.runtime && Object.prototype.hasOwnProperty.call(deps.runtime, 'activeIsolationGroupId')) {
+                    deps.runtime.activeIsolationGroupId = value;
+                } else {
+                    deps.activeIsolationGroupId = value;
+                }
+            };
+        const getIsDeletingSources = typeof deps.getIsDeletingSources === 'function'
+            ? deps.getIsDeletingSources
+            : () => Boolean(deps.isDeletingSources ?? runtime.isDeletingSources);
+
+        function resolveDetachedRowEntry(source) {
+            if (!source) return null;
+            if (resolveFreshRowEntry) {
+                const resolvedEntry = resolveFreshRowEntry(source.key);
+                if (resolvedEntry) return resolvedEntry;
+            }
+
+            const freshCheckbox = findFreshCheckbox(source.key);
+            if (!freshCheckbox) return null;
+
+            return {
+                checkbox: freshCheckbox,
+                row: typeof freshCheckbox.closest === 'function'
+                    ? (freshCheckbox.closest('.source-item') || source.element || null)
+                    : (source.element || null)
+            };
+        }
+
+        function handleAddNewGroup(parentGroupId = null) {
+            const state = getState();
+            const groupsById = getGroupsById();
+            const newGroup = {
+                id: `group_${Date.now()}`,
+                title: parentGroupId ? getMessage('ui_new_subgroup') : getMessage('ui_new_group'),
+                children: [],
+                enabled: true,
+                collapsed: false,
+                isNewlyCreated: true
+            };
+
+            groupsById.set(newGroup.id, newGroup);
+            if (parentGroupId) {
+                const parent = groupsById.get(parentGroupId);
+                if (parent) parent.children.push({ type: 'group', id: newGroup.id });
+            } else {
+                state.groups = Array.isArray(state.groups) ? state.groups : [];
+                state.groups.push(newGroup.id);
+            }
+
+            buildParentMap();
+            render();
+            saveState({ immediate: true });
+        }
+
+        function syncSourceToPage(source, desiredState) {
+            if (!source || !source.element) return;
+
+            const documentObj = getDocument();
+            let checkbox = source.element.querySelector?.(getSourceCheckboxSelector());
+
+            if (!checkbox || !documentObj?.body?.contains?.(checkbox)) {
+                const resolvedEntry = resolveDetachedRowEntry(source);
+                if (resolvedEntry) {
+                    checkbox = resolvedEntry.checkbox;
+                    source.element = resolvedEntry.row || source.element;
+                } else {
+                    return;
+                }
+            }
+
+            if (checkbox && checkbox.checked !== desiredState) {
+                getClickQueue().push({ checkbox, desiredState, sourceKey: source.key });
+            }
+
+            if (!getIsProcessingQueue()) processClickQueue();
+        }
+
+        function processClickQueue() {
+            const clickQueue = getClickQueue();
+            const documentObj = getDocument();
+            const setTimeoutFn = getSetTimeout();
+
+            if (clickQueue.length === 0) {
+                setIsProcessingQueue(false);
+                setIsSyncingState(false);
+                return;
+            }
+
+            setIsProcessingQueue(true);
+            setIsSyncingState(true);
+
+            const batchSize = 5;
+            for (let i = 0; i < batchSize && clickQueue.length > 0; i++) {
+                const item = clickQueue.shift();
+                let checkbox = item.checkbox;
+
+                if (!documentObj?.body?.contains?.(checkbox)) {
+                    const freshCheckbox = findFreshCheckbox(item.sourceKey);
+                    if (freshCheckbox) {
+                        checkbox = freshCheckbox;
+                    } else {
+                        continue;
+                    }
+                }
+
+                if (checkbox.checked !== item.desiredState) {
+                    checkbox.click();
+                }
+            }
+
+            if (typeof setTimeoutFn === 'function') {
+                setTimeoutFn(processClickQueue, 20);
+            }
+        }
+
+        function findParentGroupOfSource(key) {
+            const parentMap = getParentMap();
+            const groupsById = getGroupsById();
+            const parentId = parentMap.get(key);
+            return parentId ? (groupsById.get(parentId) || null) : null;
+        }
+
+        function removeSourceFromTree(key) {
+            const state = getState();
+            const parentGroup = findParentGroupOfSource(key);
+            if (parentGroup) {
+                parentGroup.children = parentGroup.children.filter((c) => c.type === 'group' || c.key !== key);
+            } else {
+                state.ungrouped = (Array.isArray(state.ungrouped) ? state.ungrouped : []).filter((k) => k !== key);
+            }
+        }
+
+        function removeGroupFromTree(id) {
+            const state = getState();
+            const groupsById = getGroupsById();
+            state.groups = (Array.isArray(state.groups) ? state.groups : []).filter((gid) => gid !== id);
+            groupsById.forEach((group) => {
+                group.children = group.children.filter((c) => c.id !== id);
+            });
+        }
+
+        function toggleGroupCollapse(group, groupContainer) {
+            if (!group || !groupContainer) return;
+            const save = saveState;
+            group.collapsed = !group.collapsed;
+
+            const caret = groupContainer.querySelector('.sp-caret');
+            const childrenContainer = groupContainer.querySelector('.group-children');
+            if (!caret || !childrenContainer) {
+                save({ immediate: true });
+                return;
+            }
+
+            if (group.collapsed) {
+                caret.classList.add('collapsed');
+                childrenContainer.style.overflow = 'hidden';
+                childrenContainer.style.height = `${childrenContainer.scrollHeight}px`;
+                childrenContainer.offsetHeight;
+                childrenContainer.style.height = '0px';
+                childrenContainer.classList.add('collapsed');
+            } else {
+                caret.classList.remove('collapsed');
+                childrenContainer.classList.remove('collapsed');
+                childrenContainer.style.overflow = 'hidden';
+                childrenContainer.style.height = `${childrenContainer.scrollHeight}px`;
+
+                childrenContainer.addEventListener('transitionend', function handler() {
+                    childrenContainer.style.height = 'auto';
+                    childrenContainer.style.overflow = 'visible';
+                    childrenContainer.removeEventListener('transitionend', handler);
+                });
+            }
+
+            save({ immediate: true });
+        }
+
+        function handleInteraction(event) {
+            const state = getState();
+            const groupsById = getGroupsById();
+            const sourcesByKey = getSourcesByKey();
+            const pendingBatchKeys = getPendingBatchKeys();
+            const target = event.target;
+            const groupContainer = target.closest('.group-container');
+            const groupId = groupContainer?.dataset.groupId;
+            const sourceRow = target.closest('.source-item');
+            const sourceKey = sourceRow?.dataset.sourceKey;
+            const sourceActionsButton = target.closest('.sp-source-actions-button');
+            const sourceActionsMenuItem = target.closest('.sp-source-actions-menu-item');
+            const isolationGroupId = getActiveIsolationGroupId();
+
+            if (sourceActionsMenuItem) {
+                handleSourceActionSelection(sourceActionsMenuItem.dataset.sourceKey, sourceActionsMenuItem.dataset.action);
+                render();
+                return;
+            }
+
+            if (sourceActionsButton) {
+                toggleSourceActionMenu(sourceActionsButton.dataset.sourceKey, sourceActionsButton);
+                render();
+                return;
+            }
+
+            if (target.closest('.sp-tag-pill')) {
+                const tagId = target.closest('.sp-tag-pill').dataset.tagId;
+                state.activeTagId = state.activeTagId === tagId ? null : tagId;
+                render();
+                return;
+            }
+
+            if (target.closest('#sp-clear-isolate-btn')) {
+                const oldStates = collectEffectiveSourceStates();
+                setActiveIsolationGroupId(null);
+                syncSourcesToEffectiveState(oldStates);
+                render();
+                showToast(getMessage('ui_isolation_cleared_toast'));
+                return;
+            }
+
+            if (target.closest('#sp-clear-tag-filter-btn')) {
+                state.activeTagId = null;
+                render();
+                return;
+            }
+
+            if (target.closest('.sp-add-subgroup-button')) {
+                handleAddNewGroup(groupId);
+                return;
+            }
+            if (target.closest('.sp-caret')) {
+                toggleGroupCollapse(groupsById.get(groupId), groupContainer);
+                return;
+            }
+            if (target.closest('.sp-isolate-button')) {
+                const oldStates = collectEffectiveSourceStates();
+                setActiveIsolationGroupId(isolationGroupId === groupId ? null : groupId);
+                syncSourcesToEffectiveState(oldStates);
+                render();
+                showToast(
+                    getActiveIsolationGroupId()
+                        ? getMessage('ui_isolated_toast', [groupsById.get(groupId)?.title])
+                        : getMessage('ui_isolation_cleared_toast')
+                );
+                return;
+            }
+
+            if (target.classList.contains('sp-group-toggle-checkbox')) {
+                const targetGroupId = target.dataset.groupId;
+                const group = groupsById.get(targetGroupId);
+                if (group) {
+                    const oldEffectiveStates = collectEffectiveSourceStates();
+                    group.enabled = target.checked;
+                    syncSourcesToEffectiveState(oldEffectiveStates);
+                    saveState({ immediate: true });
+                    render();
+                }
+                return;
+            }
+
+            if (target.classList.contains('sp-checkbox')) {
+                const checkboxSourceKey = target.dataset.sourceKey;
+                if (checkboxSourceKey) {
+                    const source = sourcesByKey.get(checkboxSourceKey);
+                    if (source && !source.isDisabled) {
+                        source.enabled = target.checked;
+                        syncSourceToPage(source, isSourceEffectivelyEnabled(source));
+                        saveState({ immediate: true });
+                        render();
+                    }
+                }
+                return;
+            }
+
+            if (target.closest('.group-header') && !target.closest('.sp-caret, .sp-toggle-switch, .sp-add-subgroup-button, .sp-isolate-button, .sp-edit-button, .sp-delete-button, input')) {
+                toggleGroupCollapse(groupsById.get(groupId), groupContainer);
+                return;
+            }
+
+            if (sourceRow && !target.closest('.sp-source-actions-anchor, .sp-source-actions-menu, .sp-tag-pill, input, .sp-batch-checkbox')) {
+                const source = sourcesByKey.get(sourceKey);
+
+                if (source && source.isDisabled) {
+                    return;
+                }
+
+                if (state.isBatchMode) {
+                    if (pendingBatchKeys.has(sourceKey)) {
+                        pendingBatchKeys.delete(sourceKey);
+                    } else {
+                        pendingBatchKeys.add(sourceKey);
+                    }
+                    render();
+                    return;
+                }
+
+                if (target.closest('.icon-container') && !source.isLoading) {
+                    getSourceActionInvokers().openNativeDetails(sourceKey);
+                    return;
+                }
+
+                const checkbox = sourceRow.querySelector('.sp-checkbox');
+
+                if (sourceKey && checkbox) {
+                    checkbox.checked = !checkbox.checked;
+
+                    if (source) {
+                        source.enabled = checkbox.checked;
+                        syncSourceToPage(source, isSourceEffectivelyEnabled(source));
+                        saveState({ immediate: true });
+                        render();
+                    }
+                }
+                return;
+            }
+
+            const batchCheckbox = target.closest('.sp-batch-checkbox');
+            if (batchCheckbox) {
+                const batchSourceKey = batchCheckbox.dataset.sourceKey;
+                if (pendingBatchKeys.has(batchSourceKey)) {
+                    pendingBatchKeys.delete(batchSourceKey);
+                } else {
+                    pendingBatchKeys.add(batchSourceKey);
+                }
+                render();
+                return;
+            }
+
+            if (target.closest('.sp-cancel-batch-btn')) {
+                state.isBatchMode = false;
+                pendingBatchKeys.clear();
+                render();
+                return;
+            }
+
+            if (target.closest('.sp-confirm-delete-btn') && !getIsDeletingSources() && pendingBatchKeys.size > 0) {
+                executeBatchDelete();
+                return;
+            }
+
+            if (target.closest('.sp-batch-add-folder-btn') && pendingBatchKeys.size > 0) {
+                renderMoveToFolderModal(pendingBatchKeys);
+                return;
+            }
+
+            const editButton = target.closest('.sp-edit-button');
+            if (editButton) {
+                triggerRename(groupContainer);
+                return;
+            }
+
+            const deleteButton = target.closest('.sp-delete-button');
+            if (deleteButton) {
+                const group = groupsById.get(groupId);
+                if (!group) return;
+
+                if (group.children.length === 0) {
+                    removeGroupFromTree(groupId);
+                    groupsById.delete(groupId);
+                } else {
+                    const windowObj = getWindow();
+                    const deleteContents = windowObj?.confirm?.(
+                        getMessage('ui_delete_group_confirm_non_empty', [group.title, getMessage('ui_ungrouped')])
+                    );
+
+                    if (deleteContents) {
+                        const extractChildren = (g) => {
+                            g.children.forEach((c) => {
+                                if (c.type === 'source') {
+                                    state.ungrouped.push(c.key);
+                                } else {
+                                    state.groups.push(c.id);
+                                }
+                            });
+                        };
+                        extractChildren(group);
+                        removeGroupFromTree(groupId);
+                        groupsById.delete(groupId);
+                    } else {
+                        return;
+                    }
+                }
+
+                if (getActiveIsolationGroupId() === groupId) {
+                    setActiveIsolationGroupId(null);
+                }
+                buildParentMap();
+                saveState({ immediate: true });
+                render();
+            }
+        }
+
+        function handleOriginalCheckboxChange(event) {
+            if (getIsSyncingState()) return;
+            const checkbox = event.target;
+            const DEPS = getDEPS();
+            const keyByElement = getKeyByElement();
+            const shadowRoot = getShadowRoot();
+            const sourcesByKey = getSourcesByKey();
+
+            let validCheckbox = false;
+            const checkboxSelectors = Array.isArray(DEPS.checkbox) ? DEPS.checkbox : [getSourceCheckboxSelector()];
+            for (const sel of checkboxSelectors) {
+                if (checkbox.matches?.(sel)) {
+                    validCheckbox = true;
+                    break;
+                }
+            }
+            if (!validCheckbox) return;
+
+            let sourceRow = null;
+            const rowSelectors = Array.isArray(DEPS.row) ? DEPS.row : [];
+            for (const sel of rowSelectors) {
+                sourceRow = checkbox.closest(sel);
+                if (sourceRow) break;
+            }
+
+            if (!sourceRow) return;
+            const key = keyByElement.get(sourceRow);
+            if (key) {
+                const source = sourcesByKey.get(key);
+                if (source && source.enabled !== checkbox.checked) {
+                    source.enabled = checkbox.checked;
+                    const desiredState = isSourceEffectivelyEnabled(source);
+
+                    const virtualCheckbox = shadowRoot?.querySelector?.(`.sp-checkbox[data-source-key="${key}"]`);
+                    if (virtualCheckbox) {
+                        virtualCheckbox.checked = source.enabled;
+                    }
+
+                    if (checkbox.checked !== desiredState) {
+                        syncSourceToPage(source, desiredState);
+                    }
+
+                    saveState({ immediate: true });
+                    render();
+                }
+            }
+        }
+
+        function triggerRename(groupContainer) {
+            const documentObj = getDocument();
+            const groupsById = getGroupsById();
+            const groupId = groupContainer.dataset.groupId;
+            const group = groupsById.get(groupId);
+            if (!group || !documentObj?.createElement) return;
+
+            const titleSpan = groupContainer.querySelector('.group-title');
+            const originalTitle = group.title;
+            const input = documentObj.createElement('input');
+            input.type = 'text';
+            input.value = originalTitle;
+            titleSpan.replaceChildren(input);
+            input.focus();
+            input.select();
+
+            const cleanup = () => {
+                input.removeEventListener('blur', handleSave);
+                input.removeEventListener('keydown', handleKey);
+                render();
+            };
+            const handleSave = () => {
+                const newTitle = input.value.trim();
+                if (newTitle) group.title = newTitle;
+                cleanup();
+                saveState({ immediate: true });
+            };
+            const handleKey = (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleSave();
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    group.title = originalTitle;
+                    cleanup();
+                }
+            };
+
+            input.addEventListener('blur', handleSave);
+            input.addEventListener('keydown', handleKey);
+        }
+
+        function handleDragStart(e) {
+            const sourceTarget = e.target.closest('.source-item');
+            const groupTarget = e.target.closest('.group-header');
+            const setTimeoutFn = getSetTimeout();
+
+            if (sourceTarget) {
+                const key = sourceTarget.dataset.sourceKey;
+                if (key) {
+                    e.dataTransfer.setData('application/source-key', key);
+                    e.dataTransfer.effectAllowed = 'move';
+                    if (typeof setTimeoutFn === 'function') {
+                        setTimeoutFn(() => sourceTarget.classList.add('dragging'), 0);
+                    }
+                }
+            } else if (groupTarget) {
+                const key = groupTarget.dataset.groupId;
+                if (key) {
+                    e.dataTransfer.setData('application/group-id', key);
+                    e.dataTransfer.effectAllowed = 'move';
+                    if (typeof setTimeoutFn === 'function') {
+                        setTimeoutFn(() => groupTarget.classList.add('dragging'), 0);
+                    }
+                }
+            }
+        }
+
+        function handleDragOver(e) {
+            e.preventDefault();
+            const dropTarget = e.target.closest('.group-container, .source-item');
+            if (!dropTarget) return;
+
+            const rect = dropTarget.getBoundingClientRect();
+            const offsetY = e.clientY - rect.top;
+
+            dropTarget.classList.remove('drag-over-top', 'drag-over-bottom', 'drag-into');
+
+            if (dropTarget.classList.contains('group-container')) {
+                if (offsetY < rect.height * 0.25) dropTarget.classList.add('drag-over-top');
+                else if (offsetY > rect.height * 0.75) dropTarget.classList.add('drag-over-bottom');
+                else dropTarget.classList.add('drag-into');
+            } else {
+                if (offsetY < rect.height / 2) dropTarget.classList.add('drag-over-top');
+                else dropTarget.classList.add('drag-over-bottom');
+            }
+        }
+
+        function handleDragLeave(e) {
+            const dropTarget = e.target.closest('.group-container, .source-item');
+            if (dropTarget) {
+                dropTarget.classList.remove('drag-over-top', 'drag-over-bottom', 'drag-into');
+            }
+        }
+
+        function handleDrop(e) {
+            const state = getState();
+            const groupsById = getGroupsById();
+            const parentMap = getParentMap();
+            const dropTarget = e.target.closest('.group-container, .source-item');
+            if (!dropTarget) return;
+            e.preventDefault();
+
+            const isInto = dropTarget.classList.contains('drag-into');
+            const isAbove = dropTarget.classList.contains('drag-over-top');
+            dropTarget.classList.remove('drag-over-top', 'drag-over-bottom', 'drag-into');
+
+            const sourceKey = e.dataTransfer.getData('application/source-key');
+            const draggedGroupId = e.dataTransfer.getData('application/group-id');
+
+            let targetGroup = null;
+            let insertIndex = -1;
+
+            if (dropTarget.classList.contains('group-container')) {
+                const targetGroupId = dropTarget.dataset.groupId;
+                targetGroup = groupsById.get(targetGroupId);
+                if (!isInto && targetGroup) {
+                    const parentId = parentMap.get(targetGroupId);
+                    if (parentId) {
+                        const parentGroup = groupsById.get(parentId);
+                        insertIndex = parentGroup.children.findIndex((c) => c.id === targetGroupId);
+                        targetGroup = parentGroup;
+                    } else {
+                        insertIndex = state.groups.indexOf(targetGroupId);
+                        targetGroup = null;
+                    }
+                    if (!isAbove && insertIndex !== -1) insertIndex++;
+                }
+            } else if (dropTarget.classList.contains('source-item')) {
+                const targetSourceKey = dropTarget.dataset.sourceKey;
+                targetGroup = findParentGroupOfSource(targetSourceKey);
+                if (targetGroup) {
+                    insertIndex = targetGroup.children.findIndex((c) => c.key === targetSourceKey);
+                } else {
+                    insertIndex = state.ungrouped.indexOf(targetSourceKey);
+                }
+                if (!isAbove && insertIndex !== -1) insertIndex++;
+            }
+
+            if (sourceKey) {
+                removeSourceFromTree(sourceKey);
+                if (targetGroup) {
+                    if (insertIndex !== -1) targetGroup.children.splice(insertIndex, 0, { type: 'source', key: sourceKey });
+                    else targetGroup.children.push({ type: 'source', key: sourceKey });
+                } else {
+                    if (insertIndex !== -1) state.ungrouped.splice(insertIndex, 0, sourceKey);
+                    else state.ungrouped.push(sourceKey);
+                }
+            } else if (draggedGroupId) {
+                const draggedGroupObj = groupsById.get(draggedGroupId);
+                if (!targetGroup) {
+                    removeGroupFromTree(draggedGroupId);
+                    if (insertIndex !== -1) state.groups.splice(insertIndex, 0, draggedGroupId);
+                    else state.groups.push(draggedGroupId);
+                } else if (draggedGroupId !== targetGroup.id && !isDescendant(targetGroup, draggedGroupObj, groupsById)) {
+                    removeGroupFromTree(draggedGroupId);
+                    if (insertIndex !== -1) targetGroup.children.splice(insertIndex, 0, { type: 'group', id: draggedGroupId });
+                    else targetGroup.children.push({ type: 'group', id: draggedGroupId });
+                }
+            }
+
+            buildParentMap();
+            render();
+            saveState({ immediate: true });
+        }
+
+        function handleDragEnd(e) {
+            const shadowRoot = getShadowRoot();
+            const draggedItem = shadowRoot?.querySelector?.('.dragging');
+            if (draggedItem) {
+                draggedItem.classList.remove('dragging');
+            }
+        }
+
+        return {
+            handleAddNewGroup,
+            syncSourceToPage,
+            processClickQueue,
+            findParentGroupOfSource,
+            removeSourceFromTree,
+            removeGroupFromTree,
+            toggleGroupCollapse,
+            handleInteraction,
+            handleOriginalCheckboxChange,
+            triggerRename,
+            handleDragStart,
+            handleDragOver,
+            handleDragLeave,
+            handleDrop,
+            handleDragEnd
+        };
+    }
+
+    globalThis.NSM_CREATE_CONTENT_TREE_INTERACTIONS = createContentTreeInteractions;
+
+    if (typeof module !== 'undefined' && module.exports) {
+        module.exports = createContentTreeInteractions;
+    }
+}());

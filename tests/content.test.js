@@ -1,5 +1,27 @@
 global.Node = class {};
+const fs = require('fs');
+const path = require('path');
 const loadContentModule = require('./helpers/load-content-module');
+const nativeSetTimeout = global.setTimeout;
+const nativeClearTimeout = global.clearTimeout;
+
+const CONTENT_HELPER_GLOBALS = [
+    'NSM_CONTENT_CONFIG',
+    'NSM_SOURCE_DESCRIPTOR_HELPERS',
+    'NSM_CONTENT_STYLE_TEXT',
+    'NSM_GLOBAL_OVERLAY_STYLE_TEXT',
+    'NSM_CREATE_MANAGER_SHELL',
+    'NSM_CREATE_CONTENT_PANEL_DOM',
+    'NSM_CREATE_CONTENT_SOURCE_ACTIONS',
+    'NSM_CREATE_CONTENT_TAGS',
+    'NSM_CREATE_CONTENT_STATE_RECONCILE',
+    'NSM_CREATE_CONTENT_PERSISTENCE',
+    'NSM_CREATE_CONTENT_MODALS',
+    'NSM_CREATE_CONTENT_RENDER',
+    'NSM_CREATE_CONTENT_VIEW_STATE',
+    'NSM_CREATE_CONTENT_TREE_INTERACTIONS',
+    'NSM_CREATE_CONTENT_SOURCE_SYNC'
+];
 
 const setupGlobalMocks = () => {
     global.__resizeObserverInstances = [];
@@ -131,6 +153,10 @@ const setupGlobalMocks = () => {
             getComputedStyle
         },
         documentElement: {
+            classList: {
+                add: jest.fn(),
+                remove: jest.fn()
+            },
             addEventListener: jest.fn(),
             removeEventListener: jest.fn()
         },
@@ -159,8 +185,24 @@ const setupGlobalMocks = () => {
             sendMessage: jest.fn(),
             lastError: null,
             onMessage: { addListener: jest.fn() }
+        },
+        storage: {
+            local: {
+                set: jest.fn((data, cb) => {
+                    if (typeof cb === 'function') cb();
+                }),
+                get: jest.fn((keys, cb) => {
+                    if (typeof cb === 'function') cb({});
+                })
+            }
         }
     };
+    if (typeof global.setTimeout !== 'function') {
+        global.setTimeout = nativeSetTimeout;
+    }
+    if (typeof global.clearTimeout !== 'function') {
+        global.clearTimeout = nativeClearTimeout;
+    }
 
     const utils = require('../src/utils/index.js');
     global.el = utils.el;
@@ -307,6 +349,11 @@ const createSearchUiMock = () => {
             toggle: jest.fn()
         }
     };
+    const searchCluster = {
+        classList: {
+            toggle: jest.fn()
+        }
+    };
     const searchContainer = {
         classList: {
             toggle: jest.fn()
@@ -322,21 +369,37 @@ const createSearchUiMock = () => {
     const searchButton = {
         setAttribute: jest.fn()
     };
+    const searchCloseButton = {
+        classList: {
+            toggle: jest.fn()
+        },
+        setAttribute: jest.fn()
+    };
     const shadowRoot = {
         host: { isConnected: true, remove: jest.fn() },
         querySelector: jest.fn((selector) => {
             if (selector === '.sp-controls') return controls;
+            if (selector === '.sp-search-cluster') return searchCluster;
             if (selector === '.sp-search-container') return searchContainer;
             return null;
         }),
         getElementById: jest.fn((id) => {
             if (id === 'sp-search') return searchInput;
             if (id === 'sp-search-btn') return searchButton;
+            if (id === 'sp-search-close-btn') return searchCloseButton;
             return null;
         })
     };
 
-    return { shadowRoot, controls, searchContainer, searchInput, searchButton };
+    return {
+        shadowRoot,
+        controls,
+        searchCluster,
+        searchContainer,
+        searchInput,
+        searchButton,
+        searchCloseButton
+    };
 };
 
 const createTreeEl = (tag, attrs = {}, children = []) => ({
@@ -448,7 +511,14 @@ const createInitShadowRoot = () => {
         setAttribute: jest.fn(),
         addEventListener: jest.fn()
     };
+    const searchCloseButton = {
+        classList: { toggle: jest.fn() },
+        setAttribute: jest.fn(),
+        addEventListener: jest.fn()
+    };
     const genericButton = {
+        classList: { toggle: jest.fn() },
+        setAttribute: jest.fn(),
         addEventListener: jest.fn()
     };
     const shadowRoot = {
@@ -465,6 +535,9 @@ const createInitShadowRoot = () => {
             if (selector === '.sp-controls') {
                 return { classList: { toggle: jest.fn() } };
             }
+            if (selector === '.sp-search-cluster') {
+                return { classList: { toggle: jest.fn() } };
+            }
             if (selector === '.sp-search-container') {
                 return { classList: { toggle: jest.fn() } };
             }
@@ -476,6 +549,7 @@ const createInitShadowRoot = () => {
             }
             if (id === 'sp-search') return searchInput;
             if (id === 'sp-search-btn') return searchButton;
+            if (id === 'sp-search-close-btn') return searchCloseButton;
             if (id === 'sp-view-state') return viewStateContainer;
             return genericButton;
         })
@@ -507,13 +581,43 @@ const teardownGlobalMocks = () => {
     delete global.isDescendant;
     delete global.getMessage;
     delete global.queueMicrotask;
-    delete global.NSM_CONTENT_CONFIG;
-    delete global.NSM_CONTENT_STYLE_TEXT;
-    delete global.NSM_GLOBAL_OVERLAY_STYLE_TEXT;
-    delete global.NSM_CREATE_MANAGER_SHELL;
+    CONTENT_HELPER_GLOBALS.forEach((key) => delete global[key]);
     delete global.__resizeObserverInstances;
     delete global.__rafCallbacks;
 };
+
+describe('content module loading', () => {
+    afterEach(teardownGlobalMocks);
+
+    it('reloads the sidecar factories cleanly between runs', () => {
+        jest.resetModules();
+        setupGlobalMocks();
+
+        loadContentModule();
+        const firstFactories = Object.fromEntries(
+            CONTENT_HELPER_GLOBALS
+                .filter((key) => key.startsWith('NSM_CREATE_CONTENT_'))
+                .map((key) => [key, global[key]])
+        );
+
+        expect(Object.values(firstFactories).every((factory) => typeof factory === 'function')).toBe(true);
+        expect(typeof global.NSM_SOURCE_DESCRIPTOR_HELPERS).toBe('object');
+
+        teardownGlobalMocks();
+        CONTENT_HELPER_GLOBALS.forEach((key) => {
+            expect(global[key]).toBeUndefined();
+        });
+
+        jest.resetModules();
+        setupGlobalMocks();
+        loadContentModule();
+
+        Object.entries(firstFactories).forEach(([key, factory]) => {
+            expect(typeof global[key]).toBe('function');
+            expect(global[key]).not.toBe(factory);
+        });
+    });
+});
 
 describe('areAllAncestorsEnabled', () => {
     let areAllAncestorsEnabled, parentMap, groupsById;
@@ -814,9 +918,9 @@ describe('saveState', () => {
         mod.groupsById.set('group1', { id: 'group1', title: 'Group 1', children: [{ type: 'source', key: 'source1' }] });
         mod.groupsById.set('group2', { id: 'group2', title: 'Group 2', children: [{ type: 'source', key: 'source2' }] });
 
-        mod.sourcesByKey.set('source1', { enabled: true, title: 'Source 1', normalizedTitle: 'source 1', fingerprint: 'source 1||article', identityType: 'stable-token' });
-        mod.sourcesByKey.set('source2', { enabled: false, title: 'Source 2', normalizedTitle: 'source 2', fingerprint: 'source 2||article', identityType: 'stable-token' });
-        mod.sourcesByKey.set('source3', { enabled: true, title: 'Source 3', normalizedTitle: 'source 3', fingerprint: 'source 3||article', identityType: 'fingerprint' });
+        mod.sourcesByKey.set('source1', { enabled: true, title: 'Source 1', normalizedTitle: 'source 1', stableToken: 'doc-1', fingerprint: 'source 1||article', identityType: 'stable-token' });
+        mod.sourcesByKey.set('source2', { enabled: false, title: 'Source 2', normalizedTitle: 'source 2', stableToken: 'doc-2', fingerprint: 'source 2||article', identityType: 'stable-token' });
+        mod.sourcesByKey.set('source3', { enabled: true, title: 'Source 3', normalizedTitle: 'source 3', stableToken: '', fingerprint: 'source 3||article', identityType: 'fingerprint' });
 
         mod._setCustomHeight(500);
 
@@ -833,6 +937,7 @@ describe('saveState', () => {
                     enabled: true,
                     title: 'Source 1',
                     normalizedTitle: 'source 1',
+                    stableToken: 'doc-1',
                     fingerprint: 'source 1||article',
                     identityType: 'stable-token'
                 },
@@ -840,6 +945,7 @@ describe('saveState', () => {
                     enabled: false,
                     title: 'Source 2',
                     normalizedTitle: 'source 2',
+                    stableToken: 'doc-2',
                     fingerprint: 'source 2||article',
                     identityType: 'stable-token'
                 },
@@ -847,6 +953,7 @@ describe('saveState', () => {
                     enabled: true,
                     title: 'Source 3',
                     normalizedTitle: 'source 3',
+                    stableToken: '',
                     fingerprint: 'source 3||article',
                     identityType: 'fingerprint'
                 }
@@ -983,6 +1090,73 @@ describe('saveState', () => {
         });
     });
 
+    it('immediately persists source checkbox toggles without waiting for timers', () => {
+        mod._setProjectId('project-source-toggle');
+        mod.state.ungrouped = ['source1'];
+        mod.sourcesByKey.set('source1', {
+            key: 'source1',
+            enabled: true,
+            isDisabled: false,
+            title: 'Source 1',
+            normalizedTitle: 'source 1',
+            fingerprint: 'source 1||article',
+            identityType: 'stable-token'
+        });
+
+        mod._handleInteractionForTest({
+            target: {
+                checked: false,
+                dataset: { sourceKey: 'source1' },
+                classList: {
+                    contains: jest.fn((className) => className === 'sp-checkbox')
+                },
+                closest: jest.fn((selector) => {
+                    if (selector === '.source-item') {
+                        return {
+                            dataset: { sourceKey: 'source1' },
+                            querySelector: jest.fn(() => ({ checked: true }))
+                        };
+                    }
+                    return null;
+                })
+            }
+        });
+
+        expect(global.chrome.runtime.sendMessage).toHaveBeenCalledTimes(1);
+        expect(mod.sourcesByKey.get('source1').enabled).toBe(false);
+    });
+
+    it('immediately persists folder toggle changes without waiting for timers', () => {
+        mod._setProjectId('project-folder-toggle');
+        mod.state.groups = ['group1'];
+        mod.groupsById.set('group1', {
+            id: 'group1',
+            title: 'Pinned',
+            children: [],
+            enabled: true,
+            collapsed: false
+        });
+
+        mod._handleInteractionForTest({
+            target: {
+                checked: false,
+                dataset: { groupId: 'group1' },
+                classList: {
+                    contains: jest.fn((className) => className === 'sp-group-toggle-checkbox')
+                },
+                closest: jest.fn((selector) => {
+                    if (selector === '.group-container') {
+                        return { dataset: { groupId: 'group1' } };
+                    }
+                    return null;
+                })
+            }
+        });
+
+        expect(global.chrome.runtime.sendMessage).toHaveBeenCalledTimes(1);
+        expect(mod.groupsById.get('group1').enabled).toBe(false);
+    });
+
     it('flushes a pending save when the page becomes hidden', () => {
         seedPersistedState();
 
@@ -996,6 +1170,52 @@ describe('saveState', () => {
         mod.handlePageLifecyclePersistence({ type: 'visibilitychange' });
 
         expect(global.chrome.runtime.sendMessage).toHaveBeenCalledTimes(1);
+    });
+
+    it('writes the latest state directly to local storage when the page becomes hidden', () => {
+        const projectId = seedPersistedState();
+
+        global.document.visibilityState = 'hidden';
+        mod.handlePageLifecyclePersistence({ type: 'visibilitychange' });
+
+        expect(global.chrome.storage.local.set).toHaveBeenCalledWith(
+            {
+                [`sourcesPlusState_${projectId}`]: expectedPersistableState,
+                [`sourcesPlusState_${projectId}__backup`]: expectedPersistableState
+            },
+            expect.any(Function)
+        );
+    });
+
+    it('writes the best preserved snapshot when the page hides during a loading refresh window', () => {
+        const projectId = seedPersistedState();
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+
+        global.document.querySelector = jest.fn(() => panel);
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [] : []
+        ));
+
+        expect(mod.restoreInitialLoadedState(expectedPersistableState)).toEqual({
+            deferred: true,
+            shouldUpgradeStorage: false
+        });
+
+        mod.state.groups = [];
+        mod.state.ungrouped = [];
+        mod.groupsById.clear();
+        mod.sourcesByKey.clear();
+
+        global.document.visibilityState = 'hidden';
+        mod.handlePageLifecyclePersistence({ type: 'visibilitychange' });
+
+        expect(global.chrome.storage.local.set).toHaveBeenCalledWith(
+            {
+                [`sourcesPlusState_${projectId}`]: expectedPersistableState,
+                [`sourcesPlusState_${projectId}__backup`]: expectedPersistableState
+            },
+            expect.any(Function)
+        );
     });
 });
 
@@ -1025,6 +1245,40 @@ describe('loadState', () => {
         expect(callback).toHaveBeenCalledWith(null);
     });
 
+    it('reads state directly from local storage before falling back to runtime messaging', () => {
+        const callback = jest.fn();
+        const storedState = {
+            schemaVersion: 3,
+            groups: ['group1'],
+            groupsById: {
+                group1: { id: 'group1', title: 'Pinned', children: [] }
+            },
+            ungrouped: [],
+            sourceStateById: {},
+            customHeight: 420,
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {}
+        };
+
+        mod._setProjectId('test-project');
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({
+                'sourcesPlusState_test-project': storedState,
+                'sourcesPlusState_test-project__backup': null
+            });
+        });
+
+        mod.loadState(callback);
+
+        expect(global.chrome.storage.local.get).toHaveBeenCalledWith(
+            ['sourcesPlusState_test-project', 'sourcesPlusState_test-project__backup'],
+            expect.any(Function)
+        );
+        expect(global.chrome.runtime.sendMessage).not.toHaveBeenCalled();
+        expect(callback).toHaveBeenCalledWith(storedState);
+    });
+
     it('restores v2 state and custom height', () => {
         const callback = jest.fn();
         const container = { style: {} };
@@ -1034,9 +1288,9 @@ describe('loadState', () => {
             querySelector: jest.fn((selector) => (selector === '.sp-container' ? container : null))
         });
 
-        global.chrome.runtime.sendMessage.mockImplementationOnce((message, cb) => {
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
             cb({
-                data: {
+                'sourcesPlusState_test-project': {
                     schemaVersion: 2,
                     groups: ['group1'],
                     groupsById: {
@@ -1053,7 +1307,8 @@ describe('loadState', () => {
                         }
                     },
                     customHeight: 420
-                }
+                },
+                'sourcesPlusState_test-project__backup': null
             });
         });
 
@@ -1088,9 +1343,9 @@ describe('loadState', () => {
         const callback = jest.fn();
         mod._setProjectId('test-project');
 
-        global.chrome.runtime.sendMessage.mockImplementationOnce((message, cb) => {
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
             cb({
-                data: {
+                'sourcesPlusState_test-project': {
                     groups: ['group1'],
                     groupsById: {
                         group1: { id: 'group1', title: 'Group', children: [{ type: 'source', key: 'source_legacy' }] }
@@ -1100,7 +1355,8 @@ describe('loadState', () => {
                         source_legacy: false
                     },
                     customHeight: 300
-                }
+                },
+                'sourcesPlusState_test-project__backup': null
             });
         });
 
@@ -1128,6 +1384,9 @@ describe('loadState', () => {
         const callback = jest.fn();
         mod._setProjectId('test-project');
 
+        global.chrome.storage.local.get.mockImplementationOnce(() => {
+            throw new Error('Local storage unavailable');
+        });
         global.chrome.runtime.sendMessage.mockImplementationOnce((message, cb) => {
             global.chrome.runtime.lastError = { message: 'Extension unavailable' };
             cb({});
@@ -1143,6 +1402,9 @@ describe('loadState', () => {
         const callback = jest.fn();
         mod._setProjectId('test-project');
 
+        global.chrome.storage.local.get.mockImplementationOnce(() => {
+            throw new Error('Local storage unavailable');
+        });
         global.chrome.runtime.sendMessage.mockImplementationOnce((message, cb) => {
             cb({ success: false, errorCode: 'runtime_failure' });
         });
@@ -1164,6 +1426,9 @@ describe('loadState', () => {
             querySelector: jest.fn((selector) => (selector === '.sp-container' ? container : null))
         });
 
+        global.chrome.storage.local.get.mockImplementationOnce(() => {
+            throw new Error('Local storage unavailable');
+        });
         global.chrome.runtime.sendMessage.mockImplementationOnce((message, cb) => {
             responseCallback = cb;
         });
@@ -1204,25 +1469,39 @@ describe('toolbar search UI', () => {
 
     afterEach(teardownGlobalMocks);
 
-    it('stays collapsed by default and expands on the first magnifier click', () => {
-        const { shadowRoot, controls, searchContainer, searchInput, searchButton } = createSearchUiMock();
+    it('stays collapsed by default and expands into the morph search rail on the first magnifier click', () => {
+        const {
+            shadowRoot,
+            controls,
+            searchCluster,
+            searchContainer,
+            searchInput,
+            searchButton,
+            searchCloseButton
+        } = createSearchUiMock();
         mod._setShadowRootForTest(shadowRoot);
 
         mod._syncSearchUi();
         expect(controls.classList.toggle).toHaveBeenCalledWith('is-search-expanded', false);
+        expect(searchCluster.classList.toggle).toHaveBeenCalledWith('is-search-expanded', false);
         expect(searchContainer.classList.toggle).toHaveBeenCalledWith('is-expanded', false);
         expect(searchInput.tabIndex).toBe(-1);
         expect(searchButton.setAttribute).toHaveBeenCalledWith('aria-expanded', 'false');
+        expect(searchCloseButton.classList.toggle).toHaveBeenCalledWith('is-visible', false);
 
         controls.classList.toggle.mockClear();
+        searchCluster.classList.toggle.mockClear();
         searchContainer.classList.toggle.mockClear();
+        searchCloseButton.classList.toggle.mockClear();
         const result = mod._handleSearchButtonClick(jest.fn());
 
         expect(result).toBe('expanded');
         expect(mod._getIsSearchExpanded()).toBe(true);
         expect(searchInput.focus).toHaveBeenCalled();
         expect(controls.classList.toggle).toHaveBeenCalledWith('is-search-expanded', true);
+        expect(searchCluster.classList.toggle).toHaveBeenCalledWith('is-search-expanded', true);
         expect(searchContainer.classList.toggle).toHaveBeenCalledWith('is-expanded', true);
+        expect(searchCloseButton.classList.toggle).toHaveBeenCalledWith('is-visible', true);
     });
 
     it('collapses on a second magnifier click when the query is empty', () => {
@@ -1256,7 +1535,7 @@ describe('toolbar search UI', () => {
         expect(controls.classList.toggle).toHaveBeenCalledWith('is-search-expanded', true);
     });
 
-    it('keeps toolbar actions hidden when a persisted query is still active', () => {
+    it('keeps the morph search rail expanded when a persisted query is still active', () => {
         const { shadowRoot, controls, searchContainer, searchInput } = createSearchUiMock();
         mod._setShadowRootForTest(shadowRoot);
         mod._setIsSearchExpanded(false);
@@ -1376,7 +1655,82 @@ describe('source action menu', () => {
         expect(mod._getActiveSourceActionSourceKey()).toBeNull();
     });
 
-    it('closes the action menu on outside clicks without breaking search-container clicks', () => {
+    it('opens the native source details view from the unified action menu', () => {
+        const openNativeDetails = jest.fn(() => true);
+        mod.sourcesByKey.set('source-1', {
+            key: 'source-1',
+            title: 'Source One',
+            enabled: true,
+            isLoading: false,
+            isDisabled: false
+        });
+        mod._setSourceActionInvokerForTest('openNativeDetails', openNativeDetails);
+
+        mod._setActiveSourceActionSourceKey('source-1');
+        expect(mod.handleSourceActionSelection('source-1', 'view-source')).toBe(true);
+        expect(openNativeDetails).not.toHaveBeenCalled();
+        expect(mod._getActiveSourceActionSourceKey()).toBe('source-1');
+        expect(mod._getActiveSourceActionSubmenuAction()).toBe('view-source');
+
+        expect(mod.handleSourceActionSelection('source-1', 'view-source-details')).toBe(true);
+        expect(openNativeDetails).toHaveBeenCalledWith('source-1');
+        expect(mod._getActiveSourceActionSourceKey()).toBeNull();
+        expect(mod._getActiveSourceActionSubmenuAction()).toBeNull();
+    });
+
+    it('exposes the source action menu items in the expected order', () => {
+        mod.sourcesByKey.set('source-1', {
+            key: 'source-1',
+            title: 'Source One',
+            enabled: true,
+            isLoading: false,
+            isDisabled: false
+        });
+
+        expect(mod._getSourceActionMenuItemsForTest('source-1').map((item) => item.action)).toEqual([
+            'view-source',
+            'tags',
+            'move',
+            'native-more'
+        ]);
+        expect(mod._getSourceActionSubmenuItemsForTest('source-1', 'view-source').map((item) => item.action)).toEqual([
+            'view-source-details'
+        ]);
+    });
+
+    it('shows a localized toast when source details cannot be opened', () => {
+        const createdToastNodes = [];
+        global.chrome.i18n.getMessage = jest.fn((key) => (
+            key === 'ui_source_details_unavailable' ? 'Localized source details unavailable' : key
+        ));
+
+        const shadowRoot = {
+            host: { isConnected: true },
+            querySelector: jest.fn(() => null),
+            appendChild: jest.fn((node) => {
+                createdToastNodes.push(node);
+                return node;
+            })
+        };
+
+        mod._setShadowRootForTest(shadowRoot);
+        mod.sourcesByKey.set('source-1', {
+            key: 'source-1',
+            title: 'Source One',
+            enabled: true,
+            isLoading: false,
+            isDisabled: false
+        });
+        mod._setSourceActionInvokerForTest('openNativeDetails', jest.fn(() => false));
+
+        mod._setActiveSourceActionSourceKey('source-1');
+        mod._setActiveSourceActionSubmenuAction('view-source');
+        expect(mod.handleSourceActionSelection('source-1', 'view-source-details')).toBe(false);
+        expect(createdToastNodes).toHaveLength(1);
+        expect(createdToastNodes[0].textContent).toBe('Localized source details unavailable');
+    });
+
+    it('closes the action menu on outside clicks without breaking search-rail clicks', () => {
         const { shadowRoot } = createSearchUiMock();
         mod._setShadowRootForTest(shadowRoot);
         mod._setActiveSourceActionSourceKey('source-1');
@@ -1384,7 +1738,7 @@ describe('source action menu', () => {
 
         expect(mod._handleSearchOutsideClick({
             target: {
-                closest: jest.fn((selector) => (selector === '.sp-search-container' ? {} : null))
+                closest: jest.fn((selector) => (selector === '.sp-search-cluster' ? {} : null))
             }
         })).toBe(true);
         expect(mod._getActiveSourceActionSourceKey()).toBeNull();
@@ -1444,6 +1798,185 @@ describe('source action menu', () => {
         expect(source.enabled).toBe(true);
         expect(openTags).toHaveBeenCalledWith('source-1');
         expect(sourceRow.querySelector).not.toHaveBeenCalled();
+    });
+
+    it('does not toggle the source checkbox when clicking the new source-details submenu item', () => {
+        const openNativeDetails = jest.fn(() => true);
+        const source = {
+            key: 'source-1',
+            title: 'Source One',
+            enabled: true,
+            isLoading: false,
+            isDisabled: false
+        };
+        const checkbox = { checked: true };
+        const sourceRow = {
+            dataset: { sourceKey: 'source-1' },
+            querySelector: jest.fn(() => checkbox)
+        };
+
+        mod.sourcesByKey.set('source-1', source);
+        mod._setSourceActionInvokerForTest('openNativeDetails', openNativeDetails);
+
+        mod._handleInteractionForTest({
+            target: {
+                classList: { contains: jest.fn(() => false) },
+                closest: jest.fn((selector) => {
+                    if (selector === '.group-container') return null;
+                    if (selector === '.source-item') return sourceRow;
+                    if (selector === '.sp-source-actions-menu-item') {
+                        return { dataset: { sourceKey: 'source-1', action: 'view-source-details' } };
+                    }
+                    return null;
+                })
+            }
+        });
+
+        expect(source.enabled).toBe(true);
+        expect(openNativeDetails).toHaveBeenCalledWith('source-1');
+        expect(sourceRow.querySelector).not.toHaveBeenCalled();
+    });
+
+    it('suspends the manager after opening native details from the source icon', async () => {
+        const { panel: detailPanel } = createMockPanel({ visible: true, contentVisible: true });
+        const detachHost = {
+            isConnected: true,
+            remove: jest.fn()
+        };
+        const detachShadowRoot = {
+            host: detachHost,
+            querySelector: jest.fn(() => null)
+        };
+        const nativeTitleTarget = {
+            dispatchEvent: jest.fn(),
+            click: jest.fn(),
+            getAttribute: jest.fn((attr) => (attr === 'tabindex' ? '0' : null)),
+            tagName: 'BUTTON',
+            className: ''
+        };
+        const nativeSourceRow = {
+            dispatchEvent: jest.fn(),
+            click: jest.fn(),
+            querySelectorAll: jest.fn(() => []),
+            querySelector: jest.fn((selector) => {
+                if (mod.DEPS.title.includes(selector)) return nativeTitleTarget;
+                return null;
+            })
+        };
+        const virtualSourceRow = {
+            dataset: { sourceKey: 'source-1' },
+            querySelector: jest.fn()
+        };
+
+        mod._setProjectId('test-project');
+        mod._setManagerRuntimeForTest({
+            extensionHost: detachHost,
+            shadowRoot: detachShadowRoot
+        });
+        mod.state.ungrouped = ['source-1'];
+        mod.sourcesByKey.set('source-1', {
+            key: 'source-1',
+            title: 'Source One',
+            normalizedTitle: 'source one',
+            fingerprint: 'source one||article',
+            enabled: true,
+            isLoading: false,
+            isDisabled: false,
+            element: nativeSourceRow
+        });
+        global.document.querySelector = jest.fn(() => detailPanel);
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [] : []
+        ));
+
+        mod._handleInteractionForTest({
+            target: {
+                classList: { contains: jest.fn(() => false) },
+                closest: jest.fn((selector) => {
+                    if (selector === '.group-container') return null;
+                    if (selector === '.source-item') return virtualSourceRow;
+                    if (selector === '.icon-container') return {};
+                    return null;
+                })
+            }
+        });
+
+        await Promise.resolve();
+
+        expect(nativeTitleTarget.click).toHaveBeenCalledTimes(1);
+        expect(detachHost.remove).toHaveBeenCalledTimes(1);
+        expect(mod._getPendingPanelReattachStateForTest()).toEqual(expect.objectContaining({
+            ungrouped: ['source-1']
+        }));
+        expect(global.document.documentElement.classList.remove).toHaveBeenCalledWith('sources-plus-manager-active');
+        expect(mod.getManagerStatus()).toEqual({
+            ready: false,
+            reason: 'source_detail_view'
+        });
+    });
+
+    it('does not immediately reattach while NotebookLM is transitioning into native details', async () => {
+        const { panel: listPanel, header } = createMockPanel({ visible: true, contentVisible: true });
+        const nativeSource = createMockSourceRow({ title: 'Source One', stableToken: 'doc-1', checked: true });
+        nativeSource.row.click = jest.fn();
+        nativeSource.row.dispatchEvent = jest.fn();
+        const detachHost = {
+            isConnected: true,
+            remove: jest.fn()
+        };
+        const detachShadowRoot = {
+            host: detachHost,
+            querySelector: jest.fn(() => null)
+        };
+        const virtualSourceRow = {
+            dataset: { sourceKey: 'source-1' },
+            querySelector: jest.fn()
+        };
+
+        mod._setProjectId('test-project');
+        mod._setManagerRuntimeForTest({
+            extensionHost: detachHost,
+            shadowRoot: detachShadowRoot
+        });
+        mod.state.ungrouped = ['source-1'];
+        mod.sourcesByKey.set('source-1', {
+            key: 'source-1',
+            title: 'Source One',
+            normalizedTitle: 'source one',
+            stableToken: 'doc-1',
+            fingerprint: 'source one||article',
+            identityType: 'stable-token',
+            enabled: true,
+            isLoading: false,
+            isDisabled: false,
+            element: nativeSource.row
+        });
+        global.document.querySelector = jest.fn(() => listPanel);
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [nativeSource.row] : []
+        ));
+
+        mod._handleInteractionForTest({
+            target: {
+                classList: { contains: jest.fn(() => false) },
+                closest: jest.fn((selector) => {
+                    if (selector === '.group-container') return null;
+                    if (selector === '.source-item') return virtualSourceRow;
+                    if (selector === '.icon-container') return {};
+                    return null;
+                })
+            }
+        });
+
+        await Promise.resolve();
+        mod.syncManagerWithPanelLifecycle();
+
+        expect(detachHost.remove).toHaveBeenCalledTimes(1);
+        expect(header.insertAdjacentElement).not.toHaveBeenCalled();
+        expect(mod.getManagerStatus()).toEqual({
+            ready: false,
+            reason: 'source_detail_view'
+        });
     });
 
     it('localizes the non-empty group delete confirmation message', () => {
@@ -1569,7 +2102,7 @@ describe('manager shell structure', () => {
         jest.resetModules();
     });
 
-    it('wraps toolbar buttons in a shared action group for animation', () => {
+    it('keeps the top controls split into toolbar actions and a morph search rail', () => {
         const createManagerShell = require('../src/content/content-template.js');
         const shell = createManagerShell(createTreeEl, {
             i18n: {
@@ -1579,6 +2112,10 @@ describe('manager shell structure', () => {
 
         const controls = shell.children[0];
         const actionsGroup = controls.children[0];
+        const searchRail = controls.children[1];
+        const searchTrigger = searchRail.children[0];
+        const searchSurface = searchRail.children[1];
+        const searchClose = searchRail.children[2];
 
         expect(controls.attrs.className).toBe('sp-controls');
         expect(actionsGroup.attrs.className).toBe('sp-toolbar-actions');
@@ -1588,6 +2125,11 @@ describe('manager shell structure', () => {
             'sp-manage-tags-btn',
             'sp-batch-action-btn'
         ]);
+        expect(searchRail.attrs.className).toBe('sp-search-cluster');
+        expect(searchTrigger.attrs.id).toBe('sp-search-btn');
+        expect(searchSurface.attrs.className).toBe('sp-search-container');
+        expect(searchSurface.children[0].attrs.id).toBe('sp-search');
+        expect(searchClose.attrs.id).toBe('sp-search-close-btn');
     });
 
     it('keeps the toolbar controls defined as a single-row flex layout', () => {
@@ -1597,6 +2139,34 @@ describe('manager shell structure', () => {
         expect(global.NSM_CONTENT_STYLE_TEXT).toContain('.sp-controls {');
         expect(global.NSM_CONTENT_STYLE_TEXT).toContain('display: flex;');
         expect(global.NSM_CONTENT_STYLE_TEXT).toContain('flex-wrap: nowrap;');
+    });
+
+    it('collapses the leading toolbar buttons when the search rail expands', () => {
+        jest.resetModules();
+        require('../src/content/content-style-text.js');
+
+        expect(global.NSM_CONTENT_STYLE_TEXT).toContain('.sp-controls.is-search-expanded .sp-toolbar-actions {');
+        expect(global.NSM_CONTENT_STYLE_TEXT).toContain('max-width: 0;');
+        expect(global.NSM_CONTENT_STYLE_TEXT).toContain('pointer-events: none;');
+    });
+
+    it('keeps the search trigger and rail on the same shared surface palette', () => {
+        jest.resetModules();
+        require('../src/content/content-style-text.js');
+
+        expect(global.NSM_CONTENT_STYLE_TEXT).toContain('.sp-search-trigger.sp-icon-button,');
+        expect(global.NSM_CONTENT_STYLE_TEXT).toContain('background: var(--sp-bg-button);');
+        expect(global.NSM_CONTENT_STYLE_TEXT).toContain('border: 1px solid var(--sp-border-light);');
+    });
+
+    it('keeps the search rail fully hidden while collapsed so only the round trigger remains', () => {
+        jest.resetModules();
+        require('../src/content/content-style-text.js');
+
+        expect(global.NSM_CONTENT_STYLE_TEXT).toContain('.sp-search-container {');
+        expect(global.NSM_CONTENT_STYLE_TEXT).toContain('width: 0;');
+        expect(global.NSM_CONTENT_STYLE_TEXT).toContain('opacity: 0;');
+        expect(global.NSM_CONTENT_STYLE_TEXT).toContain('pointer-events: none;');
     });
 });
 
@@ -1819,19 +2389,15 @@ describe('source icon handling', () => {
         expect(failedIcon.tagName).toBe('MAT-ICON');
     });
 
-    it('keeps icon clicks routed to the source title when using image icons', () => {
-        const titleClick = jest.fn();
+    it('routes icon clicks through the native details bridge when using image icons', () => {
+        const openNativeDetails = jest.fn(() => true);
         const source = {
             key: 'source-1',
             title: 'Image Source',
             enabled: true,
             isLoading: false,
             isDisabled: false,
-            element: {
-                querySelector: jest.fn((selector) => (
-                    selector.includes('source-title') ? { click: titleClick } : null
-                ))
-            }
+            element: null
         };
         const checkbox = { checked: true };
         const sourceRow = {
@@ -1840,6 +2406,7 @@ describe('source icon handling', () => {
         };
 
         mod.sourcesByKey.set('source-1', source);
+        mod._setSourceActionInvokerForTest('openNativeDetails', openNativeDetails);
 
         mod._handleInteractionForTest({
             target: {
@@ -1853,7 +2420,7 @@ describe('source icon handling', () => {
             }
         });
 
-        expect(titleClick).toHaveBeenCalledTimes(1);
+        expect(openNativeDetails).toHaveBeenCalledWith('source-1');
         expect(sourceRow.querySelector).not.toHaveBeenCalled();
     });
 });
@@ -1970,6 +2537,84 @@ describe('scanAndSyncSources', () => {
         expect(shouldUpgrade).toBe(true);
         expect(mod.groupsById.get('group1').children[0].key).toBe(descriptor.key);
         expect(mod.sourcesByKey.get(descriptor.key).enabled).toBe(false);
+    });
+
+    it('remaps persisted grouped sources on first load by stable token when the stored key changes', () => {
+        const currentRow = createMockSourceRow({ title: 'Stable Source', stableToken: 'stable-doc', checked: true });
+        const currentDescriptor = mod.createSourceDescriptor(currentRow.row, new Map(), new Map());
+        const outdatedStoredKey = 'source_fp_outdated';
+
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [currentRow.row] : []
+        ));
+
+        mod.scanAndSyncSources({
+            schemaVersion: 3,
+            groups: ['group1'],
+            groupsById: {
+                group1: {
+                    id: 'group1',
+                    title: 'Pinned',
+                    children: [{ type: 'source', key: outdatedStoredKey }]
+                }
+            },
+            ungrouped: [],
+            sourceStateById: {
+                [outdatedStoredKey]: {
+                    enabled: false,
+                    title: 'Stable Source',
+                    normalizedTitle: 'stable source',
+                    stableToken: 'stable-doc',
+                    fingerprint: currentDescriptor.fingerprint,
+                    identityType: 'stable-token'
+                }
+            }
+        }, true);
+
+        expect(mod.groupsById.get('group1').children).toEqual([{ type: 'source', key: currentDescriptor.key }]);
+        expect(mod.sourcesByKey.get(currentDescriptor.key).enabled).toBe(false);
+    });
+
+    it('remaps persisted grouped sources on first load by unique title when stable token and fingerprint drift', () => {
+        const currentRow = createMockSourceRow({
+            title: 'Title Fallback Source',
+            ariaLabel: 'Title Fallback Source',
+            stableToken: 'stable-doc-new',
+            iconName: 'video_youtube',
+            checked: true
+        });
+        const currentDescriptor = mod.createSourceDescriptor(currentRow.row, new Map(), new Map());
+        const outdatedStoredKey = 'source_fp_title_only';
+
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [currentRow.row] : []
+        ));
+
+        mod.scanAndSyncSources({
+            schemaVersion: 3,
+            groups: ['group1'],
+            groupsById: {
+                group1: {
+                    id: 'group1',
+                    title: 'Pinned',
+                    children: [{ type: 'source', key: outdatedStoredKey }]
+                }
+            },
+            ungrouped: [],
+            sourceStateById: {
+                [outdatedStoredKey]: {
+                    enabled: false,
+                    title: 'Title Fallback Source',
+                    normalizedTitle: 'title fallback source',
+                    stableToken: 'stable-doc-old',
+                    fingerprint: 'title fallback source|title fallback source|article',
+                    identityType: 'stable-token'
+                }
+            }
+        }, true);
+
+        expect(mod.groupsById.get('group1').children).toEqual([{ type: 'source', key: currentDescriptor.key }]);
+        expect(mod.sourcesByKey.get(currentDescriptor.key).enabled).toBe(false);
     });
 
     it('keeps local enabled state across DOM re-renders', () => {
@@ -2130,6 +2775,7 @@ describe('scanAndSyncSources', () => {
     });
 
     it('restores deferred initial source refs once source rows become available', () => {
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
         const loadedState = {
             schemaVersion: 3,
             groups: ['group1'],
@@ -2161,6 +2807,7 @@ describe('scanAndSyncSources', () => {
         ));
         mod.restoreInitialLoadedState(loadedState);
 
+        global.document.querySelector = jest.fn(() => panel);
         global.document.querySelectorAll = jest.fn((selector) => (
             mod.DEPS.row.includes(selector) ? [row.row] : []
         ));
@@ -2168,6 +2815,62 @@ describe('scanAndSyncSources', () => {
         const restoredKey = Array.from(mod.sourcesByKey.keys())[0];
 
         expect(result).toEqual({ restored: true, deferred: false, shouldUpgradeStorage: false });
+        expect(mod._getPendingInitialLoadedState()).toBe(null);
+        expect(mod.groupsById.get('group1').children).toEqual([{ type: 'source', key: restoredKey }]);
+        expect(mod.state.ungrouped).toEqual([]);
+        expect(mod.sourcesByKey.get(restoredKey).enabled).toBe(false);
+    });
+
+    it('flushes deferred initial state once the initial load gate opens and rows already exist', () => {
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const loadedState = {
+            schemaVersion: 3,
+            groups: ['group1'],
+            groupsById: {
+                group1: {
+                    id: 'group1',
+                    title: 'Pinned',
+                    children: [{ type: 'source', key: 'source_id_doc-1' }]
+                }
+            },
+            ungrouped: [],
+            sourceStateById: {
+                'source_id_doc-1': {
+                    enabled: false,
+                    title: 'Deferred Source',
+                    normalizedTitle: 'deferred source',
+                    fingerprint: 'deferred source||article',
+                    identityType: 'stable-token'
+                }
+            },
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {}
+        };
+        const row = createMockSourceRow({ title: 'Deferred Source', stableToken: 'doc-1', checked: true });
+
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [] : []
+        ));
+        expect(mod.restoreInitialLoadedState(loadedState)).toEqual({
+            deferred: true,
+            shouldUpgradeStorage: false
+        });
+
+        mod._setAwaitingInitialStateLoadForTest(true);
+        global.document.querySelector = jest.fn(() => panel);
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [row.row] : []
+        ));
+
+        mod._debouncedScanAndSyncForTest();
+        expect(mod.state.groups).toEqual([]);
+        expect(mod._getPendingInitialLoadedState()).toEqual(loadedState);
+
+        expect(() => mod._completeInitialStateLoadForTest()).not.toThrow();
+
+        const restoredKey = Array.from(mod.sourcesByKey.keys())[0];
+        expect(mod._getAwaitingInitialStateLoadForTest()).toBe(false);
         expect(mod._getPendingInitialLoadedState()).toBe(null);
         expect(mod.groupsById.get('group1').children).toEqual([{ type: 'source', key: restoredKey }]);
         expect(mod.state.ungrouped).toEqual([]);
@@ -2747,6 +3450,318 @@ describe('findFreshCheckbox', () => {
     });
 });
 
+describe('triggerNativeSourceDetails', () => {
+    let mod;
+
+    beforeEach(() => {
+        jest.resetModules();
+        setupGlobalMocks();
+        mod = loadContentModule();
+        mod._resetState();
+        global.setTimeout = jest.fn((cb) => {
+            if (typeof cb === 'function') cb();
+            return 1;
+        });
+        global.clearTimeout = jest.fn();
+    });
+
+    afterEach(teardownGlobalMocks);
+
+    it('clicks the matching native details menu item when it is available on the current row', async () => {
+        const nativeMoreClick = jest.fn();
+        const detailClick = jest.fn();
+        const nativeMenuItem = {
+            textContent: 'View source details',
+            click: detailClick,
+            getAttribute: jest.fn((attr) => (attr === 'aria-label' ? 'View source details' : null)),
+            querySelector: jest.fn(() => ({ textContent: 'description' }))
+        };
+        mod.sourcesByKey.set('source-1', {
+            key: 'source-1',
+            title: 'Source One',
+            stableToken: 'doc-1',
+            element: {
+                querySelector: jest.fn((selector) => (
+                    mod.DEPS.moreBtn.includes(selector) ? { click: nativeMoreClick } : null
+                ))
+            }
+        });
+        let menuQueryCount = 0;
+        global.document.querySelectorAll = jest.fn((selector) => {
+            if (selector !== '.cdk-overlay-container [role="menuitem"]') return [];
+            menuQueryCount += 1;
+            return menuQueryCount === 1 ? [] : [nativeMenuItem];
+        });
+
+        await expect(mod._triggerNativeSourceDetailsViaNativeMenuForTest('source-1')).resolves.toBe(true);
+        expect(nativeMoreClick).toHaveBeenCalledTimes(1);
+        expect(detailClick).toHaveBeenCalledTimes(1);
+    });
+
+    it('falls back to a fresh row more button when the current row no longer has a usable one', async () => {
+        const freshRow = createMockSourceRow({
+            title: 'Source One',
+            stableToken: 'doc-1',
+            checked: true
+        });
+        const freshMoreButton = { click: jest.fn() };
+        freshRow.row.querySelector = jest.fn((selector) => {
+            if (mod.DEPS.title.includes(selector)) return freshRow.titleEl;
+            if (mod.DEPS.checkbox.includes(selector)) return freshRow.checkbox;
+            if (mod.DEPS.moreBtn.includes(selector)) return freshMoreButton;
+            return null;
+        });
+        const detailClick = jest.fn();
+        const descriptor = mod.createSourceDescriptor(freshRow.row, new Map(), new Map());
+
+        mod.sourcesByKey.set(descriptor.key, {
+            ...descriptor,
+            element: {
+                querySelector: jest.fn(() => null)
+            }
+        });
+
+        let menuQueryCount = 0;
+        global.document.querySelectorAll = jest.fn((selector) => {
+            if (selector === '.cdk-overlay-container [role="menuitem"]') {
+                menuQueryCount += 1;
+                return menuQueryCount === 1
+                    ? []
+                    : [{
+                        textContent: '来源详情',
+                        click: detailClick,
+                        getAttribute: jest.fn((attr) => (attr === 'aria-label' ? '查看来源详情' : null)),
+                        querySelector: jest.fn(() => ({ textContent: 'description' }))
+                    }];
+            }
+            return mod.DEPS.row.includes(selector) ? [freshRow.row] : [];
+        });
+
+        await expect(mod._triggerNativeSourceDetailsViaNativeMenuForTest(descriptor.key)).resolves.toBe(true);
+        expect(freshMoreButton.click).toHaveBeenCalledTimes(1);
+        expect(detailClick).toHaveBeenCalledTimes(1);
+    });
+
+    it('closes the native menu and returns false when no details item is found', async () => {
+        const nativeMoreClick = jest.fn();
+        mod.sourcesByKey.set('source-1', {
+            key: 'source-1',
+            title: 'Source One',
+            stableToken: 'doc-1',
+            element: {
+                querySelector: jest.fn((selector) => (
+                    mod.DEPS.moreBtn.includes(selector) ? { click: nativeMoreClick } : null
+                ))
+            }
+        });
+        global.document.querySelectorAll = jest.fn((selector) => (
+            selector === '.cdk-overlay-container [role="menuitem"]' ? [] : []
+        ));
+
+        await expect(mod._triggerNativeSourceDetailsViaNativeMenuForTest('source-1')).resolves.toBe(false);
+        expect(nativeMoreClick).toHaveBeenCalledTimes(1);
+        expect(global.document.body.click).toHaveBeenCalled();
+    });
+
+    it('waits for newly opened native menu items instead of matching a stale overlay menu', async () => {
+        const nativeMoreClick = jest.fn();
+        const staleMenuItem = {
+            textContent: 'Delete',
+            click: jest.fn(),
+            getAttribute: jest.fn((attr) => (attr === 'aria-label' ? 'Delete' : null)),
+            querySelector: jest.fn(() => ({ textContent: 'delete' }))
+        };
+        const detailClick = jest.fn();
+        const detailMenuItem = {
+            textContent: 'View source details',
+            click: detailClick,
+            getAttribute: jest.fn((attr) => (attr === 'aria-label' ? 'View source details' : null)),
+            querySelector: jest.fn(() => ({ textContent: 'description' }))
+        };
+        mod.sourcesByKey.set('source-1', {
+            key: 'source-1',
+            title: 'Source One',
+            stableToken: 'doc-1',
+            element: {
+                querySelector: jest.fn((selector) => (
+                    mod.DEPS.moreBtn.includes(selector) ? { click: nativeMoreClick } : null
+                ))
+            }
+        });
+
+        let menuQueryCount = 0;
+        global.document.querySelectorAll = jest.fn((selector) => {
+            if (selector !== '.cdk-overlay-container [role="menuitem"]') return [];
+            menuQueryCount += 1;
+            if (menuQueryCount === 1) return [staleMenuItem];
+            return [staleMenuItem, detailMenuItem];
+        });
+
+        await expect(mod._triggerNativeSourceDetailsViaNativeMenuForTest('source-1')).resolves.toBe(true);
+        expect(nativeMoreClick).toHaveBeenCalledTimes(1);
+        expect(detailClick).toHaveBeenCalledTimes(1);
+        expect(global.document.body.click).not.toHaveBeenCalled();
+    });
+
+    it('matches NotebookLM view-source entries that use the eye icon and shorter label', async () => {
+        const nativeMoreClick = jest.fn();
+        const detailClick = jest.fn();
+        const nativeMenuItem = {
+            textContent: 'View source',
+            click: detailClick,
+            getAttribute: jest.fn((attr) => (attr === 'aria-label' ? 'View source' : null)),
+            querySelector: jest.fn(() => ({ textContent: 'visibility' }))
+        };
+        mod.sourcesByKey.set('source-1', {
+            key: 'source-1',
+            title: 'Source One',
+            stableToken: 'doc-1',
+            element: {
+                querySelector: jest.fn((selector) => (
+                    mod.DEPS.moreBtn.includes(selector) ? { click: nativeMoreClick } : null
+                ))
+            }
+        });
+        let menuQueryCount = 0;
+        global.document.querySelectorAll = jest.fn((selector) => {
+            if (selector !== '.cdk-overlay-container [role="menuitem"]') return [];
+            menuQueryCount += 1;
+            return menuQueryCount === 1 ? [] : [nativeMenuItem];
+        });
+
+        await expect(mod._triggerNativeSourceDetailsViaNativeMenuForTest('source-1')).resolves.toBe(true);
+        expect(nativeMoreClick).toHaveBeenCalledTimes(1);
+        expect(detailClick).toHaveBeenCalledTimes(1);
+    });
+
+    it('falls back to the native title click when no details menu item can be matched', async () => {
+        const nativeMoreClick = jest.fn();
+        const titleClick = jest.fn();
+        mod.sourcesByKey.set('source-1', {
+            key: 'source-1',
+            title: 'Source One',
+            stableToken: 'doc-1',
+            element: {
+                click: jest.fn(),
+                querySelector: jest.fn((selector) => {
+                    if (mod.DEPS.moreBtn.includes(selector)) return { click: nativeMoreClick };
+                    if (mod.DEPS.title.includes(selector)) return { click: titleClick };
+                    return null;
+                })
+            }
+        });
+        global.document.querySelectorAll = jest.fn((selector) => (
+            selector === '.cdk-overlay-container [role="menuitem"]' ? [] : []
+        ));
+
+        await expect(mod._triggerNativeSourceDetailsViaNativeMenuForTest('source-1')).resolves.toBe(true);
+        expect(nativeMoreClick).toHaveBeenCalledTimes(1);
+        expect(titleClick).toHaveBeenCalledTimes(1);
+        expect(global.document.body.click).toHaveBeenCalled();
+    });
+});
+
+describe('triggerNativeSourceDetailsDirect', () => {
+    let mod;
+
+    beforeEach(() => {
+        jest.resetModules();
+        setupGlobalMocks();
+        mod = loadContentModule();
+        mod._resetState();
+    });
+
+    afterEach(teardownGlobalMocks);
+
+    it('dispatches a native-style activation sequence to the source title first', () => {
+        const titleTarget = {
+            dispatchEvent: jest.fn(),
+            click: jest.fn(),
+            getAttribute: jest.fn((attr) => (attr === 'tabindex' ? '0' : null)),
+            tagName: 'BUTTON'
+        };
+        const row = {
+            dispatchEvent: jest.fn(),
+            click: jest.fn(),
+            querySelectorAll: jest.fn(() => []),
+            querySelector: jest.fn((selector) => {
+                if (mod.DEPS.title.includes(selector)) return titleTarget;
+                return null;
+            })
+        };
+
+        mod.sourcesByKey.set('source-1', {
+            key: 'source-1',
+            title: 'Source One',
+            element: row
+        });
+
+        expect(mod._triggerNativeSourceDetailsDirectForTest('source-1')).toBe(true);
+        expect(titleTarget.dispatchEvent).toHaveBeenCalled();
+        expect(titleTarget.click).toHaveBeenCalledTimes(1);
+        expect(row.click).not.toHaveBeenCalled();
+    });
+
+    it('prefers an actionable ancestor or link over an inert title span', () => {
+        const titleTarget = {
+            dispatchEvent: jest.fn(),
+            click: jest.fn(),
+            getAttribute: jest.fn(() => null),
+            tagName: 'SPAN',
+            className: 'source-title',
+            closest: jest.fn(() => null)
+        };
+        const anchorTarget = {
+            dispatchEvent: jest.fn(),
+            click: jest.fn(),
+            getAttribute: jest.fn((attr) => (attr === 'href' ? '/notebook/test/source/123' : null)),
+            tagName: 'A',
+            className: '',
+            matches: jest.fn(() => false)
+        };
+        const row = {
+            dispatchEvent: jest.fn(),
+            click: jest.fn(),
+            querySelectorAll: jest.fn((selector) => (selector === 'a[href]' ? [anchorTarget] : [])),
+            querySelector: jest.fn((selector) => {
+                if (mod.DEPS.title.includes(selector)) return titleTarget;
+                if (selector === 'a[href]') return anchorTarget;
+                return null;
+            })
+        };
+
+        mod.sourcesByKey.set('source-1', {
+            key: 'source-1',
+            title: 'Source One',
+            element: row
+        });
+
+        expect(mod._triggerNativeSourceDetailsDirectForTest('source-1')).toBe(true);
+        expect(anchorTarget.click).toHaveBeenCalledTimes(1);
+        expect(titleTarget.click).not.toHaveBeenCalled();
+    });
+
+    it('falls back to clicking the row when no inner detail target is available', () => {
+        const row = {
+            dispatchEvent: jest.fn(),
+            click: jest.fn(),
+            getAttribute: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => []),
+            querySelector: jest.fn(() => null)
+        };
+
+        mod.sourcesByKey.set('source-1', {
+            key: 'source-1',
+            title: 'Source One',
+            element: row
+        });
+
+        expect(mod._triggerNativeSourceDetailsDirectForTest('source-1')).toBe(true);
+        expect(row.dispatchEvent).toHaveBeenCalled();
+        expect(row.click).toHaveBeenCalledTimes(1);
+    });
+});
+
 describe('removeGroupFromTree', () => {
     let mod;
 
@@ -2856,6 +3871,24 @@ describe('manager launcher messaging', () => {
         expect(mockContainer.classList.add).toHaveBeenCalledWith('sp-focus-ring');
     });
 
+    it('reports extension_disabled when the manager is globally disabled', () => {
+        const sendResponse = jest.fn();
+
+        mod._setProjectId('test-project');
+        mod._setExtensionEnabledForTest(false);
+
+        mod.handleManagerMessage({ type: 'GET_MANAGER_STATUS' }, {}, sendResponse);
+
+        expect(sendResponse).toHaveBeenCalledWith({
+            ready: false,
+            reason: 'extension_disabled'
+        });
+        expect(mod.getManagerStatus()).toEqual({
+            ready: false,
+            reason: 'extension_disabled'
+        });
+    });
+
     it('routes runtime messages for popup status and focus requests', () => {
         const sendResponse = jest.fn();
         mod._setProjectId('test-project');
@@ -2871,6 +3904,56 @@ describe('manager launcher messaging', () => {
         expect(sendResponse).toHaveBeenCalledWith({
             success: false,
             reason: 'source_panel_missing'
+        });
+    });
+
+    it('tears down the manager when DISABLE_MANAGER is received', () => {
+        const mockHost = {
+            isConnected: true,
+            remove: jest.fn()
+        };
+        const mockShadowRoot = {
+            host: mockHost,
+            querySelector: jest.fn(() => null)
+        };
+        const sendResponse = jest.fn();
+
+        mod._setProjectId('test-project');
+        mod._setManagerRuntimeForTest({
+            extensionHost: mockHost,
+            shadowRoot: mockShadowRoot
+        });
+        mod._setExtensionEnabledForTest(true);
+
+        mod.handleManagerMessage({ type: 'DISABLE_MANAGER' }, {}, sendResponse);
+
+        expect(mockHost.remove).toHaveBeenCalledTimes(1);
+        expect(global.document.documentElement.classList.remove).toHaveBeenCalledWith('sources-plus-manager-active');
+        expect(mod._getExtensionEnabledForTest()).toBe(false);
+        expect(sendResponse).toHaveBeenCalledWith({
+            success: true,
+            disabled: true
+        });
+        expect(mod.getManagerStatus()).toEqual({
+            ready: false,
+            reason: 'extension_disabled'
+        });
+    });
+
+    it('reenables the manager runtime when ENABLE_MANAGER is received', () => {
+        const sendResponse = jest.fn();
+
+        mod._setProjectId('test-project');
+        mod._setExtensionEnabledForTest(false);
+        global.document.querySelector = jest.fn(() => null);
+
+        mod.handleManagerMessage({ type: 'ENABLE_MANAGER' }, {}, sendResponse);
+
+        expect(mod._getExtensionEnabledForTest()).toBe(true);
+        expect(sendResponse).toHaveBeenCalledWith({
+            success: true,
+            enabled: true,
+            attempted: true
         });
     });
 
@@ -2998,10 +4081,7 @@ describe('manager launcher messaging', () => {
 
         mod._setProjectId('test-project');
         global.document.querySelector = jest.fn(() => panel);
-        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
-            if (message.type === 'LOAD_STATE' && typeof cb === 'function') {
-                return;
-            }
+        global.chrome.storage.local.get.mockImplementation((keys, cb) => {
             if (typeof cb === 'function') cb({});
         });
         global.document.createElement = jest.fn((tag) => {
@@ -3037,14 +4117,109 @@ describe('manager launcher messaging', () => {
 
         expect(header.insertAdjacentElement).toHaveBeenCalledTimes(1);
         expect(mod._getAttachedSourcePanelForTest()).toBe(panel);
-        expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(
-            expect.objectContaining({
-                type: 'LOAD_STATE',
-                key: 'sourcesPlusState_test-project'
-            }),
+        expect(global.chrome.storage.local.get).toHaveBeenCalledWith(
+            ['sourcesPlusState_test-project', 'sourcesPlusState_test-project__backup'],
             expect.any(Function)
         );
         expect(global.window.location.reload).not.toHaveBeenCalled();
+    });
+
+    it('initializes while source rows are only partially hydrated and keeps the restore snapshot pending', () => {
+        const { panel, header } = createMockPanel({ visible: true, contentVisible: true });
+        const initHarness = createInitShadowRoot();
+        let firstDiv = true;
+        const loadedState = {
+            schemaVersion: 3,
+            groups: ['group1'],
+            groupsById: {
+                group1: {
+                    id: 'group1',
+                    title: 'Pinned',
+                    children: [{ type: 'source', key: 'source_id_doc-1' }]
+                }
+            },
+            ungrouped: [],
+            sourceStateById: {
+                'source_id_doc-1': {
+                    enabled: false,
+                    title: 'Deferred Source',
+                    normalizedTitle: 'deferred source',
+                    stableToken: 'doc-1',
+                    fingerprint: 'deferred source||article',
+                    identityType: 'stable-token'
+                }
+            },
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {}
+        };
+        const partialRow = {
+            querySelector: jest.fn((selector) => {
+                if (selector.includes('source-title')) return { textContent: 'Deferred Source' };
+                if (selector.includes('checkbox')) return null;
+                if (selector.includes('mat-icon')) return { textContent: 'description', classList: [] };
+                if (selector.includes('More options')) return null;
+                return null;
+            }),
+            querySelectorAll: jest.fn(() => []),
+            getAttribute: jest.fn(() => null),
+            children: []
+        };
+        const expectedLoadedState = {
+            ...loadedState,
+            customHeight: null
+        };
+
+        mod._setProjectId('test-project');
+        global.document.querySelector = jest.fn(() => panel);
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [partialRow] : []
+        ));
+        global.chrome.storage.local.get.mockImplementation((keys, cb) => {
+            if (typeof cb === 'function') {
+                cb({
+                    ['sourcesPlusState_test-project']: loadedState
+                });
+            }
+        });
+        global.document.createElement = jest.fn((tag) => {
+            if (tag === 'div' && firstDiv) {
+                firstDiv = false;
+                return {
+                    id: '',
+                    attachShadow: jest.fn(() => initHarness.shadowRoot),
+                    remove: jest.fn(),
+                    isConnected: true
+                };
+            }
+
+            return {
+                appendChild: jest.fn(),
+                cloneNode: jest.fn(function cloneNode() { return this; }),
+                setAttribute: jest.fn(),
+                getAttribute: jest.fn(() => null),
+                addEventListener: jest.fn(),
+                remove: jest.fn(),
+                classList: { add: jest.fn(), remove: jest.fn() },
+                dataset: {},
+                matches: jest.fn(() => false),
+                closest: jest.fn(() => null),
+                querySelector: jest.fn(() => null),
+                querySelectorAll: jest.fn(() => []),
+                textContent: '',
+                style: {}
+            };
+        });
+
+        mod.syncManagerWithPanelLifecycle();
+
+        expect(header.insertAdjacentElement).toHaveBeenCalledTimes(1);
+        expect(mod._getAttachedSourcePanelForTest()).toBe(panel);
+        expect(mod._getPendingInitialLoadedState()).toEqual(expectedLoadedState);
+        expect(global.chrome.storage.local.get).toHaveBeenCalledWith(
+            ['sourcesPlusState_test-project', 'sourcesPlusState_test-project__backup'],
+            expect.any(Function)
+        );
     });
 
     it('reopens from the in-memory panel snapshot before falling back to storage', () => {
@@ -3138,7 +4313,376 @@ describe('manager launcher messaging', () => {
         const runtimeMessages = global.chrome.runtime.sendMessage.mock.calls.map(([message]) => message);
         const restoredKey = Array.from(mod.sourcesByKey.keys())[0];
         expect(runtimeMessages.some((message) => message.type === 'LOAD_STATE')).toBe(false);
+        expect(runtimeMessages.some((message) => (
+            message.type === 'SAVE_STATE' && message.key === 'sourcesPlusState_test-project'
+        ))).toBe(true);
         expect(header.insertAdjacentElement).toHaveBeenCalledTimes(1);
+        expect(mod._getPendingPanelReattachStateForTest()).toBeNull();
+        expect(mod.groupsById.get('group1').children).toEqual([{ type: 'source', key: restoredKey }]);
+        expect(mod.sourcesByKey.get(restoredKey).enabled).toBe(false);
+    });
+
+    it('suspends the manager on source-detail views and blocks persistence while suspended', () => {
+        const { panel: listPanel } = createMockPanel({ visible: true, contentVisible: true });
+        const { panel: detailPanel } = createMockPanel({ visible: true, contentVisible: true });
+        const detachHost = {
+            isConnected: true,
+            remove: jest.fn()
+        };
+        const detachShadowRoot = {
+            host: detachHost,
+            querySelector: jest.fn(() => null)
+        };
+        const detailLikeRow = {
+            querySelector: jest.fn((selector) => {
+                if (selector.includes('source-title')) return { textContent: 'Source detail section' };
+                if (selector.includes('checkbox')) return null;
+                if (selector.includes('mat-icon')) return { textContent: 'description', classList: [] };
+                if (selector.includes('More options')) return null;
+                return null;
+            }),
+            querySelectorAll: jest.fn(() => []),
+            getAttribute: jest.fn(() => null),
+            children: []
+        };
+
+        mod._setProjectId('test-project');
+        mod._setShadowRootForTest(detachShadowRoot);
+        mod._setAttachedSourcePanelForTest(listPanel);
+        mod.state.groups = ['group1'];
+        mod.groupsById.set('group1', {
+            id: 'group1',
+            title: 'Pinned',
+            children: [{ type: 'source', key: 'source_id_doc-1' }]
+        });
+        mod.sourcesByKey.set('source_id_doc-1', {
+            key: 'source_id_doc-1',
+            title: 'Pinned Source',
+            normalizedTitle: 'pinned source',
+            fingerprint: 'pinned source||article',
+            identityType: 'stable-token',
+            enabled: true
+        });
+        global.document.querySelector = jest.fn(() => detailPanel);
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [detailLikeRow] : []
+        ));
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (typeof cb === 'function') cb({});
+        });
+
+        mod.syncManagerWithPanelLifecycle();
+
+        expect(detachHost.remove).toHaveBeenCalledTimes(1);
+        expect(mod.getManagerStatus()).toEqual({
+            ready: false,
+            reason: 'source_detail_view'
+        });
+        expect(mod._getPendingPanelReattachStateForTest()).toEqual(expect.objectContaining({
+            groups: ['group1']
+        }));
+
+        global.chrome.runtime.sendMessage.mockClear();
+
+        mod.saveState();
+
+        expect(global.chrome.runtime.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('treats native source guides as detail views even when regular source rows remain', () => {
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const sourceRow = createMockSourceRow({ title: 'Pinned Source', stableToken: 'doc-1', checked: true });
+        const closeSourceGuideButton = {
+            textContent: '',
+            getAttribute: jest.fn((attr) => (attr === 'aria-label' ? '关闭来源指南' : null))
+        };
+
+        panel.querySelectorAll = jest.fn((selector) => {
+            if (mod.DEPS.row.includes(selector)) return [sourceRow.row];
+            if (selector === 'button[aria-label], [role="button"][aria-label], [aria-label], button[title], [role="button"][title]') {
+                return [closeSourceGuideButton];
+            }
+            return [];
+        });
+
+        expect(mod.getSourcePanelState(panel)).toEqual(expect.objectContaining({
+            state: 'detail',
+            totalRows: 1,
+            manageableRows: 1
+        }));
+    });
+
+    it('restores the pending snapshot after returning from a source-detail view without reloading storage', () => {
+        const { panel: listPanel, content: listContent } = createMockPanel({ visible: true, contentVisible: true });
+        const { panel: detailPanel } = createMockPanel({ visible: true, contentVisible: true });
+        const sourceRow = createMockSourceRow({ title: 'Pinned Source', stableToken: 'doc-1', checked: true });
+        const detachHost = {
+            isConnected: true,
+            remove: jest.fn()
+        };
+        const detachShadowRoot = {
+            host: detachHost,
+            querySelector: jest.fn(() => null)
+        };
+        const initHarness = createInitShadowRoot();
+        const detailLikeRow = {
+            querySelector: jest.fn((selector) => {
+                if (selector.includes('source-title')) return { textContent: 'Source detail section' };
+                if (selector.includes('checkbox')) return null;
+                if (selector.includes('mat-icon')) return { textContent: 'description', classList: [] };
+                if (selector.includes('More options')) return null;
+                return null;
+            }),
+            querySelectorAll: jest.fn(() => []),
+            getAttribute: jest.fn(() => null),
+            children: []
+        };
+        let firstDiv = true;
+
+        mod._setProjectId('test-project');
+        mod._setShadowRootForTest(detachShadowRoot);
+        mod._setAttachedSourcePanelForTest(listPanel);
+        mod.state.groups = ['group1'];
+        mod.groupsById.set('group1', {
+            id: 'group1',
+            title: 'Pinned',
+            children: [{ type: 'source', key: 'source_id_doc-1' }]
+        });
+        mod.sourcesByKey.set('source_id_doc-1', {
+            key: 'source_id_doc-1',
+            title: 'Pinned Source',
+            normalizedTitle: 'pinned source',
+            fingerprint: 'pinned source||article',
+            identityType: 'stable-token',
+            enabled: false
+        });
+        global.document.querySelector = jest.fn(() => detailPanel);
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [detailLikeRow] : []
+        ));
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (typeof cb === 'function') cb({});
+        });
+
+        mod.syncManagerWithPanelLifecycle();
+
+        expect(mod._getPendingPanelReattachStateForTest()).toEqual(expect.objectContaining({
+            groups: ['group1']
+        }));
+
+        listContent.style.display = 'block';
+        listContent.style.visibility = 'visible';
+        listContent.__computedStyle.display = 'block';
+        listContent.__computedStyle.visibility = 'visible';
+        listContent.getBoundingClientRect.mockImplementation(() => ({ width: 320, height: 640 }));
+        global.document.querySelector = jest.fn(() => listPanel);
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [sourceRow.row] : []
+        ));
+        global.chrome.runtime.sendMessage.mockClear();
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (typeof cb === 'function') cb({});
+        });
+        global.document.createElement = jest.fn((tag) => {
+            if (tag === 'div' && firstDiv) {
+                firstDiv = false;
+                return {
+                    id: '',
+                    attachShadow: jest.fn(() => initHarness.shadowRoot),
+                    remove: jest.fn(),
+                    isConnected: true
+                };
+            }
+
+            return {
+                appendChild: jest.fn(),
+                cloneNode: jest.fn(function cloneNode() { return this; }),
+                setAttribute: jest.fn(),
+                getAttribute: jest.fn(() => null),
+                addEventListener: jest.fn(),
+                remove: jest.fn(),
+                classList: { add: jest.fn(), remove: jest.fn() },
+                dataset: {},
+                matches: jest.fn(() => false),
+                closest: jest.fn(() => null),
+                querySelector: jest.fn(() => null),
+                querySelectorAll: jest.fn(() => []),
+                textContent: '',
+                style: {}
+            };
+        });
+
+        mod.syncManagerWithPanelLifecycle();
+
+        const runtimeMessages = global.chrome.runtime.sendMessage.mock.calls.map(([message]) => message);
+        const restoredKey = Array.from(mod.sourcesByKey.keys())[0];
+        expect(runtimeMessages.some((message) => message.type === 'LOAD_STATE')).toBe(false);
+        expect(runtimeMessages.some((message) => (
+            message.type === 'SAVE_STATE' && message.key === 'sourcesPlusState_test-project'
+        ))).toBe(true);
+        expect(mod.getManagerStatus()).toEqual({
+            ready: true,
+            reason: 'ready'
+        });
+        expect(mod._getPendingPanelReattachStateForTest()).toBeNull();
+        expect(mod.groupsById.get('group1').children).toEqual([{ type: 'source', key: restoredKey }]);
+        expect(mod.sourcesByKey.get(restoredKey).enabled).toBe(false);
+    });
+
+    it('treats a zero-row source-detail view as suspended and blocks persistence', () => {
+        const { panel: listPanel } = createMockPanel({ visible: true, contentVisible: true });
+        const { panel: detailPanel } = createMockPanel({ visible: true, contentVisible: true });
+        const detachHost = {
+            isConnected: true,
+            remove: jest.fn()
+        };
+        const detachShadowRoot = {
+            host: detachHost,
+            querySelector: jest.fn(() => null)
+        };
+
+        mod._setProjectId('test-project');
+        mod._setShadowRootForTest(detachShadowRoot);
+        mod._setAttachedSourcePanelForTest(listPanel);
+        mod.state.groups = ['group1'];
+        mod.groupsById.set('group1', {
+            id: 'group1',
+            title: 'Pinned',
+            children: [{ type: 'source', key: 'source_id_doc-1' }]
+        });
+        mod.sourcesByKey.set('source_id_doc-1', {
+            key: 'source_id_doc-1',
+            title: 'Pinned Source',
+            normalizedTitle: 'pinned source',
+            fingerprint: 'pinned source||article',
+            identityType: 'stable-token',
+            enabled: true
+        });
+        global.document.querySelector = jest.fn(() => detailPanel);
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [] : []
+        ));
+        mod._setSourceDetailViewRequestedForTest(true);
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (typeof cb === 'function') cb({});
+        });
+
+        mod.syncManagerWithPanelLifecycle();
+
+        expect(detachHost.remove).toHaveBeenCalledTimes(1);
+        expect(mod.getManagerStatus()).toEqual({
+            ready: false,
+            reason: 'source_detail_view'
+        });
+
+        global.chrome.runtime.sendMessage.mockClear();
+
+        mod.saveState();
+
+        expect(global.chrome.runtime.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('restores from the pending snapshot after returning from a zero-row source-detail view', () => {
+        const { panel: listPanel, content: listContent } = createMockPanel({ visible: true, contentVisible: true });
+        const { panel: detailPanel } = createMockPanel({ visible: true, contentVisible: true });
+        const sourceRow = createMockSourceRow({ title: 'Pinned Source', stableToken: 'doc-1', checked: true });
+        const detachHost = {
+            isConnected: true,
+            remove: jest.fn()
+        };
+        const detachShadowRoot = {
+            host: detachHost,
+            querySelector: jest.fn(() => null)
+        };
+        const initHarness = createInitShadowRoot();
+        let firstDiv = true;
+
+        mod._setProjectId('test-project');
+        mod._setShadowRootForTest(detachShadowRoot);
+        mod._setAttachedSourcePanelForTest(listPanel);
+        mod.state.groups = ['group1'];
+        mod.groupsById.set('group1', {
+            id: 'group1',
+            title: 'Pinned',
+            children: [{ type: 'source', key: 'source_id_doc-1' }]
+        });
+        mod.sourcesByKey.set('source_id_doc-1', {
+            key: 'source_id_doc-1',
+            title: 'Pinned Source',
+            normalizedTitle: 'pinned source',
+            fingerprint: 'pinned source||article',
+            identityType: 'stable-token',
+            enabled: false
+        });
+        global.document.querySelector = jest.fn(() => detailPanel);
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [] : []
+        ));
+        mod._setSourceDetailViewRequestedForTest(true);
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (typeof cb === 'function') cb({});
+        });
+
+        mod.syncManagerWithPanelLifecycle();
+
+        expect(mod._getPendingPanelReattachStateForTest()).toEqual(expect.objectContaining({
+            groups: ['group1']
+        }));
+
+        listContent.style.display = 'block';
+        listContent.style.visibility = 'visible';
+        listContent.__computedStyle.display = 'block';
+        listContent.__computedStyle.visibility = 'visible';
+        listContent.getBoundingClientRect.mockImplementation(() => ({ width: 320, height: 640 }));
+        global.document.querySelector = jest.fn(() => listPanel);
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [sourceRow.row] : []
+        ));
+        global.chrome.runtime.sendMessage.mockClear();
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (typeof cb === 'function') cb({});
+        });
+        global.document.createElement = jest.fn((tag) => {
+            if (tag === 'div' && firstDiv) {
+                firstDiv = false;
+                return {
+                    id: '',
+                    attachShadow: jest.fn(() => initHarness.shadowRoot),
+                    remove: jest.fn(),
+                    isConnected: true
+                };
+            }
+
+            return {
+                appendChild: jest.fn(),
+                cloneNode: jest.fn(function cloneNode() { return this; }),
+                setAttribute: jest.fn(),
+                getAttribute: jest.fn(() => null),
+                addEventListener: jest.fn(),
+                remove: jest.fn(),
+                classList: { add: jest.fn(), remove: jest.fn() },
+                dataset: {},
+                matches: jest.fn(() => false),
+                closest: jest.fn(() => null),
+                querySelector: jest.fn(() => null),
+                querySelectorAll: jest.fn(() => []),
+                textContent: '',
+                style: {}
+            };
+        });
+
+        mod.syncManagerWithPanelLifecycle();
+
+        const runtimeMessages = global.chrome.runtime.sendMessage.mock.calls.map(([message]) => message);
+        const restoredKey = Array.from(mod.sourcesByKey.keys())[0];
+        expect(runtimeMessages.some((message) => message.type === 'LOAD_STATE')).toBe(false);
+        expect(runtimeMessages.some((message) => (
+            message.type === 'SAVE_STATE' && message.key === 'sourcesPlusState_test-project'
+        ))).toBe(true);
+        expect(mod.getManagerStatus()).toEqual({
+            ready: true,
+            reason: 'ready'
+        });
         expect(mod._getPendingPanelReattachStateForTest()).toBeNull();
         expect(mod.groupsById.get('group1').children).toEqual([{ type: 'source', key: restoredKey }]);
         expect(mod.sourcesByKey.get(restoredKey).enabled).toBe(false);
@@ -3187,6 +4731,27 @@ describe('manager launcher messaging', () => {
         expect(timeoutDelays.every((delay) => delay === 400)).toBe(true);
     });
 
+    it('skips mutation-driven persistence until the initial storage load finishes', () => {
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const sourceRow = createMockSourceRow({ title: 'Pinned Source', stableToken: 'doc-1', checked: true });
+
+        mod._setProjectId('test-project');
+        mod._setAwaitingInitialStateLoadForTest(true);
+        global.document.querySelector = jest.fn(() => panel);
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [sourceRow.row] : []
+        ));
+
+        mod._debouncedScanAndSyncForTest();
+
+        expect(global.chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+            expect.objectContaining({ type: 'SAVE_STATE' }),
+            expect.any(Function)
+        );
+        expect(mod.state.groups).toEqual([]);
+        expect(mod.state.ungrouped).toEqual([]);
+    });
+
     it('tears down without reloading when the user leaves a notebook route', () => {
         const mockHost = {
             isConnected: true,
@@ -3208,6 +4773,49 @@ describe('manager launcher messaging', () => {
         expect(mod.getManagerStatus()).toEqual({
             ready: false,
             reason: 'not_on_notebook_page'
+        });
+    });
+});
+
+describe('content stylesheet native source list visibility', () => {
+    it('only hides the native source list while the manager is active', () => {
+        const css = fs.readFileSync(path.join(__dirname, '../src/content/styles.css'), 'utf8');
+        const firstRule = css.slice(0, css.indexOf('{'));
+
+        expect(firstRule).toContain('.sources-plus-manager-active .source-panel .scroll-area-desktop');
+        expect(firstRule).not.toContain('\n.source-panel .scroll-area-desktop');
+    });
+});
+
+describe('content bootstrap toggle gating', () => {
+    afterEach(teardownGlobalMocks);
+
+    it('starts disabled when the background toggle is off', async () => {
+        jest.resetModules();
+        setupGlobalMocks();
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message.type === 'GET_EXTENSION_ENABLED' && typeof cb === 'function') {
+                cb({ success: true, enabled: false });
+                return;
+            }
+
+            if (typeof cb === 'function') {
+                cb({ success: true });
+            }
+        });
+
+        const mod = loadContentModule();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(
+            { type: 'GET_EXTENSION_ENABLED' },
+            expect.any(Function)
+        );
+        expect(mod._getExtensionEnabledForTest()).toBe(false);
+        expect(mod.getManagerStatus()).toEqual({
+            ready: false,
+            reason: 'extension_disabled'
         });
     });
 });

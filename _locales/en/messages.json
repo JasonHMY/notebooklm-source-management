@@ -23,6 +23,18 @@
     "popup_badge_attention": {
         "message": "Attention"
     },
+    "popup_toggle_label": {
+        "message": "Plugin status"
+    },
+    "popup_toggle_state_enabled": {
+        "message": "Enabled"
+    },
+    "popup_toggle_state_disabled": {
+        "message": "Disabled"
+    },
+    "popup_toggle_help": {
+        "message": "Turn off the in-page manager without losing saved groups or tags."
+    },
     "popup_title_ready": {
         "message": "Source manager is ready in this notebook"
     },
@@ -59,8 +71,17 @@
     "popup_body_refresh_needed": {
         "message": "Refresh this notebook and reopen the launcher. If it still fails, NotebookLM's page structure may have changed."
     },
+    "popup_title_disabled": {
+        "message": "The source manager is currently disabled"
+    },
+    "popup_body_disabled": {
+        "message": "Enable the plugin to attach the NotebookLM source manager again on this page."
+    },
     "popup_cta_open_manager": {
         "message": "Open source manager"
+    },
+    "popup_cta_enable_extension": {
+        "message": "Enable Plugin"
     },
     "popup_cta_go_to_notebooklm": {
         "message": "Go to NotebookLM"
@@ -94,6 +115,9 @@
     },
     "popup_reason_notebook_missing": {
         "message": "Open a NotebookLM notebook page to access the source manager."
+    },
+    "popup_reason_extension_disabled": {
+        "message": "The source manager is turned off from the extension popup."
     },
     "popup_reason_generic": {
         "message": "The source manager is not available on this page yet."
@@ -285,6 +309,15 @@
     },
     "ui_source_actions": {
         "message": "Source actions"
+    },
+    "ui_view_source": {
+        "message": "View source"
+    },
+    "ui_view_source_details": {
+        "message": "View source details"
+    },
+    "ui_source_details_unavailable": {
+        "message": "Source details are unavailable right now"
     },
     "ui_open_native_menu": {
         "message": "Open NotebookLM menu"

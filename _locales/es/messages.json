@@ -1,0 +1,368 @@
+{
+    "extName": {
+        "message": "Gestión de fuentes de NotebookLM"
+    },
+    "extShortName": {
+        "message": "Gestión de fuentes de NLM"
+    },
+    "actionTitle": {
+        "message": "Abrir el lanzador de Gestión de fuentes de NotebookLM"
+    },
+    "extDesc": {
+        "message": "Carpetas y ordenación mediante arrastrar y soltar para el panel de fuentes de NotebookLM."
+    },
+    "popup_launcher_note": {
+        "message": "Funciona dentro del panel de fuentes de NotebookLM. El icono de la barra de herramientas es solo un lanzador."
+    },
+    "popup_badge_ready": {
+        "message": "Listo"
+    },
+    "popup_badge_launcher": {
+        "message": "Lanzador"
+    },
+    "popup_badge_attention": {
+        "message": "Atención"
+    },
+    "popup_toggle_label": {
+        "message": "Estado del complemento"
+    },
+    "popup_toggle_state_enabled": {
+        "message": "Activado"
+    },
+    "popup_toggle_state_disabled": {
+        "message": "Desactivado"
+    },
+    "popup_toggle_help": {
+        "message": "Desactiva el gestor integrado sin perder los grupos o etiquetas guardados."
+    },
+    "popup_title_ready": {
+        "message": "El gestor de fuentes está listo en este cuaderno"
+    },
+    "popup_body_ready": {
+        "message": "Usa el botón de abajo para desplazarte al gestor y resaltarlo dentro de NotebookLM."
+    },
+    "popup_title_notebook_home": {
+        "message": "Abre un cuaderno para usar esta extensión"
+    },
+    "popup_body_notebook_home": {
+        "message": "Estás en NotebookLM, pero todavía no dentro de un cuaderno específico. Abre un cuaderno y luego vuelve a usar este lanzador."
+    },
+    "popup_title_notebook_home_new_tab": {
+        "message": "Abrir NotebookLM en una pestaña nueva"
+    },
+    "popup_body_notebook_home_new_tab": {
+        "message": "Ya estás en la página de inicio de NotebookLM. Este lanzador abrirá una nueva pestaña de NotebookLM para que el clic tenga un resultado claro."
+    },
+    "popup_title_switch_notebook": {
+        "message": "Cambiar al cuaderno abierto de NotebookLM"
+    },
+    "popup_body_switch_notebook": {
+        "message": "Ya hay un cuaderno de NotebookLM abierto en otra pestaña. Usa el botón de abajo para ir allí primero."
+    },
+    "popup_title_external_page": {
+        "message": "Ve a NotebookLM para usar el gestor de fuentes"
+    },
+    "popup_body_external_page": {
+        "message": "Esta extensión no abre una aplicación separada en la barra de herramientas. Su gestor aparece dentro de un cuaderno abierto de NotebookLM."
+    },
+    "popup_title_refresh_needed": {
+        "message": "Este cuaderno está abierto, pero el gestor no está adjunto"
+    },
+    "popup_body_refresh_needed": {
+        "message": "Actualiza este cuaderno y vuelve a abrir el lanzador. Si sigue fallando, es posible que la estructura de la página de NotebookLM haya cambiado."
+    },
+    "popup_title_disabled": {
+        "message": "El gestor de fuentes está desactivado"
+    },
+    "popup_body_disabled": {
+        "message": "Activa el complemento para volver a adjuntar el gestor de fuentes de NotebookLM en esta página."
+    },
+    "popup_cta_open_manager": {
+        "message": "Abrir gestor de fuentes"
+    },
+    "popup_cta_enable_extension": {
+        "message": "Activar complemento"
+    },
+    "popup_cta_go_to_notebooklm": {
+        "message": "Ir a NotebookLM"
+    },
+    "popup_cta_go_to_open_notebook": {
+        "message": "Ir al cuaderno abierto"
+    },
+    "popup_cta_open_notebooklm_new_tab": {
+        "message": "Abrir NotebookLM en una pestaña nueva"
+    },
+    "popup_cta_refresh_notebook": {
+        "message": "Actualizar este cuaderno"
+    },
+    "popup_reason_source_panel_missing": {
+        "message": "No se pudo encontrar el panel de fuentes de NotebookLM en esta página."
+    },
+    "popup_reason_panel_header_missing": {
+        "message": "Se encontró el panel de fuentes, pero no se pudo adjuntar el gestor a su encabezado."
+    },
+    "popup_reason_manager_not_ready": {
+        "message": "El gestor todavía se está cargando en esta página."
+    },
+    "popup_reason_manager_unreachable": {
+        "message": "NotebookLM está abierto, pero no se pudo acceder al gestor en esta pestaña."
+    },
+    "popup_reason_tab_message_failed": {
+        "message": "La pestaña del gestor respondió con un fallo de mensajería inesperado."
+    },
+    "popup_reason_tabs_query_failed": {
+        "message": "Chrome no pudo leer las pestañas actuales de NotebookLM en este momento."
+    },
+    "popup_reason_notebook_missing": {
+        "message": "Abre la página de un cuaderno de NotebookLM para acceder al gestor de fuentes."
+    },
+    "popup_reason_extension_disabled": {
+        "message": "El gestor de fuentes está desactivado desde la ventana emergente de la extensión."
+    },
+    "popup_reason_generic": {
+        "message": "El gestor de fuentes todavía no está disponible en esta página."
+    },
+    "popup_error_invalid_storage_key": {
+        "message": "El gestor de fuentes no pudo acceder a su estado guardado en esta página."
+    },
+    "ui_filter_sources": {
+        "message": "Filtrar fuentes"
+    },
+    "ui_new_group": {
+        "message": "Nuevo grupo"
+    },
+    "ui_manage_tags": {
+        "message": "Gestionar etiquetas"
+    },
+    "ui_new_subgroup": {
+        "message": "Nuevo subgrupo"
+    },
+    "ui_add_subgroup": {
+        "message": "Agregar subgrupo"
+    },
+    "ui_rename": {
+        "message": "Cambiar nombre"
+    },
+    "ui_delete_group": {
+        "message": "Eliminar grupo"
+    },
+    "ui_expand": {
+        "message": "Expandir"
+    },
+    "ui_collapse": {
+        "message": "Contraer"
+    },
+    "ui_enable_group": {
+        "message": "Activar grupo"
+    },
+    "ui_disable_group": {
+        "message": "Desactivar grupo"
+    },
+    "ui_isolate_group": {
+        "message": "Aislar este grupo"
+    },
+    "ui_isolation_active": {
+        "message": "Aislando \"$1\"",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            }
+        }
+    },
+    "ui_exit_isolate": {
+        "message": "Salir del modo aislado"
+    },
+    "ui_clear_tag_filter": {
+        "message": "Limpiar filtro de etiquetas"
+    },
+    "ui_tag_filter_active": {
+        "message": "Filtro de etiquetas: $1",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            }
+        }
+    },
+    "ui_ungrouped": {
+        "message": "Sin agrupar"
+    },
+    "ui_tags": {
+        "message": "Etiquetas"
+    },
+    "ui_edit_tags": {
+        "message": "Agregar/editar etiquetas"
+    },
+    "ui_create_tag": {
+        "message": "Crear etiqueta"
+    },
+    "ui_create_tag_placeholder": {
+        "message": "Nombre de la nueva etiqueta"
+    },
+    "ui_tag_color": {
+        "message": "Color de la etiqueta"
+    },
+    "ui_tag_color_custom": {
+        "message": "Color personalizado"
+    },
+    "ui_tag_color_hex": {
+        "message": "Color hexadecimal (#RRGGBB)"
+    },
+    "ui_tag_color_none": {
+        "message": "Neutro"
+    },
+    "ui_no_tags": {
+        "message": "Todavía no hay etiquetas."
+    },
+    "ui_no_tags_for_source": {
+        "message": "Crea etiquetas para asignarlas a esta fuente."
+    },
+    "ui_source_untitled": {
+        "message": "Fuente sin título"
+    },
+    "ui_group_untitled": {
+        "message": "Grupo sin título"
+    },
+    "ui_empty_group": {
+        "message": "Esta carpeta está vacía."
+    },
+    "ui_no_matching_sources": {
+        "message": "Ninguna fuente coincide con los filtros actuales."
+    },
+    "ui_save": {
+        "message": "Guardar"
+    },
+    "ui_tag_delete": {
+        "message": "Eliminar etiqueta"
+    },
+    "ui_tag_edit_title": {
+        "message": "Editar etiqueta"
+    },
+    "ui_tag_rename_prompt": {
+        "message": "Cambiar nombre de la etiqueta"
+    },
+    "ui_tag_update": {
+        "message": "Actualizar etiqueta"
+    },
+    "ui_tag_delete_confirm": {
+        "message": "¿Eliminar la etiqueta \"$1\"? Se quitará de todas las fuentes.",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            }
+        }
+    },
+    "ui_tag_name_required": {
+        "message": "Ingresa un nombre de etiqueta."
+    },
+    "ui_tag_create_duplicate": {
+        "message": "Esa etiqueta ya existe."
+    },
+    "ui_batch_action": {
+        "message": "Acción por lotes"
+    },
+    "ui_batch_add_to_folder": {
+        "message": "Agregar a carpeta por lotes"
+    },
+    "ui_batch_add_count": {
+        "message": "Agregar ($1)",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            }
+        }
+    },
+    "ui_cancel": {
+        "message": "Cancelar"
+    },
+    "ui_delete_count": {
+        "message": "Eliminar ($1)",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            }
+        }
+    },
+    "ui_deleting": {
+        "message": "Eliminando..."
+    },
+    "ui_deleting_count": {
+        "message": "Eliminando $1 fuente(s)...",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            }
+        }
+    },
+    "ui_source_import_failed": {
+        "message": "Falló la importación de la fuente"
+    },
+    "ui_source_parsing": {
+        "message": "Analizando fuente..."
+    },
+    "ui_deleted_toast": {
+        "message": "Se eliminaron $1 fuente(s)",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            }
+        }
+    },
+    "ui_source_actions": {
+        "message": "Acciones de la fuente"
+    },
+    "ui_view_source": {
+        "message": "Ver fuente"
+    },
+    "ui_view_source_details": {
+        "message": "Ver detalles de la fuente"
+    },
+    "ui_source_details_unavailable": {
+        "message": "Los detalles de la fuente no están disponibles ahora mismo"
+    },
+    "ui_open_native_menu": {
+        "message": "Abrir menú de NotebookLM"
+    },
+    "ui_move_to_folder": {
+        "message": "Mover a carpeta"
+    },
+    "ui_empty_folders": {
+        "message": "Todavía no hay carpetas disponibles.\nPrimero crea una."
+    },
+    "ui_delete_group_confirm_non_empty": {
+        "message": "La carpeta \"$1\" no está vacía.\n\n¿Eliminarla y mover su contenido a \"$2\"?",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            },
+            "2": {
+                "content": "$2"
+            }
+        }
+    },
+    "ui_crash_banner_prefix": {
+        "message": "Error:"
+    },
+    "ui_dismiss": {
+        "message": "Cerrar"
+    },
+    "ui_crash_missing_header": {
+        "message": "Error de inicialización. No se pudo localizar el encabezado del panel de fuentes."
+    },
+    "ui_crash_missing_panel": {
+        "message": "No se pudo encontrar el panel de fuentes de NotebookLM. Es posible que Google haya actualizado la estructura de la página."
+    },
+    "ui_crash_init_error": {
+        "message": "Error de inicialización. Consulta la consola para ver los detalles."
+    },
+    "ui_isolated_toast": {
+        "message": "Aislando \"$1\"",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            }
+        }
+    },
+    "ui_isolation_cleared_toast": {
+        "message": "Se salió del modo aislado"
+    }
+}

@@ -383,8 +383,15 @@
         };
     }
 
+    function isManageableSourceIdentity(identity) {
+        return Boolean(identity && identity.titleEl && identity.checkbox);
+    }
+
     function createSourceDescriptor(sourceElement, seenSourceIds, seenLegacyKeys) {
         const identity = extractSourceIdentitySnapshot(sourceElement);
+        if (!isManageableSourceIdentity(identity)) {
+            return null;
+        }
         const {
             titleEl,
             checkbox,
@@ -440,6 +447,7 @@
         extractTokenFromUrl,
         extractCssUrl,
         generateSourceKey,
+        isManageableSourceIdentity,
         normalizeSourceText,
         resolveSourceImageUrl,
         sanitizeSourceToken

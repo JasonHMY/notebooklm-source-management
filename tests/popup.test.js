@@ -3,6 +3,10 @@ const path = require('path');
 
 const createPopupDocument = () => {
     const elements = {
+        'popup-toggle-label': { textContent: '', hidden: false },
+        'popup-toggle-state': { textContent: '', hidden: false },
+        'popup-toggle-help': { textContent: '', hidden: false },
+        'popup-toggle-input': { checked: false, disabled: false, onchange: null },
         'popup-badge': { textContent: '', hidden: false },
         'popup-title': { textContent: '', hidden: false },
         'popup-body': { textContent: '', hidden: false },
@@ -25,12 +29,14 @@ describe('popup launcher', () => {
     let popupDocument;
     let activeTab;
     let notebookLmTabs;
+    let tabUpdatedListeners;
 
     beforeEach(() => {
         jest.resetModules();
         popupDocument = createPopupDocument();
         activeTab = { id: 7, url: 'https://notebooklm.google.com/notebook/abc' };
         notebookLmTabs = [activeTab];
+        tabUpdatedListeners = [];
 
         global.document = popupDocument;
         global.window = { close: jest.fn() };
@@ -42,7 +48,19 @@ describe('popup launcher', () => {
             },
             runtime: {
                 lastError: null,
-                sendMessage: jest.fn((message, cb) => cb({ success: true, action: 'focused-existing-notebook' }))
+                sendMessage: jest.fn((message, cb) => {
+                    if (message.type === 'GET_EXTENSION_ENABLED') {
+                        cb({ success: true, enabled: true });
+                        return;
+                    }
+
+                    if (message.type === 'SET_EXTENSION_ENABLED') {
+                        cb({ success: true, enabled: message.enabled, tabId: message.tabId, forwarded: true });
+                        return;
+                    }
+
+                    cb({ success: true, action: 'focused-existing-notebook' });
+                })
             },
             tabs: {
                 query: jest.fn((queryInfo, cb) => {
@@ -54,7 +72,20 @@ describe('popup launcher', () => {
                     cb(notebookLmTabs);
                 }),
                 sendMessage: jest.fn((tabId, message, cb) => cb({ ready: true })),
-                reload: jest.fn((tabId, options, cb) => cb())
+                reload: jest.fn((tabId, options, cb) => {
+                    if (cb) cb();
+                    tabUpdatedListeners.slice().forEach((listener) => {
+                        listener(tabId, { status: 'complete' }, { id: tabId, url: activeTab && activeTab.url });
+                    });
+                }),
+                onUpdated: {
+                    addListener: jest.fn((listener) => {
+                        tabUpdatedListeners.push(listener);
+                    }),
+                    removeListener: jest.fn((listener) => {
+                        tabUpdatedListeners = tabUpdatedListeners.filter((candidate) => candidate !== listener);
+                    })
+                }
             }
         };
 
@@ -79,6 +110,10 @@ describe('popup launcher', () => {
         expect(popupHtml).toContain('id="popup-body"');
         expect(popupHtml).toContain('id="popup-note"');
         expect(popupHtml).toContain('id="popup-detail"');
+        expect(popupHtml).toContain('id="popup-toggle-label"');
+        expect(popupHtml).toContain('id="popup-toggle-state"');
+        expect(popupHtml).toContain('id="popup-toggle-help"');
+        expect(popupHtml).toContain('id="popup-toggle-input"');
         expect(popupHtml).toContain('id="popup-primary-btn"');
     });
 
@@ -138,13 +173,23 @@ describe('popup launcher', () => {
         const result = await popup.initializePopup(popupDocument);
 
         expect(result.context).toBe('notebook');
+        expect(result.extensionEnabled).toBe(true);
         expect(popupDocument.title).toBe('extName');
         expect(popupDocument.documentElement.lang).toBe('zh-CN');
+        expect(popupDocument.elements['popup-toggle-label'].textContent).toBe('popup_toggle_label');
+        expect(popupDocument.elements['popup-toggle-state'].textContent).toBe('popup_toggle_state_enabled');
+        expect(popupDocument.elements['popup-toggle-help'].textContent).toBe('popup_toggle_help');
+        expect(popupDocument.elements['popup-toggle-input'].checked).toBe(true);
         expect(popupDocument.elements['popup-title'].textContent).toBe('popup_title_ready');
         expect(popupDocument.elements['popup-primary-btn'].textContent).toBe('popup_cta_open_manager');
 
         await popupDocument.elements['popup-primary-btn'].onclick();
 
+        expect(global.chrome.runtime.sendMessage).toHaveBeenNthCalledWith(
+            1,
+            { type: 'GET_EXTENSION_ENABLED' },
+            expect.any(Function)
+        );
         expect(global.chrome.tabs.sendMessage).toHaveBeenNthCalledWith(
             1,
             7,
@@ -158,6 +203,63 @@ describe('popup launcher', () => {
             expect.any(Function)
         );
         expect(global.window.close).toHaveBeenCalled();
+    });
+
+    it('renders a disabled state without inspecting the notebook manager', async () => {
+        let isEnabled = false;
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message.type === 'GET_EXTENSION_ENABLED') {
+                cb({ success: true, enabled: isEnabled });
+                return;
+            }
+
+            if (message.type === 'SET_EXTENSION_ENABLED') {
+                isEnabled = message.enabled;
+                cb({ success: true, enabled: message.enabled, tabId: message.tabId, forwarded: true });
+                return;
+            }
+
+            cb({ success: true });
+        });
+
+        const result = await popup.initializePopup(popupDocument);
+
+        expect(result.extensionEnabled).toBe(false);
+        expect(global.chrome.tabs.sendMessage).not.toHaveBeenCalled();
+        expect(popupDocument.elements['popup-toggle-input'].checked).toBe(false);
+        expect(popupDocument.elements['popup-toggle-state'].textContent).toBe('popup_toggle_state_disabled');
+        expect(popupDocument.elements['popup-title'].textContent).toBe('popup_title_disabled');
+        expect(popupDocument.elements['popup-body'].textContent).toBe('popup_body_disabled');
+        expect(popupDocument.elements['popup-detail'].hidden).toBe(false);
+        expect(popupDocument.elements['popup-detail'].textContent).toBe('popup_reason_extension_disabled');
+        expect(popupDocument.elements['popup-primary-btn'].textContent).toBe('popup_cta_enable_extension');
+
+        await popupDocument.elements['popup-primary-btn'].onclick();
+
+        expect(global.chrome.tabs.reload).not.toHaveBeenCalled();
+        expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(
+            {
+                type: 'SET_EXTENSION_ENABLED',
+                enabled: true,
+                tabId: 7
+            },
+            expect.any(Function)
+        );
+        expect(global.chrome.tabs.sendMessage).toHaveBeenCalledWith(
+            7,
+            { type: 'GET_MANAGER_STATUS' },
+            expect.any(Function)
+        );
+        expect(popupDocument.elements['popup-title'].textContent).toBe('popup_title_ready');
+    });
+
+    it.each(['es', 'es-ES'])('applies the Chrome UI language %s to the popup document', async (uiLanguage) => {
+        global.chrome.i18n.getUILanguage = () => uiLanguage;
+
+        await popup.initializePopup(popupDocument);
+
+        expect(popupDocument.title).toBe('extName');
+        expect(popupDocument.documentElement.lang).toBe(uiLanguage);
     });
 
     it('renders a refresh action when the manager is unavailable in a notebook', async () => {
@@ -199,6 +301,137 @@ describe('popup launcher', () => {
         expect(result.state.action).toBe('refresh-tab');
         expect(popupDocument.elements['popup-detail'].hidden).toBe(false);
         expect(popupDocument.elements['popup-detail'].textContent).toBe('popup_reason_tab_message_failed');
+    });
+
+    it('wires the toggle switch to extension enablement and rerenders on change', async () => {
+        let isEnabled = true;
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message.type === 'GET_EXTENSION_ENABLED') {
+                cb({ success: true, enabled: isEnabled });
+                return;
+            }
+
+            if (message.type === 'SET_EXTENSION_ENABLED') {
+                isEnabled = message.enabled;
+                cb({ success: true, enabled: message.enabled, tabId: message.tabId, forwarded: true });
+                return;
+            }
+
+            cb({ success: true, action: 'focused-existing-notebook' });
+        });
+
+        await popup.initializePopup(popupDocument);
+
+        global.chrome.tabs.reload.mockClear();
+        global.chrome.tabs.sendMessage.mockClear();
+        popupDocument.elements['popup-toggle-input'].checked = false;
+        await popupDocument.elements['popup-toggle-input'].onchange();
+
+        expect(global.chrome.tabs.reload).not.toHaveBeenCalled();
+        expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(
+            {
+                type: 'SET_EXTENSION_ENABLED',
+                enabled: false,
+                tabId: 7
+            },
+            expect.any(Function)
+        );
+        expect(popupDocument.elements['popup-toggle-state'].textContent).toBe('popup_toggle_state_disabled');
+        expect(popupDocument.elements['popup-title'].textContent).toBe('popup_title_disabled');
+        expect(global.chrome.tabs.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('does not reload the current NotebookLM home tab when soft toggling succeeds', async () => {
+        let isEnabled = true;
+        activeTab = { id: 14, url: 'https://notebooklm.google.com/' };
+        notebookLmTabs = [activeTab];
+
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message.type === 'GET_EXTENSION_ENABLED') {
+                cb({ success: true, enabled: isEnabled });
+                return;
+            }
+
+            if (message.type === 'SET_EXTENSION_ENABLED') {
+                isEnabled = message.enabled;
+                cb({ success: true, enabled: message.enabled, tabId: message.tabId, forwarded: true });
+                return;
+            }
+
+            cb({ success: true, action: 'focused-existing-notebook' });
+        });
+
+        await popup.initializePopup(popupDocument);
+
+        global.chrome.tabs.reload.mockClear();
+        popupDocument.elements['popup-toggle-input'].checked = false;
+        await popupDocument.elements['popup-toggle-input'].onchange();
+
+        expect(global.chrome.tabs.reload).not.toHaveBeenCalled();
+        expect(popupDocument.elements['popup-title'].textContent).toBe('popup_title_disabled');
+    });
+
+    it('falls back to reloading the current NotebookLM tab when soft toggling cannot reach content', async () => {
+        let isEnabled = true;
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message.type === 'GET_EXTENSION_ENABLED') {
+                cb({ success: true, enabled: isEnabled });
+                return;
+            }
+
+            if (message.type === 'SET_EXTENSION_ENABLED') {
+                isEnabled = message.enabled;
+                cb({
+                    success: true,
+                    enabled: message.enabled,
+                    tabId: message.tabId,
+                    forwarded: false,
+                    forwardErrorCode: 'tab_message_failed'
+                });
+                return;
+            }
+
+            cb({ success: true, action: 'focused-existing-notebook' });
+        });
+
+        await popup.initializePopup(popupDocument);
+
+        global.chrome.tabs.reload.mockClear();
+        popupDocument.elements['popup-toggle-input'].checked = false;
+        await popupDocument.elements['popup-toggle-input'].onchange();
+
+        expect(global.chrome.tabs.reload).toHaveBeenCalledWith(7, {}, expect.any(Function));
+        expect(popupDocument.elements['popup-title'].textContent).toBe('popup_title_disabled');
+    });
+
+    it('does not reload external pages after toggling the extension', async () => {
+        let isEnabled = true;
+        activeTab = { id: 4, url: 'https://example.com' };
+        notebookLmTabs = [];
+
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message.type === 'GET_EXTENSION_ENABLED') {
+                cb({ success: true, enabled: isEnabled });
+                return;
+            }
+
+            if (message.type === 'SET_EXTENSION_ENABLED') {
+                isEnabled = message.enabled;
+                cb({ success: true, enabled: message.enabled, tabId: message.tabId });
+                return;
+            }
+
+            cb({ success: true, action: 'focused-existing-notebook' });
+        });
+
+        await popup.initializePopup(popupDocument);
+
+        global.chrome.tabs.reload.mockClear();
+        popupDocument.elements['popup-toggle-input'].checked = false;
+        await popupDocument.elements['popup-toggle-input'].onchange();
+
+        expect(global.chrome.tabs.reload).not.toHaveBeenCalled();
+        expect(popupDocument.elements['popup-title'].textContent).toBe('popup_title_disabled');
     });
 
     it('opens NotebookLM from non-notebook pages', async () => {
@@ -263,10 +496,17 @@ describe('popup launcher', () => {
     it('maps background error codes to localized popup messages', async () => {
         activeTab = { id: 4, url: 'https://example.com' };
         notebookLmTabs = [];
-        global.chrome.runtime.sendMessage.mockImplementationOnce((message, cb) => cb({
-            success: false,
-            errorCode: 'tabs_query_failed'
-        }));
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message.type === 'GET_EXTENSION_ENABLED') {
+                cb({ success: true, enabled: true });
+                return;
+            }
+
+            cb({
+                success: false,
+                errorCode: 'tabs_query_failed'
+            });
+        });
 
         await popup.initializePopup(popupDocument);
         await popupDocument.elements['popup-primary-btn'].onclick();
@@ -278,10 +518,17 @@ describe('popup launcher', () => {
     it('maps invalid storage key errors to localized popup messages', async () => {
         activeTab = { id: 4, url: 'https://example.com' };
         notebookLmTabs = [];
-        global.chrome.runtime.sendMessage.mockImplementationOnce((message, cb) => cb({
-            success: false,
-            errorCode: 'invalid_storage_key'
-        }));
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message.type === 'GET_EXTENSION_ENABLED') {
+                cb({ success: true, enabled: true });
+                return;
+            }
+
+            cb({
+                success: false,
+                errorCode: 'invalid_storage_key'
+            });
+        });
 
         await popup.initializePopup(popupDocument);
         await popupDocument.elements['popup-primary-btn'].onclick();
@@ -293,7 +540,12 @@ describe('popup launcher', () => {
     it('falls back to a localized generic message for thrown runtime errors', async () => {
         activeTab = { id: 4, url: 'https://example.com' };
         notebookLmTabs = [];
-        global.chrome.runtime.sendMessage.mockImplementationOnce((message, cb) => {
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message.type === 'GET_EXTENSION_ENABLED') {
+                cb({ success: true, enabled: true });
+                return;
+            }
+
             global.chrome.runtime.lastError = { message: 'English runtime failure' };
             cb();
             global.chrome.runtime.lastError = null;

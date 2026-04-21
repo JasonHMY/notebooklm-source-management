@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "__MSG_extName__",
   "short_name": "__MSG_extShortName__",
-  "version": "2.6.3",
+  "version": "2.6.5",
   "description": "__MSG_extDesc__",
   "default_locale": "en",
   "icons": {
@@ -33,6 +33,16 @@
         "src/content/source-descriptor-helpers.js",
         "src/content/content-style-text.js",
         "src/content/content-template.js",
+        "src/content/content-panel-dom.js",
+        "src/content/content-source-actions.js",
+        "src/content/content-tags.js",
+        "src/content/content-state-reconcile.js",
+        "src/content/content-persistence.js",
+        "src/content/content-modals.js",
+        "src/content/content-render.js",
+        "src/content/content-view-state.js",
+        "src/content/content-tree-interactions.js",
+        "src/content/content-source-sync.js",
         "src/content/index.js"
       ],
       "css": [

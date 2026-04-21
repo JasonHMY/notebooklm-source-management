@@ -50,6 +50,16 @@ Relevant files:
 
 - `src/content/index.js`
 - `src/content/content-template.js`
+- `src/content/content-panel-dom.js`
+- `src/content/content-source-actions.js`
+- `src/content/content-tags.js`
+- `src/content/content-state-reconcile.js`
+- `src/content/content-persistence.js`
+- `src/content/content-modals.js`
+- `src/content/content-render.js`
+- `src/content/content-view-state.js`
+- `src/content/content-tree-interactions.js`
+- `src/content/content-source-sync.js`
 - `src/content/content-style-text.js`
 
 Important implementation characteristics:
@@ -980,7 +990,8 @@ Practical rules:
 - Prefer `sp-` classes and the Shadow DOM for content-panel UI.
 - Add styles to `src/content/content-style-text.js`.
 - Add structure via `src/content/content-template.js` only for shell-level elements.
-- For list items, menus, banners, modals, and mode bars, render from `src/content/index.js`.
+- Keep `src/content/index.js` as the only bootstrap and side-effect entrypoint.
+- Render list items, menus, banners, and mode bars from the content sidecars that own them.
 - Reuse `patchChildren(...)` and fragment-based rendering.
 - Reuse the shared easing curve unless there is a documented reason not to.
 - Reuse the radius scale.
@@ -1065,7 +1076,17 @@ Use this map when updating UI.
 
 - `src/content/content-style-text.js`: content-panel tokens, components, motion, overlays
 - `src/content/content-template.js`: shell structure
-- `src/content/index.js`: rendering, state transitions, event binding, modals, menus
+- `src/content/content-panel-dom.js`: source panel lookup, renderability, lifecycle scheduling helpers
+- `src/content/content-source-actions.js`: source action menu state, menu models, native menu bridge
+- `src/content/content-tags.js`: tag normalization, serialization, CRUD helpers
+- `src/content/content-state-reconcile.js`: persisted source and tag reconciliation
+- `src/content/content-persistence.js`: state load/save, schema normalization, lifecycle persistence
+- `src/content/content-modals.js`: move-to-folder and tag management modals
+- `src/content/content-render.js`: fragment patching, icons, menu layer, main render path
+- `src/content/content-view-state.js`: search/filter/isolation view-state helpers and effective-state sync
+- `src/content/content-tree-interactions.js`: tree mutations, rename, batch interactions, drag-and-drop
+- `src/content/content-source-sync.js`: fresh row lookup, source panel classification, DOM-driven source sync
+- `src/content/index.js`: singleton state ownership, bootstrap, lifecycle, event binding, sidecar orchestration
 - `src/popup/styles.css`: popup styling
 - `src/popup/index.js`: popup state and copy logic
 - `src/utils/index.js`: safe DOM helper, debounce, i18n helper

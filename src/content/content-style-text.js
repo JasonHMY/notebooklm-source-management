@@ -55,6 +55,12 @@
                 --sp-focus-ring: 0 0 0 3px rgba(0, 122, 255, 0.15);
                 --sp-focus-ring-soft: 0 0 0 3px rgba(0, 122, 255, 0.12);
                 --sp-focus-ring-strong: 0 0 0 3px rgba(0, 122, 255, 0.22), 0 18px 40px rgba(0, 122, 255, 0.18);
+                --sp-search-focus-border: rgba(0, 122, 255, 0.7);
+                --sp-search-focus-ring:
+                    inset 0 1px 0 rgba(255,255,255,0.32),
+                    0 0 0 1px rgba(0, 122, 255, 0.34),
+                    0 0 0 3px rgba(0, 122, 255, 0.14),
+                    0 10px 24px rgba(0, 122, 255, 0.12);
                 --sp-shadow-toast: 0 8px 32px rgba(0,0,0,0.08);
                 --sp-shadow-button: 0 8px 32px rgba(0,0,0,0.08);
                 --sp-shadow-hover-item: 0 10px 24px rgba(0,0,0,0.08);
@@ -116,6 +122,12 @@
                     --sp-focus-ring: 0 0 0 3px rgba(10, 132, 255, 0.15);
                     --sp-focus-ring-soft: 0 0 0 3px rgba(10, 132, 255, 0.12);
                     --sp-focus-ring-strong: 0 0 0 3px rgba(10, 132, 255, 0.22), 0 18px 40px rgba(10, 132, 255, 0.18);
+                    --sp-search-focus-border: rgba(64, 156, 255, 0.78);
+                    --sp-search-focus-ring:
+                        inset 0 1px 0 rgba(255,255,255,0.06),
+                        0 0 0 1px rgba(64, 156, 255, 0.46),
+                        0 0 0 3px rgba(64, 156, 255, 0.18),
+                        0 10px 24px rgba(10, 132, 255, 0.16);
                     --sp-shadow-toast: 0 8px 32px rgba(0,0,0,0.4);
                     --sp-shadow-button: 0 8px 32px rgba(0,0,0,0.2);
                     --sp-shadow-hover-item: 0 12px 28px rgba(0,0,0,0.32);
@@ -196,7 +208,7 @@
                 flex-wrap: nowrap;
                 min-width: 0;
                 flex-shrink: 0;
-                padding: 12px 0 8px;
+                padding: 10px 0 8px;
                 position: sticky;
                 top: 0;
                 z-index: 20;
@@ -212,22 +224,108 @@
                 display: flex;
                 align-items: center;
                 gap: 8px;
-                flex: 1 1 auto;
+                flex: 0 1 auto;
                 min-width: 0;
-                max-width: 520px;
+                max-width: 540px;
                 overflow: hidden;
                 transform-origin: right center;
-                transition: max-width 0.26s cubic-bezier(0.25, 1, 0.5, 1), opacity 0.18s ease, transform 0.24s cubic-bezier(0.25, 1, 0.5, 1);
+                transition:
+                    max-width 0.4s cubic-bezier(0.2, 0.9, 0.25, 1),
+                    opacity 0.22s ease,
+                    transform 0.4s cubic-bezier(0.2, 0.9, 0.25, 1);
             }
             .sp-controls > .sp-button,
             .sp-toolbar-actions > .sp-button {
                 flex-shrink: 0;
             }
+            .sp-button.sp-toolbar-action {
+                border-radius: 999px;
+                padding: 6px 12px;
+                font-size: 12px;
+                line-height: 1.2;
+                box-shadow: 0 6px 18px rgba(0,0,0,0.08);
+                transition:
+                    opacity 0.3s ease,
+                    transform 0.38s cubic-bezier(0.2, 0.9, 0.25, 1),
+                    background-color 0.2s ease,
+                    border-color 0.2s ease,
+                    box-shadow 0.2s ease;
+            }
             .sp-controls.is-search-expanded .sp-toolbar-actions {
+                flex-basis: 0;
                 max-width: 0;
                 opacity: 0;
-                transform: translateX(10px) scale(0.98);
+                transform: translateX(12px) scale(0.96);
                 pointer-events: none;
+            }
+            .sp-controls.is-search-expanded .sp-toolbar-actions > .sp-button {
+                opacity: 0;
+                transform: translateX(10px) scale(0.94);
+            }
+            .sp-toolbar-actions > .sp-button:nth-child(1) {
+                transition-delay: 0s;
+            }
+            .sp-toolbar-actions > .sp-button:nth-child(2) {
+                transition-delay: 0.03s;
+            }
+            .sp-toolbar-actions > .sp-button:nth-child(3) {
+                transition-delay: 0.06s;
+            }
+            .sp-search-cluster {
+                margin-left: auto;
+                min-width: 0;
+                display: flex;
+                align-items: center;
+                justify-content: flex-end;
+                position: relative;
+                isolation: isolate;
+                flex: 0 0 auto;
+                transition: flex-basis 0.42s cubic-bezier(0.2, 0.9, 0.25, 1);
+            }
+            .sp-controls.is-search-expanded .sp-search-cluster {
+                flex: 1 1 auto;
+            }
+            .sp-search-trigger.sp-icon-button,
+            .sp-search-close.sp-icon-button {
+                width: 34px;
+                height: 34px;
+                border-radius: 999px;
+                border: 1px solid var(--sp-border-light);
+                background: var(--sp-bg-button);
+                box-shadow: 0 6px 18px rgba(0,0,0,0.08);
+                color: var(--sp-text-primary);
+                position: relative;
+                z-index: 2;
+                padding: 0;
+            }
+            .sp-search-trigger.sp-icon-button .google-symbols,
+            .sp-search-close.sp-icon-button .google-symbols {
+                font-size: 18px;
+            }
+            .sp-search-close.sp-icon-button {
+                width: 0;
+                min-width: 0;
+                padding: 0;
+                margin-left: 0;
+                opacity: 0;
+                overflow: hidden;
+                pointer-events: none;
+                transform: translateX(-14px) scale(0.72);
+                transition: width 0.32s cubic-bezier(0.2, 0.9, 0.25, 1),
+                    margin-left 0.32s cubic-bezier(0.2, 0.9, 0.25, 1),
+                    opacity 0.18s ease,
+                    transform 0.32s cubic-bezier(0.2, 0.9, 0.25, 1),
+                    background-color 0.2s ease,
+                    border-color 0.2s ease,
+                    box-shadow 0.2s ease;
+            }
+            .sp-search-close.is-visible {
+                width: 34px;
+                min-width: 34px;
+                margin-left: 8px;
+                opacity: 1;
+                pointer-events: auto;
+                transform: translateX(0) scale(1);
             }
             .sp-view-state {
                 display: flex;
@@ -279,63 +377,87 @@
                 isolation: isolate;
             }
             .sp-search-container {
+                position: relative;
                 display: flex;
                 align-items: center;
-                justify-content: flex-end;
-                gap: 6px;
-                flex: 0 0 36px;
-                width: 36px;
-                min-width: 36px;
-                margin-left: auto;
-                position: relative;
+                flex: 0 0 0;
+                width: 0;
+                min-width: 0;
+                height: 34px;
+                margin-left: 0;
                 overflow: hidden;
+                opacity: 0;
+                pointer-events: none;
                 border: 1px solid transparent;
-                border-radius: 12px;
-                transition: flex-basis 0.26s cubic-bezier(0.25, 1, 0.5, 1), width 0.26s cubic-bezier(0.25, 1, 0.5, 1), min-width 0.26s cubic-bezier(0.25, 1, 0.5, 1), border-color 0.22s ease, background-color 0.22s ease, box-shadow 0.22s ease, padding 0.26s cubic-bezier(0.25, 1, 0.5, 1);
+                border-radius: 999px;
+                background: transparent;
+                box-shadow: none;
+                transform-origin: right center;
+                transition:
+                    flex-basis 0.42s cubic-bezier(0.2, 0.9, 0.25, 1),
+                    width 0.42s cubic-bezier(0.2, 0.9, 0.25, 1),
+                    min-width 0.42s cubic-bezier(0.2, 0.9, 0.25, 1),
+                    margin-left 0.42s cubic-bezier(0.2, 0.9, 0.25, 1),
+                    opacity 0.18s ease,
+                    border-color 0.24s ease,
+                    background-color 0.24s ease,
+                    box-shadow 0.24s ease,
+                    transform 0.42s cubic-bezier(0.2, 0.9, 0.25, 1);
             }
             .sp-search-container.is-expanded {
-                flex: 1 1 100%;
-                width: auto;
+                flex: 0 1 min(240px, calc(100% - 42px));
+                width: min(240px, calc(100% - 42px));
                 min-width: 0;
-                padding: 0 4px 0 10px;
-                background-color: var(--sp-bg-secondary);
-                border-color: var(--sp-border-light);
-                box-shadow: inset 0 1px 2px rgba(0,0,0,0.02);
+                margin-left: 8px;
+                opacity: 1;
+                pointer-events: auto;
+                border-color: var(--sp-border-medium);
+                background-color: var(--sp-bg-button);
+                box-shadow: 0 6px 18px rgba(0,0,0,0.08);
+                transform: translateZ(0);
             }
             .sp-search-container.is-expanded:focus-within {
                 background-color: var(--sp-bg-button);
-                border-color: var(--sp-accent);
-                box-shadow: var(--sp-focus-ring);
+                border-color: var(--sp-search-focus-border);
+                box-shadow: var(--sp-search-focus-ring);
             }
             #sp-search {
-                width: 0;
-                min-width: 0;
+                position: absolute;
+                inset: 0;
+                width: 100%;
                 box-sizing: border-box;
-                padding: 6px 0;
+                padding: 0 12px;
                 border: 0;
                 border-radius: 0;
                 font-size: 13px;
+                font-weight: 500;
                 background-color: transparent;
                 color: var(--sp-text-primary);
-                transition: width 0.26s cubic-bezier(0.25, 1, 0.5, 1), opacity 0.18s ease 0s, padding 0.26s cubic-bezier(0.25, 1, 0.5, 1);
+                transition:
+                    opacity 0.2s ease,
+                    transform 0.36s cubic-bezier(0.2, 0.9, 0.25, 1),
+                    padding 0.36s cubic-bezier(0.2, 0.9, 0.25, 1);
                 outline: none;
                 box-shadow: none;
                 opacity: 0;
                 pointer-events: none;
+                transform: translateX(18px);
             }
             .sp-search-container.is-expanded #sp-search {
-                width: 100%;
                 opacity: 1;
                 pointer-events: auto;
+                transform: translateX(0);
                 transition-delay: 0.08s, 0.08s, 0.08s;
             }
             #sp-search:focus {
                 background-color: transparent;
-                border-color: var(--sp-accent);
-                box-shadow: var(--sp-focus-ring);
                 transform: none;
             }
-            #sp-search:focus + #sp-search-btn .google-symbols {
+            #sp-search::-webkit-search-cancel-button {
+                display: none;
+            }
+            .sp-search-cluster:focus-within .sp-search-trigger .google-symbols,
+            .sp-search-cluster:focus-within .sp-search-close .google-symbols {
                 color: var(--sp-accent);
             }
             #sp-search::placeholder {
@@ -721,9 +843,31 @@
                 cursor: pointer;
                 transition: background-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
             }
+            .sp-source-actions-menu-item-content {
+                min-width: 0;
+                display: inline-flex;
+                align-items: center;
+                gap: 10px;
+                flex: 1;
+            }
+            .sp-source-actions-menu-item.is-parent {
+                justify-content: space-between;
+            }
+            .sp-source-actions-submenu {
+                min-width: 190px;
+            }
             .sp-source-actions-menu-item .google-symbols {
                 font-size: 16px;
                 color: var(--sp-text-secondary);
+            }
+            .sp-source-actions-menu-chevron {
+                margin-left: 8px;
+                transition: transform 0.2s ease, color 0.2s ease;
+            }
+            .sp-source-actions-menu-item.is-expanded .sp-source-actions-menu-chevron,
+            .sp-source-actions-menu-item.is-parent:hover .sp-source-actions-menu-chevron {
+                color: var(--sp-text-primary);
+                transform: translateX(2px);
             }
             .sp-source-actions-menu-label {
                 min-width: 0;

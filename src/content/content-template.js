@@ -9,21 +9,33 @@
                     el('button', { id: 'sp-manage-tags-btn', className: 'sp-button sp-toolbar-action' }, [chrome.i18n.getMessage("ui_manage_tags")]),
                     el('button', { id: 'sp-batch-action-btn', className: 'sp-button sp-toolbar-action' }, [chrome.i18n.getMessage("ui_batch_action")])
                 ]),
-                el('div', { className: 'sp-search-container' }, [
-                    el('input', {
-                        id: 'sp-search',
-                        type: 'search',
-                        placeholder: chrome.i18n.getMessage("ui_filter_sources"),
-                        'aria-label': chrome.i18n.getMessage("ui_filter_sources"),
-                        autocomplete: 'off'
-                    }),
+                el('div', { className: 'sp-search-cluster' }, [
                     el('button', {
                         id: 'sp-search-btn',
-                        className: 'sp-icon-button',
+                        className: 'sp-search-trigger sp-icon-button',
                         title: chrome.i18n.getMessage("ui_filter_sources"),
                         'aria-label': chrome.i18n.getMessage("ui_filter_sources")
                     }, [
                         el('span', { className: 'google-symbols' }, ['search'])
+                    ]),
+                    el('div', { className: 'sp-search-container' }, [
+                        el('input', {
+                            id: 'sp-search',
+                            type: 'search',
+                            placeholder: chrome.i18n.getMessage("ui_filter_sources"),
+                            'aria-label': chrome.i18n.getMessage("ui_filter_sources"),
+                            autocomplete: 'off'
+                        })
+                    ]),
+                    el('button', {
+                        id: 'sp-search-close-btn',
+                        className: 'sp-search-close sp-icon-button',
+                        title: chrome.i18n.getMessage("ui_cancel"),
+                        'aria-label': chrome.i18n.getMessage("ui_cancel"),
+                        'aria-hidden': 'true',
+                        tabIndex: -1
+                    }, [
+                        el('span', { className: 'google-symbols' }, ['close'])
                     ])
                 ])
             ]),

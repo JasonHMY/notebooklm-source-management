@@ -1,6 +1,7 @@
 const NOTEBOOKLM_HOME_URL = 'https://notebooklm.google.com/';
 const NOTEBOOKLM_URL_PATTERN = 'https://notebooklm.google.com/*';
 const NOTEBOOKLM_NOTEBOOK_PREFIX = 'https://notebooklm.google.com/notebook/';
+const EXTENSION_ENABLED_KEY = 'extensionEnabled';
 const ERROR_CODES = {
     INVALID_STORAGE_KEY: 'invalid_storage_key',
     RUNTIME_FAILURE: 'runtime_failure',
@@ -78,6 +79,56 @@ function openNewNotebookLmHome(sendResponse) {
     });
 }
 
+function getExtensionEnabled(sendResponse) {
+    chrome.storage.local.get([EXTENSION_ENABLED_KEY], (data) => {
+        if (chrome.runtime.lastError) {
+            sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
+            return;
+        }
+
+        sendResponse({
+            success: true,
+            enabled: data?.[EXTENSION_ENABLED_KEY] !== false
+        });
+    });
+}
+
+function forwardManagerToggleToTab(tabId, enabled, sendResponse) {
+    if (typeof tabId !== 'number') {
+        sendResponse({ success: true, enabled, forwarded: false });
+        return;
+    }
+
+    chrome.tabs.sendMessage(tabId, {
+        type: enabled ? 'ENABLE_MANAGER' : 'DISABLE_MANAGER'
+    }, () => {
+        if (chrome.runtime.lastError) {
+            sendResponse({
+                success: true,
+                enabled,
+                forwarded: false,
+                forwardErrorCode: 'tab_message_failed'
+            });
+            return;
+        }
+
+        sendResponse({ success: true, enabled, forwarded: true });
+    });
+}
+
+function setExtensionEnabled(request, sendResponse) {
+    const enabled = request?.enabled !== false;
+
+    chrome.storage.local.set({ [EXTENSION_ENABLED_KEY]: enabled }, () => {
+        if (chrome.runtime.lastError) {
+            sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
+            return;
+        }
+
+        forwardManagerToggleToTab(request?.tabId, enabled, sendResponse);
+    });
+}
+
 function openOrFocusNotebookLm(request, sendResponse) {
     const currentTabId = typeof request.currentTabId === 'number' ? request.currentTabId : null;
     const currentContext = typeof request.currentContext === 'string' ? request.currentContext : 'external';
@@ -110,6 +161,40 @@ function openOrFocusNotebookLm(request, sendResponse) {
     });
 }
 
+function getStateBackupKey(primaryKey) {
+    return `${primaryKey}__backup`;
+}
+
+function hasRestorableStateSnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object') return false;
+    if (Array.isArray(snapshot.groups) && snapshot.groups.length > 0) return true;
+    if (snapshot.groupsById && Object.keys(snapshot.groupsById).length > 0) return true;
+    if (Array.isArray(snapshot.ungrouped) && snapshot.ungrouped.length > 0) return true;
+    if (snapshot.sourceStateById && Object.keys(snapshot.sourceStateById).length > 0) return true;
+    if (snapshot.tagsById && Object.keys(snapshot.tagsById).length > 0) return true;
+    if (Array.isArray(snapshot.tagOrder) && snapshot.tagOrder.length > 0) return true;
+    if (snapshot.sourceTagsById && Object.keys(snapshot.sourceTagsById).length > 0) return true;
+    return false;
+}
+
+function pickPreferredStoredState(primaryState, backupState) {
+    if (hasRestorableStateSnapshot(primaryState)) {
+        return primaryState;
+    }
+
+    if (hasRestorableStateSnapshot(backupState)) {
+        if (primaryState && typeof primaryState === 'object' && primaryState.customHeight != null) {
+            return {
+                ...backupState,
+                customHeight: primaryState.customHeight
+            };
+        }
+        return backupState;
+    }
+
+    return primaryState ?? null;
+}
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (!request || typeof request.type !== 'string') {
         return;
@@ -117,6 +202,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     if (request.type === 'OPEN_OR_FOCUS_NOTEBOOKLM') {
         openOrFocusNotebookLm(request, sendResponse);
+        return true;
+    }
+
+    if (request.type === 'GET_EXTENSION_ENABLED') {
+        getExtensionEnabled(sendResponse);
+        return true;
+    }
+
+    if (request.type === 'SET_EXTENSION_ENABLED') {
+        setExtensionEnabled(request, sendResponse);
         return true;
     }
 
@@ -137,7 +232,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             return;
         }
 
-        chrome.storage.local.set({ [request.key]: request.data }, () => {
+        const storagePayload = { [request.key]: request.data };
+        if (hasRestorableStateSnapshot(request.data)) {
+            storagePayload[getStateBackupKey(request.key)] = request.data;
+        }
+
+        chrome.storage.local.set(storagePayload, () => {
             if (chrome.runtime.lastError) {
                 console.error('NotebookLM Source Management background save error:', chrome.runtime.lastError);
                 sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
@@ -154,14 +254,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return;
     }
 
-    chrome.storage.local.get(request.key, (data) => {
+    const backupKey = getStateBackupKey(request.key);
+    chrome.storage.local.get([request.key, backupKey], (data) => {
         if (chrome.runtime.lastError) {
             console.error('NotebookLM Source Management background load error:', chrome.runtime.lastError);
             sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
             return;
         }
 
-        const storedData = data && typeof data === 'object' ? data[request.key] : null;
+        const primaryState = data && typeof data === 'object' ? data[request.key] : null;
+        const backupState = data && typeof data === 'object' ? data[backupKey] : null;
+        const storedData = pickPreferredStoredState(primaryState, backupState);
         sendResponse({ success: true, data: storedData ?? null });
     });
     return true;
@@ -171,9 +274,15 @@ if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         NOTEBOOKLM_HOME_URL,
         NOTEBOOKLM_NOTEBOOK_PREFIX,
+        EXTENSION_ENABLED_KEY,
         ERROR_CODES,
+        getStateBackupKey,
+        hasRestorableStateSnapshot,
+        pickPreferredStoredState,
         isNotebookHomeTab,
         pickPreferredNotebookTab,
-        isAuthorizedNotebookSender
+        isAuthorizedNotebookSender,
+        getExtensionEnabled,
+        setExtensionEnabled
     };
 }
