@@ -108,13 +108,242 @@ describe('background.js message listener', () => {
 
         expect(global.chrome.storage.local.set).toHaveBeenCalledWith(
             {
-                'sourcesPlusState_123': request.data,
-                'sourcesPlusState_123__backup': request.data
+                'sourcesPlusState_123': expect.objectContaining({
+                    ...request.data,
+                    _saveRevision: 1,
+                    _savedAt: expect.any(String)
+                }),
+                'sourcesPlusState_123__backup': expect.objectContaining({
+                    ...request.data,
+                    _saveRevision: 1,
+                    _savedAt: expect.any(String)
+                })
             },
             expect.any(Function)
         );
-        expect(mockSendResponse).toHaveBeenCalledWith({ success: true });
+        expect(mockSendResponse).toHaveBeenCalledWith({
+            success: true,
+            saveRevision: 1,
+            savedAt: expect.any(String)
+        });
         expect(result).toBe(true); // Should return true to keep channel open
+    });
+
+    it('should ignore stale SAVE_STATE revisions without overwriting newer stored state', () => {
+        const newerState = {
+            _saveRevision: 5,
+            groups: ['newer'],
+            groupsById: { newer: { id: 'newer', children: [] } },
+            sourceStateById: {}
+        };
+        const request = {
+            type: 'SAVE_STATE',
+            key: 'sourcesPlusState_123',
+            data: {
+                _saveRevision: 4,
+                groups: ['older'],
+                groupsById: { older: { id: 'older', children: [] } },
+                sourceStateById: {}
+            }
+        };
+
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({ sourcesPlusState_123: newerState });
+        });
+
+        listener(request, validSender, mockSendResponse);
+
+        expect(global.chrome.storage.local.set).not.toHaveBeenCalled();
+        expect(mockSendResponse).toHaveBeenCalledWith({ success: true, stale: true, currentRevision: 5 });
+    });
+
+    it('should reject explicit stale SAVE_STATE base revisions without overwriting newer state', () => {
+        const newerState = {
+            _saveRevision: 5,
+            groups: ['newer'],
+            groupsById: { newer: { id: 'newer', children: [] } },
+            sourceStateById: {}
+        };
+        const request = {
+            type: 'SAVE_STATE',
+            key: 'sourcesPlusState_123',
+            baseRevision: 4,
+            data: {
+                groups: ['older'],
+                groupsById: { older: { id: 'older', children: [] } },
+                sourceStateById: {}
+            }
+        };
+
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({ sourcesPlusState_123: newerState });
+        });
+
+        listener(request, validSender, mockSendResponse);
+
+        expect(global.chrome.storage.local.set).not.toHaveBeenCalled();
+        expect(mockSendResponse).toHaveBeenCalledWith({
+            success: false,
+            errorCode: 'stale_revision',
+            currentRevision: 5
+        });
+    });
+
+    it('should allow legacy SAVE_STATE payloads without a revision', () => {
+        const request = {
+            type: 'SAVE_STATE',
+            key: 'sourcesPlusState_123',
+            data: {
+                groups: ['legacy'],
+                groupsById: { legacy: { id: 'legacy', children: [] } },
+                sourceStateById: {}
+            }
+        };
+
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({
+                sourcesPlusState_123: {
+                    _saveRevision: 5,
+                    groups: ['newer'],
+                    groupsById: { newer: { id: 'newer', children: [] } },
+                    sourceStateById: {}
+                }
+            });
+        });
+
+        listener(request, validSender, mockSendResponse);
+
+        expect(global.chrome.storage.local.set).toHaveBeenCalledWith(
+            {
+                sourcesPlusState_123: expect.objectContaining({
+                    ...request.data,
+                    _saveRevision: 6,
+                    _savedAt: expect.any(String)
+                }),
+                sourcesPlusState_123__backup: expect.objectContaining({
+                    ...request.data,
+                    _saveRevision: 6,
+                    _savedAt: expect.any(String)
+                })
+            },
+            expect.any(Function)
+        );
+        expect(mockSendResponse).toHaveBeenCalledWith({
+            success: true,
+            saveRevision: 6,
+            savedAt: expect.any(String)
+        });
+    });
+
+    it('should keep assigned revisions monotonic when explicit base is ahead of storage', () => {
+        const request = {
+            type: 'SAVE_STATE',
+            key: 'sourcesPlusState_123',
+            baseRevision: 5,
+            data: {
+                groups: ['ahead'],
+                groupsById: { ahead: { id: 'ahead', children: [] } },
+                sourceStateById: {}
+            }
+        };
+
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({});
+        });
+
+        listener(request, validSender, mockSendResponse);
+
+        expect(global.chrome.storage.local.set).toHaveBeenCalledWith(
+            {
+                sourcesPlusState_123: expect.objectContaining({
+                    ...request.data,
+                    _saveRevision: 6,
+                    _savedAt: expect.any(String)
+                }),
+                sourcesPlusState_123__backup: expect.objectContaining({
+                    ...request.data,
+                    _saveRevision: 6,
+                    _savedAt: expect.any(String)
+                })
+            },
+            expect.any(Function)
+        );
+        expect(mockSendResponse).toHaveBeenCalledWith({
+            success: true,
+            saveRevision: 6,
+            savedAt: expect.any(String)
+        });
+    });
+
+    it('should serialize SAVE_STATE writes for the same key before checking revisions', async () => {
+        const firstRequest = {
+            type: 'SAVE_STATE',
+            key: 'sourcesPlusState_123',
+            baseRevision: 0,
+            data: {
+                groups: ['first'],
+                groupsById: { first: { id: 'first', children: [] } },
+                sourceStateById: {}
+            }
+        };
+        const secondRequest = {
+            type: 'SAVE_STATE',
+            key: 'sourcesPlusState_123',
+            baseRevision: 1,
+            data: {
+                groups: ['second'],
+                groupsById: { second: { id: 'second', children: [] } },
+                sourceStateById: {}
+            }
+        };
+        const pendingGets = [];
+        const pendingSets = [];
+        const firstResponse = jest.fn();
+        const secondResponse = jest.fn();
+
+        global.chrome.storage.local.get.mockImplementation((keys, cb) => {
+            pendingGets.push(cb);
+        });
+        global.chrome.storage.local.set.mockImplementation((payload, cb) => {
+            pendingSets.push({ payload, cb });
+        });
+
+        listener(firstRequest, validSender, firstResponse);
+        listener(secondRequest, validSender, secondResponse);
+
+        expect(pendingGets).toHaveLength(1);
+        pendingGets[0]({});
+        expect(pendingSets).toHaveLength(1);
+        expect(pendingSets[0].payload.sourcesPlusState_123).toMatchObject({
+            ...firstRequest.data,
+            _saveRevision: 1,
+            _savedAt: expect.any(String)
+        });
+
+        pendingSets[0].cb();
+        expect(firstResponse).toHaveBeenCalledWith({
+            success: true,
+            saveRevision: 1,
+            savedAt: expect.any(String)
+        });
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(pendingGets).toHaveLength(2);
+        pendingGets[1]({ sourcesPlusState_123: pendingSets[0].payload.sourcesPlusState_123 });
+        expect(pendingSets).toHaveLength(2);
+        expect(pendingSets[1].payload.sourcesPlusState_123).toMatchObject({
+            ...secondRequest.data,
+            _saveRevision: 2,
+            _savedAt: expect.any(String)
+        });
+
+        pendingSets[1].cb();
+        expect(secondResponse).toHaveBeenCalledWith({
+            success: true,
+            saveRevision: 2,
+            savedAt: expect.any(String)
+        });
     });
 
     it('should not overwrite the backup snapshot when SAVE_STATE receives an empty payload', () => {
@@ -135,7 +364,13 @@ describe('background.js message listener', () => {
         listener(request, validSender, mockSendResponse);
 
         expect(global.chrome.storage.local.set).toHaveBeenCalledWith(
-            { 'sourcesPlusState_123': request.data },
+            {
+                'sourcesPlusState_123': expect.objectContaining({
+                    ...request.data,
+                    _saveRevision: 1,
+                    _savedAt: expect.any(String)
+                })
+            },
             expect.any(Function)
         );
     });
@@ -160,7 +395,7 @@ describe('background.js message listener', () => {
         });
     });
 
-    it('should handle SAVE_STATE error case', () => {
+    it('should handle SAVE_STATE read error case', () => {
         const request = {
             type: 'SAVE_STATE',
             key: 'sourcesPlusState_123',
@@ -169,6 +404,34 @@ describe('background.js message listener', () => {
 
         // Set lastError before calling listener
         global.chrome.runtime.lastError = { message: 'Storage quota exceeded' };
+
+        const result = listener(request, validSender, mockSendResponse);
+
+        expect(console.error).toHaveBeenCalledWith(
+            'NotebookLM Source Management background save error:',
+            global.chrome.runtime.lastError
+        );
+        expect(mockSendResponse).toHaveBeenCalledWith({
+            success: false,
+            errorCode: 'runtime_failure'
+        });
+        expect(result).toBe(true);
+    });
+
+    it('should handle SAVE_STATE write error case', () => {
+        const request = {
+            type: 'SAVE_STATE',
+            key: 'sourcesPlusState_123',
+            data: { test: 123 }
+        };
+
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({});
+        });
+        global.chrome.storage.local.set.mockImplementationOnce((data, cb) => {
+            global.chrome.runtime.lastError = { message: 'Storage quota exceeded' };
+            cb();
+        });
 
         const result = listener(request, validSender, mockSendResponse);
 

@@ -1,7 +1,7 @@
 # NotebookLM Source Management
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-2.6.5-green.svg)
+![Version](https://img.shields.io/badge/version-2.6.7-green.svg)
 
 A Chrome extension that makes source management inside Google NotebookLM less awkward.
 
@@ -10,9 +10,19 @@ It runs directly inside NotebookLM's source panel. The toolbar icon is only a la
 ## What It Does
 
 - Group sources into custom folders.
+- Create nested folders, move sources into subfolders, and isolate one folder when you want to focus.
 - Reorder sources or whole groups with drag and drop.
-- Delete multiple sources at once.
-- Switch between English and Simplified Chinese.
+- Search by source title, tag, or folder, with simple `tag:` and `folder:` filters.
+- Automatically expand folders that contain search results, then restore the previous collapsed state when search is cleared.
+- Add color-coded tags, filter by tag, and batch add or remove tags.
+- Move sources into folders one at a time or in batches, including moving selected sources back to ungrouped.
+- Delete multiple sources at once through NotebookLM's native delete confirmation flow.
+- Open source details, rename sources, and delete sources from a single plugin menu.
+- Undo recent plugin-side organization changes with `Command+Z` on macOS or `Ctrl+Z` on Windows/Linux.
+- Export and import a notebook's organization config from the settings panel.
+- Turn the in-page manager on or off from the toolbar popup without deleting saved data.
+- Switch between English, Spanish, and Simplified Chinese.
+- Use local icon font assets instead of depending on remote Google Symbols font loading.
 
 If one of your notebooks has started to fill up with PDFs, links, and uploads, this extension is meant to make that list easier to work with.
 
@@ -39,6 +49,7 @@ Use these commands when you want to verify the repository without doing a full m
 - `npm run test:smoke` runs the Playwright browser smoke suite.
 - `npm run verify:full` runs both suites in sequence.
 - `npm run playwright:install` installs the Chromium browser used by Playwright smoke.
+- `npm run package` creates the Chrome Web Store zip and validates its contents.
 
 The current Playwright smoke coverage is intentionally small:
 
@@ -56,6 +67,8 @@ The current Playwright smoke coverage is intentionally small:
 
 This extension does not send NotebookLM content to external servers. State stays in the browser, and this release does not include analytics, telemetry, or crash reporting.
 
+Import/export config files are generated locally in your browser. They contain this extension's saved folder order, tags, enabled state, and related per-notebook organization data.
+
 See [PRIVACY.md](PRIVACY.md) for the full privacy note.
 
 ## Troubleshooting
@@ -64,6 +77,8 @@ See [PRIVACY.md](PRIVACY.md) for the full privacy note.
 - **Batch actions are disabled.** Make sure the source list has finished loading. Controls stay disabled while NotebookLM is still rendering placeholders.
 - **The popup still says a refresh is needed, or it cannot find the source panel.** Refresh the page, then open the launcher again so the extension can rebuild its state.
 - **A source loses its saved enabled state.** The extension prefers stable DOM identifiers when it can find them. If NotebookLM does not expose one, it falls back to a normalized fingerprint based on `title + aria-label + icon`. That works most of the time, but duplicate or unnamed sources can still be matched imperfectly after a major UI change.
+- **Import preview reports unmatched sources.** The imported folders and tags can still be applied, but unmatched sources cannot inherit source-specific state until NotebookLM exposes matching source identities in the current notebook.
+- **Undo does not restore a NotebookLM-deleted source.** Undo covers plugin-side organization changes. Native NotebookLM deletion still removes the real source through NotebookLM's own confirmation flow.
 
 ## Development Smoke Checklist
 

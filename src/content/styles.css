@@ -35,13 +35,18 @@
   border-radius: 16px !important;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08) !important;
   border: 1px solid rgba(0, 0, 0, 0.05) !important;
-  animation: sp-menu-pop 0.3s cubic-bezier(0.25, 1, 0.5, 1) forwards !important;
+  animation: sp-menu-pop var(--sp-motion-medium, 240ms) var(--sp-ease-emphasized, cubic-bezier(0.2, 0.9, 0.25, 1)) forwards !important;
   overflow: hidden !important;
   transform-origin: top left;
   background-color: rgba(255, 255, 255, 0.85) !important;
   backdrop-filter: blur(20px) saturate(180%) !important;
   -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
-  transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1) !important;
+  transition:
+    background-color var(--sp-motion-base, 180ms) var(--sp-ease-standard, cubic-bezier(0.2, 0.8, 0.2, 1)) !important,
+    border-color var(--sp-motion-base, 180ms) var(--sp-ease-standard, cubic-bezier(0.2, 0.8, 0.2, 1)) !important,
+    box-shadow var(--sp-motion-base, 180ms) var(--sp-ease-standard, cubic-bezier(0.2, 0.8, 0.2, 1)) !important,
+    transform var(--sp-motion-medium, 240ms) var(--sp-ease-emphasized, cubic-bezier(0.2, 0.9, 0.25, 1)) !important,
+    opacity var(--sp-motion-medium, 240ms) var(--sp-ease-standard, cubic-bezier(0.2, 0.8, 0.2, 1)) !important;
 }
 
 @keyframes sp-menu-pop {
@@ -61,13 +66,30 @@
   border-radius: 10px !important;
   margin: 4px 8px !important;
   width: calc(100% - 16px) !important;
-  transition: all 0.15s cubic-bezier(0.25, 1, 0.5, 1) !important;
+  transition:
+    background-color var(--sp-motion-base, 180ms) var(--sp-ease-standard, cubic-bezier(0.2, 0.8, 0.2, 1)) !important,
+    color var(--sp-motion-base, 180ms) var(--sp-ease-standard, cubic-bezier(0.2, 0.8, 0.2, 1)) !important,
+    opacity var(--sp-motion-base, 180ms) var(--sp-ease-standard, cubic-bezier(0.2, 0.8, 0.2, 1)) !important,
+    transform var(--sp-motion-base, 180ms) var(--sp-ease-standard, cubic-bezier(0.2, 0.8, 0.2, 1)) !important;
 }
 
 .cdk-overlay-pane .mat-mdc-menu-content .mat-mdc-menu-item:hover {
-  transform: scale(0.98) !important;
-  opacity: 0.8 !important;
+  transform: scale(1.02) !important;
+  opacity: 1 !important;
   background-color: transparent !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cdk-overlay-pane .mat-mdc-menu-panel,
+  .cdk-overlay-pane [role="menu"],
+  .cdk-overlay-pane .mat-mdc-menu-content .mat-mdc-menu-item {
+    animation: none !important;
+    transition-duration: 1ms !important;
+  }
+
+  .cdk-overlay-pane .mat-mdc-menu-content .mat-mdc-menu-item:hover {
+    transform: none !important;
+  }
 }
 
 /* Dark mode adjustments for native menu */

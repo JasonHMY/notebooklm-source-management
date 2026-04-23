@@ -1,14 +1,26 @@
 (function () {
     'use strict';
 
+    function getExtensionAssetUrl(path) {
+        try {
+            const chromeApi = globalThis.chrome;
+            if (chromeApi?.runtime && typeof chromeApi.runtime.getURL === 'function') {
+                return chromeApi.runtime.getURL(path);
+            }
+        } catch (error) {
+            // Fall through to the relative path for tests and degraded environments.
+        }
+        return path;
+    }
+
+    const googleSymbolsFontUrl = getExtensionAssetUrl('src/assets/fonts/google-symbols.woff2');
+
     const contentStyleText = `
             @font-face {
                 font-family: 'Google Symbols';
                 font-style: normal;
                 font-weight: 400;
-                src: url(
-                    https://fonts.gstatic.com/s/googlesymbols/v342/HhzMU5Ak9u-oMExPeInvcuEmPosC9zyteYEFU68cPrjdKM1XLPTxlGmzczpgWvF1d8Yp7AudBnt3CPar1JFWjoLAUv3G-tSNljixIIGUsC62cYrKiAw.woff2
-                ) format('woff2');
+                src: url("${googleSymbolsFontUrl}") format('woff2');
             }
             .google-symbols {
                 font-family: 'Google Symbols';
@@ -81,10 +93,21 @@
                 --sp-tag-color-trigger-border: rgba(0, 0, 0, 0.08);
                 --sp-batch-selected-bg: rgba(0, 122, 255, 0.05);
                 --sp-batch-checkbox-bg: rgba(0, 122, 255, 0.1);
+                --sp-spotlight-color: rgba(0, 122, 255, 0.14);
+                --sp-glare-color: rgba(255, 255, 255, 0.42);
+                --sp-batch-glow: rgba(0, 122, 255, 0.16);
+                --sp-danger-glow: rgba(255, 59, 48, 0.22);
                 --sp-empty-state-bg: rgba(0, 0, 0, 0.01);
                 --sp-scrollbar-thumb: rgba(150, 150, 150, 0.3);
                 --sp-scrollbar-thumb-hover: rgba(150, 150, 150, 0.6);
                 --sp-menu-item-hover-bg: rgba(128, 128, 128, 0.1);
+                --sp-motion-fast: 120ms;
+                --sp-motion-base: 180ms;
+                --sp-motion-medium: 240ms;
+                --sp-motion-slow: 320ms;
+                --sp-ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+                --sp-ease-emphasized: cubic-bezier(0.2, 0.9, 0.25, 1);
+                --sp-ease-press: cubic-bezier(0.25, 1, 0.5, 1);
                 
                 /* Global Glassmorphism Variables */
                 --sp-glass-bg-body: rgba(255, 255, 255, 0.85);
@@ -148,6 +171,10 @@
                     --sp-tag-color-trigger-border: rgba(255, 255, 255, 0.14);
                     --sp-batch-selected-bg: rgba(10, 132, 255, 0.12);
                     --sp-batch-checkbox-bg: rgba(10, 132, 255, 0.18);
+                    --sp-spotlight-color: rgba(64, 156, 255, 0.18);
+                    --sp-glare-color: rgba(255, 255, 255, 0.24);
+                    --sp-batch-glow: rgba(10, 132, 255, 0.24);
+                    --sp-danger-glow: rgba(255, 69, 58, 0.28);
                     --sp-empty-state-bg: rgba(255, 255, 255, 0.01);
                     --sp-scrollbar-thumb: rgba(150, 150, 150, 0.3);
                     --sp-scrollbar-thumb-hover: rgba(150, 150, 150, 0.6);
@@ -170,7 +197,9 @@
                 color: var(--sp-text-primary);
                 position: relative;
                 background: var(--sp-panel-bg);
-                transition: box-shadow 0.35s cubic-bezier(0.25, 1, 0.5, 1), transform 0.35s cubic-bezier(0.25, 1, 0.5, 1);
+                transition:
+                    box-shadow var(--sp-motion-slow) var(--sp-ease-standard),
+                    transform var(--sp-motion-slow) var(--sp-ease-standard);
             }
             .sp-container.sp-focus-ring {
                 box-shadow: var(--sp-focus-ring-strong);
@@ -194,7 +223,7 @@
                 height: 3px;
                 background-color: var(--sp-border-medium);
                 border-radius: 3px;
-                transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+                transition: background-color var(--sp-motion-base) var(--sp-ease-standard);
             }
             .sp-resizer:hover::after {
                 background-color: var(--sp-accent);
@@ -214,7 +243,7 @@
                 z-index: 20;
                 background: var(--sp-panel-bg);
                 border-bottom: 1px solid var(--sp-border-light);
-                transition: border-color 0.3s ease;
+                transition: border-color var(--sp-motion-base) var(--sp-ease-standard);
             }
             .sp-controls::after {
                 content: none;
@@ -230,13 +259,22 @@
                 overflow: hidden;
                 transform-origin: right center;
                 transition:
-                    max-width 0.4s cubic-bezier(0.2, 0.9, 0.25, 1),
-                    opacity 0.22s ease,
-                    transform 0.4s cubic-bezier(0.2, 0.9, 0.25, 1);
+                    max-width var(--sp-motion-slow) var(--sp-ease-emphasized),
+                    opacity var(--sp-motion-medium) var(--sp-ease-standard),
+                    transform var(--sp-motion-slow) var(--sp-ease-emphasized);
             }
             .sp-controls > .sp-button,
-            .sp-toolbar-actions > .sp-button {
+            .sp-toolbar-actions > button {
                 flex-shrink: 0;
+            }
+            .sp-toolbar-settings.sp-icon-button {
+                width: 32px;
+                height: 32px;
+                border-radius: 999px;
+                border: 1px solid var(--sp-border-light);
+                background: var(--sp-bg-button);
+                box-shadow: 0 6px 18px rgba(0,0,0,0.08);
+                color: var(--sp-text-secondary);
             }
             .sp-button.sp-toolbar-action {
                 border-radius: 999px;
@@ -245,11 +283,11 @@
                 line-height: 1.2;
                 box-shadow: 0 6px 18px rgba(0,0,0,0.08);
                 transition:
-                    opacity 0.3s ease,
-                    transform 0.38s cubic-bezier(0.2, 0.9, 0.25, 1),
-                    background-color 0.2s ease,
-                    border-color 0.2s ease,
-                    box-shadow 0.2s ease;
+                    opacity var(--sp-motion-medium) var(--sp-ease-standard),
+                    transform var(--sp-motion-slow) var(--sp-ease-emphasized),
+                    background-color var(--sp-motion-base) var(--sp-ease-standard),
+                    border-color var(--sp-motion-base) var(--sp-ease-standard),
+                    box-shadow var(--sp-motion-base) var(--sp-ease-standard);
             }
             .sp-controls.is-search-expanded .sp-toolbar-actions {
                 flex-basis: 0;
@@ -258,18 +296,79 @@
                 transform: translateX(12px) scale(0.96);
                 pointer-events: none;
             }
-            .sp-controls.is-search-expanded .sp-toolbar-actions > .sp-button {
+            .sp-controls.is-search-expanded .sp-toolbar-actions > button {
                 opacity: 0;
                 transform: translateX(10px) scale(0.94);
             }
-            .sp-toolbar-actions > .sp-button:nth-child(1) {
+            .sp-toolbar-actions > button:nth-child(1) {
                 transition-delay: 0s;
             }
-            .sp-toolbar-actions > .sp-button:nth-child(2) {
+            .sp-toolbar-actions > button:nth-child(2) {
                 transition-delay: 0.03s;
             }
-            .sp-toolbar-actions > .sp-button:nth-child(3) {
+            .sp-toolbar-actions > button:nth-child(3) {
                 transition-delay: 0.06s;
+            }
+            .sp-toolbar-actions > button:nth-child(4) {
+                transition-delay: 0.09s;
+            }
+            .sp-save-status {
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                min-width: 0;
+                max-width: 220px;
+                padding: 5px 8px;
+                border-radius: 999px;
+                border: 1px solid var(--sp-border-light);
+                background: var(--sp-bg-secondary);
+                color: var(--sp-text-secondary);
+                font-size: 11px;
+                font-weight: 600;
+                line-height: 1.2;
+                white-space: nowrap;
+                box-shadow: 0 6px 18px rgba(0,0,0,0.06);
+                transition:
+                    opacity var(--sp-motion-base) var(--sp-ease-standard),
+                    transform var(--sp-motion-base) var(--sp-ease-standard),
+                    background-color var(--sp-motion-base) var(--sp-ease-standard),
+                    border-color var(--sp-motion-base) var(--sp-ease-standard),
+                    color var(--sp-motion-base) var(--sp-ease-standard),
+                    box-shadow var(--sp-motion-base) var(--sp-ease-standard);
+            }
+            .sp-save-status[hidden] {
+                display: none;
+            }
+            .sp-save-status-label {
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+            .sp-save-status-saving {
+                color: var(--sp-accent);
+                border-color: rgba(0, 122, 255, 0.24);
+            }
+            .sp-save-status-saved {
+                color: var(--sp-accent);
+            }
+            .sp-save-status-failed,
+            .sp-save-status-stale,
+            .sp-save-status-recovery_available {
+                color: var(--sp-accent-danger);
+                border-color: rgba(255, 59, 48, 0.28);
+                box-shadow: 0 8px 22px rgba(255, 59, 48, 0.12);
+            }
+            .sp-save-status-action {
+                border: 0;
+                border-radius: 999px;
+                background: rgba(0, 122, 255, 0.12);
+                color: var(--sp-accent);
+                font: inherit;
+                padding: 2px 6px;
+                cursor: pointer;
+            }
+            .sp-save-status-action-muted {
+                background: transparent;
+                color: var(--sp-text-secondary);
             }
             .sp-search-cluster {
                 margin-left: auto;
@@ -280,7 +379,7 @@
                 position: relative;
                 isolation: isolate;
                 flex: 0 0 auto;
-                transition: flex-basis 0.42s cubic-bezier(0.2, 0.9, 0.25, 1);
+                transition: flex-basis var(--sp-motion-slow) var(--sp-ease-emphasized);
             }
             .sp-controls.is-search-expanded .sp-search-cluster {
                 flex: 1 1 auto;
@@ -311,13 +410,13 @@
                 overflow: hidden;
                 pointer-events: none;
                 transform: translateX(-14px) scale(0.72);
-                transition: width 0.32s cubic-bezier(0.2, 0.9, 0.25, 1),
-                    margin-left 0.32s cubic-bezier(0.2, 0.9, 0.25, 1),
-                    opacity 0.18s ease,
-                    transform 0.32s cubic-bezier(0.2, 0.9, 0.25, 1),
-                    background-color 0.2s ease,
-                    border-color 0.2s ease,
-                    box-shadow 0.2s ease;
+                transition: width var(--sp-motion-slow) var(--sp-ease-emphasized),
+                    margin-left var(--sp-motion-slow) var(--sp-ease-emphasized),
+                    opacity var(--sp-motion-base) var(--sp-ease-standard),
+                    transform var(--sp-motion-slow) var(--sp-ease-emphasized),
+                    background-color var(--sp-motion-base) var(--sp-ease-standard),
+                    border-color var(--sp-motion-base) var(--sp-ease-standard),
+                    box-shadow var(--sp-motion-base) var(--sp-ease-standard);
             }
             .sp-search-close.is-visible {
                 width: 34px;
@@ -394,19 +493,19 @@
                 box-shadow: none;
                 transform-origin: right center;
                 transition:
-                    flex-basis 0.42s cubic-bezier(0.2, 0.9, 0.25, 1),
-                    width 0.42s cubic-bezier(0.2, 0.9, 0.25, 1),
-                    min-width 0.42s cubic-bezier(0.2, 0.9, 0.25, 1),
-                    margin-left 0.42s cubic-bezier(0.2, 0.9, 0.25, 1),
-                    opacity 0.18s ease,
-                    border-color 0.24s ease,
-                    background-color 0.24s ease,
-                    box-shadow 0.24s ease,
-                    transform 0.42s cubic-bezier(0.2, 0.9, 0.25, 1);
+                    flex-basis var(--sp-motion-slow) var(--sp-ease-emphasized),
+                    width var(--sp-motion-slow) var(--sp-ease-emphasized),
+                    min-width var(--sp-motion-slow) var(--sp-ease-emphasized),
+                    margin-left var(--sp-motion-slow) var(--sp-ease-emphasized),
+                    opacity var(--sp-motion-base) var(--sp-ease-standard),
+                    border-color var(--sp-motion-medium) var(--sp-ease-standard),
+                    background-color var(--sp-motion-medium) var(--sp-ease-standard),
+                    box-shadow var(--sp-motion-medium) var(--sp-ease-standard),
+                    transform var(--sp-motion-slow) var(--sp-ease-emphasized);
             }
             .sp-search-container.is-expanded {
-                flex: 0 1 min(240px, calc(100% - 42px));
-                width: min(240px, calc(100% - 42px));
+                flex: 0 1 min(300px, calc(100% - 42px));
+                width: min(300px, calc(100% - 42px));
                 min-width: 0;
                 margin-left: 8px;
                 opacity: 1;
@@ -426,7 +525,7 @@
                 inset: 0;
                 width: 100%;
                 box-sizing: border-box;
-                padding: 0 12px;
+                padding: 0 78px 0 12px;
                 border: 0;
                 border-radius: 0;
                 font-size: 13px;
@@ -434,9 +533,9 @@
                 background-color: transparent;
                 color: var(--sp-text-primary);
                 transition:
-                    opacity 0.2s ease,
-                    transform 0.36s cubic-bezier(0.2, 0.9, 0.25, 1),
-                    padding 0.36s cubic-bezier(0.2, 0.9, 0.25, 1);
+                    opacity var(--sp-motion-base) var(--sp-ease-standard),
+                    transform var(--sp-motion-slow) var(--sp-ease-emphasized),
+                    padding var(--sp-motion-slow) var(--sp-ease-emphasized);
                 outline: none;
                 box-shadow: none;
                 opacity: 0;
@@ -463,6 +562,31 @@
             #sp-search::placeholder {
                 color: var(--sp-text-secondary);
             }
+            .sp-search-count {
+                position: absolute;
+                right: 10px;
+                max-width: 64px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                font-size: 11px;
+                font-weight: 700;
+                color: var(--sp-text-secondary);
+                pointer-events: none;
+                font-variant-numeric: tabular-nums;
+                opacity: 0;
+                transition: opacity var(--sp-motion-base) var(--sp-ease-standard);
+            }
+            .sp-search-container.is-expanded .sp-search-count:not([hidden]) {
+                opacity: 1;
+            }
+            .sp-search-highlight {
+                border-radius: 4px;
+                padding: 0 2px;
+                background: rgba(0, 122, 255, 0.16);
+                color: var(--sp-text-primary);
+                box-shadow: inset 0 0 0 1px rgba(0, 122, 255, 0.12);
+            }
             
             .sp-icon-button {
                 background: none;
@@ -475,15 +599,20 @@
                 cursor: pointer;
                 border-radius: 8px;
                 flex-shrink: 0;
-                transition: all 0.2s cubic-bezier(0.25, 1, 0.5, 1);
+                transition:
+                    background-color var(--sp-motion-base) var(--sp-ease-standard),
+                    color var(--sp-motion-base) var(--sp-ease-standard),
+                    transform var(--sp-motion-fast) var(--sp-ease-press),
+                    box-shadow var(--sp-motion-base) var(--sp-ease-standard),
+                    border-color var(--sp-motion-base) var(--sp-ease-standard);
             }
             .sp-icon-button:hover {
                 background-color: var(--sp-icon-button-hover);
                 color: var(--sp-text-primary);
-                transform: scale(1.08);
+                transform: scale(1.06);
             }
             .sp-icon-button:active {
-                transform: scale(0.85);
+                transform: scale(0.95);
             }
             .sp-icon-button .google-symbols {
                 font-size: 18px;
@@ -500,17 +629,23 @@
                 border-radius: 12px;
                 padding: 6px 12px;
                 cursor: pointer;
-                transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+                transition:
+                    background-color var(--sp-motion-base) var(--sp-ease-standard),
+                    border-color var(--sp-motion-base) var(--sp-ease-standard),
+                    box-shadow var(--sp-motion-base) var(--sp-ease-standard),
+                    color var(--sp-motion-base) var(--sp-ease-standard),
+                    transform var(--sp-motion-fast) var(--sp-ease-press);
                 white-space: nowrap;
                 box-shadow: var(--sp-shadow-button);
             }
             .sp-button:hover {
                 background-color: var(--sp-bg-button-hover);
                 border-color: var(--sp-border-medium);
+                transform: scale(1.02);
             }
             .sp-button:active {
                 background-color: var(--sp-bg-button-active);
-                transform: scale(0.95);
+                transform: scale(0.98);
             }
             .sp-button::after {
                 content: '';
@@ -521,7 +656,7 @@
                 height: 100%;
                 background: linear-gradient(90deg, transparent, rgba(128,128,128,0.15), transparent);
                 transform: skewX(-20deg);
-                transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+                transition: left var(--sp-motion-slow) var(--sp-ease-emphasized);
             }
             .sp-button:hover::after {
                 left: 150%;
@@ -539,7 +674,11 @@
                 position: relative; 
                 flex-shrink: 0; 
                 background-color: var(--sp-bg-primary); 
-                transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+                transition:
+                    background-color var(--sp-motion-base) var(--sp-ease-standard),
+                    border-color var(--sp-motion-base) var(--sp-ease-standard),
+                    transform var(--sp-motion-fast) var(--sp-ease-press),
+                    opacity var(--sp-motion-base) var(--sp-ease-standard);
             }
             .sp-checkbox:hover {
                 border-color: var(--sp-accent);
@@ -552,7 +691,7 @@
             }
             /* Explicit user-interaction animation */
             .sp-checkbox.is-animating:checked {
-                animation: checkbox-spring 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+                animation: checkbox-spring var(--sp-motion-medium) var(--sp-ease-press);
             }
             
             /* The hidden checkmark shape inside the box */
@@ -585,8 +724,8 @@
             /* Animate the checkmark drawing in using an organic, non-linear sequence ONLY on user interaction */
             .sp-checkbox.is-animating:checked::before { 
                 /* ease-out decelerates at the very end of the stroke */
-                animation: check-draw-organic 0.3s cubic-bezier(0.25, 1, 0.5, 1) forwards !important;
-                animation-delay: 0.1s !important; /* Let the checkbox pop start and settle a bit first */
+                animation: check-draw-organic var(--sp-motion-medium) var(--sp-ease-press) forwards !important;
+                animation-delay: var(--sp-motion-fast) !important; /* Let the checkbox pop start and settle a bit first */
             }
 
             @keyframes check-draw-organic {
@@ -616,13 +755,28 @@
                     transform: scale(1);
                 }
             }
+            @keyframes sp-list-item-enter {
+                0% {
+                    opacity: 0;
+                    transform: scale(0.985);
+                }
+                100% {
+                    opacity: 1;
+                    transform: scale(1);
+                }
+            }
             .source-item, .group-header {
                 display: flex;
                 align-items: center;
                 padding: 6px 8px;
                 border-radius: 12px;
                 margin: 2px 0;
-                transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+                transition:
+                    background-color var(--sp-motion-base) var(--sp-ease-standard),
+                    box-shadow var(--sp-motion-base) var(--sp-ease-standard),
+                    border-color var(--sp-motion-base) var(--sp-ease-standard),
+                    color var(--sp-motion-base) var(--sp-ease-standard),
+                    transform var(--sp-motion-base) var(--sp-ease-standard);
                 color: var(--sp-text-primary);
                 position: relative;
                 z-index: 1;
@@ -635,7 +789,42 @@
                 border: 1px solid transparent;
                 border-radius: 8px;
                 margin-bottom: 2px;
-                transition: background-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+                transition:
+                    background-color var(--sp-motion-base) var(--sp-ease-standard),
+                    box-shadow var(--sp-motion-base) var(--sp-ease-standard),
+                    border-color var(--sp-motion-base) var(--sp-ease-standard),
+                    transform var(--sp-motion-base) var(--sp-ease-standard);
+            }
+            .source-item.sp-list-item-enter,
+            .group-container.sp-list-item-enter {
+                animation: sp-list-item-enter var(--sp-motion-medium) var(--sp-ease-emphasized) backwards;
+                animation-delay: calc(var(--sp-list-item-index, 0) * 18ms);
+                transform-origin: left center;
+            }
+            .sp-spotlight-surface {
+                overflow: hidden;
+                isolation: isolate;
+            }
+            .source-item.sp-spotlight-surface::before,
+            .group-header.sp-spotlight-surface::before {
+                content: '';
+                position: absolute;
+                inset: 0;
+                border-radius: inherit;
+                pointer-events: none;
+                z-index: 0;
+                opacity: 0;
+                background: radial-gradient(
+                    circle at var(--sp-spotlight-x, 50%) var(--sp-spotlight-y, 50%),
+                    var(--sp-spotlight-color),
+                    transparent 62%
+                );
+                transition: opacity var(--sp-motion-base) var(--sp-ease-standard);
+            }
+            .source-item.sp-spotlight-surface > *,
+            .group-header.sp-spotlight-surface > * {
+                position: relative;
+                z-index: 1;
             }
             .group-header {
                 font-weight: 600;
@@ -644,18 +833,30 @@
             .source-item:hover, .group-header:hover {
                 background-color: var(--sp-bg-hover);
                 z-index: 4;
-                transform: scale(1.015);
+                transform: scale(1.01);
                 box-shadow: var(--sp-shadow-hover-item);
             }
+            .source-item.sp-spotlight-surface:hover::before,
+            .source-item.sp-spotlight-surface:focus-within::before,
+            .source-item.sp-spotlight-surface.is-spotlight-active::before,
+            .group-header.sp-spotlight-surface:hover::before,
+            .group-header.sp-spotlight-surface:focus-within::before,
+            .group-header.sp-spotlight-surface.is-spotlight-active::before {
+                opacity: 1;
+            }
             .source-item:active, .group-header:active {
-                transform: scale(1.008);
+                transform: scale(0.995);
             }
             .sp-caret {
                 background: none;
                 border: none;
                 cursor: pointer;
                 padding: 0 2px;
-                transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+                transition:
+                    transform var(--sp-motion-medium) var(--sp-ease-emphasized),
+                    color var(--sp-motion-base) var(--sp-ease-standard),
+                    box-shadow var(--sp-motion-base) var(--sp-ease-standard),
+                    background-color var(--sp-motion-base) var(--sp-ease-standard);
                 transform: rotate(0deg);
                 color: var(--sp-text-secondary);
                 display: flex;
@@ -678,11 +879,14 @@
                 height: 18px;
                 overflow: hidden;
                 color: var(--sp-text-secondary);
-                transition: all 0.15s cubic-bezier(0.25, 1, 0.5, 1);
+                transition:
+                    color var(--sp-motion-base) var(--sp-ease-standard),
+                    opacity var(--sp-motion-fast) var(--sp-ease-standard),
+                    transform var(--sp-motion-fast) var(--sp-ease-press);
                 cursor: pointer;
             }
             .icon-container:hover {
-                transform: scale(0.95);
+                transform: scale(1.04);
                 opacity: 0.8;
             }
             .icon-container .google-symbols {
@@ -751,7 +955,10 @@
                 font-size: 11px;
                 line-height: 1.4;
                 cursor: pointer;
-                transition: all 0.2s cubic-bezier(0.25, 1, 0.5, 1);
+                transition:
+                    background-color var(--sp-motion-base) var(--sp-ease-standard),
+                    border-color var(--sp-motion-base) var(--sp-ease-standard),
+                    color var(--sp-motion-base) var(--sp-ease-standard);
             }
             .sp-tag-pill:hover {
                 background: var(--sp-tag-hover-bg, var(--sp-bg-hover));
@@ -783,7 +990,12 @@
                 padding: 0;
                 color: var(--sp-text-secondary);
                 flex-shrink: 0;
-                transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+                transition:
+                    background-color var(--sp-motion-base) var(--sp-ease-standard),
+                    color var(--sp-motion-base) var(--sp-ease-standard),
+                    opacity var(--sp-motion-base) var(--sp-ease-standard),
+                    transform var(--sp-motion-fast) var(--sp-ease-press),
+                    box-shadow var(--sp-motion-base) var(--sp-ease-standard);
             }
             .sp-source-actions-button .google-symbols,
             .sp-add-subgroup-button .google-symbols,
@@ -810,6 +1022,36 @@
                 pointer-events: none;
                 z-index: 10002;
             }
+            @keyframes sp-menu-surface-enter {
+                0% {
+                    opacity: 0;
+                    transform: translateY(-4px) scale(0.96);
+                }
+                100% {
+                    opacity: 1;
+                    transform: translateY(0) scale(1);
+                }
+            }
+            @keyframes sp-menu-surface-enter-top {
+                0% {
+                    opacity: 0;
+                    transform: translateY(4px) scale(0.96);
+                }
+                100% {
+                    opacity: 1;
+                    transform: translateY(0) scale(1);
+                }
+            }
+            @keyframes sp-menu-item-enter {
+                0% {
+                    opacity: 0;
+                    transform: scale(0.96);
+                }
+                100% {
+                    opacity: 1;
+                    transform: scale(1);
+                }
+            }
             .sp-source-actions-menu {
                 position: absolute;
                 min-width: 170px;
@@ -825,9 +1067,11 @@
                 box-shadow: var(--sp-glass-shadow);
                 pointer-events: auto;
                 transform-origin: top left;
+                animation: sp-menu-surface-enter var(--sp-motion-medium) var(--sp-ease-emphasized) both;
             }
             .sp-source-actions-menu.is-top {
                 transform-origin: bottom left;
+                animation-name: sp-menu-surface-enter-top;
             }
             .sp-source-actions-menu-item {
                 width: 100%;
@@ -841,7 +1085,13 @@
                 gap: 10px;
                 text-align: left;
                 cursor: pointer;
-                transition: background-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
+                animation: sp-menu-item-enter var(--sp-motion-fast) var(--sp-ease-emphasized) backwards;
+                animation-delay: calc(var(--sp-menu-item-index, 0) * 24ms);
+                transform-origin: center;
+                transition:
+                    background-color var(--sp-motion-base) var(--sp-ease-standard),
+                    color var(--sp-motion-base) var(--sp-ease-standard),
+                    transform var(--sp-motion-base) var(--sp-ease-standard);
             }
             .sp-source-actions-menu-item-content {
                 min-width: 0;
@@ -862,7 +1112,9 @@
             }
             .sp-source-actions-menu-chevron {
                 margin-left: 8px;
-                transition: transform 0.2s ease, color 0.2s ease;
+                transition:
+                    transform var(--sp-motion-base) var(--sp-ease-standard),
+                    color var(--sp-motion-base) var(--sp-ease-standard);
             }
             .sp-source-actions-menu-item.is-expanded .sp-source-actions-menu-chevron,
             .sp-source-actions-menu-item.is-parent:hover .sp-source-actions-menu-chevron {
@@ -877,15 +1129,64 @@
                 overflow: hidden;
                 text-overflow: ellipsis;
             }
+            .sp-glare-hover {
+                position: relative;
+                overflow: hidden;
+                isolation: isolate;
+            }
+            .sp-glare-hover::after {
+                content: '';
+                position: absolute;
+                inset: -1px;
+                border-radius: inherit;
+                pointer-events: none;
+                z-index: 0;
+                opacity: 0;
+                background:
+                    linear-gradient(
+                        115deg,
+                        transparent 0%,
+                        transparent 42%,
+                        var(--sp-glare-color) 50%,
+                        transparent 58%,
+                        transparent 100%
+                    );
+                background-size: 220% 220%;
+                background-position: -140% -140%;
+                transition:
+                    opacity var(--sp-motion-base) var(--sp-ease-standard),
+                    background-position var(--sp-motion-slow) var(--sp-ease-emphasized);
+            }
+            .sp-glare-hover:hover::after,
+            .sp-glare-hover:focus-visible::after {
+                opacity: 1;
+                background-position: 140% 140%;
+            }
+            .sp-glare-hover > * {
+                position: relative;
+                z-index: 1;
+            }
             .sp-add-subgroup-button, .sp-isolate-button, .sp-edit-button, .sp-delete-button {
                 display: flex;
                 opacity: 0;
                 transform: translateX(10px) scale(0.9);
                 pointer-events: none;
-                transition: all 0.25s cubic-bezier(0.25, 1, 0.5, 1);
+                transition:
+                    background-color var(--sp-motion-base) var(--sp-ease-standard),
+                    color var(--sp-motion-base) var(--sp-ease-standard),
+                    opacity var(--sp-motion-medium) var(--sp-ease-standard),
+                    transform var(--sp-motion-medium) var(--sp-ease-emphasized),
+                    box-shadow var(--sp-motion-base) var(--sp-ease-standard);
                 margin-left: 2px;
             }
-            .group-header:hover .sp-add-subgroup-button, .group-header:hover .sp-isolate-button, .group-header:hover .sp-edit-button, .group-header:hover .sp-delete-button {
+            .group-header:hover .sp-add-subgroup-button,
+            .group-header:hover .sp-isolate-button,
+            .group-header:hover .sp-edit-button,
+            .group-header:hover .sp-delete-button,
+            .group-header:focus-within .sp-add-subgroup-button,
+            .group-header:focus-within .sp-isolate-button,
+            .group-header:focus-within .sp-edit-button,
+            .group-header:focus-within .sp-delete-button {
                 opacity: 1;
                 transform: translateX(0) scale(1);
                 pointer-events: auto;
@@ -898,13 +1199,38 @@
                 color: var(--sp-text-primary);
             }
             .sp-source-actions-button:hover, .sp-add-subgroup-button:hover, .sp-isolate-button:hover, .sp-edit-button:hover {
-                transform: scale(1.1);
+                transform: scale(1.06);
             }
             .sp-source-actions-menu-item:hover {
-                transform: translateX(2px);
+                transform: scale(1.02);
+            }
+            .sp-source-actions-menu-item[disabled] {
+                opacity: 0.42;
+                cursor: not-allowed;
+                transform: none;
+            }
+            .sp-source-actions-menu-item[disabled]:hover {
+                background-color: transparent;
+                color: var(--sp-text-primary);
+                transform: none;
             }
             .sp-source-actions-menu-item:hover .google-symbols {
                 color: var(--sp-text-primary);
+            }
+            .sp-source-actions-button:focus-visible,
+            .sp-source-actions-menu-item:focus-visible,
+            .sp-add-subgroup-button:focus-visible,
+            .sp-isolate-button:focus-visible,
+            .sp-edit-button:focus-visible,
+            .sp-delete-button:focus-visible,
+            .sp-caret:focus-visible {
+                outline: none;
+                box-shadow: var(--sp-focus-ring);
+                background-color: var(--sp-icon-button-hover);
+                color: var(--sp-text-primary);
+            }
+            .sp-source-actions-menu-item:focus-visible {
+                transform: translateX(2px);
             }
             .sp-isolate-button.is-active {
                 opacity: 1;
@@ -916,10 +1242,11 @@
             .sp-delete-button:hover {
                 background-color: var(--sp-delete-hover-bg);
                 color: var(--sp-accent-danger);
-                transform: scale(1.1);
+                transform: scale(1.06);
+                box-shadow: inset 0 0 0 1px rgba(255, 59, 48, 0.18), 0 0 14px var(--sp-danger-glow);
             }
             .sp-source-actions-button:active, .sp-add-subgroup-button:active, .sp-isolate-button:active, .sp-edit-button:active, .sp-delete-button:active {
-                transform: scale(0.85);
+                transform: scale(0.95);
             }
             .icon-color {
                 color: var(--sp-accent);
@@ -988,7 +1315,10 @@
                 margin-left: 18px; 
                 margin-top: 2px; 
                 overflow: visible; 
-                transition: border-color 0.3s ease, height 0.3s cubic-bezier(0.25, 1, 0.5, 1), opacity 0.3s ease;
+                transition:
+                    border-color var(--sp-motion-base) var(--sp-ease-standard),
+                    height var(--sp-motion-slow) var(--sp-ease-emphasized),
+                    opacity var(--sp-motion-medium) var(--sp-ease-standard);
                 opacity: 1;
                 position: relative;
                 /* By default, let height be auto. JS will set explicit heights during animation. */
@@ -1003,7 +1333,7 @@
             
             /* Folder Entry Animation */
             .sp-folder-enter {
-                animation: sp-folder-pop 0.4s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+                animation: sp-folder-pop var(--sp-motion-slow) var(--sp-ease-emphasized) forwards;
                 transform-origin: top center;
             }
             @keyframes sp-folder-pop {
@@ -1038,6 +1368,16 @@
                     transform: translate(-50%, -54%) scale(0.95);
                 }
             }
+            @keyframes sp-modal-item-enter {
+                0% {
+                    opacity: 0;
+                    transform: scale(0.97);
+                }
+                100% {
+                    opacity: 1;
+                    transform: scale(1);
+                }
+            }
             .sp-overlay-backdrop {
                 position: fixed;
                 top: 0;
@@ -1047,7 +1387,7 @@
                 background: var(--sp-overlay-backdrop);
                 z-index: 10000;
                 opacity: 0;
-                transition: opacity 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+                transition: opacity var(--sp-motion-medium) var(--sp-ease-standard);
                 pointer-events: none;
                 display: flex;
                 align-items: center;
@@ -1077,16 +1417,18 @@
                 overflow: hidden;
                 opacity: 0;
                 pointer-events: none;
-                transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.4s ease;
+                transition:
+                    transform var(--sp-motion-slow) var(--sp-ease-standard),
+                    opacity var(--sp-motion-slow) var(--sp-ease-standard);
             }
             
             .sp-folder-modal.visible {
                 opacity: 1;
                 pointer-events: auto;
-                animation: sp-modal-enter 0.3s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+                animation: sp-modal-enter var(--sp-motion-slow) var(--sp-ease-emphasized) forwards;
             }
             .sp-folder-modal.closing {
-                animation: sp-modal-leave 0.3s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+                animation: sp-modal-leave var(--sp-motion-slow) var(--sp-ease-emphasized) forwards;
             }
             .sp-folder-modal-header {
                 padding: 16px 20px;
@@ -1114,15 +1456,28 @@
                 padding: 10px 12px;
                 border-radius: 10px;
                 cursor: pointer;
-                transition: all 0.2s cubic-bezier(0.25, 1, 0.5, 1);
+                transition:
+                    background-color var(--sp-motion-base) var(--sp-ease-standard),
+                    color var(--sp-motion-base) var(--sp-ease-standard),
+                    transform var(--sp-motion-base) var(--sp-ease-standard),
+                    box-shadow var(--sp-motion-base) var(--sp-ease-standard);
                 background: transparent;
                 border: none;
                 width: 100%;
                 text-align: left;
             }
-            .sp-folder-option:hover {
+            .sp-folder-option,
+            .sp-tag-option,
+            .sp-tag-manage-item {
+                animation: sp-modal-item-enter var(--sp-motion-medium) var(--sp-ease-emphasized) backwards;
+                animation-delay: calc(var(--sp-modal-item-index, 0) * 24ms);
+                transform-origin: center;
+            }
+            .sp-folder-option:hover,
+            .sp-folder-option:focus-visible {
                 background: var(--sp-bg-hover);
-                transform: scale(0.98);
+                transform: scale(1.02);
+                outline: none;
             }
             .sp-folder-option .google-symbols {
                 font-size: 20px;
@@ -1204,7 +1559,10 @@
                 border-radius: 999px;
                 border: 2px solid transparent;
                 cursor: pointer;
-                transition: transform 0.2s cubic-bezier(0.25, 1, 0.5, 1), box-shadow 0.2s cubic-bezier(0.25, 1, 0.5, 1), border-color 0.2s cubic-bezier(0.25, 1, 0.5, 1);
+                transition:
+                    transform var(--sp-motion-fast) var(--sp-ease-press),
+                    box-shadow var(--sp-motion-base) var(--sp-ease-standard),
+                    border-color var(--sp-motion-base) var(--sp-ease-standard);
                 box-shadow: var(--sp-tag-swatch-inset);
             }
             .sp-tag-color-swatch:hover {
@@ -1269,6 +1627,19 @@
                 border-radius: 10px;
                 background: var(--sp-bg-primary);
                 border: 1px solid var(--sp-border-light);
+                transition:
+                    background-color var(--sp-motion-base) var(--sp-ease-standard),
+                    border-color var(--sp-motion-base) var(--sp-ease-standard),
+                    box-shadow var(--sp-motion-base) var(--sp-ease-standard),
+                    transform var(--sp-motion-base) var(--sp-ease-standard);
+            }
+            .sp-tag-option:hover,
+            .sp-tag-option:focus-within,
+            .sp-tag-row:hover,
+            .sp-tag-row:focus-within {
+                background: var(--sp-bg-hover);
+                border-color: var(--sp-border-medium);
+                transform: scale(1.01);
             }
             .sp-tag-option-checkbox {
                 margin: 0;
@@ -1317,14 +1688,147 @@
                 display: inline-flex;
                 align-items: center;
                 justify-content: center;
-                transition: all 0.2s cubic-bezier(0.25, 1, 0.5, 1);
+                transition:
+                    background-color var(--sp-motion-base) var(--sp-ease-standard),
+                    color var(--sp-motion-base) var(--sp-ease-standard),
+                    transform var(--sp-motion-fast) var(--sp-ease-press);
             }
             .sp-tag-row-button:hover {
                 background: var(--sp-bg-hover);
                 color: var(--sp-text-primary);
+                transform: scale(1.06);
             }
             .sp-tag-row-button .google-symbols {
                 font-size: 16px;
+            }
+            .sp-settings-modal {
+                width: min(560px, calc(100vw - 32px));
+            }
+            .sp-settings-modal-content {
+                padding: 12px;
+                gap: 12px;
+            }
+            .sp-settings-section {
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+                padding: 12px;
+                border: 1px solid var(--sp-modal-divider);
+                border-radius: 12px;
+                background: var(--sp-bg-secondary);
+            }
+            .sp-settings-section-header {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 12px;
+            }
+            .sp-settings-action-row {
+                display: flex;
+                align-items: center;
+                justify-content: flex-end;
+                gap: 8px;
+                flex-wrap: wrap;
+            }
+            .sp-settings-section-title {
+                margin: 0;
+                font-size: 13px;
+                font-weight: 700;
+                color: var(--sp-text-primary);
+            }
+            .sp-settings-file-input {
+                display: none;
+            }
+            .sp-settings-textarea {
+                width: 100%;
+                min-height: 116px;
+                box-sizing: border-box;
+                resize: vertical;
+                border: 1px solid var(--sp-border-light);
+                border-radius: 10px;
+                padding: 10px;
+                background: var(--sp-bg-button);
+                color: var(--sp-text-primary);
+                font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+                outline: none;
+                transition:
+                    border-color var(--sp-motion-base) var(--sp-ease-standard),
+                    box-shadow var(--sp-motion-base) var(--sp-ease-standard),
+                    background-color var(--sp-motion-base) var(--sp-ease-standard);
+            }
+            .sp-settings-textarea:focus {
+                border-color: var(--sp-search-focus-border);
+                box-shadow: var(--sp-search-focus-ring);
+            }
+            .sp-settings-import-preview {
+                min-height: 18px;
+                font-size: 12px;
+                color: var(--sp-text-secondary);
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+            }
+            .sp-settings-import-preview.is-valid {
+                color: var(--sp-accent);
+            }
+            .sp-settings-import-preview.is-invalid {
+                color: var(--sp-accent-danger);
+            }
+            .sp-settings-preview-details {
+                display: grid;
+                gap: 6px;
+                color: var(--sp-text-secondary);
+            }
+            .sp-settings-preview-detail-title {
+                color: var(--sp-text-primary);
+                font-size: 11px;
+                font-weight: 700;
+            }
+            .sp-settings-preview-list {
+                display: grid;
+                gap: 4px;
+                margin: 0;
+                padding: 0;
+                list-style: none;
+            }
+            .sp-settings-preview-item,
+            .sp-settings-preview-empty,
+            .sp-settings-preview-more {
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                color: var(--sp-text-secondary);
+            }
+            .sp-settings-save-status-section .sp-save-status {
+                width: fit-content;
+                max-width: 100%;
+            }
+            .sp-settings-diagnostics-grid {
+                display: grid;
+                grid-template-columns: minmax(110px, max-content) minmax(0, 1fr);
+                gap: 6px 10px;
+                font-size: 11px;
+                color: var(--sp-text-secondary);
+            }
+            .sp-settings-diagnostics-key {
+                font-weight: 700;
+                color: var(--sp-text-primary);
+            }
+            .sp-settings-diagnostics-value {
+                min-width: 0;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            }
+            .sp-settings-apply-import-btn {
+                background-color: var(--sp-accent);
+                color: white;
+                border-color: transparent;
+            }
+            .sp-settings-apply-import-btn:disabled {
+                opacity: 0.5;
+                cursor: not-allowed;
             }
             .sp-modal-cancel {
                 background: var(--sp-bg-secondary);
@@ -1335,10 +1839,17 @@
                 font-size: 13px;
                 font-weight: 500;
                 cursor: pointer;
-                transition: all 0.2s cubic-bezier(0.25, 1, 0.5, 1);
+                transition:
+                    background-color var(--sp-motion-base) var(--sp-ease-standard),
+                    border-color var(--sp-motion-base) var(--sp-ease-standard),
+                    color var(--sp-motion-base) var(--sp-ease-standard),
+                    transform var(--sp-motion-fast) var(--sp-ease-press);
             }
             .sp-modal-cancel:hover {
                 background: var(--sp-bg-hover);
+                transform: scale(1.02);
+            }
+            .sp-modal-cancel:active {
                 transform: scale(0.98);
             }
 
@@ -1371,9 +1882,14 @@
             .sp-toast {
                 visibility: hidden;
                 min-width: 200px;
+                max-width: min(420px, calc(100vw - 32px));
                 background-color: var(--sp-bg-toast);
                 color: var(--sp-text-toast);
-                text-align: center;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 10px;
+                text-align: left;
                 border-radius: 12px;
                 padding: 12px 16px;
                 position: fixed;
@@ -1385,10 +1901,58 @@
                 font-weight: 500;
                 opacity: 0;
                 filter: blur(4px);
-                transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1);
-                backdrop-filter: blur(10px);
-                box-shadow: var(--sp-shadow-toast);
-            }
+                transition:
+                    opacity var(--sp-motion-medium) var(--sp-ease-standard),
+                    transform var(--sp-motion-medium) var(--sp-ease-emphasized),
+                    filter var(--sp-motion-medium) var(--sp-ease-standard),
+                    background-color var(--sp-motion-base) var(--sp-ease-standard);
+	                backdrop-filter: blur(10px);
+	                box-shadow: var(--sp-shadow-toast);
+	            }
+
+	            .sp-toast-success {
+	                background-color: rgba(34, 128, 75, 0.92);
+	                color: #fff;
+	            }
+
+	            .sp-toast-error {
+	                background-color: rgba(196, 42, 36, 0.94);
+	                color: #fff;
+	                box-shadow: var(--sp-shadow-toast), 0 0 18px var(--sp-danger-glow);
+	            }
+
+	            .sp-toast-message {
+	                min-width: 0;
+	                overflow-wrap: anywhere;
+	            }
+
+	            .sp-toast-action {
+	                appearance: none;
+	                border: 1px solid rgba(255, 255, 255, 0.34);
+	                border-radius: 999px;
+	                background: rgba(255, 255, 255, 0.16);
+	                color: inherit;
+	                cursor: pointer;
+	                font: inherit;
+	                font-weight: 700;
+	                padding: 5px 10px;
+	                transition:
+	                    background-color var(--sp-motion-fast) var(--sp-ease-standard),
+	                    border-color var(--sp-motion-fast) var(--sp-ease-standard),
+	                    transform var(--sp-motion-fast) var(--sp-ease-press);
+	            }
+
+	            .sp-toast-action:hover,
+	            .sp-toast-action:focus-visible {
+	                background: rgba(255, 255, 255, 0.24);
+	                border-color: rgba(255, 255, 255, 0.48);
+	                outline: none;
+	                transform: scale(1.03);
+	            }
+
+	            .sp-toast-action:active {
+	                transform: scale(0.97);
+	            }
 
             .sp-toast.show {
                 visibility: visible;
@@ -1407,6 +1971,14 @@
                 background: var(--sp-bg-badge);
                 padding: 2px 6px;
                 border-radius: 12px;
+            }
+
+            .sp-count-up-number {
+                display: inline-block;
+                min-width: 1ch;
+                text-align: center;
+                font-variant-numeric: tabular-nums;
+                line-height: 1;
             }
 
             .sp-toggle-switch {
@@ -1436,7 +2008,9 @@
                 right: 0;
                 bottom: 0;
                 background-color: var(--sp-bg-switch);
-                transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+                transition:
+                    background-color var(--sp-motion-base) var(--sp-ease-standard),
+                    box-shadow var(--sp-motion-base) var(--sp-ease-standard);
                 border-radius: 18px;
                 box-shadow: inset 0 0 0 1px var(--sp-border-light);
             }
@@ -1449,7 +2023,10 @@
                 left: 2px;
                 bottom: 2px;
                 background-color: var(--sp-bg-switch-thumb);
-                transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+                transition:
+                    transform var(--sp-motion-base) var(--sp-ease-emphasized),
+                    background-color var(--sp-motion-base) var(--sp-ease-standard),
+                    box-shadow var(--sp-motion-base) var(--sp-ease-standard);
                 border-radius: 50%;
                 box-shadow: var(--sp-shadow-switch-thumb);
             }
@@ -1464,9 +2041,30 @@
             }
             
             /* --- Batch Mode Additions --- */
+            @keyframes sp-batch-selected-pop {
+                0% {
+                    transform: scale(1);
+                    box-shadow: inset 0 0 0 1px rgba(0, 122, 255, 0.08), 0 0 0 0 rgba(0, 122, 255, 0);
+                }
+                48% {
+                    transform: scale(1.018);
+                    box-shadow: inset 0 0 0 1px rgba(0, 122, 255, 0.16), 0 0 0 3px rgba(0, 122, 255, 0.12);
+                }
+                100% {
+                    transform: scale(1);
+                    box-shadow: inset 0 0 0 1px rgba(0, 122, 255, 0.08), 0 0 0 0 rgba(0, 122, 255, 0);
+                }
+            }
             .source-item.selected-for-batch {
                 background-color: var(--sp-batch-selected-bg);
                 border: 1px dashed var(--sp-accent);
+                box-shadow: inset 0 0 0 1px rgba(0, 122, 255, 0.08);
+                animation: sp-batch-selected-pop var(--sp-motion-medium) var(--sp-ease-emphasized);
+                transition:
+                    background-color var(--sp-motion-base) var(--sp-ease-standard),
+                    border-color var(--sp-motion-base) var(--sp-ease-standard),
+                    box-shadow var(--sp-motion-base) var(--sp-ease-standard),
+                    transform var(--sp-motion-base) var(--sp-ease-standard);
             }
             .sp-batch-checkbox {
                 border-color: var(--sp-accent);
@@ -1475,6 +2073,16 @@
             .sp-batch-checkbox:checked {
                 background-color: var(--sp-accent);
                 border-color: var(--sp-accent);
+            }
+            @keyframes sp-batch-bar-enter {
+                0% {
+                    opacity: 0;
+                    transform: translateY(8px) scale(0.98);
+                }
+                100% {
+                    opacity: 1;
+                    transform: translateY(0) scale(1);
+                }
             }
             .sp-batch-action-bar {
                 display: flex;
@@ -1490,25 +2098,70 @@
                 -webkit-backdrop-filter: blur(20px) saturate(180%);
                 border: 1px solid var(--sp-glass-border, rgba(0, 0, 0, 0.05));
                 border-radius: 16px;
-                box-shadow: var(--sp-glass-shadow);
+                box-shadow:
+                    var(--sp-glass-shadow),
+                    inset 0 0 0 1px rgba(0, 122, 255, 0.08),
+                    0 0 18px var(--sp-batch-glow);
                 z-index: 5;
+                overflow: hidden;
+                isolation: isolate;
+                animation: sp-batch-bar-enter var(--sp-motion-medium) var(--sp-ease-emphasized) both;
+                transition:
+                    background-color var(--sp-motion-base) var(--sp-ease-standard),
+                    border-color var(--sp-motion-base) var(--sp-ease-standard),
+                    box-shadow var(--sp-motion-base) var(--sp-ease-standard),
+                    transform var(--sp-motion-base) var(--sp-ease-standard);
             }
-            .sp-batch-actions {
-                display: flex;
-                gap: 8px;
+            .sp-batch-action-bar::before {
+                content: '';
+                position: absolute;
+                inset: 0;
+                border-radius: inherit;
+                pointer-events: none;
+                box-shadow:
+                    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+                    inset 0 0 0 1px var(--sp-batch-glow);
+                opacity: 0.75;
+                z-index: 0;
             }
-            .sp-batch-add-folder-btn {
-                background-color: var(--sp-accent);
-                color: white;
-                border-color: transparent;
+            .sp-batch-action-bar > * {
+                position: relative;
+                z-index: 1;
             }
-            .sp-batch-add-folder-btn:hover {
-                background-color: #0066cc;
-            }
-            .sp-batch-add-folder-btn:disabled {
-                opacity: 0.5;
-                cursor: not-allowed;
-            }
+	            .sp-batch-actions {
+	                display: flex;
+	                flex-wrap: wrap;
+	                justify-content: flex-end;
+	                gap: 8px;
+	            }
+	            .sp-batch-add-folder-btn,
+	            .sp-batch-add-tags-btn {
+	                background-color: var(--sp-accent);
+	                color: white;
+	                border-color: transparent;
+	            }
+	            .sp-batch-add-folder-btn:hover,
+	            .sp-batch-add-tags-btn:hover {
+	                background-color: #0066cc;
+	            }
+	            .sp-batch-remove-tags-btn,
+	            .sp-batch-ungroup-btn {
+	                background-color: var(--sp-bg-button);
+	                color: var(--sp-text-primary);
+	                border-color: var(--sp-border-light);
+	            }
+	            .sp-batch-remove-tags-btn:hover,
+	            .sp-batch-ungroup-btn:hover {
+	                border-color: var(--sp-accent);
+	                box-shadow: inset 0 0 0 1px rgba(0, 122, 255, 0.08), 0 0 12px var(--sp-batch-glow);
+	            }
+	            .sp-batch-add-folder-btn:disabled,
+	            .sp-batch-add-tags-btn:disabled,
+	            .sp-batch-remove-tags-btn:disabled,
+	            .sp-batch-ungroup-btn:disabled {
+	                opacity: 0.5;
+	                cursor: not-allowed;
+	            }
             .sp-confirm-delete-btn {
                 background-color: var(--sp-accent-danger);
                 color: white;
@@ -1516,6 +2169,7 @@
             }
             .sp-confirm-delete-btn:hover {
                 background-color: #ff2d20;
+                box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18), 0 0 16px var(--sp-danger-glow);
             }
             .sp-confirm-delete-btn:disabled {
                 opacity: 0.5;
@@ -1539,7 +2193,11 @@
                 font-size: 13px;
                 font-weight: 500;
                 background-color: var(--sp-empty-state-bg);
-                transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+                transition:
+                    background-color var(--sp-motion-base) var(--sp-ease-standard),
+                    border-color var(--sp-motion-base) var(--sp-ease-standard),
+                    color var(--sp-motion-base) var(--sp-ease-standard),
+                    transform var(--sp-motion-base) var(--sp-ease-standard);
             }
             .group-container.drag-into > .group-children > .sp-empty-state {
                 background-color: var(--sp-drag-into-bg);
@@ -1599,10 +2257,11 @@
             }
             
             /* Enhanced Drag Feedback */
-            .drag-over-top {
-                border-top: 2px solid var(--sp-accent) !important;
-                position: relative;
-            }
+	            .drag-over-top {
+	                border-top: 2px solid var(--sp-accent) !important;
+	                position: relative;
+	                box-shadow: 0 -6px 14px rgba(0, 122, 255, 0.12);
+	            }
             .drag-over-top::before {
                 content: '';
                 position: absolute;
@@ -1616,10 +2275,11 @@
                 z-index: 10;
             }
             
-            .drag-over-bottom {
-                border-bottom: 2px solid var(--sp-accent) !important;
-                position: relative;
-            }
+	            .drag-over-bottom {
+	                border-bottom: 2px solid var(--sp-accent) !important;
+	                position: relative;
+	                box-shadow: 0 6px 14px rgba(0, 122, 255, 0.12);
+	            }
             .drag-over-bottom::after {
                 content: '';
                 position: absolute;
@@ -1631,6 +2291,94 @@
                 background-color: var(--sp-accent);
                 border: 2px solid var(--sp-bg-primary, white);
                 z-index: 10;
+            }
+
+            @media (prefers-reduced-motion: reduce) {
+                :host {
+                    --sp-motion-fast: 1ms;
+                    --sp-motion-base: 1ms;
+                    --sp-motion-medium: 1ms;
+                    --sp-motion-slow: 1ms;
+                }
+
+                *,
+                *::before,
+                *::after {
+                    animation-duration: 1ms !important;
+                    animation-iteration-count: 1 !important;
+                    transition-duration: 1ms !important;
+                    scroll-behavior: auto !important;
+                }
+
+                .sp-spinner {
+                    animation: spin 1s linear infinite !important;
+                }
+
+                .loading-source .title-container,
+                .sp-folder-enter,
+                .source-item.sp-list-item-enter,
+                .group-container.sp-list-item-enter,
+                .sp-source-actions-menu,
+                .sp-source-actions-menu-item,
+                .sp-folder-option,
+                .sp-tag-option,
+                .sp-tag-manage-item,
+                .sp-batch-action-bar,
+                .source-item.selected-for-batch,
+                .sp-folder-modal.visible,
+                .sp-folder-modal.closing,
+                .sp-checkbox.is-animating:checked,
+                .sp-checkbox.is-animating:checked::before {
+                    animation: none !important;
+                }
+
+                .sp-glare-hover::after {
+                    background-position: 50% 50% !important;
+                    transition-property: opacity !important;
+                }
+
+                .source-item.sp-spotlight-surface::before,
+                .group-header.sp-spotlight-surface::before {
+                    transition-property: opacity !important;
+                }
+
+                .sp-icon-button:hover,
+                .sp-icon-button:active,
+                .sp-button:hover,
+                .sp-button:active,
+                .source-item:hover,
+                .source-item:active,
+                .group-header:hover,
+                .group-header:active,
+                .sp-source-actions-button:hover,
+                .sp-source-actions-button:active,
+                .sp-add-subgroup-button:hover,
+                .sp-add-subgroup-button:active,
+                .sp-isolate-button:hover,
+                .sp-isolate-button:active,
+                .sp-edit-button:hover,
+                .sp-edit-button:active,
+                .sp-delete-button:hover,
+                .sp-delete-button:active,
+                .sp-folder-option:hover,
+                .sp-folder-option:focus-visible,
+                .sp-tag-option:hover,
+                .sp-tag-option:focus-within,
+                .sp-tag-row:hover,
+                .sp-tag-row:focus-within,
+                .sp-tag-row-button:hover,
+                .sp-modal-cancel:hover,
+                .sp-modal-cancel:active,
+                .sp-empty-state,
+                .group-container.drag-into > .group-children > .sp-empty-state {
+                    transform: none !important;
+                }
+
+                .sp-toast,
+                .sp-toast.show {
+                    filter: none !important;
+                    transform: translateX(-50%) !important;
+                }
             }
         `;
 

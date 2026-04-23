@@ -1,0 +1,1048 @@
+const fs = require('fs');
+const path = require('path');
+const {
+    CONTENT_HELPER_GLOBALS,
+    setupGlobalMocks,
+    teardownGlobalMocks,
+    loadContentModule,
+    loadFreshContentModule,
+    createMockSourceRow,
+    createMockImageCandidate,
+    createSearchUiMock,
+    createMockPanel,
+    createInitShadowRoot,
+    createTreeEl
+} = require('../helpers/content-test-harness');
+
+const createModalRenderElement = (tag, attrs = {}, children = []) => {
+    const listeners = new Map();
+    const element = {
+        tag,
+        tagName: String(tag).toUpperCase(),
+        attrs,
+        id: attrs.id || '',
+        className: attrs.className || attrs.class || '',
+        dataset: Object.assign({}, attrs.dataset || {}),
+        childNodes: [],
+        children: [],
+        parentNode: null,
+        disabled: Boolean(attrs.disabled),
+        value: attrs.value || '',
+        checked: Boolean(attrs.checked),
+        focus: jest.fn(),
+        addEventListener: jest.fn((type, handler) => {
+            const handlers = listeners.get(type) || [];
+            handlers.push(handler);
+            listeners.set(type, handlers);
+        }),
+        removeEventListener: jest.fn(),
+        dispatchEvent: jest.fn((event) => {
+            const handlers = listeners.get(event?.type || event) || [];
+            handlers.forEach((handler) => handler.call(element, event));
+            return true;
+        }),
+        appendChild(child) {
+            this.childNodes.push(child);
+            if (child && typeof child === 'object') {
+                child.parentNode = this;
+                this.children.push(child);
+            }
+            return child;
+        },
+        removeChild(child) {
+            this.childNodes = this.childNodes.filter((candidate) => candidate !== child);
+            this.children = this.children.filter((candidate) => candidate !== child);
+            return child;
+        },
+        setAttribute(name, value) {
+            this.attrs[name] = value;
+            if (name === 'id') this.id = value;
+            if (name === 'class') this.className = value;
+        },
+        getAttribute(name) {
+            if (name === 'id') return this.id || null;
+            if (name === 'class') return this.className || null;
+            if (name === 'style') return this.attrs.style || null;
+            return this.attrs[name] ?? null;
+        },
+        classList: {
+            add: jest.fn((className) => {
+                const classes = new Set(String(element.className || '').split(/\s+/).filter(Boolean));
+                classes.add(className);
+                element.className = Array.from(classes).join(' ');
+            }),
+            remove: jest.fn((className) => {
+                const classes = new Set(String(element.className || '').split(/\s+/).filter(Boolean));
+                classes.delete(className);
+                element.className = Array.from(classes).join(' ');
+            }),
+            toggle: jest.fn((className, force) => {
+                const classes = new Set(String(element.className || '').split(/\s+/).filter(Boolean));
+                const shouldAdd = typeof force === 'boolean' ? force : !classes.has(className);
+                if (shouldAdd) classes.add(className);
+                else classes.delete(className);
+                element.className = Array.from(classes).join(' ');
+                return shouldAdd;
+            }),
+            contains: jest.fn((className) => String(element.className || '').split(/\s+/).includes(className))
+        },
+        querySelector(selector) {
+            return this.querySelectorAll(selector)[0] || null;
+        },
+        querySelectorAll(selector) {
+            const results = [];
+            const matches = (candidate) => {
+                if (!candidate || typeof candidate !== 'object') return false;
+                if (selector.startsWith('#')) return candidate.id === selector.slice(1);
+                if (selector.startsWith('.')) {
+                    const className = selector.slice(1).split(/[:\s.\[]/)[0];
+                    return String(candidate.className || '').split(/\s+/).includes(className);
+                }
+                return false;
+            };
+            const visit = (candidate) => {
+                if (matches(candidate)) results.push(candidate);
+                (candidate?.childNodes || []).forEach(visit);
+            };
+            this.childNodes.forEach(visit);
+            return results;
+        }
+    };
+
+    Object.defineProperty(element, 'textContent', {
+        get() {
+            return this.childNodes.map((child) => (
+                typeof child === 'string' ? child : (child?.textContent || '')
+            )).join('');
+        },
+        set(value) {
+            this.childNodes = [String(value)];
+            this.children = [];
+        }
+    });
+
+    children.forEach((child) => element.appendChild(child));
+    return element;
+};
+
+const createModalTestShadowRoot = () => {
+    const shadowRoot = {
+        childNodes: [],
+        children: [],
+        activeElement: null,
+        host: { isConnected: true },
+        appendChild(node) {
+            this.childNodes.push(node);
+            this.children.push(node);
+            if (node && typeof node === 'object') node.parentNode = this;
+            return node;
+        },
+        removeChild(node) {
+            this.childNodes = this.childNodes.filter((child) => child !== node);
+            this.children = this.children.filter((child) => child !== node);
+            return node;
+        },
+        getElementById(id) {
+            return this.querySelector(`#${id}`);
+        },
+        querySelector(selector) {
+            return this.querySelectorAll(selector)[0] || null;
+        },
+        querySelectorAll(selector) {
+            const results = [];
+            const matches = (candidate) => {
+                if (!candidate || typeof candidate !== 'object') return false;
+                if (selector.startsWith('#')) return candidate.id === selector.slice(1);
+                if (selector.startsWith('.')) {
+                    const className = selector.slice(1).split(/[:\s.\[]/)[0];
+                    return String(candidate.className || '').split(/\s+/).includes(className);
+                }
+                return false;
+            };
+            const visit = (candidate) => {
+                if (matches(candidate)) results.push(candidate);
+                (candidate?.childNodes || []).forEach(visit);
+            };
+            this.childNodes.forEach(visit);
+            return results;
+        }
+    };
+    return shadowRoot;
+};
+
+const createModalMotionTestRuntime = ({
+    state = {},
+    groupsById = new Map(),
+    tagsById = new Map(),
+    sourcesByKey = new Map(),
+    sourceTagsById = new Map(),
+    pendingBatchKeys = new Set(),
+    getSourceTagIds = () => [],
+    setSourceTagIds = jest.fn(),
+    saveState = jest.fn(),
+    render = jest.fn(),
+    createTag = jest.fn(() => null),
+    showToast = jest.fn(),
+    showUndoableToast = showToast,
+    getExportConfigText = jest.fn(() => '{"data":{}}'),
+    previewImportConfig = jest.fn(() => ({ ok: false, reason: 'empty' })),
+    applyImportConfig = jest.fn(() => ({ ok: false, reason: 'invalid' })),
+    getDiagnosticsInfo = jest.fn(() => ({
+        notebookId: 'notebook-test',
+        sourceCount: 2,
+        groupCount: 1,
+        tagCount: 1,
+        saveRevision: 3,
+        savedAt: '2026-04-22T00:00:00.000Z',
+        saveStatus: 'saved',
+        lastSaveError: '',
+        recoveryAvailable: false,
+        lastNativeActionFailure: null
+    })),
+    getDiagnosticsText = jest.fn(() => '{"notebookId":"notebook-test"}'),
+    renderSaveStatus = jest.fn()
+} = {}) => {
+    const createContentModals = require('../../src/content/content-modals.js');
+    const shadowRoot = createModalTestShadowRoot();
+    const modals = createContentModals({
+        el: createModalRenderElement,
+        getShadowRoot: () => shadowRoot,
+        getState: () => state,
+        getGroupsById: () => groupsById,
+        getTagsById: () => tagsById,
+        getSourceTagsById: () => sourceTagsById,
+        getSourcesByKey: () => sourcesByKey,
+        getPendingBatchKeys: () => pendingBatchKeys,
+        getMessage: (key, substitutions = []) => (
+            substitutions.length > 0 ? `${key}:${substitutions.join(',')}` : key
+        ),
+        getTagUsageCounts: () => new Map(),
+        getSourceTagIds,
+        setSourceTagIds,
+        saveState,
+        render,
+        createTag,
+        getExportConfigText,
+        previewImportConfig,
+        applyImportConfig,
+        getDiagnosticsInfo,
+        getDiagnosticsText,
+        renderSaveStatus,
+        updateTag: jest.fn(() => null),
+        deleteTag: jest.fn(),
+        showToast,
+        showUndoableToast,
+        normalizeTagColor: (value) => value || null,
+        normalizeTagColorInputValue: (value) => String(value || ''),
+        getDefaultTagColor: () => '#007AFF',
+        getTagColorPreviewStyle: (color) => (color ? `--tag-color:${color};` : '')
+    });
+
+    return { modals, shadowRoot, renderSaveStatus };
+};
+
+describe('move-to-folder options', () => {
+    let mod;
+
+    beforeEach(() => {
+        jest.resetModules();
+        setupGlobalMocks();
+        mod = loadContentModule();
+        if (mod._resetState) mod._resetState();
+    });
+
+    afterEach(() => {
+        delete global.requestAnimationFrame;
+        teardownGlobalMocks();
+    });
+
+    it('collects top-level, second-level, and third-level folders in tree order', () => {
+        mod.state.groups = ['root', 'sibling'];
+        mod.groupsById.set('root', {
+            id: 'root',
+            title: 'Root',
+            children: [
+                { type: 'source', key: 'source1' },
+                { type: 'group', id: 'child' }
+            ]
+        });
+        mod.groupsById.set('child', {
+            id: 'child',
+            title: 'Child',
+            children: [{ type: 'group', id: 'grandchild' }]
+        });
+        mod.groupsById.set('grandchild', {
+            id: 'grandchild',
+            title: 'Grandchild',
+            children: []
+        });
+        mod.groupsById.set('sibling', {
+            id: 'sibling',
+            title: 'Sibling',
+            children: []
+        });
+
+        expect(mod.collectMoveFolderOptions(mod.state.groups).map(({ group, level }) => ({
+            id: group.id,
+            level
+        }))).toEqual([
+            { id: 'root', level: 0 },
+            { id: 'child', level: 1 },
+            { id: 'grandchild', level: 2 },
+            { id: 'sibling', level: 0 }
+        ]);
+    });
+
+    it('renders move folder options with modal item stagger indexes in tree order', () => {
+        global.requestAnimationFrame = (callback) => {
+            callback();
+            return 1;
+        };
+
+        const state = { groups: ['root', 'sibling'] };
+        const groupsById = new Map([
+            ['root', {
+                id: 'root',
+                title: 'Root',
+                children: [{ type: 'group', id: 'child' }]
+            }],
+            ['child', {
+                id: 'child',
+                title: 'Child',
+                children: [{ type: 'group', id: 'grandchild' }]
+            }],
+            ['grandchild', {
+                id: 'grandchild',
+                title: 'Grandchild',
+                children: []
+            }],
+            ['sibling', {
+                id: 'sibling',
+                title: 'Sibling',
+                children: []
+            }]
+        ]);
+        const { modals, shadowRoot } = createModalMotionTestRuntime({ state, groupsById });
+
+        modals.renderMoveToFolderModal(['source-1']);
+
+        expect(shadowRoot.querySelectorAll('.sp-folder-option').map((option) => option.attrs.style)).toEqual([
+            '--sp-modal-item-index:0;',
+            'padding-left:30px;--sp-modal-item-index:1;',
+            'padding-left:48px;--sp-modal-item-index:2;',
+            '--sp-modal-item-index:3;'
+        ]);
+    });
+});
+
+describe('modal option motion', () => {
+    beforeEach(() => {
+        jest.resetModules();
+        setupGlobalMocks();
+        global.requestAnimationFrame = (callback) => {
+            callback();
+            return 1;
+        };
+    });
+
+    afterEach(() => {
+        delete global.requestAnimationFrame;
+        teardownGlobalMocks();
+    });
+
+    it('renders source tag options with modal item stagger indexes', () => {
+        const state = { tagOrder: ['alpha', 'beta'] };
+        const tagsById = new Map([
+            ['alpha', { id: 'alpha', label: 'Alpha', color: '#007AFF' }],
+            ['beta', { id: 'beta', label: 'Beta', color: '#34C759' }]
+        ]);
+        const sourcesByKey = new Map([
+            ['source-1', { key: 'source-1', title: 'Source 1' }]
+        ]);
+        const { modals, shadowRoot } = createModalMotionTestRuntime({ state, tagsById, sourcesByKey });
+
+        modals.renderTagModal('source-1');
+
+        expect(shadowRoot.querySelectorAll('.sp-tag-option').map((option) => option.attrs.style)).toEqual([
+            '--sp-modal-item-index:0;',
+            '--sp-modal-item-index:1;'
+        ]);
+        expect(shadowRoot.querySelector('#sp-tag-name-input').focus).toHaveBeenCalled();
+    });
+
+    it('renders manage tag rows with modal item stagger indexes', () => {
+        const state = { tagOrder: ['alpha', 'beta'] };
+        const tagsById = new Map([
+            ['alpha', { id: 'alpha', label: 'Alpha', color: '#007AFF' }],
+            ['beta', { id: 'beta', label: 'Beta', color: '#34C759' }]
+        ]);
+        const { modals, shadowRoot } = createModalMotionTestRuntime({ state, tagsById });
+
+        modals.renderTagModal();
+
+        expect(shadowRoot.querySelectorAll('.sp-tag-manage-item').map((item) => item.attrs.style)).toEqual([
+            '--sp-modal-item-index:0;',
+            '--sp-modal-item-index:1;'
+        ]);
+        expect(shadowRoot.querySelector('#sp-tag-name-input').focus).toHaveBeenCalled();
+    });
+
+    it('renders batch tag options with modal item stagger indexes', () => {
+        const state = { tagOrder: ['alpha', 'beta'] };
+        const pendingBatchKeys = new Set(['source-1']);
+        const tagsById = new Map([
+            ['alpha', { id: 'alpha', label: 'Alpha', color: '#007AFF' }],
+            ['beta', { id: 'beta', label: 'Beta', color: '#34C759' }]
+        ]);
+        const sourcesByKey = new Map([
+            ['source-1', { key: 'source-1', title: 'Source 1' }]
+        ]);
+        const { modals, shadowRoot } = createModalMotionTestRuntime({
+            state,
+            tagsById,
+            sourcesByKey,
+            pendingBatchKeys
+        });
+
+        modals.renderBatchTagModal('add', pendingBatchKeys);
+
+        expect(shadowRoot.querySelectorAll('.sp-batch-tag-option').map((option) => option.attrs.style)).toEqual([
+            '--sp-modal-item-index:0;',
+            '--sp-modal-item-index:1;'
+        ]);
+        expect(shadowRoot.querySelector('#sp-batch-tag-name-input').focus).toHaveBeenCalled();
+        expect(shadowRoot.querySelector('#sp-apply-batch-tags-btn').disabled).toBe(true);
+    });
+
+    it('applies batch add and remove tag updates without changing tag storage shape', () => {
+        const state = {
+            isBatchMode: true,
+            tagOrder: ['alpha', 'beta']
+        };
+        const pendingBatchKeys = new Set(['source-1', 'source-2']);
+        const currentTags = new Map([
+            ['source-1', ['alpha']],
+            ['source-2', []]
+        ]);
+        const nextTags = new Map();
+        const tagsById = new Map([
+            ['alpha', { id: 'alpha', label: 'Alpha' }],
+            ['beta', { id: 'beta', label: 'Beta' }]
+        ]);
+        const sourcesByKey = new Map([
+            ['source-1', { key: 'source-1', title: 'Source 1' }],
+            ['source-2', { key: 'source-2', title: 'Source 2' }]
+        ]);
+        const saveState = jest.fn();
+        const render = jest.fn();
+        const showToast = jest.fn();
+        const setSourceTagIds = jest.fn((sourceKey, tagIds) => {
+            nextTags.set(sourceKey, tagIds);
+            currentTags.set(sourceKey, tagIds);
+        });
+        const { modals } = createModalMotionTestRuntime({
+            state,
+            tagsById,
+            sourcesByKey,
+            pendingBatchKeys,
+            getSourceTagIds: (sourceKey) => currentTags.get(sourceKey) || [],
+            setSourceTagIds,
+            saveState,
+            render,
+            showToast
+        });
+
+        expect(modals.executeBatchTagUpdate('add', pendingBatchKeys, ['beta'])).toBe(true);
+        expect(nextTags.get('source-1')).toEqual(['alpha', 'beta']);
+        expect(nextTags.get('source-2')).toEqual(['beta']);
+        expect(state.isBatchMode).toBe(false);
+        expect(pendingBatchKeys.size).toBe(0);
+        expect(saveState).toHaveBeenCalledWith({ immediate: true, critical: true });
+        expect(render).toHaveBeenCalled();
+        expect(showToast).toHaveBeenCalledWith('ui_batch_tags_added_toast:2', { variant: 'success' });
+
+        state.isBatchMode = true;
+        pendingBatchKeys.add('source-1');
+        pendingBatchKeys.add('source-2');
+        nextTags.clear();
+
+        expect(modals.executeBatchTagUpdate('remove', pendingBatchKeys, ['alpha'])).toBe(true);
+        expect(nextTags.get('source-1')).toEqual(['beta']);
+        expect(nextTags.get('source-2')).toEqual(['beta']);
+        expect(pendingBatchKeys.size).toBe(0);
+        expect(showToast).toHaveBeenLastCalledWith('ui_batch_tags_removed_toast:2', { variant: 'success' });
+    });
+
+    it('caps modal stagger indexes while preserving any base style', () => {
+        const { modals } = createModalMotionTestRuntime();
+
+        expect(modals.createModalItemStaggerStyle(12, 'padding-left:48px;')).toBe('padding-left:48px;--sp-modal-item-index:10;');
+    });
+
+    it('renders settings import/export UI and enables apply after a valid preview', () => {
+        const previewImportConfig = jest.fn(() => ({
+            ok: true,
+            matchedSources: 2,
+            totalSources: 3,
+            groupCount: 1,
+            tagCount: 4,
+            matchedSourceDetails: [
+                { storedKey: 'source-1', resolvedKey: 'source-1', title: 'Matched Source' }
+            ],
+            unmatchedSourceDetails: [
+                { storedKey: 'source-2', title: 'Missing Source' }
+            ]
+        }));
+        const applyImportConfig = jest.fn(() => ({ ok: true }));
+        const writeText = jest.fn(() => Promise.resolve());
+        const getDiagnosticsText = jest.fn(() => '{"notebookId":"diagnostic-test","sourceCount":2}');
+        global.window.navigator = { clipboard: { writeText } };
+        const renderSaveStatus = jest.fn();
+        const { modals, shadowRoot } = createModalMotionTestRuntime({
+            getExportConfigText: () => '{"format":"notebooklm-source-management-config"}',
+            previewImportConfig,
+            applyImportConfig,
+            getDiagnosticsInfo: () => ({
+                notebookId: 'diagnostic-test',
+                sourceCount: 2,
+                groupCount: 1,
+                tagCount: 4,
+                saveRevision: 6,
+                savedAt: '2026-04-22T00:00:00.000Z',
+                saveStatus: 'saved',
+                lastSaveError: '',
+                recoveryAvailable: true,
+                importBackupAvailable: true,
+                lastNativeActionFailure: { reason: 'menu_item_missing' },
+                nativeActionFailureHistory: [
+                    { reason: 'menu_item_missing' },
+                    { reason: 'confirm_dialog_missing' }
+                ]
+            }),
+            getDiagnosticsText,
+            renderSaveStatus
+        });
+
+        expect(modals.renderSettingsModal({ importText: '{"data":{}}' })).toBe(true);
+
+        const modal = shadowRoot.getElementById('sp-settings-modal');
+        expect(modal).toBeTruthy();
+        expect(shadowRoot.querySelector('.sp-settings-export-textarea').value).toContain('notebooklm-source-management-config');
+        expect(shadowRoot.querySelector('.sp-settings-import-preview').textContent).toContain('ui_settings_import_preview_summary:2,3,1,4');
+        expect(shadowRoot.querySelector('.sp-settings-import-preview').textContent).toContain('ui_settings_import_preview_matched:1');
+        expect(shadowRoot.querySelector('.sp-settings-import-preview').textContent).toContain('Matched Source');
+        expect(shadowRoot.querySelector('.sp-settings-import-preview').textContent).toContain('ui_settings_import_preview_unmatched:1');
+        expect(shadowRoot.querySelector('.sp-settings-import-preview').textContent).toContain('Missing Source');
+        expect(shadowRoot.querySelector('.sp-settings-apply-import-btn').disabled).toBe(false);
+        expect(shadowRoot.querySelector('.sp-settings-download-export-btn')).toBeTruthy();
+        expect(shadowRoot.querySelector('.sp-settings-choose-import-btn')).toBeTruthy();
+        expect(shadowRoot.querySelector('.sp-settings-save-status-section')).toBeTruthy();
+        expect(shadowRoot.getElementById('sp-settings-save-status')).toBeTruthy();
+        expect(renderSaveStatus).toHaveBeenCalled();
+        expect(shadowRoot.querySelector('.sp-settings-diagnostics-section')).toBeTruthy();
+        expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('ui_diagnostics_notebook_id');
+        expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('diagnostic-test');
+        expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('ui_diagnostics_import_backup');
+        expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('ui_diagnostics_native_failure_history');
+        expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('menu_item_missing');
+        expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('(+1)');
+        expect(shadowRoot.querySelector('.sp-settings-copy-diagnostics-btn')).toBeTruthy();
+
+        shadowRoot.querySelector('.sp-settings-apply-import-btn').dispatchEvent({ type: 'click' });
+        expect(applyImportConfig).toHaveBeenCalledWith('{"data":{}}');
+
+        shadowRoot.querySelector('.sp-settings-copy-diagnostics-btn').dispatchEvent({ type: 'click' });
+        expect(getDiagnosticsText).toHaveBeenCalled();
+        expect(writeText).toHaveBeenCalledWith('{"notebookId":"diagnostic-test","sourceCount":2}');
+    });
+
+    it('uses the undoable toast hook for batch tag success messages', () => {
+        const state = { isBatchMode: true };
+        const tagsById = new Map([['beta', { id: 'beta', label: 'Beta' }]]);
+        const sourcesByKey = new Map([
+            ['source-1', { key: 'source-1' }]
+        ]);
+        const pendingBatchKeys = new Set(['source-1']);
+        const currentTags = new Map([['source-1', []]]);
+        const showToast = jest.fn();
+        const showUndoableToast = jest.fn();
+        const { modals } = createModalMotionTestRuntime({
+            state,
+            tagsById,
+            sourcesByKey,
+            pendingBatchKeys,
+            getSourceTagIds: (sourceKey) => currentTags.get(sourceKey) || [],
+            setSourceTagIds: (sourceKey, tagIds) => currentTags.set(sourceKey, tagIds),
+            showToast,
+            showUndoableToast
+        });
+
+        expect(modals.executeBatchTagUpdate('add', pendingBatchKeys, ['beta'])).toBe(true);
+        expect(showToast).not.toHaveBeenCalled();
+        expect(showUndoableToast).toHaveBeenCalledWith('ui_batch_tags_added_toast:1', { variant: 'success' });
+    });
+});
+
+describe('modal keyboard helpers', () => {
+    let mod;
+
+    const createKeyboardModal = (focusableElements = []) => {
+        const root = { activeElement: null };
+        const modal = {
+            focus: jest.fn(() => {
+                root.activeElement = modal;
+            }),
+            querySelectorAll: jest.fn(() => focusableElements),
+            setAttribute: jest.fn(),
+            addEventListener: jest.fn(),
+            removeEventListener: jest.fn(),
+            getRootNode: jest.fn(() => root)
+        };
+        focusableElements.forEach((element) => {
+            element.focus = jest.fn(() => {
+                root.activeElement = element;
+            });
+            element.getAttribute = element.getAttribute || jest.fn(() => null);
+            element.getRootNode = jest.fn(() => root);
+            element.disabled = Boolean(element.disabled);
+        });
+        return { modal, root };
+    };
+
+    beforeEach(() => {
+        jest.resetModules();
+        setupGlobalMocks();
+        mod = loadContentModule();
+        mod._resetState();
+    });
+
+    afterEach(teardownGlobalMocks);
+
+    it('focuses the preferred move folder option when one exists', () => {
+        const folderButton = {};
+        const cancelButton = {};
+        const { modal } = createKeyboardModal([folderButton, cancelButton]);
+
+        expect(mod._focusModalInitialElementForTest(modal, folderButton)).toBe(folderButton);
+        expect(folderButton.focus).toHaveBeenCalledTimes(1);
+        expect(cancelButton.focus).not.toHaveBeenCalled();
+    });
+
+    it('focuses the cancel button when a move folder modal has no folder option', () => {
+        const cancelButton = {};
+        const { modal } = createKeyboardModal([cancelButton]);
+
+        expect(mod._focusModalInitialElementForTest(modal, cancelButton)).toBe(cancelButton);
+        expect(cancelButton.focus).toHaveBeenCalledTimes(1);
+    });
+
+    it('closes a modal on Escape', () => {
+        const closeModal = jest.fn();
+        const { modal } = createKeyboardModal([]);
+        const event = {
+            key: 'Escape',
+            preventDefault: jest.fn()
+        };
+
+        expect(mod._handleModalKeyboardEventForTest(event, modal, closeModal)).toBe(true);
+        expect(event.preventDefault).toHaveBeenCalledTimes(1);
+        expect(closeModal).toHaveBeenCalledTimes(1);
+    });
+
+    it('cycles focus from the last element to the first on Tab', () => {
+        const firstInput = {};
+        const lastButton = {};
+        const { modal, root } = createKeyboardModal([firstInput, lastButton]);
+        root.activeElement = lastButton;
+        const event = {
+            key: 'Tab',
+            shiftKey: false,
+            preventDefault: jest.fn()
+        };
+
+        expect(mod._handleModalKeyboardEventForTest(event, modal, jest.fn())).toBe(true);
+        expect(event.preventDefault).toHaveBeenCalledTimes(1);
+        expect(firstInput.focus).toHaveBeenCalledTimes(1);
+    });
+
+    it('cycles focus from the first element to the last on Shift+Tab', () => {
+        const firstInput = {};
+        const lastButton = {};
+        const { modal, root } = createKeyboardModal([firstInput, lastButton]);
+        root.activeElement = firstInput;
+        const event = {
+            key: 'Tab',
+            shiftKey: true,
+            preventDefault: jest.fn()
+        };
+
+        expect(mod._handleModalKeyboardEventForTest(event, modal, jest.fn())).toBe(true);
+        expect(event.preventDefault).toHaveBeenCalledTimes(1);
+        expect(lastButton.focus).toHaveBeenCalledTimes(1);
+    });
+
+    it('focuses create and edit tag inputs through the same initial focus helper', () => {
+        const createInput = {};
+        const editInput = {};
+        const { modal: createModal } = createKeyboardModal([createInput]);
+        const { modal: editModal } = createKeyboardModal([editInput]);
+
+        expect(mod._focusModalInitialElementForTest(createModal, createInput)).toBe(createInput);
+        expect(mod._focusModalInitialElementForTest(editModal, editInput)).toBe(editInput);
+        expect(createInput.focus).toHaveBeenCalledTimes(1);
+        expect(editInput.focus).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not intercept Enter used by tag editors', () => {
+        const input = {};
+        const { modal } = createKeyboardModal([input]);
+        const event = {
+            key: 'Enter',
+            preventDefault: jest.fn()
+        };
+
+        expect(mod._handleModalKeyboardEventForTest(event, modal, jest.fn())).toBe(false);
+        expect(event.preventDefault).not.toHaveBeenCalled();
+    });
+
+    it('binds modal keyboard handling to the modal element itself', () => {
+        const input = {};
+        const { modal } = createKeyboardModal([input]);
+        const closeModal = jest.fn();
+
+        const binding = mod._bindModalKeyboardNavigationForTest(modal, {
+            closeModal,
+            initialFocusTarget: input
+        });
+
+        expect(modal.setAttribute).toHaveBeenCalledWith('role', 'dialog');
+        expect(modal.setAttribute).toHaveBeenCalledWith('aria-modal', 'true');
+        expect(modal.setAttribute).toHaveBeenCalledWith('tabindex', '-1');
+        expect(modal.addEventListener).toHaveBeenCalledWith('keydown', expect.any(Function));
+        binding.focusInitial();
+        expect(input.focus).toHaveBeenCalledTimes(1);
+
+        const keydownHandler = modal.addEventListener.mock.calls[0][1];
+        keydownHandler({ key: 'Escape', preventDefault: jest.fn() });
+        expect(closeModal).toHaveBeenCalledTimes(1);
+        binding.dispose();
+        expect(modal.removeEventListener).toHaveBeenCalledWith('keydown', keydownHandler);
+    });
+
+    it('removes an existing modal immediately before rerendering', () => {
+        const parentNode = { removeChild: jest.fn() };
+        const modal = {
+            parentNode,
+            classList: {
+                remove: jest.fn(),
+                add: jest.fn()
+            }
+        };
+        const backdrop = {
+            parentNode,
+            classList: {
+                remove: jest.fn(),
+                add: jest.fn()
+            }
+        };
+        mod._setShadowRootForTest({
+            host: { isConnected: true },
+            activeElement: null,
+            getElementById: jest.fn((id) => {
+                if (id === 'sp-tag-modal') return modal;
+                if (id === 'sp-tag-backdrop') return backdrop;
+                return null;
+            }),
+            querySelectorAll: jest.fn(() => [])
+        });
+
+        mod._prepareModalOpenForTest('sp-tag-modal', 'sp-tag-backdrop');
+
+        expect(parentNode.removeChild).toHaveBeenCalledWith(backdrop);
+        expect(parentNode.removeChild).toHaveBeenCalledWith(modal);
+        expect(modal.classList.add).not.toHaveBeenCalledWith('closing');
+    });
+
+    it('restores focus after a normal animated modal close', () => {
+        const parentNode = { removeChild: jest.fn() };
+        const opener = {
+            isConnected: true,
+            focus: jest.fn(),
+            closest: jest.fn(() => null)
+        };
+        const modal = {
+            parentNode,
+            classList: {
+                remove: jest.fn(),
+                add: jest.fn()
+            }
+        };
+        const backdrop = {
+            parentNode,
+            classList: {
+                remove: jest.fn(),
+                add: jest.fn()
+            }
+        };
+        global.setTimeout = jest.fn((cb) => {
+            cb();
+            return 1;
+        });
+        global.document.activeElement = opener;
+        mod._setShadowRootForTest({
+            host: { isConnected: true },
+            activeElement: null,
+            getElementById: jest.fn((id) => {
+                if (id === 'sp-move-modal') return modal;
+                if (id === 'sp-move-backdrop') return backdrop;
+                return null;
+            }),
+            querySelectorAll: jest.fn(() => [])
+        });
+
+        mod._rememberModalFocusRestoreTargetForTest('sp-move-modal');
+        mod._closeManagedModalForTest('sp-move-modal', 'sp-move-backdrop');
+
+        expect(modal.classList.remove).toHaveBeenCalledWith('visible');
+        expect(modal.classList.add).toHaveBeenCalledWith('closing');
+        expect(parentNode.removeChild).toHaveBeenCalledWith(backdrop);
+        expect(parentNode.removeChild).toHaveBeenCalledWith(modal);
+        expect(opener.focus).toHaveBeenCalledTimes(1);
+    });
+
+    it('declares dialog titles through aria-labelledby', () => {
+        const source = fs.readFileSync(path.join(__dirname, '../../src/content/content-modals.js'), 'utf8');
+
+        expect(source).toContain("'aria-labelledby': 'sp-move-modal-title'");
+        expect(source).toContain("id: 'sp-move-modal-title'");
+        expect(source).toContain("'aria-labelledby': 'sp-tag-modal-title'");
+        expect(source).toContain("id: 'sp-tag-modal-title'");
+    });
+});
+
+describe('tag persistence and filtering', () => {
+    let mod;
+
+    beforeEach(() => {
+        jest.resetModules();
+        setupGlobalMocks();
+        global.setTimeout = (cb) => {
+            cb();
+            return 1;
+        };
+        global.clearTimeout = jest.fn();
+        mod = loadContentModule();
+        mod._resetState();
+    });
+
+    afterEach(teardownGlobalMocks);
+
+    it('persists multiple tags for a single source', () => {
+        mod.sourcesByKey.set('source1', {
+            key: 'source1',
+            title: 'Source 1',
+            normalizedTitle: 'source 1',
+            fingerprint: 'source 1||article',
+            identityType: 'stable-token',
+            enabled: true
+        });
+        mod.state.ungrouped = ['source1'];
+
+        const researchTagId = mod.createTag('Research', { color: 'ff9500' });
+        const priorityTagId = mod.createTag('Priority');
+        mod.setSourceTagIds('source1', [researchTagId, priorityTagId]);
+
+        expect(mod.buildPersistableState()).toMatchObject({
+            schemaVersion: 3,
+            tagOrder: [researchTagId, priorityTagId],
+            sourceTagsById: {
+                source1: [researchTagId, priorityTagId]
+            },
+            tagsById: {
+                [researchTagId]: { id: researchTagId, label: 'Research', color: '#FF9500' },
+                [priorityTagId]: { id: priorityTagId, label: 'Priority' }
+            }
+        });
+    });
+
+    it('normalizes custom tag colors to uppercase six-digit hex', () => {
+        expect(mod.normalizeTagColor('34c759')).toBe('#34C759');
+        expect(mod.normalizeTagColor('#007aff')).toBe('#007AFF');
+        expect(mod.normalizeTagColor('#ABC')).toBe(null);
+        expect(mod.normalizeTagColor('not-a-color')).toBe(null);
+    });
+
+    it('uses the shared content config for tag color presets', () => {
+        expect(mod.getTagColorPresets()).toEqual(globalThis.NSM_CONTENT_CONFIG.TAG_COLOR_PRESETS);
+        expect(mod._getModalTagColorPresetsForTest()).toEqual(globalThis.NSM_CONTENT_CONFIG.TAG_COLOR_PRESETS);
+        expect(mod.getTagColorPresets()).not.toBe(globalThis.NSM_CONTENT_CONFIG.TAG_COLOR_PRESETS);
+    });
+
+    it('normalizes v2 state into v3-compatible empty tag structures', () => {
+        expect(mod.normalizeLoadedState({
+            schemaVersion: 2,
+            groups: ['group1'],
+            groupsById: { group1: { id: 'group1', title: 'Group', children: [] } },
+            ungrouped: []
+        })).toEqual({
+            schemaVersion: 2,
+            groups: ['group1'],
+            groupsById: { group1: { id: 'group1', title: 'Group', children: [] } },
+            ungrouped: [],
+            sourceStateById: {},
+            customHeight: null,
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {}
+        });
+    });
+
+    it('migrates persisted tag assignments from legacy source keys to v3 ids', () => {
+        const taggedRow = createMockSourceRow({ title: 'Tagged Source', ariaLabel: 'Tagged Source', stableToken: 'doc-tagged', checked: true });
+        const descriptor = mod.createSourceDescriptor(taggedRow.row, new Map(), new Map());
+        const tagId = 'tag_research';
+
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [taggedRow.row] : []
+        ));
+
+        mod.scanAndSyncSources({
+            schemaVersion: 3,
+            groups: [],
+            groupsById: {},
+            ungrouped: [descriptor.legacyKey],
+            sourceStateById: {
+                [descriptor.legacyKey]: {
+                    enabled: true,
+                    title: 'Tagged Source',
+                    normalizedTitle: 'tagged source',
+                    fingerprint: descriptor.fingerprint,
+                    identityType: descriptor.identityType
+                }
+            },
+            tagsById: {
+                [tagId]: { id: tagId, label: 'Research' }
+            },
+            tagOrder: [tagId],
+            sourceTagsById: {
+                [descriptor.legacyKey]: [tagId]
+            }
+        }, true);
+
+        expect(mod.getSourceTagIds(descriptor.key)).toEqual([tagId]);
+    });
+
+    it('loads stored tag colors while tolerating legacy tags without color', () => {
+        global.document.querySelectorAll = jest.fn(() => []);
+
+        mod.scanAndSyncSources({
+            schemaVersion: 3,
+            groups: [],
+            groupsById: {},
+            ungrouped: [],
+            sourceStateById: {},
+            tagsById: {
+                tag_green: { id: 'tag_green', label: 'Green', color: '#34c759' },
+                tag_legacy: { id: 'tag_legacy', label: 'Legacy' }
+            },
+            tagOrder: ['tag_green', 'tag_legacy'],
+            sourceTagsById: {}
+        }, true);
+
+        expect(mod.tagsById.get('tag_green')).toMatchObject({
+            id: 'tag_green',
+            label: 'Green',
+            color: '#34C759'
+        });
+        expect(mod.tagsById.get('tag_legacy')).toMatchObject({
+            id: 'tag_legacy',
+            label: 'Legacy',
+            color: null
+        });
+    });
+
+    it('combines active tag filtering with text search', () => {
+        const alphaTagId = mod.createTag('Alpha');
+        const betaTagId = mod.createTag('Beta');
+
+        mod.sourcesByKey.set('source1', { key: 'source1', title: 'Alpha notes', lowercaseTitle: 'alpha notes', enabled: true });
+        mod.sourcesByKey.set('source2', { key: 'source2', title: 'Alpha draft', lowercaseTitle: 'alpha draft', enabled: true });
+        mod.sourcesByKey.set('source3', { key: 'source3', title: 'Beta summary', lowercaseTitle: 'beta summary', enabled: true });
+
+        mod.setSourceTagIds('source1', [alphaTagId]);
+        mod.setSourceTagIds('source2', [betaTagId]);
+        mod.setSourceTagIds('source3', [alphaTagId]);
+        mod.state.activeTagId = alphaTagId;
+        mod.state.filterQuery = 'alpha';
+
+        expect(mod.sourceMatchesCurrentFilters(mod.sourcesByKey.get('source1'))).toBe(true);
+        expect(mod.sourceMatchesCurrentFilters(mod.sourcesByKey.get('source2'))).toBe(false);
+        expect(mod.sourceMatchesCurrentFilters(mod.sourcesByKey.get('source3'))).toBe(true);
+    });
+
+    it('searches tag names and folder names with scoped query syntax', () => {
+        const paperTagId = mod.createTag('Paper');
+        const draftTagId = mod.createTag('Draft');
+
+        mod.sourcesByKey.set('source1', { key: 'source1', title: 'Notes', lowercaseTitle: 'notes', enabled: true });
+        mod.sourcesByKey.set('source2', { key: 'source2', title: 'Notes', lowercaseTitle: 'notes', enabled: true });
+        mod.sourcesByKey.set('source3', { key: 'source3', title: 'Appendix', lowercaseTitle: 'appendix', enabled: true });
+        mod.setSourceTagIds('source1', [paperTagId]);
+        mod.setSourceTagIds('source2', [draftTagId]);
+        mod.groupsById.set('folder1', {
+            id: 'folder1',
+            title: 'Chapter One',
+            enabled: true,
+            children: [{ type: 'source', key: 'source3' }]
+        });
+        mod.parentMap.set('source3', 'folder1');
+
+        mod.state.filterQuery = 'tag:paper';
+        expect(mod.sourceMatchesCurrentFilters(mod.sourcesByKey.get('source1'))).toBe(true);
+        expect(mod.sourceMatchesCurrentFilters(mod.sourcesByKey.get('source2'))).toBe(false);
+
+        mod.state.filterQuery = 'folder:chapter';
+        expect(mod.sourceMatchesCurrentFilters(mod.sourcesByKey.get('source3'))).toBe(true);
+        expect(mod.sourceMatchesCurrentFilters(mod.sourcesByKey.get('source1'))).toBe(false);
+
+        mod.state.filterQuery = 'paper';
+        expect(mod.sourceMatchesCurrentFilters(mod.sourcesByKey.get('source1'))).toBe(true);
+    });
+
+    it('removes deleted tags from every source assignment', () => {
+        const tagId = mod.createTag('Delete Me');
+        mod.setSourceTagIds('source1', [tagId]);
+        mod.setSourceTagIds('source2', [tagId]);
+
+        mod.deleteTag(tagId);
+
+        expect(mod.getSourceTagIds('source1')).toEqual([]);
+        expect(mod.getSourceTagIds('source2')).toEqual([]);
+        expect(mod.tagsById.has(tagId)).toBe(false);
+    });
+
+    it('preserves duplicate-name validation while allowing color-only edits', () => {
+        const alphaTagId = mod.createTag('Alpha', { color: '#007AFF' });
+        const betaTagId = mod.createTag('Beta');
+
+        expect(mod.updateTag(betaTagId, { label: 'Alpha', color: '#FF9500' })).toBe(alphaTagId);
+        expect(mod.tagsById.get(betaTagId)).toMatchObject({
+            id: betaTagId,
+            label: 'Beta',
+            color: null
+        });
+
+        expect(mod.updateTag(betaTagId, { label: 'Beta', color: '#FF9500' })).toBe(betaTagId);
+        expect(mod.tagsById.get(betaTagId)).toMatchObject({
+            id: betaTagId,
+            label: 'Beta',
+            color: '#FF9500'
+        });
+    });
+
+    it('generates style variables only for colored tags', () => {
+        expect(mod.getTagStyleVars({ color: '#007AFF' }, true)).toContain('--sp-tag-active-text:#007AFF');
+        expect(mod.getTagStyleVars({ color: '#007AFF' }, false)).toContain('--sp-tag-bg:rgba(0, 122, 255, 0.1)');
+        expect(mod.getTagStyleVars({ color: null }, false)).toBe('');
+    });
+});

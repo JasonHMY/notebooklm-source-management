@@ -9,8 +9,10 @@ const ERROR_CODES = {
     TABS_QUERY_FAILED: 'tabs_query_failed',
     TAB_FOCUS_FAILED: 'tab_focus_failed',
     WINDOW_FOCUS_FAILED: 'window_focus_failed',
-    TAB_CREATE_FAILED: 'tab_create_failed'
+    TAB_CREATE_FAILED: 'tab_create_failed',
+    STALE_REVISION: 'stale_revision'
 };
+const stateSaveQueueByKey = new Map();
 
 function isAuthorizedNotebookSender(sender) {
     return Boolean(
@@ -177,7 +179,58 @@ function hasRestorableStateSnapshot(snapshot) {
     return false;
 }
 
+function getSnapshotSaveRevision(snapshot) {
+    const revision = Number(snapshot?._saveRevision);
+    return Number.isFinite(revision) && revision > 0 ? revision : 0;
+}
+
+function cloneSerializableData(value) {
+    if (value == null) return value;
+    try {
+        return JSON.parse(JSON.stringify(value));
+    } catch (error) {
+        return value;
+    }
+}
+
+function getRequestBaseRevision(request) {
+    const revision = Number(request?.baseRevision);
+    return Number.isFinite(revision) && revision >= 0 ? revision : null;
+}
+
+function isStaleStateWrite(incomingState, storedState) {
+    const incomingRevision = getSnapshotSaveRevision(incomingState);
+    const storedRevision = getSnapshotSaveRevision(storedState);
+    return incomingRevision > 0 && storedRevision > 0 && incomingRevision < storedRevision;
+}
+
+function isStaleBaseRevision(baseRevision, storedState) {
+    const storedRevision = getSnapshotSaveRevision(storedState);
+    return baseRevision != null && storedRevision > 0 && baseRevision < storedRevision;
+}
+
+function createSavedStateSnapshot(data, currentRevision, baseRevision = null) {
+    const snapshot = cloneSerializableData(data || {});
+    const incomingRevision = getSnapshotSaveRevision(snapshot);
+    const explicitBaseRevision = Number(baseRevision);
+    const comparableRevision = Number.isFinite(explicitBaseRevision) && explicitBaseRevision >= 0
+        ? explicitBaseRevision
+        : incomingRevision;
+    const nextRevision = Math.max(currentRevision, comparableRevision) + 1;
+    snapshot._saveRevision = nextRevision;
+    snapshot._savedAt = new Date().toISOString();
+    return snapshot;
+}
+
 function pickPreferredStoredState(primaryState, backupState) {
+    if (
+        hasRestorableStateSnapshot(primaryState) &&
+        hasRestorableStateSnapshot(backupState) &&
+        getSnapshotSaveRevision(backupState) > getSnapshotSaveRevision(primaryState)
+    ) {
+        return backupState;
+    }
+
     if (hasRestorableStateSnapshot(primaryState)) {
         return primaryState;
     }
@@ -193,6 +246,91 @@ function pickPreferredStoredState(primaryState, backupState) {
     }
 
     return primaryState ?? null;
+}
+
+function writeStateWithRevisionGuard(request, sendResponse) {
+    const key = request.key;
+    const data = request.data;
+    const backupKey = getStateBackupKey(key);
+    const baseRevision = getRequestBaseRevision(request);
+    chrome.storage.local.get([key, backupKey], (existingData) => {
+        if (chrome.runtime.lastError) {
+            console.error('NotebookLM Source Management background save error:', chrome.runtime.lastError);
+            sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
+            return;
+        }
+
+        const currentState = pickPreferredStoredState(
+            existingData && typeof existingData === 'object' ? existingData[key] : null,
+            existingData && typeof existingData === 'object' ? existingData[backupKey] : null
+        );
+        const currentRevision = getSnapshotSaveRevision(currentState);
+
+        if (isStaleBaseRevision(baseRevision, currentState)) {
+            sendResponse({
+                success: false,
+                errorCode: ERROR_CODES.STALE_REVISION,
+                currentRevision
+            });
+            return;
+        }
+
+        if (baseRevision == null && isStaleStateWrite(data, currentState)) {
+            sendResponse({ success: true, stale: true, currentRevision });
+            return;
+        }
+
+        const savedState = createSavedStateSnapshot(data, currentRevision, baseRevision);
+        const storagePayload = { [key]: savedState };
+        if (hasRestorableStateSnapshot(savedState)) {
+            storagePayload[backupKey] = savedState;
+        }
+
+        chrome.storage.local.set(storagePayload, () => {
+            if (chrome.runtime.lastError) {
+                console.error('NotebookLM Source Management background save error:', chrome.runtime.lastError);
+                sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
+            } else {
+                sendResponse({
+                    success: true,
+                    saveRevision: savedState._saveRevision,
+                    savedAt: savedState._savedAt
+                });
+            }
+        });
+    });
+}
+
+function enqueueStateWrite(request, sendResponse) {
+    const key = request.key;
+    const createTask = () => new Promise((resolve) => {
+        writeStateWithRevisionGuard(request, (response) => {
+            sendResponse(response);
+            resolve(response);
+        });
+    });
+    const previousTask = stateSaveQueueByKey.get(key);
+
+    if (!previousTask) {
+        const saveTask = createTask();
+        stateSaveQueueByKey.set(key, saveTask);
+        saveTask.finally(() => {
+            if (stateSaveQueueByKey.get(key) === saveTask) {
+                stateSaveQueueByKey.delete(key);
+            }
+        }).catch(() => {});
+        return;
+    }
+
+    const saveTask = previousTask
+        .catch(() => null)
+        .then(createTask);
+    stateSaveQueueByKey.set(key, saveTask);
+    saveTask.finally(() => {
+        if (stateSaveQueueByKey.get(key) === saveTask) {
+            stateSaveQueueByKey.delete(key);
+        }
+    }).catch(() => {});
 }
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -232,19 +370,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             return;
         }
 
-        const storagePayload = { [request.key]: request.data };
-        if (hasRestorableStateSnapshot(request.data)) {
-            storagePayload[getStateBackupKey(request.key)] = request.data;
-        }
-
-        chrome.storage.local.set(storagePayload, () => {
-            if (chrome.runtime.lastError) {
-                console.error('NotebookLM Source Management background save error:', chrome.runtime.lastError);
-                sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
-            } else {
-                sendResponse({ success: true });
-            }
-        });
+        enqueueStateWrite(request, sendResponse);
         return true;
     }
 
@@ -277,6 +403,11 @@ if (typeof module !== 'undefined' && module.exports) {
         EXTENSION_ENABLED_KEY,
         ERROR_CODES,
         getStateBackupKey,
+        getSnapshotSaveRevision,
+        getRequestBaseRevision,
+        isStaleStateWrite,
+        isStaleBaseRevision,
+        createSavedStateSnapshot,
         hasRestorableStateSnapshot,
         pickPreferredStoredState,
         isNotebookHomeTab,

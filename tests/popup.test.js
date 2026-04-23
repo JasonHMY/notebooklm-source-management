@@ -1,6 +1,29 @@
 const fs = require('fs');
 const path = require('path');
 
+const extractCssBlock = (css, selector) => {
+    const selectorIndex = css.indexOf(selector);
+    if (selectorIndex === -1) return '';
+
+    const openIndex = css.indexOf('{', selectorIndex);
+    if (openIndex === -1) return '';
+
+    let depth = 0;
+    for (let index = openIndex; index < css.length; index += 1) {
+        const char = css[index];
+        if (char === '{') {
+            depth += 1;
+        } else if (char === '}') {
+            depth -= 1;
+            if (depth === 0) {
+                return css.slice(openIndex + 1, index);
+            }
+        }
+    }
+
+    return '';
+};
+
 const createPopupDocument = () => {
     const elements = {
         'popup-toggle-label': { textContent: '', hidden: false },
@@ -23,6 +46,41 @@ const createPopupDocument = () => {
         addEventListener: jest.fn()
     };
 };
+
+describe('popup motion styles', () => {
+    it('uses unified popup motion tokens and reduced motion handling', () => {
+        const css = fs.readFileSync(path.join(__dirname, '../src/popup/styles.css'), 'utf8');
+
+        expect(css).toContain('--popup-motion-fast: 120ms;');
+        expect(css).toContain('--popup-motion-base: 180ms;');
+        expect(css).toContain('--popup-motion-medium: 240ms;');
+        expect(css).toContain('--popup-motion-slow: 320ms;');
+        expect(css).toContain('--popup-ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);');
+        expect(css).toContain('--popup-ease-emphasized: cubic-bezier(0.2, 0.9, 0.25, 1);');
+        expect(css).toContain('--popup-ease-press: cubic-bezier(0.25, 1, 0.5, 1);');
+        expect(css).not.toContain('--popup-ease:');
+        expect(css).toContain('@media (prefers-reduced-motion: reduce)');
+    });
+
+    it('keeps popup control transitions explicit', () => {
+        const css = fs.readFileSync(path.join(__dirname, '../src/popup/styles.css'), 'utf8');
+        const switchTrack = extractCssBlock(css, '.popup-switch-track {');
+        const popupButton = extractCssBlock(css, '.popup-button {');
+
+        expect(switchTrack).toContain('var(--popup-motion-base)');
+        expect(switchTrack).not.toContain('transition: all');
+        expect(popupButton).toContain('var(--popup-motion-fast)');
+        expect(popupButton).not.toContain('transition: all');
+    });
+
+    it('keeps popup hover feedback as subtle scale without vertical lift', () => {
+        const css = fs.readFileSync(path.join(__dirname, '../src/popup/styles.css'), 'utf8');
+        const popupButtonHover = extractCssBlock(css, '.popup-button:hover:not(:disabled) {');
+
+        expect(popupButtonHover).toContain('transform: scale(1.02);');
+        expect(css).not.toContain('translateY(-1px)');
+    });
+});
 
 describe('popup launcher', () => {
     let popup;

@@ -12,6 +12,50 @@
     const MAX_EXPLICIT_ICON_CANDIDATES = 24;
     const MAX_FALLBACK_ICON_CANDIDATES = 18;
     const MAX_QUERY_RESULTS_PER_SELECTOR = 12;
+    const SOURCE_PROCESSING_SELECTOR = '[role="progressbar"], mat-spinner, svg animateTransform';
+    const SOURCE_FAILURE_SELECTOR = [
+        '[aria-invalid="true"]',
+        '[data-state="failed"]',
+        '[data-status="failed"]',
+        '[data-testid*="failed" i]',
+        '[data-testid*="error" i]'
+    ].join(', ');
+    const SOURCE_PROCESSING_TEXT_PATTERN = /\b(?:loading|analy[sz](?:ing|e)?|processing|parsing|uploading|importing|pending)\b|正在|载入|載入|加载|讀取|读取|分析|处理中|處理中|cargando|analizando|procesando|importando|subiendo/i;
+    const SOURCE_FAILURE_TEXT_PATTERN = /\b(?:failed|failure|could(?:n['’]?t| not)|unable|unsupported|invalid)\b|\b(?:error (?:loading|processing|importing|analy[sz]ing)|(?:loading|processing|importing|analy[sz]ing) error)\b|失败|失敗|错误|錯誤|无法|無法|fall[oó]|no se pudo|no pudo|no compatible/i;
+    const STABLE_SOURCE_TOKEN_ATTRIBUTES = [
+        'data-source-id',
+        'data-source-key',
+        'data-source-token',
+        'data-source-uuid',
+        'data-source-document-id',
+        'data-source-file-id',
+        'data-source-resource-id',
+        'data-notebook-source-id',
+        'data-document-id',
+        'data-doc-id',
+        'data-docid',
+        'data-drive-id',
+        'data-drive-file-id',
+        'data-file-id',
+        'data-resource-id',
+        'data-resource-key',
+        'data-item-id',
+        'data-record-id',
+        'data-uuid',
+        'data-id'
+    ];
+    const STABLE_SOURCE_REFERENCE_ATTRIBUTES = [
+        'href',
+        'data-href',
+        'data-url',
+        'data-link',
+        'data-source-url',
+        'data-document-url',
+        'data-drive-url',
+        'data-file-url',
+        'aria-describedby',
+        'aria-labelledby'
+    ];
 
     function findElement(selectors, parent) {
         const root = parent || document;
@@ -68,6 +112,30 @@
             }
 
             const segments = parsedUrl.pathname.split('/').filter(Boolean);
+            const stablePathKeys = new Set([
+                'd',
+                'doc',
+                'docs',
+                'document',
+                'documents',
+                'drive',
+                'file',
+                'files',
+                'folder',
+                'folders',
+                'resource',
+                'resources',
+                'source',
+                'sources'
+            ]);
+            for (let index = 0; index < segments.length - 1; index++) {
+                const segment = segments[index];
+                const nextSegment = segments[index + 1];
+                if (stablePathKeys.has(String(segment || '').toLowerCase()) && /[A-Za-z0-9_-]{6,}/.test(nextSegment)) {
+                    return sanitizeSourceToken(`${segment}:${nextSegment}`);
+                }
+            }
+
             const lastSegment = segments[segments.length - 1];
             if (lastSegment && /[A-Za-z0-9_-]{6,}/.test(lastSegment)) {
                 return sanitizeSourceToken(`${segments[segments.length - 2] || 'path'}:${lastSegment}`);
@@ -79,25 +147,92 @@
         return null;
     }
 
+    function extractTokenFromReferenceValue(attributeKey, value) {
+        const trimmedValue = String(value || '').trim();
+        if (!attributeKey || !trimmedValue) return null;
+
+        if (attributeKey === 'href') {
+            return extractTokenFromUrl(trimmedValue);
+        }
+
+        if (/(?:href|url|link)$/i.test(attributeKey)) {
+            const urlToken = extractTokenFromUrl(trimmedValue);
+            const sanitizedUrlToken = sanitizeSourceToken(urlToken ? `${attributeKey}:${urlToken}` : '');
+            if (sanitizedUrlToken) return sanitizedUrlToken;
+        }
+
+        if (attributeKey.startsWith('data-')) {
+            return sanitizeSourceToken(`${attributeKey}:${trimmedValue}`);
+        }
+
+        if (attributeKey === 'aria-describedby' || attributeKey === 'aria-labelledby') {
+            const parts = trimmedValue.split(/\s+/).filter(Boolean);
+            const stableReferencePattern = /(?:source|document|doc|drive|file|resource|item)[-_:]?[A-Za-z0-9_-]{6,}/i;
+            const idLikePattern = /[A-Za-z0-9_-]{12,}/;
+            const reference = parts.find((part) => stableReferencePattern.test(part)) ||
+                (/(?:source|document|doc|drive|file|resource|item)/i.test(trimmedValue)
+                    ? parts.find((part) => idLikePattern.test(part))
+                    : null);
+            const sanitized = sanitizeSourceToken(reference ? `${attributeKey}:${reference}` : '');
+            if (sanitized) return sanitized;
+        }
+
+        return null;
+    }
+
+    function getElementSignalText(element) {
+        if (!element) return '';
+        const parts = [];
+        if (typeof element.textContent === 'string') parts.push(element.textContent);
+        if (typeof element.getAttribute === 'function') {
+            [
+                'aria-label',
+                'title',
+                'data-state',
+                'data-status',
+                'data-testid',
+                'aria-describedby',
+                'aria-labelledby'
+            ].forEach((attributeKey) => {
+                const value = element.getAttribute(attributeKey);
+                if (value) parts.push(value);
+            });
+        }
+        return parts.join(' ');
+    }
+
+    function hasSourceProcessingSignal(sourceElement) {
+        if (!sourceElement) return false;
+        if (
+            typeof sourceElement.querySelector === 'function' &&
+            sourceElement.querySelector(SOURCE_PROCESSING_SELECTOR)
+        ) {
+            return true;
+        }
+        return SOURCE_PROCESSING_TEXT_PATTERN.test(getElementSignalText(sourceElement));
+    }
+
+    function hasSourceFailureSignal(sourceElement) {
+        if (!sourceElement) return false;
+        if (
+            typeof sourceElement.querySelector === 'function' &&
+            sourceElement.querySelector(SOURCE_FAILURE_SELECTOR)
+        ) {
+            return true;
+        }
+        return SOURCE_FAILURE_TEXT_PATTERN.test(getElementSignalText(sourceElement));
+    }
+
     function extractSourceStableToken(sourceRow) {
         if (!sourceRow) return null;
 
         const selectors = [
-            '[data-source-id]',
-            '[data-document-id]',
-            '[data-doc-id]',
-            '[data-resource-id]',
-            '[data-item-id]',
-            '[data-id]',
-            '[href]'
+            ...STABLE_SOURCE_TOKEN_ATTRIBUTES.map((attributeKey) => `[${attributeKey}]`),
+            ...STABLE_SOURCE_REFERENCE_ATTRIBUTES.map((attributeKey) => `[${attributeKey}]`)
         ];
         const attributeKeys = [
-            'data-source-id',
-            'data-document-id',
-            'data-doc-id',
-            'data-resource-id',
-            'data-item-id',
-            'data-id'
+            ...STABLE_SOURCE_TOKEN_ATTRIBUTES,
+            ...STABLE_SOURCE_REFERENCE_ATTRIBUTES
         ];
         const candidates = [sourceRow];
 
@@ -113,12 +248,9 @@
 
             for (const attributeKey of attributeKeys) {
                 const attributeValue = candidate.getAttribute(attributeKey);
-                const sanitized = sanitizeSourceToken(attributeValue ? `${attributeKey}:${attributeValue}` : '');
-                if (sanitized) return sanitized;
+                const token = extractTokenFromReferenceValue(attributeKey, attributeValue);
+                if (token) return token;
             }
-
-            const hrefToken = extractTokenFromUrl(candidate.getAttribute('href'));
-            if (hrefToken) return hrefToken;
         }
 
         return null;
@@ -329,10 +461,15 @@
 
         const titleEl = findElement(DEPS.title, sourceElement);
         const checkbox = findElement(DEPS.checkbox, sourceElement);
-        const ariaLabel = checkbox && typeof checkbox.getAttribute === 'function'
+        const checkboxAriaLabel = checkbox && typeof checkbox.getAttribute === 'function'
             ? (checkbox.getAttribute('aria-label') || '')
             : '';
-        const title = titleEl?.textContent.trim() || getMessage('ui_source_untitled');
+        const rowAriaLabel = typeof sourceElement.getAttribute === 'function'
+            ? (sourceElement.getAttribute('aria-label') || '')
+            : '';
+        const ariaLabel = checkboxAriaLabel || rowAriaLabel;
+        const explicitTitle = titleEl?.textContent.trim() || ariaLabel;
+        const title = explicitTitle || getMessage('ui_source_untitled');
         const nativeMoreButton = findElement(DEPS.moreBtn, sourceElement);
         const nativeIconContext = {
             titleEl,
@@ -362,6 +499,8 @@
         }
 
         const stableToken = extractSourceStableToken(sourceElement);
+        const hasProcessingSignal = hasSourceProcessingSignal(sourceElement);
+        const hasFailureSignal = hasSourceFailureSignal(sourceElement);
         const fingerprint = [
             normalizeSourceText(title),
             normalizeSourceText(ariaLabel),
@@ -379,12 +518,16 @@
             ariaLabel,
             stableToken,
             fingerprint,
-            nativeIconContext
+            nativeIconContext,
+            hasProcessingSignal,
+            hasFailureSignal,
+            hasTitleSignal: Boolean(titleEl || explicitTitle),
+            hasActionSignal: Boolean(checkbox || nativeMoreButton || stableToken || hasProcessingSignal || hasFailureSignal)
         };
     }
 
     function isManageableSourceIdentity(identity) {
-        return Boolean(identity && identity.titleEl && identity.checkbox);
+        return Boolean(identity && identity.hasTitleSignal && identity.hasActionSignal);
     }
 
     function createSourceDescriptor(sourceElement, seenSourceIds, seenLegacyKeys) {
@@ -402,7 +545,9 @@
             fingerprint,
             iconName,
             iconEl,
-            nativeIconContext
+            nativeIconContext,
+            hasProcessingSignal,
+            hasFailureSignal
         } = identity || {};
         const keyTitle = ariaLabel || titleEl?.textContent || '';
 
@@ -416,8 +561,9 @@
         seenSourceIds.set(sourceIdBase, duplicateIndex + 1);
         const key = duplicateIndex === 0 ? sourceIdBase : `${sourceIdBase}_${duplicateIndex}`;
         const legacyKey = buildLegacySourceKey(keyTitle, seenLegacyKeys);
-        const isLoading = Boolean(sourceElement.querySelector('[role="progressbar"], mat-spinner, svg animateTransform'));
-        const isDisabled = !checkbox || checkbox.disabled || isLoading;
+        const isLoading = Boolean(hasProcessingSignal);
+        const hasNativeCheckbox = Boolean(checkbox);
+        const isDisabled = Boolean(checkbox?.disabled || isLoading || (hasFailureSignal && !hasNativeCheckbox));
 
         return {
             key,
@@ -434,7 +580,9 @@
             iconColorClass,
             iconImageUrl,
             checkbox,
+            hasNativeCheckbox,
             isLoading,
+            isFailed: Boolean(hasFailureSignal && !isLoading),
             isDisabled
         };
     }
@@ -445,6 +593,9 @@
         extractSourceIconImageUrl,
         extractSourceStableToken,
         extractTokenFromUrl,
+        extractTokenFromReferenceValue,
+        hasSourceProcessingSignal,
+        hasSourceFailureSignal,
         extractCssUrl,
         generateSourceKey,
         isManageableSourceIdentity,

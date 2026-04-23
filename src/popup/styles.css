@@ -34,7 +34,13 @@
     --popup-shadow-control: 0 6px 18px rgba(0, 0, 0, 0.08);
     --popup-shadow-action: 0 8px 20px rgba(0, 122, 255, 0.18);
     --popup-switch-thumb-shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 0 1px rgba(0, 0, 0, 0.1);
-    --popup-ease: cubic-bezier(0.25, 1, 0.5, 1);
+    --popup-motion-fast: 120ms;
+    --popup-motion-base: 180ms;
+    --popup-motion-medium: 240ms;
+    --popup-motion-slow: 320ms;
+    --popup-ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+    --popup-ease-emphasized: cubic-bezier(0.2, 0.9, 0.25, 1);
+    --popup-ease-press: cubic-bezier(0.25, 1, 0.5, 1);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -222,9 +228,9 @@ body {
     border-radius: var(--popup-radius-pill);
     background: #e9e9ea;
     transition:
-        background-color 180ms var(--popup-ease),
-        border-color 180ms var(--popup-ease),
-        box-shadow 180ms var(--popup-ease);
+        background-color var(--popup-motion-base) var(--popup-ease-standard),
+        border-color var(--popup-motion-base) var(--popup-ease-standard),
+        box-shadow var(--popup-motion-base) var(--popup-ease-standard);
 }
 
 .popup-switch-track::after {
@@ -238,7 +244,7 @@ body {
     background: #fff;
     box-shadow: var(--popup-switch-thumb-shadow);
     transform: translateY(-50%);
-    transition: transform 180ms var(--popup-ease);
+    transition: transform var(--popup-motion-base) var(--popup-ease-emphasized);
 }
 
 .popup-switch-input:checked + .popup-switch-track {
@@ -315,16 +321,16 @@ body {
     overflow-wrap: anywhere;
     text-align: center;
     transition:
-        background-color 180ms var(--popup-ease),
-        border-color 180ms var(--popup-ease),
-        box-shadow 180ms var(--popup-ease),
-        opacity 180ms var(--popup-ease),
-        transform 180ms var(--popup-ease);
+        background-color var(--popup-motion-base) var(--popup-ease-standard),
+        border-color var(--popup-motion-base) var(--popup-ease-standard),
+        box-shadow var(--popup-motion-base) var(--popup-ease-standard),
+        opacity var(--popup-motion-base) var(--popup-ease-standard),
+        transform var(--popup-motion-fast) var(--popup-ease-press);
 }
 
 .popup-button:hover:not(:disabled) {
     background: var(--popup-accent-hover);
-    transform: translateY(-1px);
+    transform: scale(1.02);
 }
 
 .popup-button:active:not(:disabled) {
@@ -348,5 +354,28 @@ body {
 @media (prefers-color-scheme: dark) {
     .popup-switch-track {
         background: #39393d;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    :root {
+        --popup-motion-fast: 1ms;
+        --popup-motion-base: 1ms;
+        --popup-motion-medium: 1ms;
+        --popup-motion-slow: 1ms;
+    }
+
+    *,
+    *::before,
+    *::after {
+        animation-duration: 1ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 1ms !important;
+        scroll-behavior: auto !important;
+    }
+
+    .popup-button:hover:not(:disabled),
+    .popup-button:active:not(:disabled) {
+        transform: none;
     }
 }

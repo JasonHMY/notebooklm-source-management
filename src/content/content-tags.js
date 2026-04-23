@@ -7,18 +7,14 @@
             getMessage
         } = deps;
         const runtime = deps.runtime || deps;
+        const contentConfig = globalThis.NSM_CONTENT_CONFIG || {};
 
-        const TAG_COLOR_PRESETS = [
-            '#007AFF',
-            '#34C759',
-            '#FF9500',
-            '#FF3B30',
-            '#AF52DE',
-            '#5AC8FA',
-            '#FF2D55',
-            '#8E8E93'
-        ];
-        const TAG_COLOR_HEX_PATTERN = /^#([0-9A-F]{6})$/;
+        const TAG_COLOR_PRESETS = Array.isArray(contentConfig.TAG_COLOR_PRESETS)
+            ? contentConfig.TAG_COLOR_PRESETS
+            : ['#007AFF'];
+        const TAG_COLOR_HEX_PATTERN = contentConfig.TAG_COLOR_HEX_PATTERN instanceof RegExp
+            ? contentConfig.TAG_COLOR_HEX_PATTERN
+            : /^#([0-9A-F]{6})$/;
 
         function normalizeTagLabel(value) {
             return String(value || '')
@@ -38,6 +34,10 @@
 
         function getDefaultTagColor() {
             return TAG_COLOR_PRESETS[0];
+        }
+
+        function getTagColorPresets() {
+            return [...TAG_COLOR_PRESETS];
         }
 
         function normalizeTagColorInputValue(value) {
@@ -221,6 +221,7 @@
             normalizeTagLabel,
             normalizeTagColor,
             getDefaultTagColor,
+            getTagColorPresets,
             normalizeTagColorInputValue,
             getSerializedTag,
             getTagColorRgb,

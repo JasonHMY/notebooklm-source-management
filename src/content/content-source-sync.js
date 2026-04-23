@@ -54,6 +54,9 @@
         const buildSourceLookup = typeof deps.buildSourceLookup === 'function'
             ? deps.buildSourceLookup
             : () => ({});
+        const resolveStoredSourceKeyWithReason = typeof deps.resolveStoredSourceKeyWithReason === 'function'
+            ? deps.resolveStoredSourceKeyWithReason
+            : () => ({ key: null, reason: 'unresolved' });
         const buildResolvedSourceStateById = typeof deps.buildResolvedSourceStateById === 'function'
             ? deps.buildResolvedSourceStateById
             : () => new Map();
@@ -93,6 +96,9 @@
         const buildParentMap = typeof deps.buildParentMap === 'function'
             ? deps.buildParentMap
             : () => {};
+        const buildPersistableState = typeof deps.buildPersistableState === 'function'
+            ? deps.buildPersistableState
+            : null;
         const saveState = typeof deps.saveState === 'function'
             ? deps.saveState
             : () => {};
@@ -186,6 +192,66 @@
         const getShadowRoot = () => runtime.shadowRoot || null;
         const getScrollObserver = () => runtime.scrollObserver || null;
 
+        function getStableComparableValue(value, seenValues = new WeakSet()) {
+            if (value == null || typeof value !== 'object') {
+                return value;
+            }
+
+            if (seenValues.has(value)) {
+                return '[Circular]';
+            }
+            seenValues.add(value);
+
+            try {
+                if (Array.isArray(value)) {
+                    return value.map((item) => getStableComparableValue(item, seenValues));
+                }
+
+                if (value instanceof Map) {
+                    return Array.from(value.entries())
+                        .sort(([leftKey], [rightKey]) => String(leftKey).localeCompare(String(rightKey)))
+                        .map(([key, item]) => [String(key), getStableComparableValue(item, seenValues)]);
+                }
+
+                return Object.keys(value)
+                    .sort()
+                    .reduce((acc, key) => {
+                        acc[key] = getStableComparableValue(value[key], seenValues);
+                        return acc;
+                    }, {});
+            } finally {
+                seenValues.delete(value);
+            }
+        }
+
+        function getPersistableStateSignature() {
+            if (!buildPersistableState) return null;
+
+            try {
+                return JSON.stringify(getStableComparableValue(buildPersistableState()));
+            } catch (error) {
+                return null;
+            }
+        }
+
+        function shouldSaveAfterMutationSync(previousSignature, nextSignature) {
+            return previousSignature == null || nextSignature == null || previousSignature !== nextSignature;
+        }
+
+        const SOURCE_RENAME_ATTRIBUTE_NAMES = new Set([
+            'aria-label',
+            'title',
+            'alt',
+            'data-source-id',
+            'data-document-id',
+            'data-doc-id',
+            'data-file-id',
+            'data-drive-id',
+            'data-resource-id',
+            'data-testid',
+            'href'
+        ]);
+
         const SOURCE_DETAIL_HEADING_PATTERNS = [
             /\bsource\s+guide\b/i,
             /\bsource\s+details?\b/i,
@@ -256,8 +322,7 @@
         }
 
         function hasSourceLoadingIndicator(sourceElement) {
-            if (!sourceElement || typeof sourceElement.querySelector !== 'function') return false;
-            return Boolean(sourceElement.querySelector('[role="progressbar"], mat-spinner, svg animateTransform'));
+            return Boolean(extractSourceIdentitySnapshot(sourceElement)?.hasProcessingSignal);
         }
 
         function isDetailLikeSourceIdentity(identity) {
@@ -265,7 +330,10 @@
                 identity &&
                 identity.titleEl &&
                 !identity.checkbox &&
-                !identity.nativeMoreButton
+                !identity.nativeMoreButton &&
+                !identity.stableToken &&
+                !identity.hasProcessingSignal &&
+                !identity.hasFailureSignal
             );
         }
 
@@ -342,7 +410,7 @@
                 [resolvedEntry] = fingerprintMatches;
             }
 
-            if (!resolvedEntry || !resolvedEntry.checkbox) {
+            if (!resolvedEntry) {
                 return null;
             }
 
@@ -429,6 +497,7 @@
             let manageableRows = 0;
             let detailLikeRows = 0;
             let loadingRows = 0;
+            let failedRows = 0;
 
             sourceElements.forEach((row) => {
                 const identity = extractSourceIdentitySnapshot(row);
@@ -441,6 +510,9 @@
                 if (hasSourceLoadingIndicator(row)) {
                     loadingRows += 1;
                 }
+                if (identity?.hasFailureSignal) {
+                    failedRows += 1;
+                }
             });
 
             if (hasNativeDetailView) {
@@ -449,7 +521,8 @@
                     totalRows: sourceElements.length,
                     manageableRows,
                     detailLikeRows,
-                    loadingRows
+                    loadingRows,
+                    failedRows
                 };
             }
 
@@ -460,7 +533,8 @@
                         totalRows: sourceElements.length,
                         manageableRows,
                         detailLikeRows,
-                        loadingRows
+                        loadingRows,
+                        failedRows
                     };
                 }
 
@@ -473,7 +547,8 @@
                     totalRows: sourceElements.length,
                     manageableRows,
                     detailLikeRows,
-                    loadingRows
+                    loadingRows,
+                    failedRows
                 };
             }
 
@@ -489,7 +564,8 @@
                     totalRows: sourceElements.length,
                     manageableRows,
                     detailLikeRows,
-                    loadingRows
+                    loadingRows,
+                    failedRows
                 };
             }
 
@@ -498,7 +574,8 @@
                 totalRows: sourceElements.length,
                 manageableRows,
                 detailLikeRows,
-                loadingRows
+                loadingRows,
+                failedRows
             };
         }
 
@@ -508,6 +585,30 @@
 
         function isSourceDetailViewPanel(panel) {
             return getSourcePanelState(panel).state === 'detail';
+        }
+
+        function shouldPreserveExistingSourcesDuringPartialSync(currentSources, sourceLookup, previousSourceRecordsByKey) {
+            if (!previousSourceRecordsByKey || typeof previousSourceRecordsByKey.forEach !== 'function') return false;
+            const previousCount = previousSourceRecordsByKey.size;
+            const currentCount = Array.isArray(currentSources) ? currentSources.length : 0;
+            if (previousCount === 0 || currentCount >= previousCount) return false;
+            if (currentCount === 0) return true;
+
+            const currentKeys = new Set((currentSources || []).map((source) => source.key).filter(Boolean));
+            if (currentKeys.size === 0) return true;
+
+            const resolvedCurrentKeys = new Set();
+            previousSourceRecordsByKey.forEach((sourceRecord, storedKey) => {
+                const resolution = resolveStoredSourceKeyWithReason(storedKey, sourceLookup, sourceRecord);
+                if (resolution?.key && currentKeys.has(resolution.key)) {
+                    resolvedCurrentKeys.add(resolution.key);
+                }
+            });
+
+            const missingPreviousCount = Math.max(0, previousCount - resolvedCurrentKeys.size);
+            if (missingPreviousCount === 0) return false;
+
+            return (currentSources || []).some((source) => source?.key && !resolvedCurrentKeys.has(source.key));
         }
 
         function scanAndSyncSources(loadedState, isFirstLoad = false) {
@@ -529,10 +630,6 @@
                 });
             }
 
-            sourcesByKey.clear();
-            sourceTagsById.clear();
-            runtime.keyByElement = keyByElement;
-
             const sourceElements = getSourceElements();
             if (sourceElements.length === 0 && Array.from(getDocument()?.body?.children || []).length > 2) {
                 // The native panel can be empty while NotebookLM is still loading initial results.
@@ -544,6 +641,19 @@
                 .map((sourceElement) => createSourceDescriptor(sourceElement, seenSourceIds, seenLegacyKeys))
                 .filter(Boolean);
             const sourceLookup = buildSourceLookup(currentSources);
+            if (!isFirstLoad && shouldPreserveExistingSourcesDuringPartialSync(currentSources, sourceLookup, previousSourceRecordsByKey)) {
+                runtime.lastSkippedPartialSourceSync = {
+                    previousCount: previousSourceRecordsByKey.size,
+                    currentCount: currentSources.length,
+                    skippedAt: new Date().toISOString()
+                };
+                return false;
+            }
+
+            sourcesByKey.clear();
+            sourceTagsById.clear();
+            runtime.keyByElement = keyByElement;
+
             const normalizedTagState = isFirstLoad ? buildNormalizedTagState(loadedState) : null;
             const resolvedSourceStateById = isFirstLoad
                 ? buildResolvedSourceStateById(sourceLookup, loadedState)
@@ -598,11 +708,11 @@
                 if (isFirstLoad) {
                     enabled = resolvedSourceStateById.has(source.key)
                         ? Boolean(resolvedSourceStateById.get(source.key).enabled)
-                        : Boolean(source.checkbox?.checked);
+                        : (source.hasNativeCheckbox ? Boolean(source.checkbox?.checked) : true);
                 } else {
                     enabled = oldSourcesMap.has(source.key)
                         ? Boolean(oldSourcesMap.get(source.key).enabled)
-                        : Boolean(source.checkbox?.checked);
+                        : (source.hasNativeCheckbox ? Boolean(source.checkbox?.checked) : true);
                 }
 
                 const hydratedSource = {
@@ -649,7 +759,7 @@
                 return wrapped;
             });
 
-        const debouncedScanAndSync = createDebounced(() => {
+        const debouncedScanAndSync = createDebounced((syncOptions = {}) => {
             try {
                 if (getIsAwaitingInitialStateLoad()) {
                     return;
@@ -686,46 +796,110 @@
                     return;
                 }
 
+                const previousPersistableSignature = getPersistableStateSignature();
                 // Pass false for isFirstLoad because this is triggered by DOM mutations
                 scanAndSyncSources({}, false);
                 render();
-                saveState();
+                const nextPersistableSignature = getPersistableStateSignature();
+                if (shouldSaveAfterMutationSync(previousPersistableSignature, nextPersistableSignature)) {
+                    saveState(syncOptions?.critical
+                        ? { immediate: true, critical: true }
+                        : {});
+                }
             } catch (error) {
                 console.error('NotebookLM Source Management: Error syncing state during DOM change.', error);
             }
         }, 500);
 
+        function isElementInsideExtensionRoot(element) {
+            if (!element || element.nodeType !== 1) return false;
+            return Boolean(
+                element.id === 'sources-plus-root' ||
+                element.closest?.('#sources-plus-root')
+            );
+        }
+
+        function getMutationElementTarget(target) {
+            if (!target) return null;
+            if (target.nodeType === 1) return target;
+            return target.parentElement || target.parentNode || null;
+        }
+
+        function isElementWithinSourceRow(element) {
+            if (!element || element.nodeType !== 1) return false;
+            const rowSelectors = Array.isArray(getDEPS().row) ? getDEPS().row : [];
+            return rowSelectors.some((selector) => {
+                try {
+                    return Boolean(element.matches?.(selector) || element.closest?.(selector));
+                } catch (error) {
+                    return false;
+                }
+            });
+        }
+
+        function isRelevantSourceChildNode(node) {
+            if (!node) return false;
+            if (node.nodeType === 3) {
+                return isElementWithinSourceRow(getMutationElementTarget(node));
+            }
+            if (node.nodeType !== 1) return false;
+            return Boolean(
+                node.hasAttribute?.('data-testid') ||
+                node.classList?.contains('single-source-container') ||
+                node.querySelector?.('.single-source-container') ||
+                isElementWithinSourceRow(node)
+            );
+        }
+
+        function getMutationRelevance(mutation) {
+            const targetElement = getMutationElementTarget(mutation?.target);
+            if (isElementInsideExtensionRoot(targetElement)) {
+                return { relevant: false, critical: false };
+            }
+
+            if (mutation?.type === 'childList') {
+                const changedNodes = [
+                    ...Array.from(mutation.addedNodes || []),
+                    ...Array.from(mutation.removedNodes || [])
+                ];
+                const relevant = changedNodes.some((node) => isRelevantSourceChildNode(node));
+                return { relevant, critical: false };
+            }
+
+            if (mutation?.type === 'characterData') {
+                return {
+                    relevant: isElementWithinSourceRow(targetElement),
+                    critical: true
+                };
+            }
+
+            if (mutation?.type === 'attributes') {
+                const attributeName = String(mutation.attributeName || '');
+                return {
+                    relevant: SOURCE_RENAME_ATTRIBUTE_NAMES.has(attributeName) && isElementWithinSourceRow(targetElement),
+                    critical: true
+                };
+            }
+
+            return { relevant: false, critical: false };
+        }
+
         function handleDomChanges(mutations) {
             try {
                 let needsReSync = false;
+                let needsCriticalSave = false;
                 for (const mutation of mutations) {
-                    // Ignore mutations happening inside our own extension container to prevent infinite loops
-                    if (mutation.target && (mutation.target.id === 'sources-plus-root' || mutation.target.closest('#sources-plus-root'))) {
-                        continue;
-                    }
-
-                    // We only care about nodes being added/removed in the native list
-                    if (mutation.type === 'childList') {
-                        const addedNodes = Array.from(mutation.addedNodes);
-                        const removedNodes = Array.from(mutation.removedNodes);
-                        const hasRelevantChanges = [...addedNodes, ...removedNodes].some((node) => {
-                            return node.nodeType === 1 && (
-                                node.hasAttribute('data-testid') ||
-                                node.classList.contains('single-source-container') ||
-                                node.querySelector('.single-source-container')
-                            );
-                        });
-
-                        if (hasRelevantChanges) {
-                            needsReSync = true;
-                            break;
-                        }
+                    const relevance = getMutationRelevance(mutation);
+                    if (relevance.relevant) {
+                        needsReSync = true;
+                        needsCriticalSave = needsCriticalSave || relevance.critical;
+                        if (needsCriticalSave) break;
                     }
                 }
 
                 if (needsReSync) {
                     setFreshRowCache(null);
-                    debouncedScanAndSync();
+                    debouncedScanAndSync(needsCriticalSave ? { critical: true } : {});
                 }
             } catch (error) {
                 console.error('NotebookLM Source Management: Failed handling mutations.', error);
@@ -748,6 +922,9 @@
             scanAndSyncSources,
             handleDomChanges,
             debouncedScanAndSync,
+            getPersistableStateSignature,
+            shouldSaveAfterMutationSync,
+            getMutationRelevance,
             getFreshRowCache,
             setFreshRowCache,
             clearFreshRowCache: () => setFreshRowCache(null)

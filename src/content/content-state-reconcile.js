@@ -12,6 +12,9 @@
         function buildSourceLookup(sourceList) {
             const byId = new Map();
             const byLegacyKey = new Map();
+            const byElement = new WeakMap();
+            const sourceByKey = new Map();
+            const orderedKeys = [];
             const stableTokenBuckets = new Map();
             const fingerprintBuckets = new Map();
             const titleBuckets = new Map();
@@ -19,6 +22,11 @@
             for (const source of sourceList) {
                 byId.set(source.key, source.key);
                 byLegacyKey.set(source.legacyKey, source.key);
+                sourceByKey.set(source.key, source);
+                orderedKeys.push(source.key);
+                if (source.element && typeof source.element === 'object') {
+                    byElement.set(source.element, source.key);
+                }
 
                 if (source.stableToken) {
                     if (!stableTokenBuckets.has(source.stableToken)) stableTokenBuckets.set(source.stableToken, []);
@@ -48,37 +56,107 @@
             return {
                 byId,
                 byLegacyKey,
+                byElement,
+                sourceByKey,
+                orderedKeys,
                 uniqueByStableToken,
                 uniqueByFingerprint,
                 uniqueByTitle
             };
         }
 
-        function resolveStoredSourceKey(storedKey, sourceLookup, sourceRecord = null) {
-            if (!storedKey || !sourceLookup) return null;
-            if (sourceLookup.byId.has(storedKey)) return sourceLookup.byId.get(storedKey);
-            if (sourceLookup.byLegacyKey.has(storedKey)) return sourceLookup.byLegacyKey.get(storedKey);
+        function createResolvedSourceKey(key, reason) {
+            return { key: key || null, reason: key ? reason : 'unresolved' };
+        }
+
+        function normalizeStableTokenForComparison(value) {
+            return String(value || '')
+                .trim()
+                .replace(/\s+/g, ' ')
+                .toLowerCase()
+                .replace(/[^a-z0-9]+/g, '-')
+                .replace(/^-+|-+$/g, '');
+        }
+
+        function areStableTokensCompatible(storedStableToken, candidateStableToken) {
+            const storedToken = normalizeStableTokenForComparison(storedStableToken);
+            const candidateToken = normalizeStableTokenForComparison(candidateStableToken);
+            if (!storedToken || !candidateToken) return true;
+            if (storedToken === candidateToken) return true;
+            return candidateToken.endsWith(`-${storedToken}`) || storedToken.endsWith(`-${candidateToken}`);
+        }
+
+        function extractStableTokenFromSourceKey(sourceKey) {
+            const value = String(sourceKey || '');
+            return value.startsWith('source_id_') ? value.slice('source_id_'.length) : '';
+        }
+
+        function getStoredStableToken(sourceRecord = null, storedKey = '') {
+            return sourceRecord?.stableToken || extractStableTokenFromSourceKey(storedKey);
+        }
+
+        function canResolveSourceByWeakIdentity(sourceLookup, candidateKey, sourceRecord = null, storedKey = '') {
+            if (!candidateKey || !sourceRecord) return Boolean(candidateKey);
+            const candidateSource = sourceLookup?.sourceByKey?.get?.(candidateKey) || null;
+            const storedStableToken = getStoredStableToken(sourceRecord, storedKey);
+            if (!storedStableToken && candidateSource?.stableToken) {
+                return false;
+            }
+            if (
+                storedStableToken &&
+                candidateSource?.stableToken &&
+                !areStableTokensCompatible(storedStableToken, candidateSource.stableToken)
+            ) {
+                return false;
+            }
+            return true;
+        }
+
+        function resolveStoredSourceKeyWithReason(storedKey, sourceLookup, sourceRecord = null) {
+            if (!storedKey || !sourceLookup) return createResolvedSourceKey(null, 'unresolved');
+            if (sourceLookup.byId.has(storedKey)) return createResolvedSourceKey(sourceLookup.byId.get(storedKey), 'id');
+            if (sourceLookup.byLegacyKey.has(storedKey)) return createResolvedSourceKey(sourceLookup.byLegacyKey.get(storedKey), 'legacy');
 
             if (sourceRecord && sourceRecord.stableToken && sourceLookup.uniqueByStableToken.has(sourceRecord.stableToken)) {
-                return sourceLookup.uniqueByStableToken.get(sourceRecord.stableToken);
+                return createResolvedSourceKey(sourceLookup.uniqueByStableToken.get(sourceRecord.stableToken), 'stable-token');
             }
 
             if (sourceRecord && sourceRecord.fingerprint && sourceLookup.uniqueByFingerprint.has(sourceRecord.fingerprint)) {
-                return sourceLookup.uniqueByFingerprint.get(sourceRecord.fingerprint);
+                const fingerprintKey = sourceLookup.uniqueByFingerprint.get(sourceRecord.fingerprint);
+                if (canResolveSourceByWeakIdentity(sourceLookup, fingerprintKey, sourceRecord, storedKey)) {
+                    return createResolvedSourceKey(fingerprintKey, 'fingerprint');
+                }
+            }
+
+            if (
+                sourceRecord &&
+                sourceRecord.element &&
+                sourceLookup.byElement &&
+                sourceLookup.byElement.has(sourceRecord.element)
+            ) {
+                return createResolvedSourceKey(sourceLookup.byElement.get(sourceRecord.element), 'element');
             }
 
             const normalizedTitle = normalizeSourceText(
                 sourceRecord && (sourceRecord.normalizedTitle || sourceRecord.title)
             );
             if (normalizedTitle && sourceLookup.uniqueByTitle.has(normalizedTitle)) {
-                return sourceLookup.uniqueByTitle.get(normalizedTitle);
+                const titleKey = sourceLookup.uniqueByTitle.get(normalizedTitle);
+                if (canResolveSourceByWeakIdentity(sourceLookup, titleKey, sourceRecord, storedKey)) {
+                    return createResolvedSourceKey(titleKey, 'unique-title');
+                }
             }
 
-            return null;
+            return createResolvedSourceKey(null, 'unresolved');
+        }
+
+        function resolveStoredSourceKey(storedKey, sourceLookup, sourceRecord = null) {
+            return resolveStoredSourceKeyWithReason(storedKey, sourceLookup, sourceRecord).key;
         }
 
         function snapshotExistingSourceRecords() {
             const sourceRecordsByKey = new Map();
+            let domIndex = 0;
             runtime.sourcesByKey.forEach((source, key) => {
                 sourceRecordsByKey.set(key, {
                     enabled: Boolean(source.enabled),
@@ -86,10 +164,106 @@
                     normalizedTitle: source.normalizedTitle || normalizeSourceText(source.title),
                     stableToken: source.stableToken || '',
                     fingerprint: source.fingerprint || '',
-                    identityType: source.identityType || 'fingerprint'
+                    identityType: source.identityType || 'fingerprint',
+                    element: source.element || null,
+                    domIndex
                 });
+                domIndex++;
             });
             return sourceRecordsByKey;
+        }
+
+        function buildSingleSourcePositionalRemap(sourceLookup, previousState) {
+            const orderedKeys = Array.isArray(sourceLookup?.orderedKeys) ? sourceLookup.orderedKeys : [];
+            const sourceRecordsByKey = previousState?.sourceRecordsByKey;
+            if (!sourceRecordsByKey || typeof sourceRecordsByKey.entries !== 'function' || orderedKeys.length === 0) {
+                return new Map();
+            }
+
+            const previousEntries = Array.from(sourceRecordsByKey.entries())
+                .sort((left, right) => {
+                    const leftIndex = Number(left[1]?.domIndex);
+                    const rightIndex = Number(right[1]?.domIndex);
+                    if (Number.isFinite(leftIndex) && Number.isFinite(rightIndex)) return leftIndex - rightIndex;
+                    if (Number.isFinite(leftIndex)) return -1;
+                    if (Number.isFinite(rightIndex)) return 1;
+                    return 0;
+                });
+            if (previousEntries.length !== orderedKeys.length) {
+                return new Map();
+            }
+
+            const resolvedByOldKey = new Map();
+            const resolvedReasonByOldKey = new Map();
+            const resolvedCurrentKeys = new Set();
+            let hasDuplicateResolution = false;
+            previousEntries.forEach(([storedKey, sourceRecord]) => {
+                const resolution = resolveStoredSourceKeyWithReason(storedKey, sourceLookup, sourceRecord);
+                if (!resolution.key) return;
+                if (resolvedCurrentKeys.has(resolution.key)) {
+                    hasDuplicateResolution = true;
+                    return;
+                }
+                resolvedByOldKey.set(storedKey, resolution.key);
+                resolvedReasonByOldKey.set(storedKey, resolution.reason);
+                resolvedCurrentKeys.add(resolution.key);
+            });
+            if (hasDuplicateResolution) {
+                return new Map();
+            }
+
+            const unresolvedEntries = previousEntries
+                .map(([storedKey, sourceRecord], index) => ({ storedKey, sourceRecord, index }))
+                .filter(({ storedKey }) => !resolvedByOldKey.has(storedKey));
+            if (unresolvedEntries.length !== 1) {
+                return new Map();
+            }
+
+            const [{ storedKey, sourceRecord, index }] = unresolvedEntries;
+            const candidateKey = orderedKeys[index];
+            if (!candidateKey || resolvedCurrentKeys.has(candidateKey)) {
+                return new Map();
+            }
+
+            const candidateSource = sourceLookup.sourceByKey?.get?.(candidateKey) || null;
+            const storedStableToken = getStoredStableToken(sourceRecord, storedKey);
+            if (candidateSource?.stableToken && !storedStableToken) {
+                return new Map();
+            }
+            if (
+                candidateSource?.stableToken &&
+                storedStableToken &&
+                !areStableTokensCompatible(storedStableToken, candidateSource.stableToken)
+            ) {
+                return new Map();
+            }
+
+            const strongAnchorReasons = new Set(['id', 'legacy', 'stable-token', 'fingerprint', 'element']);
+            const hasStrongAnchorAtIndex = (entryIndex) => {
+                if (entryIndex < 0 || entryIndex >= previousEntries.length) return false;
+                const previousKey = previousEntries[entryIndex][0];
+                const resolvedKey = resolvedByOldKey.get(previousKey);
+                const resolvedReason = resolvedReasonByOldKey.get(previousKey);
+                return Boolean(
+                    resolvedKey &&
+                    resolvedKey === orderedKeys[entryIndex] &&
+                    strongAnchorReasons.has(resolvedReason)
+                );
+            };
+            const hasAdjacentAnchor = previousEntries.length === 1 ||
+                hasStrongAnchorAtIndex(index - 1) ||
+                hasStrongAnchorAtIndex(index + 1);
+            if (!hasAdjacentAnchor) {
+                return new Map();
+            }
+
+            return new Map([[
+                storedKey,
+                {
+                    key: candidateKey,
+                    reason: 'position-single-unresolved'
+                }
+            ]]);
         }
 
         function remapExistingStateToCurrentSources(sourceLookup, previousState) {
@@ -99,6 +273,12 @@
             const nextSourceStateById = new Map();
             const nextSourceTagsById = new Map();
             const seenSourceRefs = new Set();
+            const positionalRemap = buildSingleSourcePositionalRemap(sourceLookup, previousState);
+            const resolveCurrentSourceKey = (storedKey, sourceRecord) => (
+                resolveStoredSourceKey(storedKey, sourceLookup, sourceRecord) ||
+                positionalRemap.get(storedKey)?.key ||
+                null
+            );
 
             runtime.groupsById.forEach((group, groupId) => {
                 nextGroupsById.set(groupId, {
@@ -120,7 +300,7 @@
                     if (child.type !== 'source') return;
 
                     const sourceRecord = previousState.sourceRecordsByKey.get(child.key) || null;
-                    const resolvedKey = resolveStoredSourceKey(child.key, sourceLookup, sourceRecord);
+                    const resolvedKey = resolveCurrentSourceKey(child.key, sourceRecord);
                     if (!resolvedKey || seenSourceRefs.has(resolvedKey)) return;
 
                     nextGroup.children.push({ type: 'source', key: resolvedKey });
@@ -144,7 +324,7 @@
 
             runtime.state.ungrouped.forEach((storedKey) => {
                 const sourceRecord = previousState.sourceRecordsByKey.get(storedKey) || null;
-                const resolvedKey = resolveStoredSourceKey(storedKey, sourceLookup, sourceRecord);
+                const resolvedKey = resolveCurrentSourceKey(storedKey, sourceRecord);
                 if (!resolvedKey || seenSourceRefs.has(resolvedKey)) return;
 
                 nextUngrouped.push(resolvedKey);
@@ -160,14 +340,14 @@
             });
 
             previousState.sourceRecordsByKey.forEach((sourceRecord, storedKey) => {
-                const resolvedKey = resolveStoredSourceKey(storedKey, sourceLookup, sourceRecord);
+                const resolvedKey = resolveCurrentSourceKey(storedKey, sourceRecord);
                 if (!resolvedKey || nextSourceStateById.has(resolvedKey)) return;
                 nextSourceStateById.set(resolvedKey, sourceRecord);
             });
 
             previousState.sourceTagsById.forEach((tagIds, storedKey) => {
                 const sourceRecord = previousState.sourceRecordsByKey.get(storedKey) || null;
-                const resolvedKey = resolveStoredSourceKey(storedKey, sourceLookup, sourceRecord);
+                const resolvedKey = resolveCurrentSourceKey(storedKey, sourceRecord);
                 if (!resolvedKey || nextSourceTagsById.has(resolvedKey)) return;
                 nextSourceTagsById.set(resolvedKey, [...tagIds]);
             });
@@ -317,7 +497,9 @@
         return {
             buildSourceLookup,
             resolveStoredSourceKey,
+            resolveStoredSourceKeyWithReason,
             snapshotExistingSourceRecords,
+            buildSingleSourcePositionalRemap,
             remapExistingStateToCurrentSources,
             buildResolvedSourceStateById,
             buildNormalizedTagState,

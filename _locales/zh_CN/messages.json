@@ -128,6 +128,173 @@
     "ui_filter_sources": {
         "message": "过滤来源"
     },
+    "ui_filter_sources_v2": {
+        "message": "搜索来源、标签、文件夹"
+    },
+    "ui_search_results_count": {
+        "message": "$1 个结果",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            }
+        }
+    },
+    "ui_settings": {
+        "message": "设置"
+    },
+    "ui_settings_save_status_title": {
+        "message": "保存状态"
+    },
+    "ui_settings_export_title": {
+        "message": "导出配置"
+    },
+    "ui_settings_import_title": {
+        "message": "导入配置"
+    },
+    "ui_settings_copy_json": {
+        "message": "复制 JSON"
+    },
+    "ui_settings_download_json": {
+        "message": "下载 JSON"
+    },
+    "ui_settings_choose_json": {
+        "message": "选择 JSON"
+    },
+    "ui_settings_preview_import": {
+        "message": "预览"
+    },
+    "ui_settings_apply_import": {
+        "message": "应用导入"
+    },
+    "ui_settings_import_placeholder": {
+        "message": "在这里粘贴导出的 JSON"
+    },
+    "ui_settings_import_preview_summary": {
+        "message": "已匹配 $1/$2 个来源 · $3 个文件夹 · $4 个标签",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" },
+            "3": { "content": "$3" },
+            "4": { "content": "$4" }
+        }
+    },
+    "ui_settings_import_preview_matched": {
+        "message": "已匹配 $1 个来源",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_settings_import_preview_unmatched": {
+        "message": "未匹配 $1 个来源",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_settings_import_preview_no_unmatched": {
+        "message": "没有未匹配来源"
+    },
+    "ui_settings_import_preview_more": {
+        "message": "另有 $1 个",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_settings_import_empty": {
+        "message": "请先粘贴配置 JSON。"
+    },
+    "ui_settings_import_invalid": {
+        "message": "无法读取该配置 JSON。"
+    },
+    "ui_settings_imported_toast": {
+        "message": "配置已导入"
+    },
+    "ui_settings_restore_import_backup": {
+        "message": "恢复导入前状态"
+    },
+    "ui_settings_import_backup_unavailable": {
+        "message": "导入前备份不可用。"
+    },
+    "ui_settings_import_backup_restore_failed": {
+        "message": "无法恢复导入前备份。"
+    },
+    "ui_settings_import_backup_restored": {
+        "message": "已恢复导入前状态。"
+    },
+    "ui_settings_import_deferred": {
+        "message": "来源加载完成后会导入该配置。"
+    },
+    "ui_settings_export_copied": {
+        "message": "配置已复制"
+    },
+    "ui_settings_export_downloaded": {
+        "message": "配置已下载"
+    },
+    "ui_settings_export_copy_failed": {
+        "message": "无法复制配置"
+    },
+    "ui_settings_export_download_failed": {
+        "message": "无法下载配置"
+    },
+    "ui_settings_import_file_invalid": {
+        "message": "无法读取该 JSON 文件"
+    },
+    "ui_settings_diagnostics_title": {
+        "message": "诊断信息"
+    },
+    "ui_settings_copy_diagnostics": {
+        "message": "复制诊断信息"
+    },
+    "ui_settings_diagnostics_copied": {
+        "message": "诊断信息已复制"
+    },
+    "ui_settings_diagnostics_copy_failed": {
+        "message": "无法复制诊断信息"
+    },
+    "ui_diagnostics_notebook_id": {
+        "message": "Notebook"
+    },
+    "ui_diagnostics_sources": {
+        "message": "来源数"
+    },
+    "ui_diagnostics_groups": {
+        "message": "文件夹数"
+    },
+    "ui_diagnostics_tags": {
+        "message": "标签数"
+    },
+    "ui_diagnostics_save_revision": {
+        "message": "保存版本"
+    },
+    "ui_diagnostics_saved_at": {
+        "message": "保存时间"
+    },
+    "ui_diagnostics_save_status": {
+        "message": "保存状态"
+    },
+    "ui_diagnostics_last_save_error": {
+        "message": "最近保存错误"
+    },
+    "ui_diagnostics_recovery": {
+        "message": "恢复快照"
+    },
+    "ui_diagnostics_import_backup": {
+        "message": "导入前备份"
+    },
+    "ui_diagnostics_native_failure": {
+        "message": "原生操作失败"
+    },
+    "ui_diagnostics_native_failure_history": {
+        "message": "原生操作失败历史"
+    },
+    "ui_undo_action": {
+        "message": "撤销"
+    },
+    "ui_undo_toast": {
+        "message": "已撤销上一步操作"
+    },
+    "ui_undo_empty": {
+        "message": "没有可撤销的操作"
+    },
     "ui_new_group": {
         "message": "新建分组"
     },
@@ -231,6 +398,51 @@
     "ui_save": {
         "message": "保存"
     },
+    "ui_save_failed": {
+        "message": "保存失败。刷新前请重试。"
+    },
+    "ui_save_stale_failed": {
+        "message": "保存被阻止，因为另一个标签页有更新的修改。"
+    },
+    "ui_save_status_saving": {
+        "message": "正在保存..."
+    },
+    "ui_save_status_saved": {
+        "message": "刚刚已保存"
+    },
+    "ui_save_status_failed": {
+        "message": "保存失败"
+    },
+    "ui_save_status_stale": {
+        "message": "存在更新的修改"
+    },
+    "ui_save_status_recovery": {
+        "message": "有可恢复内容"
+    },
+    "ui_save_status_retry": {
+        "message": "重试"
+    },
+    "ui_recovery_restore": {
+        "message": "恢复"
+    },
+    "ui_recovery_dismiss": {
+        "message": "忽略"
+    },
+    "ui_recovery_unavailable": {
+        "message": "恢复快照不可用。"
+    },
+    "ui_recovery_restore_failed": {
+        "message": "无法恢复快照。"
+    },
+    "ui_recovery_restored": {
+        "message": "已恢复快照。"
+    },
+    "ui_yes": {
+        "message": "是"
+    },
+    "ui_no": {
+        "message": "否"
+    },
     "ui_tag_delete": {
         "message": "删除标签"
     },
@@ -270,6 +482,69 @@
                 "content": "$1"
             }
         }
+    },
+    "ui_batch_add_tags_count": {
+        "message": "添加标签 ($1)",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            }
+        }
+    },
+    "ui_batch_remove_tags_count": {
+        "message": "移除标签 ($1)",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            }
+        }
+    },
+    "ui_batch_ungroup_count": {
+        "message": "移到未分组 ($1)",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            }
+        }
+    },
+    "ui_batch_add_tags_title": {
+        "message": "添加标签"
+    },
+    "ui_batch_remove_tags_title": {
+        "message": "移除标签"
+    },
+    "ui_apply_tags": {
+        "message": "应用标签"
+    },
+    "ui_batch_tags_added_toast": {
+        "message": "已给 $1 个来源添加标签",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            }
+        }
+    },
+    "ui_batch_tags_removed_toast": {
+        "message": "已从 $1 个来源移除标签",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            }
+        }
+    },
+    "ui_no_tags_to_remove": {
+        "message": "没有可移除的标签。"
+    },
+    "ui_batch_ungrouped_toast": {
+        "message": "已将 $1 个来源移到未分组",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            }
+        }
+    },
+    "ui_batch_no_sources_changed": {
+        "message": "所选来源没有可更改的项目。"
     },
     "ui_cancel": {
         "message": "取消"
@@ -316,14 +591,62 @@
     "ui_view_source_details": {
         "message": "查看来源详情"
     },
+    "ui_rename_source": {
+        "message": "重命名来源"
+    },
+    "ui_rename_source_unavailable": {
+        "message": "当前无法重命名该来源"
+    },
+    "ui_rename_source_failed": {
+        "message": "无法打开该来源的重命名操作。请刷新 NotebookLM 后重试。"
+    },
+    "ui_delete_source": {
+        "message": "删除来源"
+    },
+    "ui_delete_source_unavailable": {
+        "message": "当前无法删除该来源"
+    },
+    "ui_delete_source_failed": {
+        "message": "无法开始删除该来源。请刷新 NotebookLM 后重试。"
+    },
     "ui_source_details_unavailable": {
         "message": "当前无法打开该来源详情"
     },
-    "ui_open_native_menu": {
-        "message": "打开 NotebookLM 菜单"
+    "ui_source_details_failed": {
+        "message": "无法打开来源详情。请刷新 NotebookLM 后重试。"
+    },
+    "ui_retry": {
+        "message": "重试"
+    },
+    "ui_native_action_source_unavailable": {
+        "message": "该来源当前不可用。"
+    },
+    "ui_native_action_menu_button_missing": {
+        "message": "未找到 NotebookLM 的来源菜单按钮。"
+    },
+    "ui_native_action_menu_item_missing": {
+        "message": "未找到 NotebookLM 对应的菜单项。"
+    },
+    "ui_native_action_confirm_dialog_missing": {
+        "message": "未找到 NotebookLM 的确认弹窗。"
+    },
+    "ui_native_action_confirm_button_missing": {
+        "message": "未找到 NotebookLM 的确认按钮。"
+    },
+    "ui_native_action_failed": {
+        "message": "NotebookLM 页面结构可能已经变化。"
     },
     "ui_move_to_folder": {
         "message": "加入文件夹"
+    },
+    "ui_move_to_ungrouped": {
+        "message": "移到未分组"
+    },
+    "ui_keyboard_move_unavailable": {
+        "message": "当前项目不能这样移动。"
+    },
+    "ui_keyboard_moved_ungrouped_toast": {
+        "message": "已移到未分组"
     },
     "ui_empty_folders": {
         "message": "当前没有可用的文件夹。\n请先创建一个。"

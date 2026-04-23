@@ -6,6 +6,8 @@
 *.zip
 *.tar.gz
 旧版本zip/
+release/
+output/
 
 # Large design files & unnecessary images
 total.png
@@ -20,6 +22,8 @@ always_update_changelog.md
 .agents/
 .agent/
 .cursor/
+.superpowers/
+docs/superpowers/plans/
 
 # PLAN
 PLAN.md

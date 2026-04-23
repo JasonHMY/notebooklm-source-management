@@ -5,6 +5,14 @@
         return el('div', { className: 'sp-container' }, [
             el('div', { className: 'sp-controls' }, [
                 el('div', { className: 'sp-toolbar-actions' }, [
+                    el('button', {
+                        id: 'sp-settings-btn',
+                        className: 'sp-icon-button sp-toolbar-settings sp-glare-hover',
+                        title: chrome.i18n.getMessage("ui_settings"),
+                        'aria-label': chrome.i18n.getMessage("ui_settings")
+                    }, [
+                        el('span', { className: 'google-symbols' }, ['settings'])
+                    ]),
                     el('button', { id: 'sp-new-group-btn', className: 'sp-button sp-toolbar-action' }, [chrome.i18n.getMessage("ui_new_group")]),
                     el('button', { id: 'sp-manage-tags-btn', className: 'sp-button sp-toolbar-action' }, [chrome.i18n.getMessage("ui_manage_tags")]),
                     el('button', { id: 'sp-batch-action-btn', className: 'sp-button sp-toolbar-action' }, [chrome.i18n.getMessage("ui_batch_action")])
@@ -22,9 +30,14 @@
                         el('input', {
                             id: 'sp-search',
                             type: 'search',
-                            placeholder: chrome.i18n.getMessage("ui_filter_sources"),
+                            placeholder: chrome.i18n.getMessage("ui_filter_sources_v2"),
                             'aria-label': chrome.i18n.getMessage("ui_filter_sources"),
                             autocomplete: 'off'
+                        }),
+                        el('span', {
+                            id: 'sp-search-count',
+                            className: 'sp-search-count',
+                            hidden: true
                         })
                     ]),
                     el('button', {

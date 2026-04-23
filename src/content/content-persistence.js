@@ -24,6 +24,11 @@
             : () => ({ state: 'ready' });
         const hasRenderableSourceRows = typeof ctx.hasRenderableSourceRows === 'function' ? ctx.hasRenderableSourceRows : () => false;
         const render = typeof ctx.render === 'function' ? ctx.render : () => {};
+        const getMessage = typeof ctx.getMessage === 'function' ? ctx.getMessage : (key) => key;
+        const showToast = typeof ctx.showToast === 'function' ? ctx.showToast : () => {};
+        const onSaveStatusChange = typeof ctx.onSaveStatusChange === 'function'
+            ? ctx.onSaveStatusChange
+            : () => {};
         const cloneSerializableData = typeof ctx.cloneSerializableData === 'function'
             ? ctx.cloneSerializableData
             : (value) => {
@@ -86,9 +91,242 @@
             if (typeof ctx.isAwaitingInitialStateLoad !== 'boolean') {
                 ctx.isAwaitingInitialStateLoad = false;
             }
+            if (typeof ctx.lastKnownSaveRevision !== 'number') {
+                ctx.lastKnownSaveRevision = 0;
+            }
         };
 
         ensureStorageState();
+        let saveQueueTail = null;
+        let nextClientSaveId = 1;
+
+        const DEFAULT_SAVE_STATUS = {
+            state: 'idle',
+            lastSavedAt: '',
+            lastSaveRevision: 0,
+            lastError: '',
+            currentRevision: 0,
+            recoveryAvailable: false,
+            recoveryCreatedAt: '',
+            clientSaveId: ''
+        };
+
+        function getSaveStatus() {
+            if (!ctx.saveStatus || typeof ctx.saveStatus !== 'object') {
+                ctx.saveStatus = { ...DEFAULT_SAVE_STATUS };
+            }
+            return ctx.saveStatus;
+        }
+
+        function setSaveStatus(nextStatus = {}) {
+            const currentStatus = getSaveStatus();
+            ctx.saveStatus = Object.assign({}, currentStatus, nextStatus);
+            try {
+                onSaveStatusChange(cloneSerializableData(ctx.saveStatus));
+            } catch (error) {
+                console.warn('NotebookLM Source Management: Save status update failed:', error);
+            }
+            return ctx.saveStatus;
+        }
+
+        function getSessionStorage() {
+            const storage = ctx.sessionStorage
+                || globalThis.sessionStorage
+                || globalThis.window?.sessionStorage;
+            return storage && typeof storage.getItem === 'function' ? storage : null;
+        }
+
+        function getSnapshotSaveRevision(snapshot) {
+            const revision = Number(snapshot?._saveRevision);
+            return Number.isFinite(revision) && revision > 0 ? revision : 0;
+        }
+
+        function isStaleStateWrite(incomingState, storedState) {
+            const incomingRevision = getSnapshotSaveRevision(incomingState);
+            const storedRevision = getSnapshotSaveRevision(storedState);
+            return incomingRevision > 0 && storedRevision > 0 && incomingRevision < storedRevision;
+        }
+
+        function getStableComparablePersistableValue(value, seenValues = new WeakSet()) {
+            if (value == null || typeof value !== 'object') return value;
+            if (seenValues.has(value)) return null;
+            seenValues.add(value);
+
+            try {
+                if (Array.isArray(value)) {
+                    return value.map((item) => getStableComparablePersistableValue(item, seenValues));
+                }
+
+                return Object.keys(value)
+                    .filter((key) => key !== '_saveRevision' && key !== '_savedAt')
+                    .sort()
+                    .reduce((acc, key) => {
+                        acc[key] = getStableComparablePersistableValue(value[key], seenValues);
+                        return acc;
+                    }, {});
+            } finally {
+                seenValues.delete(value);
+            }
+        }
+
+        function getPersistableSnapshotSignature(snapshot) {
+            try {
+                return JSON.stringify(getStableComparablePersistableValue(snapshot || null));
+            } catch (error) {
+                return '';
+            }
+        }
+
+        function arePersistableSnapshotsEquivalent(leftSnapshot, rightSnapshot) {
+            const leftSignature = getPersistableSnapshotSignature(leftSnapshot);
+            const rightSignature = getPersistableSnapshotSignature(rightSnapshot);
+            return Boolean(leftSignature && rightSignature && leftSignature === rightSignature);
+        }
+
+        function rememberSnapshotSaveRevision(snapshot) {
+            const revision = getSnapshotSaveRevision(snapshot);
+            if (revision > ctx.lastKnownSaveRevision) {
+                ctx.lastKnownSaveRevision = revision;
+            }
+            return ctx.lastKnownSaveRevision;
+        }
+
+        function preparePersistableSnapshot(rawSnapshot) {
+            const snapshot = cloneSerializableData(rawSnapshot || {});
+            const nextRevision = Math.max(
+                Number(ctx.lastKnownSaveRevision) || 0,
+                getSnapshotSaveRevision(snapshot)
+            ) + 1;
+            ctx.lastKnownSaveRevision = nextRevision;
+            snapshot._saveRevision = nextRevision;
+            snapshot._savedAt = new Date().toISOString();
+            return snapshot;
+        }
+
+        function prepareRuntimeSaveSnapshot(rawSnapshot) {
+            const snapshot = cloneSerializableData(rawSnapshot || {});
+            delete snapshot._saveRevision;
+            delete snapshot._savedAt;
+            return snapshot;
+        }
+
+        function createClientSaveId() {
+            const prefix = String(ctx.projectId || 'project');
+            const value = `${prefix}:${Date.now()}:${nextClientSaveId}`;
+            nextClientSaveId += 1;
+            return value;
+        }
+
+        function getRecoveryKey(projectId = ctx.projectId) {
+            return projectId ? `sourcesPlusRecovery_${projectId}` : '';
+        }
+
+        function writeRecoverySnapshot(rawSnapshot, options = {}) {
+            const storage = getSessionStorage();
+            const key = getRecoveryKey();
+            if (!storage || !key || !rawSnapshot) return false;
+
+            const payload = {
+                snapshot: cloneSerializableData(rawSnapshot),
+                baseRevision: Number(ctx.lastKnownSaveRevision) || 0,
+                createdAt: new Date().toISOString(),
+                reason: typeof options.reason === 'string' ? options.reason : 'critical_save',
+                clientSaveId: typeof options.clientSaveId === 'string' ? options.clientSaveId : createClientSaveId(),
+                failed: Boolean(options.failed)
+            };
+
+            try {
+                storage.setItem(key, JSON.stringify(payload));
+                setSaveStatus({
+                    recoveryAvailable: true,
+                    recoveryCreatedAt: payload.createdAt
+                });
+                return payload;
+            } catch (error) {
+                console.warn('NotebookLM Source Management: Recovery snapshot write failed:', error);
+                return false;
+            }
+        }
+
+        function readRecoverySnapshot(projectId = ctx.projectId) {
+            const storage = getSessionStorage();
+            const key = getRecoveryKey(projectId);
+            if (!storage || !key) return null;
+
+            try {
+                const rawValue = storage.getItem(key);
+                if (!rawValue) return null;
+                const parsed = JSON.parse(rawValue);
+                if (!parsed || typeof parsed !== 'object' || !parsed.snapshot) return null;
+                return parsed;
+            } catch (error) {
+                console.warn('NotebookLM Source Management: Recovery snapshot read failed:', error);
+                return null;
+            }
+        }
+
+        function clearRecoverySnapshot(projectId = ctx.projectId) {
+            const storage = getSessionStorage();
+            const key = getRecoveryKey(projectId);
+            if (!storage || !key) return false;
+
+            try {
+                storage.removeItem(key);
+                setSaveStatus({
+                    recoveryAvailable: false,
+                    recoveryCreatedAt: ''
+                });
+                return true;
+            } catch (error) {
+                console.warn('NotebookLM Source Management: Recovery snapshot clear failed:', error);
+                return false;
+            }
+        }
+
+        function detectRecoverySnapshotAvailability(loadedState = null) {
+            const recovery = readRecoverySnapshot();
+            if (!recovery) {
+                setSaveStatus({
+                    recoveryAvailable: false,
+                    recoveryCreatedAt: ''
+                });
+                return false;
+            }
+
+            if (loadedState && arePersistableSnapshotsEquivalent(recovery.snapshot, loadedState)) {
+                clearRecoverySnapshot();
+                return false;
+            }
+
+            const loadedRevision = getSnapshotSaveRevision(loadedState);
+            const recoveryBaseRevision = Number(recovery.baseRevision) || 0;
+            const shouldOfferRecovery = !loadedState || recovery.failed || loadedRevision <= recoveryBaseRevision;
+            if (shouldOfferRecovery) {
+                setSaveStatus({
+                    state: 'recovery_available',
+                    recoveryAvailable: true,
+                    recoveryCreatedAt: recovery.createdAt || '',
+                    lastError: 'recovery_available'
+                });
+                return true;
+            }
+
+            clearRecoverySnapshot();
+            return false;
+        }
+
+        function getComparableStoredState(primaryState, backupState) {
+            const primaryRevision = getSnapshotSaveRevision(primaryState);
+            const backupRevision = getSnapshotSaveRevision(backupState);
+            if (
+                hasRestorableStateSnapshot(primaryState) &&
+                hasRestorableStateSnapshot(backupState) &&
+                backupRevision > primaryRevision
+            ) {
+                return backupState;
+            }
+            return primaryState;
+        }
 
         function hasRestorableStateSnapshot(snapshot) {
             if (!snapshot || typeof snapshot !== 'object') return false;
@@ -107,11 +345,19 @@
         }
 
         function pickPreferredStoredState(primaryState, backupState) {
+            const preferredPrimaryState = getComparableStoredState(primaryState, backupState);
+            if (preferredPrimaryState !== primaryState) {
+                rememberSnapshotSaveRevision(preferredPrimaryState);
+                return preferredPrimaryState;
+            }
+
             if (hasRestorableStateSnapshot(primaryState)) {
+                rememberSnapshotSaveRevision(primaryState);
                 return primaryState;
             }
 
             if (hasRestorableStateSnapshot(backupState)) {
+                rememberSnapshotSaveRevision(backupState);
                 if (primaryState && typeof primaryState === 'object' && primaryState.customHeight != null) {
                     return {
                         ...backupState,
@@ -125,58 +371,325 @@
         }
 
         function writeStateToLocalStorage(key, data) {
-            if (!chromeApi?.storage?.local?.set) return;
-
-            const payload = { [key]: data };
-            if (hasRestorableStateSnapshot(data)) {
-                payload[`${key}__backup`] = data;
+            if (!chromeApi?.storage?.local?.set) {
+                return Promise.resolve({ ok: false, reason: 'local_storage_unavailable' });
             }
 
-            try {
-                chromeApi.storage.local.set(payload, () => {
-                    if (chromeApi.runtime?.lastError) {
-                        console.warn('NotebookLM Source Management: Local storage write failed:', chromeApi.runtime.lastError);
+            return new Promise((resolve) => {
+                const backupKey = `${key}__backup`;
+                const writePayload = () => {
+                    const payload = { [key]: data };
+                    if (hasRestorableStateSnapshot(data)) {
+                        payload[backupKey] = data;
                     }
-                });
-            } catch (error) {
-                console.warn('NotebookLM Source Management: Local storage write threw:', error);
-            }
-        }
 
-        function sendStateToStorage(key, data, options = {}) {
-            const { skipRuntimeMessage = false } = options;
-            writeStateToLocalStorage(key, data);
+                    chromeApi.storage.local.set(payload, () => {
+                        if (chromeApi.runtime?.lastError) {
+                            console.warn('NotebookLM Source Management: Local storage write failed:', chromeApi.runtime.lastError);
+                            resolve({ ok: false, reason: 'local_storage_error' });
+                            return;
+                        }
+                        resolve({ ok: true });
+                    });
+                };
 
-            if (skipRuntimeMessage) {
-                return;
-            }
+                const handleExistingState = (existingData) => {
+                    const currentState = pickPreferredStoredState(
+                        existingData && typeof existingData === 'object' ? existingData[key] : null,
+                        existingData && typeof existingData === 'object' ? existingData[backupKey] : null
+                    );
 
-            if (!chromeApi?.runtime?.sendMessage) {
-                return;
-            }
-
-            try {
-                chromeApi.runtime.sendMessage({ type: 'SAVE_STATE', key, data }, (response) => {
-                    if (chromeApi.runtime.lastError) {
-                        console.error('NotebookLM Source Management 通信失败:', chromeApi.runtime.lastError);
+                    if (isStaleStateWrite(data, currentState)) {
+                        resolve({ ok: true, stale: true });
                         return;
                     }
 
-                    if (response && response.success === false) {
-                        console.warn('NotebookLM Source Management: SAVE_STATE rejected by background:', response.errorCode || 'unknown_error');
+                    writePayload();
+                };
+
+                try {
+                    if (chromeApi.storage.local.get) {
+                        chromeApi.storage.local.get([key, backupKey], (existingData) => {
+                            if (chromeApi.runtime?.lastError) {
+                                console.warn('NotebookLM Source Management: Local storage revision check failed:', chromeApi.runtime.lastError);
+                                resolve({ ok: false, reason: 'local_storage_revision_check_error' });
+                                return;
+                            }
+                            handleExistingState(existingData);
+                        });
+                        return;
                     }
-                });
-            } catch (error) {
-                console.warn('NotebookLM Source Management: Context invalidated. Please refresh the page.', error);
+
+                    writePayload();
+                } catch (error) {
+                    console.warn('NotebookLM Source Management: Local storage write threw:', error);
+                    resolve({ ok: false, reason: 'local_storage_exception' });
+                }
+            });
+        }
+
+        function sendStateToRuntimeStorage(key, data, options = {}) {
+            if (!chromeApi?.runtime?.sendMessage) {
+                return Promise.resolve({ ok: false, reason: 'runtime_unavailable' });
             }
+
+            return new Promise((resolve) => {
+                try {
+                    chromeApi.runtime.sendMessage({
+                        type: 'SAVE_STATE',
+                        key,
+                        data,
+                        baseRevision: Number(options.baseRevision) || 0,
+                        clientSaveId: options.clientSaveId || '',
+                        critical: Boolean(options.critical)
+                    }, (response) => {
+                        if (chromeApi.runtime.lastError) {
+                            console.error('NotebookLM Source Management 通信失败:', chromeApi.runtime.lastError);
+                            resolve({ ok: false, reason: 'runtime_message_error' });
+                            return;
+                        }
+
+                        if (response && response.success === false) {
+                            console.warn('NotebookLM Source Management: SAVE_STATE rejected by background:', response.errorCode || 'unknown_error');
+                            if (response.errorCode === 'stale_revision') {
+                                const currentRevision = Number(response.currentRevision) || 0;
+                                if (currentRevision > ctx.lastKnownSaveRevision) {
+                                    ctx.lastKnownSaveRevision = currentRevision;
+                                }
+                                resolve({
+                                    ok: false,
+                                    reason: 'stale_revision',
+                                    stale: true,
+                                    currentRevision
+                                });
+                                return;
+                            }
+                            resolve({ ok: false, reason: response.errorCode || 'runtime_failure' });
+                            return;
+                        }
+
+                        const saveRevision = Number(response?.saveRevision) || 0;
+                        if (saveRevision > ctx.lastKnownSaveRevision) {
+                            ctx.lastKnownSaveRevision = saveRevision;
+                        }
+                        resolve({
+                            ok: true,
+                            stale: Boolean(response?.stale),
+                            saveRevision,
+                            savedAt: response?.savedAt || ''
+                        });
+                    });
+                } catch (error) {
+                    console.warn('NotebookLM Source Management: Context invalidated. Please refresh the page.', error);
+                    resolve({ ok: false, reason: 'runtime_exception' });
+                }
+            });
+        }
+
+        async function sendStateToStorage(key, data, options = {}) {
+            const { skipRuntimeMessage = false } = options;
+            if (!skipRuntimeMessage) {
+                const runtimeResult = await sendStateToRuntimeStorage(key, data, options);
+                if (runtimeResult.ok) {
+                    return { ok: true, localResult: { skipped: true }, runtimeResult };
+                }
+                if (runtimeResult.stale || runtimeResult.reason === 'stale_revision') {
+                    return {
+                        ok: false,
+                        reason: 'stale_revision',
+                        localResult: { skipped: true, reason: 'stale_revision' },
+                        runtimeResult
+                    };
+                }
+
+                const localData = data && data._saveRevision ? data : preparePersistableSnapshot(data);
+                const localResult = await writeStateToLocalStorage(key, localData);
+                if (localResult.stale) {
+                    return {
+                        ok: false,
+                        reason: 'stale_revision',
+                        localResult,
+                        runtimeResult
+                    };
+                }
+                if (localResult.ok) {
+                    return { ok: true, localResult, runtimeResult, localData };
+                }
+
+                return {
+                    ok: false,
+                    reason: runtimeResult.reason || localResult.reason || 'save_failed',
+                    localResult,
+                    runtimeResult
+                };
+            }
+
+            const localData = data && data._saveRevision ? data : preparePersistableSnapshot(data);
+            const localResult = await writeStateToLocalStorage(key, localData);
+            if (localResult.stale) {
+                return {
+                    ok: false,
+                    reason: 'stale_revision',
+                    localResult,
+                    runtimeResult: { skipped: true, reason: 'runtime_skipped' }
+                };
+            }
+            if (localResult.ok) {
+                return {
+                    ok: true,
+                    localResult,
+                    localData,
+                    runtimeResult: { skipped: true, reason: 'runtime_skipped' }
+                };
+            }
+
+            return {
+                ok: false,
+                reason: localResult.reason || 'save_failed',
+                localResult,
+                runtimeResult: { skipped: true, reason: 'runtime_skipped' }
+            };
+        }
+
+        function notifyCriticalSaveFailure(result) {
+            if (result?.ok) return;
+            showToast(getMessage(result?.reason === 'stale_revision'
+                ? 'ui_save_stale_failed'
+                : 'ui_save_failed'), { variant: 'error' });
+        }
+
+        function enqueueStateSave(key, rawSnapshot, options = {}) {
+            const clientSaveId = createClientSaveId();
+            const snapshot = options.skipRuntimeMessage
+                ? preparePersistableSnapshot(rawSnapshot)
+                : prepareRuntimeSaveSnapshot(rawSnapshot);
+            if (options.critical) {
+                writeRecoverySnapshot(snapshot, {
+                    reason: options.reason || 'critical_save',
+                    clientSaveId
+                });
+            }
+            const runSave = () => {
+                const baseRevision = Number(ctx.lastKnownSaveRevision) || 0;
+                setSaveStatus({
+                    state: 'saving',
+                    lastError: '',
+                    clientSaveId
+                });
+                return sendStateToStorage(key, snapshot, Object.assign({}, options, {
+                        baseRevision,
+                        clientSaveId
+                    }))
+                    .then((result) => {
+                        if (result.ok) {
+                            const saveRevision = result.runtimeResult?.saveRevision
+                                || getSnapshotSaveRevision(result.localData)
+                                || getSnapshotSaveRevision(snapshot)
+                                || ctx.lastKnownSaveRevision;
+                            const savedAt = result.runtimeResult?.savedAt || result.localData?._savedAt || snapshot._savedAt || new Date().toISOString();
+                            if (saveRevision > ctx.lastKnownSaveRevision) {
+                                ctx.lastKnownSaveRevision = saveRevision;
+                            }
+                            setSaveStatus({
+                                state: 'saved',
+                                lastSavedAt: savedAt,
+                                lastSaveRevision: saveRevision,
+                                currentRevision: saveRevision,
+                                lastError: '',
+                                clientSaveId
+                            });
+                            if (options.critical) {
+                                clearRecoverySnapshot();
+                            }
+                        } else {
+                            setSaveStatus({
+                                state: result.reason === 'stale_revision' ? 'stale' : 'failed',
+                                lastError: result.reason || 'save_failed',
+                                currentRevision: result.runtimeResult?.currentRevision || ctx.lastKnownSaveRevision,
+                                clientSaveId
+                            });
+                            if (options.critical) {
+                                writeRecoverySnapshot(snapshot, {
+                                    reason: result.reason || 'save_failed',
+                                    clientSaveId,
+                                    failed: true
+                                });
+                            }
+                        }
+                        if (options.critical) {
+                            notifyCriticalSaveFailure(result);
+                        }
+                        return result;
+                    });
+            };
+
+            if (!saveQueueTail) {
+                const immediateSave = runSave();
+                saveQueueTail = immediateSave;
+                immediateSave.finally(() => {
+                    if (saveQueueTail === immediateSave) {
+                        saveQueueTail = null;
+                    }
+                }).catch(() => {});
+                return immediateSave;
+            }
+
+            const queuedSave = saveQueueTail
+                .catch(() => ({ ok: false }))
+                .then(runSave);
+            saveQueueTail = queuedSave;
+            queuedSave.finally(() => {
+                if (saveQueueTail === queuedSave) {
+                    saveQueueTail = null;
+                }
+            }).catch(() => {});
+            return queuedSave;
+        }
+
+        function waitForPendingStateSave() {
+            return saveQueueTail || Promise.resolve({ ok: true });
+        }
+
+        function prepareAndQueueStateSave(key, snapshot, options = {}) {
+            return enqueueStateSave(key, snapshot, options);
+        }
+
+        function saveLifecycleSnapshotToLocalStorage(key, rawSnapshot) {
+            writeRecoverySnapshot(rawSnapshot, { reason: 'page_lifecycle' });
+            const snapshot = preparePersistableSnapshot(rawSnapshot);
+            return writeStateToLocalStorage(key, snapshot)
+                .then((result) => {
+                    if (result.ok) {
+                        const revision = getSnapshotSaveRevision(snapshot);
+                        if (revision > ctx.lastKnownSaveRevision) {
+                            ctx.lastKnownSaveRevision = revision;
+                        }
+                        setSaveStatus({
+                            state: 'saved',
+                            lastSavedAt: snapshot._savedAt || new Date().toISOString(),
+                            lastSaveRevision: revision,
+                            currentRevision: revision,
+                            lastError: ''
+                        });
+                        clearRecoverySnapshot();
+                    } else {
+                        setSaveStatus({
+                            state: 'failed',
+                            lastError: result.reason || 'save_failed',
+                            recoveryAvailable: true
+                        });
+                    }
+                    notifyCriticalSaveFailure(result);
+                    return result;
+                });
         }
 
         const debouncedStorageSet = typeof debounceFn === 'function'
             ? debounceFn((key, data) => {
-                sendStateToStorage(key, data);
+                return prepareAndQueueStateSave(key, data);
             }, 1500)
             : Object.assign((key, data) => {
-                sendStateToStorage(key, data);
+                return prepareAndQueueStateSave(key, data);
             }, {
                 flush: () => false,
                 cancel: () => {}
@@ -184,9 +697,13 @@
 
         function flushPendingStateSave() {
             if (typeof debouncedStorageSet.flush === 'function') {
-                return debouncedStorageSet.flush();
+                const flushResult = debouncedStorageSet.flush();
+                if (flushResult && typeof flushResult.then === 'function') {
+                    return flushResult;
+                }
+                return waitForPendingStateSave();
             }
-            return false;
+            return waitForPendingStateSave();
         }
 
         function cancelPendingStateSave() {
@@ -278,11 +795,11 @@
 
             if (immediate) {
                 cancelPendingStateSave();
-                sendStateToStorage(key, persistableState);
-                return;
+                return prepareAndQueueStateSave(key, persistableState, options);
             }
 
             debouncedStorageSet(key, persistableState);
+            return waitForPendingStateSave();
         }
 
         function handlePageLifecyclePersistence(event) {
@@ -302,11 +819,12 @@
             }
 
             const key = `sourcesPlusState_${ctx.projectId}`;
-            writeStateToLocalStorage(key, persistableState);
+            return saveLifecycleSnapshotToLocalStorage(key, persistableState);
         }
 
         function normalizeLoadedState(stateData) {
             if (!stateData || typeof stateData !== 'object') return null;
+            rememberSnapshotSaveRevision(stateData);
 
             if (stateData.schemaVersion === storageSchemaVersion) {
                 ctx.pendingStorageUpgrade = false;
@@ -395,6 +913,25 @@
             );
         }
 
+        function getPersistedSourceRefCount(loadedState) {
+            if (!loadedState || typeof loadedState !== 'object') return 0;
+            const sourceKeys = new Set();
+
+            getMapLikeEntries(loadedState.sourceStateById || {}).forEach(([sourceKey]) => {
+                if (sourceKey) sourceKeys.add(sourceKey);
+            });
+            getMapLikeValues(loadedState.groupsById || {}).forEach((group) => {
+                (Array.isArray(group?.children) ? group.children : []).forEach((child) => {
+                    if (child?.type === 'source' && child.key) sourceKeys.add(child.key);
+                });
+            });
+            (Array.isArray(loadedState.ungrouped) ? loadedState.ungrouped : []).forEach((sourceKey) => {
+                if (sourceKey) sourceKeys.add(sourceKey);
+            });
+
+            return sourceKeys.size;
+        }
+
         function hasPersistableManagerState(snapshot) {
             if (!snapshot || typeof snapshot !== 'object') return false;
             if (hasPersistedSourceRefs(snapshot)) return true;
@@ -405,21 +942,148 @@
             return snapshot.customHeight != null;
         }
 
+        function restorePersistedSnapshotWithoutDom(loadedState) {
+            if (!loadedState || typeof loadedState !== 'object' || !hasPersistedSourceRefs(loadedState)) {
+                return false;
+            }
+
+            const state = getState();
+            const sourcesByKey = ctx.sourcesByKey instanceof Map ? ctx.sourcesByKey : null;
+            const groupsById = ctx.groupsById instanceof Map ? ctx.groupsById : null;
+            const tagsById = ctx.tagsById instanceof Map ? ctx.tagsById : null;
+            const sourceTagsById = ctx.sourceTagsById instanceof Map ? ctx.sourceTagsById : null;
+            if (!sourcesByKey || !groupsById || !tagsById || !sourceTagsById) {
+                return false;
+            }
+
+            const sourceRecords = getMapLikeEntries(loadedState.sourceStateById || {});
+            const sourceKeys = new Set(sourceRecords.map(([sourceKey]) => sourceKey));
+            const seenSourceRefs = new Set();
+
+            sourcesByKey.clear();
+            sourceRecords.forEach(([sourceKey, sourceRecord]) => {
+                const title = String(sourceRecord?.title || getMessage('ui_source_untitled'));
+                const normalizedTitle = sourceRecord?.normalizedTitle || normalizeSourceText(title);
+                sourcesByKey.set(sourceKey, {
+                    key: sourceKey,
+                    legacyKey: sourceKey,
+                    title,
+                    normalizedTitle,
+                    lowercaseTitle: normalizedTitle,
+                    ariaLabel: '',
+                    stableToken: sourceRecord?.stableToken || '',
+                    fingerprint: sourceRecord?.fingerprint || '',
+                    identityType: sourceRecord?.identityType || 'fingerprint',
+                    element: null,
+                    iconName: 'article',
+                    iconColorClass: '',
+                    iconImageUrl: '',
+                    checkbox: null,
+                    hasNativeCheckbox: false,
+                    isLoading: false,
+                    isDisabled: false,
+                    enabled: sourceRecord?.enabled !== false,
+                    isPendingNativeHydration: true
+                });
+            });
+
+            groupsById.clear();
+            getMapLikeEntries(loadedState.groupsById || {}).forEach(([groupId, rawGroup]) => {
+                if (!rawGroup || typeof rawGroup !== 'object') return;
+                groupsById.set(groupId, {
+                    ...rawGroup,
+                    id: rawGroup.id || groupId,
+                    enabled: rawGroup.enabled !== undefined ? rawGroup.enabled : true,
+                    collapsed: rawGroup.collapsed === true,
+                    children: []
+                });
+            });
+
+            getMapLikeEntries(loadedState.groupsById || {}).forEach(([groupId, rawGroup]) => {
+                const nextGroup = groupsById.get(groupId);
+                if (!nextGroup) return;
+
+                (Array.isArray(rawGroup?.children) ? rawGroup.children : []).forEach((child) => {
+                    if (child?.type === 'group' && child.id !== groupId && groupsById.has(child.id)) {
+                        nextGroup.children.push({ type: 'group', id: child.id });
+                        return;
+                    }
+
+                    if (child?.type === 'source' && sourceKeys.has(child.key) && !seenSourceRefs.has(child.key)) {
+                        nextGroup.children.push({ type: 'source', key: child.key });
+                        seenSourceRefs.add(child.key);
+                    }
+                });
+            });
+
+            state.groups = (Array.isArray(loadedState.groups) ? loadedState.groups : [])
+                .filter((groupId) => groupsById.has(groupId));
+            state.ungrouped = [];
+            (Array.isArray(loadedState.ungrouped) ? loadedState.ungrouped : []).forEach((sourceKey) => {
+                if (!sourceKeys.has(sourceKey) || seenSourceRefs.has(sourceKey)) return;
+                state.ungrouped.push(sourceKey);
+                seenSourceRefs.add(sourceKey);
+            });
+            sourceRecords.forEach(([sourceKey]) => {
+                if (seenSourceRefs.has(sourceKey)) return;
+                state.ungrouped.push(sourceKey);
+                seenSourceRefs.add(sourceKey);
+            });
+
+            tagsById.clear();
+            getMapLikeEntries(loadedState.tagsById || {}).forEach(([tagId, tag]) => {
+                if (tag && typeof tag === 'object') {
+                    tagsById.set(tagId, { ...tag, id: tag.id || tagId });
+                }
+            });
+            state.tagOrder = (Array.isArray(loadedState.tagOrder) ? loadedState.tagOrder : [])
+                .filter((tagId) => tagsById.has(tagId));
+
+            sourceTagsById.clear();
+            getMapLikeEntries(loadedState.sourceTagsById || {}).forEach(([sourceKey, tagIds]) => {
+                if (!sourceKeys.has(sourceKey)) return;
+                const validTagIds = (Array.isArray(tagIds) ? tagIds : [])
+                    .filter((tagId) => tagsById.has(tagId));
+                if (validTagIds.length > 0) {
+                    sourceTagsById.set(sourceKey, validTagIds);
+                }
+            });
+
+            if (state.activeTagId && !tagsById.has(state.activeTagId)) {
+                state.activeTagId = null;
+            }
+
+            return true;
+        }
+
         function capturePendingPanelReattachState() {
             const bestSnapshot = getBestPersistableSnapshot();
             return hasPersistableManagerState(bestSnapshot) ? bestSnapshot : null;
         }
 
+        function shouldDeferInitialRestore(loadedState) {
+            if (!loadedState || !hasPersistedSourceRefs(loadedState)) return false;
+
+            const sourcePanel = findSourcePanel();
+            const panelState = getSourcePanelState(sourcePanel);
+            if (!hasRenderableSourceRows() || panelState.state !== 'ready') {
+                return true;
+            }
+
+            const persistedSourceCount = getPersistedSourceRefCount(loadedState);
+            const currentSourceCount = getManageableSourceElements(sourcePanel).length;
+            return Boolean(
+                persistedSourceCount > 0 &&
+                currentSourceCount > 0 &&
+                currentSourceCount < persistedSourceCount &&
+                ((Number(panelState.loadingRows) || 0) > 0 || (Number(panelState.failedRows) || 0) > 0)
+            );
+        }
+
         function restoreInitialLoadedState(loadedState) {
-            if (
-                loadedState &&
-                hasPersistedSourceRefs(loadedState) &&
-                (
-                    !hasRenderableSourceRows() ||
-                    getSourcePanelState(findSourcePanel()).state !== 'ready'
-                )
-            ) {
+            if (shouldDeferInitialRestore(loadedState)) {
                 ctx.pendingInitialLoadedState = loadedState;
+                restorePersistedSnapshotWithoutDom(loadedState);
                 return { deferred: true, shouldUpgradeStorage: false };
             }
 
@@ -433,7 +1097,7 @@
                 return { restored: false, deferred: false, shouldUpgradeStorage: false };
             }
 
-            if (!hasRenderableSourceRows() || getSourcePanelState(findSourcePanel()).state !== 'ready') {
+            if (shouldDeferInitialRestore(ctx.pendingInitialLoadedState)) {
                 return { restored: false, deferred: true, shouldUpgradeStorage: false };
             }
 
@@ -489,6 +1153,7 @@
                 }
 
                 const loadedState = normalizeLoadedState(rawState);
+                detectRecoverySnapshotAvailability(rawState);
                 if (loadedState && loadedState.customHeight != null) {
                     ctx.customHeight = loadedState.customHeight;
                     const container = ctx.shadowRoot?.querySelector('.sp-container');
@@ -588,6 +1253,18 @@
             pickPreferredStoredState,
             writeStateToLocalStorage,
             sendStateToStorage,
+            enqueueStateSave,
+            waitForPendingStateSave,
+            preparePersistableSnapshot,
+            prepareRuntimeSaveSnapshot,
+            getSnapshotSaveRevision,
+            getSaveStatus,
+            setSaveStatus,
+            getRecoveryKey,
+            writeRecoverySnapshot,
+            readRecoverySnapshot,
+            clearRecoverySnapshot,
+            detectRecoverySnapshotAvailability,
             flushPendingStateSave,
             cancelPendingStateSave,
             invalidateManagerInstance,
@@ -600,7 +1277,10 @@
             hasPreservableManagerSnapshot,
             canPersistManagerState,
             hasPersistedSourceRefs,
+            getPersistedSourceRefCount,
             hasPersistableManagerState,
+            restorePersistedSnapshotWithoutDom,
+            shouldDeferInitialRestore,
             capturePendingPanelReattachState,
             restoreInitialLoadedState,
             flushPendingInitialLoadedState,

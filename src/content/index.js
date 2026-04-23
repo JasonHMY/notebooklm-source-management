@@ -103,7 +103,12 @@
     let panelLifecycleAnimationFrame = null;
     let panelLifecycleTimeout = null;
     let panelLifecycleObserver = null;
+    let nativeRenameWatcherTimeout = null;
+    const NATIVE_ACTION_FAILURE_HISTORY_LIMIT = 5;
+    let nativeActionFailureHistory = [];
     const MANAGER_ACTIVE_CLASS = 'sources-plus-manager-active';
+    const NATIVE_RENAME_WATCHER_INTERVAL_MS = 250;
+    const NATIVE_RENAME_WATCHER_DURATION_MS = 5000;
 
     // --- Helper Functions ---
 
@@ -222,6 +227,7 @@
         getSerializedTag,
         getTagColorRgb,
         getTagColorRgba,
+        getTagColorPresets,
         getTagStyleVars,
         getTagColorPreviewStyle,
         generateTagId,
@@ -244,7 +250,9 @@
     const {
         buildSourceLookup,
         resolveStoredSourceKey,
+        resolveStoredSourceKeyWithReason,
         snapshotExistingSourceRecords,
+        buildSingleSourcePositionalRemap,
         remapExistingStateToCurrentSources,
         buildResolvedSourceStateById,
         buildNormalizedTagState,
@@ -266,6 +274,8 @@
         resolveFreshRowEntry: (...args) => resolveFreshRowEntry(...args),
         renderTagModal: (...args) => renderTagModal(...args),
         renderMoveToFolderModal: (...args) => renderMoveToFolderModal(...args),
+        canMoveSourceToUngrouped: (...args) => canMoveSourceToUngrouped(...args),
+        moveSourceToUngrouped: (...args) => moveSourceToUngrouped(...args),
         markSourceDetailViewRequested: () => {
             const suppressReadyStateUntil = Date.now() + 1500;
             sourceDetailViewRequested = true;
@@ -279,6 +289,16 @@
                     schedulePanelLifecycleSync({ immediate: true });
                 }
             }, 1550);
+        },
+        onNativeSourceRenameStarted: (...args) => startNativeRenameWatcher(...args),
+        recordNativeActionFailure: (details) => {
+            const failure = Object.assign({
+                occurredAt: new Date().toISOString()
+            }, details || {});
+            nativeActionFailureHistory.unshift(failure);
+            if (nativeActionFailureHistory.length > NATIVE_ACTION_FAILURE_HISTORY_LIMIT) {
+                nativeActionFailureHistory = nativeActionFailureHistory.slice(0, NATIVE_ACTION_FAILURE_HISTORY_LIMIT);
+            }
         },
         findElement: (...args) => findElement(...args)
     });
@@ -299,6 +319,18 @@
         getNativeMenuItemMetadata,
         getNativeMenuItemFingerprint,
         queryNativeMenuItems,
+        queryNativeDialogs,
+        getNativeDialogMetadata,
+        getNativeDialogFingerprint,
+        isNativeDeleteConfirmDialog,
+        findNativeDeleteConfirmDialogs,
+        getNativeDeleteMenuItemScore,
+        getNativeRenameMenuItemScore,
+        scoreNativeMenuItemAction,
+        findNativeActionMenuItem,
+        findNativeDeleteMenuItem,
+        findNativeRenameMenuItem,
+        findNativeDeleteConfirmButton,
         getNativeSourceDetailsMenuItemScore,
         findNativeSourceDetailsMenuItem,
         resolveFreshSourceRow,
@@ -307,10 +339,16 @@
         isSourceDetailsTargetCandidate,
         collectSourceDetailsCandidates,
         getSourceDetailsTargetScore,
+        triggerNativeSourceDetailsDirectWithResult,
         triggerNativeSourceDetailsDirect,
         waitForNativeMenuItems,
+        waitForNativeDialogs,
+        triggerNativeSourceDetailsViaNativeMenuWithResult,
         triggerNativeSourceDetailsViaNativeMenu,
-        triggerNativeSourceMenu,
+        triggerNativeSourceRenameWithResult,
+        triggerNativeSourceRename,
+        deleteNativeSource,
+        getNativeActionFailureMessage,
         openNativeSourceDetails,
         handleSourceActionSelection,
         getSourceActionInvokers,
@@ -329,6 +367,7 @@
         getState: () => state,
         getGroupsById: () => groupsById,
         getSourcesByKey: () => sourcesByKey,
+        getTagsById: () => tagsById,
         getParentMap: () => parentMap,
         getShadowRoot: () => shadowRoot,
         getActiveIsolationGroupId: () => activeIsolationGroupId,
@@ -350,6 +389,9 @@
         isSourceEffectivelyEnabled,
         isGroupWithinActiveIsolation,
         isSourceWithinActiveIsolation,
+        parseSearchQuery,
+        sourceMatchesSearchCriteria,
+        groupMatchesSearchCriteria,
         sourceMatchesCurrentFilters,
         hasActiveRenderFilters,
         groupHasRenderableDescendant,
@@ -372,6 +414,7 @@
 
     const modalsModule = createContentModals({
         getDocument: () => document,
+        getWindow: () => window,
         getShadowRoot: () => shadowRoot,
         getState: () => state,
         getGroupsById: () => groupsById,
@@ -382,6 +425,8 @@
         getMessage,
         el: (...args) => el(...args),
         closeSourceActionMenu,
+        showToast: (...args) => showToast(...args),
+        showUndoableToast: (...args) => showUndoableToast(...args),
         render: (...args) => render(...args),
         saveState: (...args) => saveState(...args),
         buildParentMap: (...args) => buildParentMap(...args),
@@ -392,6 +437,12 @@
         getTagUsageCounts,
         getSourceTagIds,
         setSourceTagIds,
+        getExportConfigText: (...args) => getExportConfigText(...args),
+        previewImportConfig: (...args) => previewImportConfig(...args),
+        applyImportConfig: (...args) => applyImportConfig(...args),
+        getDiagnosticsInfo: (...args) => getDiagnosticsInfo(...args),
+        getDiagnosticsText: (...args) => getDiagnosticsText(...args),
+        renderSaveStatus: (...args) => renderSaveStatus(...args),
         normalizeTagColor,
         normalizeTagColorInputValue,
         getDefaultTagColor,
@@ -401,9 +452,26 @@
         renderMoveToFolderModal,
         closeMoveToFolderModal,
         executeMoveToFolder,
+        collectMoveFolderOptions,
         closeTagModal,
+        closeBatchTagModal,
+        executeBatchTagUpdate,
+        renderBatchTagModal,
         createTagColorControl,
         createTagEditor,
+        getModalFocusableElements,
+        focusModalInitialElement,
+        handleModalKeyboardEvent,
+        bindModalKeyboardNavigation,
+        rememberModalFocusRestoreTarget,
+        restoreModalFocus,
+        closeManagedModal,
+        prepareModalOpen,
+        createModalItemStaggerStyle,
+        getTagColorPresets: getModalTagColorPresets,
+        closeSettingsModal,
+        renderSettingsModal,
+        getImportPreviewMessage,
         renderTagModal
     } = modalsModule;
 
@@ -423,6 +491,7 @@
         createSourceDescriptor,
         extractSourceIdentitySnapshot,
         buildSourceLookup,
+        resolveStoredSourceKeyWithReason,
         buildResolvedSourceStateById,
         buildNormalizedTagState,
         buildResolvedSourceTagsById,
@@ -432,7 +501,8 @@
         setSourceTagIds,
         syncSourceToPage: (...args) => syncSourceToPage(...args),
         buildParentMap: (...args) => buildParentMap(...args),
-        saveState: (...args) => saveState(...args),
+        buildPersistableState: (...args) => buildPersistableState(...args),
+        saveState: (options = {}) => saveState(Object.assign({}, options, { recordUndo: false })),
         render: (...args) => render(...args),
         suspendManagerForSourceDetailView: (...args) => suspendManagerForSourceDetailView(...args),
         flushPendingInitialLoadedState: (...args) => flushPendingInitialLoadedState(...args),
@@ -450,8 +520,66 @@
         isSourceDetailViewPanel,
         scanAndSyncSources,
         handleDomChanges,
-        debouncedScanAndSync
+        debouncedScanAndSync,
+        getPersistableStateSignature,
+        shouldSaveAfterMutationSync,
+        getMutationRelevance
     } = sourceSyncModule;
+
+    function clearNativeRenameWatcher() {
+        if (nativeRenameWatcherTimeout) {
+            clearTimeout(nativeRenameWatcherTimeout);
+            nativeRenameWatcherTimeout = null;
+        }
+    }
+
+    function runNativeRenameSyncPass(initialSignature) {
+        if (isAwaitingInitialStateLoad) return false;
+        if (getSourcePanelState(findSourcePanel()).state !== 'ready') return false;
+
+        const previousSignature = getPersistableStateSignature();
+        scanAndSyncSources({}, false);
+        render();
+        const nextSignature = getPersistableStateSignature();
+        if (
+            shouldSaveAfterMutationSync(previousSignature, nextSignature) ||
+            (
+                initialSignature != null &&
+                nextSignature != null &&
+                initialSignature !== nextSignature
+            )
+        ) {
+            saveState({ immediate: true, critical: true, recordUndo: false });
+            return true;
+        }
+
+        return false;
+    }
+
+    function startNativeRenameWatcher(sourceKey) {
+        if (!sourceKey || !sourcesByKey.has(sourceKey)) return false;
+
+        clearNativeRenameWatcher();
+        const initialSignature = getPersistableStateSignature();
+        const startedAt = Date.now();
+
+        const tick = () => {
+            if (Date.now() - startedAt > NATIVE_RENAME_WATCHER_DURATION_MS) {
+                clearNativeRenameWatcher();
+                return;
+            }
+
+            if (runNativeRenameSyncPass(initialSignature)) {
+                clearNativeRenameWatcher();
+                return;
+            }
+
+            nativeRenameWatcherTimeout = setTimeout(tick, NATIVE_RENAME_WATCHER_INTERVAL_MS);
+        };
+
+        nativeRenameWatcherTimeout = setTimeout(tick, NATIVE_RENAME_WATCHER_INTERVAL_MS);
+        return true;
+    }
 
     const renderModule = createContentRender({
         getDocument: () => document,
@@ -460,6 +588,7 @@
         getGroupsById: () => groupsById,
         getTagsById: () => tagsById,
         getSourcesByKey: () => sourcesByKey,
+        getParentMap: () => parentMap,
         getPendingBatchKeys: () => pendingBatchKeys,
         getActiveIsolationGroupId: () => activeIsolationGroupId,
         getIsDeletingSources: () => isDeletingSources,
@@ -486,18 +615,43 @@
         getActiveSourceActionSourceKey,
         getActiveSourceActionSubmenuAction,
         getSourceActionMenuPositionState,
-        setSourceActionMenuPosition
+        setSourceActionMenuPosition,
+        closeSourceActionMenu,
+        setActiveSourceActionSubmenuAction
     });
     const {
+        createBatchCountMessageChildren,
+        collectBatchCountSnapshot,
+        animateBatchCountElement,
+        animateBatchCountChanges,
+        clearSpotlightSurface,
+        updateSpotlightSurfaceFromPointer,
+        handleSpotlightPointerMove,
+        handleSpotlightPointerLeave,
+        bindSpotlightPointerTracking,
+        getNormalizedSearchQuery,
+        parseSearchQuery: parseRenderSearchQuery,
+        sourceMatchesSearchQuery,
+        getSearchHighlightTerms,
+        createHighlightedTextChildren,
+        updateSearchResultCount,
+        collectSearchExpandedGroupIds,
         getGroupEffectiveState,
         patchNode,
         patchChildren,
         renderViewStateBar,
         getSourceActionMenuLayer,
         renderSourceActionMenuLayer,
+        getRenderedSourceActionMenuItems,
+        findRenderedSourceActionMenu,
+        focusSourceActionMenuItem,
+        focusSourceActionMenuButton,
+        handleSourceActionMenuKeydown,
         createSourceGlyphIcon,
         createGroupTitleIconElement,
         replaceSourceIconWithFallback,
+        handleSourceIconImageError,
+        bindSourceIconFallbackDelegation,
         createSourceIconElement,
         render
     } = renderModule;
@@ -507,6 +661,9 @@
         debounce,
         storageSchemaVersion: STORAGE_SCHEMA_VERSION,
         normalizeSourceText,
+        getMessage,
+        showToast: (...args) => showToast(...args),
+        onSaveStatusChange: (status) => renderSaveStatus(status),
         getSourceTagIds,
         getSerializedTag,
         scanAndSyncSources: (...args) => scanAndSyncSources(...args),
@@ -525,24 +682,222 @@
         pickPreferredStoredState,
         writeStateToLocalStorage,
         sendStateToStorage,
+        enqueueStateSave,
+        waitForPendingStateSave,
+        preparePersistableSnapshot,
+        prepareRuntimeSaveSnapshot,
+        getSnapshotSaveRevision,
+        getSaveStatus,
+        setSaveStatus,
+        getRecoveryKey,
+        writeRecoverySnapshot,
+        readRecoverySnapshot,
+        clearRecoverySnapshot,
+        detectRecoverySnapshotAvailability,
         flushPendingStateSave,
         cancelPendingStateSave,
         invalidateManagerInstance,
         isLiveManagerLoadRequest,
         buildPersistableState,
-        saveState,
+        saveState: persistState,
         handlePageLifecyclePersistence,
         normalizeLoadedState,
         hasPreservableManagerSnapshot,
         canPersistManagerState,
         hasPersistedSourceRefs,
         hasPersistableManagerState,
+        restorePersistedSnapshotWithoutDom,
         capturePendingPanelReattachState,
         restoreInitialLoadedState,
         flushPendingInitialLoadedState,
         applyLoadedStateToManager,
         loadState
     } = persistenceModule;
+
+    const UNDO_STACK_LIMIT = 20;
+    let undoStack = [];
+    let undoBaselineSnapshot = null;
+    let undoBaselineSignature = '';
+    let isApplyingUndoSnapshot = false;
+
+    function getUndoSnapshotSignature(snapshot) {
+        try {
+            return JSON.stringify(snapshot || null);
+        } catch (error) {
+            return '';
+        }
+    }
+
+    function getCurrentUndoSnapshot() {
+        try {
+            return cloneSerializableData(buildPersistableState());
+        } catch (error) {
+            console.warn('NotebookLM Source Management: Could not capture undo snapshot.', error);
+            return null;
+        }
+    }
+
+    function setUndoBaselineSnapshot(snapshot = null) {
+        const nextSnapshot = snapshot ? cloneSerializableData(snapshot) : getCurrentUndoSnapshot();
+        undoBaselineSnapshot = nextSnapshot;
+        undoBaselineSignature = getUndoSnapshotSignature(nextSnapshot);
+        return Boolean(nextSnapshot);
+    }
+
+    function resetUndoHistoryBaseline(snapshot = null) {
+        undoStack = [];
+        setUndoBaselineSnapshot(snapshot);
+    }
+
+    function recordUndoBaselineForSave(nextSnapshot, options = {}) {
+        const shouldRecordUndo = options.recordUndo !== false && !isApplyingUndoSnapshot;
+        const nextSignature = getUndoSnapshotSignature(nextSnapshot);
+
+        if (
+            shouldRecordUndo &&
+            undoBaselineSnapshot &&
+            undoBaselineSignature &&
+            nextSignature &&
+            nextSignature !== undoBaselineSignature
+        ) {
+            undoStack.push(cloneSerializableData(undoBaselineSnapshot));
+            if (undoStack.length > UNDO_STACK_LIMIT) {
+                undoStack.splice(0, undoStack.length - UNDO_STACK_LIMIT);
+            }
+        }
+
+        undoBaselineSnapshot = cloneSerializableData(nextSnapshot);
+        undoBaselineSignature = nextSignature;
+    }
+
+    function saveState(options = {}) {
+        const normalizedOptions = options && typeof options === 'object' ? options : {};
+        if (projectId) {
+            const nextSnapshot = getCurrentUndoSnapshot();
+            if (nextSnapshot) {
+                recordUndoBaselineForSave(nextSnapshot, normalizedOptions);
+            }
+        }
+        return persistState(normalizedOptions);
+    }
+
+    function applyPersistableSnapshotToRuntime(snapshot) {
+        const normalizedState = normalizeLoadedState(cloneSerializableData(snapshot));
+        if (!normalizedState || !hasPersistableManagerState(normalizedState)) return false;
+
+        state.groups = Array.isArray(normalizedState.groups) ? [...normalizedState.groups] : [];
+        state.ungrouped = Array.isArray(normalizedState.ungrouped) ? [...normalizedState.ungrouped] : [];
+        state.tagOrder = Array.isArray(normalizedState.tagOrder) ? [...normalizedState.tagOrder] : [];
+        state.isBatchMode = false;
+        pendingBatchKeys.clear();
+
+        groupsById.clear();
+        Object.entries(normalizedState.groupsById || {}).forEach(([groupId, group]) => {
+            groupsById.set(groupId, cloneSerializableData(group));
+        });
+
+        tagsById.clear();
+        Object.entries(normalizedState.tagsById || {}).forEach(([tagId, tag]) => {
+            tagsById.set(tagId, cloneSerializableData(tag));
+        });
+
+        sourceTagsById.clear();
+        Object.entries(normalizedState.sourceTagsById || {}).forEach(([sourceKey, tagIds]) => {
+            sourceTagsById.set(sourceKey, Array.isArray(tagIds) ? [...tagIds] : []);
+        });
+
+        Object.entries(normalizedState.sourceStateById || {}).forEach(([sourceKey, sourceState]) => {
+            const source = sourcesByKey.get(sourceKey);
+            if (!source) return;
+            source.enabled = Boolean(sourceState.enabled);
+            source.title = sourceState.title || source.title;
+            source.normalizedTitle = sourceState.normalizedTitle || normalizeSourceText(source.title);
+            source.stableToken = sourceState.stableToken || source.stableToken || '';
+            source.fingerprint = sourceState.fingerprint || source.fingerprint || '';
+            source.identityType = sourceState.identityType || source.identityType || 'fingerprint';
+        });
+
+        const knownSourceKeys = new Set(state.ungrouped);
+        const visitGroupSources = (groupId) => {
+            const group = groupsById.get(groupId);
+            if (!group || !Array.isArray(group.children)) return;
+            group.children.forEach((child) => {
+                if (child?.type === 'source' && child.key) {
+                    knownSourceKeys.add(child.key);
+                } else if (child?.type === 'group' && child.id) {
+                    visitGroupSources(child.id);
+                }
+            });
+        };
+        state.groups.forEach(visitGroupSources);
+        sourcesByKey.forEach((source, sourceKey) => {
+            if (!knownSourceKeys.has(sourceKey)) {
+                state.ungrouped.push(sourceKey);
+                knownSourceKeys.add(sourceKey);
+            }
+        });
+
+        if (state.activeTagId && !tagsById.has(state.activeTagId)) {
+            state.activeTagId = null;
+        }
+
+        if (normalizedState.customHeight != null) {
+            customHeight = normalizedState.customHeight;
+            const container = shadowRoot?.querySelector?.('.sp-container');
+            if (container) container.style.height = `${customHeight}px`;
+        }
+
+        buildParentMap();
+        sourcesByKey.forEach((source) => {
+            syncSourceToPage(source, isSourceEffectivelyEnabled(source));
+        });
+        return true;
+    }
+
+    function undoLastOperation() {
+        const snapshot = undoStack.pop();
+        if (!snapshot) {
+            showToast(getMessage('ui_undo_empty'), { variant: 'info' });
+            return false;
+        }
+
+        isApplyingUndoSnapshot = true;
+        try {
+            if (!applyPersistableSnapshotToRuntime(snapshot)) {
+                showToast(getMessage('ui_undo_empty'), { variant: 'info' });
+                return false;
+            }
+
+            closeSourceActionMenu();
+            render();
+            saveState({ immediate: true, critical: true, recordUndo: false });
+            setUndoBaselineSnapshot(snapshot);
+            showToast(getMessage('ui_undo_toast'), { variant: 'success' });
+            return true;
+        } finally {
+            isApplyingUndoSnapshot = false;
+        }
+    }
+
+    function isEditableUndoTarget(target) {
+        if (!target) return false;
+        const tagName = String(target.tagName || '').toLowerCase();
+        if (tagName === 'input' || tagName === 'textarea' || tagName === 'select') return true;
+        if (target.isContentEditable) return true;
+        return Boolean(target.closest?.('[contenteditable="true"]'));
+    }
+
+    function handleUndoKeydown(event) {
+        const key = String(event?.key || '').toLowerCase();
+        if (key !== 'z' || (!event.metaKey && !event.ctrlKey) || event.shiftKey || event.altKey) {
+            return;
+        }
+        if (isEditableUndoTarget(event.target)) return;
+
+        event.preventDefault?.();
+        event.stopPropagation?.();
+        undoLastOperation();
+    }
 
     const treeInteractionsModule = createContentTreeInteractions({
         runtime: runtimeContext,
@@ -561,6 +916,7 @@
         getSourceCheckboxSelector: () => SOURCE_CHECKBOX_SELECTOR,
         getMessage,
         showToast: (...args) => showToast(...args),
+        showUndoableToast: (...args) => showUndoableToast(...args),
         render: (...args) => render(...args),
         saveState: (...args) => saveState(...args),
         buildParentMap: (...args) => buildParentMap(...args),
@@ -569,6 +925,7 @@
         syncSourcesToEffectiveState: (...args) => syncSourcesToEffectiveState(...args),
         executeBatchDelete: (...args) => executeBatchDelete(...args),
         renderMoveToFolderModal: (...args) => renderMoveToFolderModal(...args),
+        renderBatchTagModal: (...args) => renderBatchTagModal(...args),
         getSourceActionInvokers,
         handleSourceActionSelection,
         toggleSourceActionMenu,
@@ -592,6 +949,9 @@
         processClickQueue,
         findParentGroupOfSource,
         removeSourceFromTree,
+        executeBatchMoveToUngrouped,
+        canMoveSourceToUngrouped,
+        moveSourceToUngrouped,
         removeGroupFromTree,
         toggleGroupCollapse,
         handleInteraction,
@@ -601,7 +961,12 @@
         handleDragOver,
         handleDragLeave,
         handleDrop,
-        handleDragEnd
+        handleDragEnd,
+        clearDragFeedback,
+        getDropIntent,
+        getSourceTreePosition,
+        getGroupTreePosition,
+        isNoopTreeMove
     } = treeInteractionsModule;
 
     function getProjectId() {
@@ -614,24 +979,290 @@
     }
 
     let toastTimeout = null;
-    function showToast(message) {
+    let activeToastItem = null;
+    const toastQueue = [];
+    const TOAST_DEFAULT_DURATION_MS = 3000;
+    const TOAST_ACTION_DURATION_MS = 5000;
+
+    function normalizeToastOptions(options = {}) {
+        const normalizedOptions = options && typeof options === 'object' ? options : {};
+        const variant = ['info', 'success', 'error'].includes(normalizedOptions.variant)
+            ? normalizedOptions.variant
+            : 'info';
+        return {
+            variant,
+            actionLabel: typeof normalizedOptions.actionLabel === 'string' ? normalizedOptions.actionLabel : '',
+            onAction: typeof normalizedOptions.onAction === 'function' ? normalizedOptions.onAction : null,
+            durationMs: Number.isFinite(normalizedOptions.durationMs) && normalizedOptions.durationMs > 0
+                ? normalizedOptions.durationMs
+                : null
+        };
+    }
+
+    function ensureToastElement() {
+        if (!shadowRoot) return null;
         let toast = shadowRoot.querySelector('.sp-toast');
         if (!toast) {
             toast = document.createElement('div');
-            toast.className = 'sp-toast';
+            toast.className = 'sp-toast sp-toast-info';
             shadowRoot.appendChild(toast);
         }
-        toast.textContent = message;
-        
-        // Force reflow to restart animation if needed
-        toast.classList.remove('show');
-        void toast.offsetWidth; 
-        toast.classList.add('show');
-        
-        if (toastTimeout) clearTimeout(toastTimeout);
-        toastTimeout = setTimeout(() => {
+        toast.setAttribute('role', 'status');
+        toast.setAttribute('aria-live', 'polite');
+        return toast;
+    }
+
+    function clearToastTimeout() {
+        if (toastTimeout) {
+            clearTimeout(toastTimeout);
+            toastTimeout = null;
+        }
+    }
+
+    function hideActiveToast(showNext = true) {
+        const toast = shadowRoot?.querySelector?.('.sp-toast');
+        if (toast) {
             toast.classList.remove('show');
-        }, 3000);
+        }
+        clearToastTimeout();
+        activeToastItem = null;
+        if (showNext && toastQueue.length > 0) {
+            toastTimeout = setTimeout(() => {
+                toastTimeout = null;
+                showNextToast();
+            }, 120);
+        }
+    }
+
+    function showNextToast() {
+        if (activeToastItem || toastQueue.length === 0) return;
+        const toast = ensureToastElement();
+        if (!toast) return;
+
+        const item = toastQueue.shift();
+        activeToastItem = item;
+        toast.className = `sp-toast sp-toast-${item.variant}`;
+        toast.setAttribute('role', 'status');
+        toast.setAttribute('aria-live', 'polite');
+
+        const messageNode = document.createElement('span');
+        messageNode.className = 'sp-toast-message';
+        messageNode.textContent = item.message;
+        const children = [messageNode];
+
+        if (item.actionLabel && item.onAction) {
+            const actionButton = document.createElement('button');
+            actionButton.type = 'button';
+            actionButton.className = 'sp-toast-action';
+            actionButton.textContent = item.actionLabel;
+            actionButton.addEventListener('click', () => {
+                try {
+                    item.onAction();
+                } finally {
+                    hideActiveToast(true);
+                }
+            });
+            children.push(actionButton);
+        }
+
+        toast.replaceChildren(...children);
+        toast.classList.remove('show');
+        void toast.offsetWidth;
+        toast.classList.add('show');
+
+        const duration = item.durationMs || (item.actionLabel ? TOAST_ACTION_DURATION_MS : TOAST_DEFAULT_DURATION_MS);
+        clearToastTimeout();
+        toastTimeout = setTimeout(() => hideActiveToast(true), duration);
+    }
+
+    function showToast(message, options = {}) {
+        const text = String(message || '').trim();
+        if (!text) return;
+        toastQueue.push(Object.assign({ message: text }, normalizeToastOptions(options)));
+        showNextToast();
+    }
+
+    function showUndoableToast(message, options = {}) {
+        const normalizedOptions = options && typeof options === 'object' ? options : {};
+        if (
+            undoStack.length === 0 ||
+            normalizedOptions.actionLabel ||
+            normalizedOptions.onAction
+        ) {
+            showToast(message, options);
+            return;
+        }
+
+        showToast(message, Object.assign({}, normalizedOptions, {
+            actionLabel: getMessage('ui_undo_action'),
+            onAction: undoLastOperation
+        }));
+    }
+
+    function getSaveStatusMessageKey(statusState) {
+        switch (statusState) {
+            case 'saving':
+                return 'ui_save_status_saving';
+            case 'saved':
+                return 'ui_save_status_saved';
+            case 'failed':
+                return 'ui_save_status_failed';
+            case 'stale':
+                return 'ui_save_status_stale';
+            case 'recovery_available':
+                return 'ui_save_status_recovery';
+            default:
+                return '';
+        }
+    }
+
+    function clearElementChildren(element) {
+        if (!element) return;
+        if (typeof element.replaceChildren === 'function') {
+            element.replaceChildren();
+            return;
+        }
+        while (element.firstChild && typeof element.removeChild === 'function') {
+            element.removeChild(element.firstChild);
+        }
+        if (Array.isArray(element.childNodes)) {
+            element.childNodes.length = 0;
+        }
+        if (Array.isArray(element.children)) {
+            element.children.length = 0;
+        }
+    }
+
+    function appendSaveStatusAction(container, labelKey, handler, className) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = className || 'sp-save-status-action';
+        button.textContent = getMessage(labelKey);
+        button.addEventListener('click', (event) => {
+            event.preventDefault?.();
+            event.stopPropagation?.();
+            handler();
+        });
+        container.appendChild(button);
+        return button;
+    }
+
+    function retryCurrentSave() {
+        return saveState({ immediate: true, critical: true, recordUndo: false });
+    }
+
+    function restoreRecoverySnapshotFromUi() {
+        const recovery = readRecoverySnapshot();
+        if (!recovery?.snapshot) {
+            showToast(getMessage('ui_recovery_unavailable'), { variant: 'error' });
+            setSaveStatus({ state: 'idle', recoveryAvailable: false, recoveryCreatedAt: '' });
+            return false;
+        }
+
+        if (!applyPersistableSnapshotToRuntime(recovery.snapshot)) {
+            showToast(getMessage('ui_recovery_restore_failed'), { variant: 'error' });
+            return false;
+        }
+
+        closeSourceActionMenu();
+        render();
+        saveState({ immediate: true, critical: true, recordUndo: false });
+        showToast(getMessage('ui_recovery_restored'), { variant: 'success' });
+        return true;
+    }
+
+    function dismissRecoverySnapshotFromUi() {
+        clearRecoverySnapshot();
+        setSaveStatus({
+            state: 'idle',
+            lastError: '',
+            recoveryAvailable: false,
+            recoveryCreatedAt: ''
+        });
+        renderSaveStatus();
+        return true;
+    }
+
+    function renderSaveStatus(status = null) {
+        if (!shadowRoot) return null;
+        const container = typeof shadowRoot.getElementById === 'function'
+            ? shadowRoot.getElementById('sp-settings-save-status')
+            : shadowRoot.querySelector?.('#sp-settings-save-status');
+        if (!container) return null;
+        const section = typeof shadowRoot.getElementById === 'function'
+            ? shadowRoot.getElementById('sp-settings-save-status-section')
+            : shadowRoot.querySelector?.('#sp-settings-save-status-section');
+
+        const saveStatus = status || getSaveStatus();
+        const stateName = saveStatus?.state || 'idle';
+        const messageKey = getSaveStatusMessageKey(stateName);
+        const shouldShow = Boolean(messageKey && stateName !== 'idle');
+
+        if (section) {
+            section.hidden = !shouldShow;
+        }
+        container.hidden = !shouldShow;
+        container.className = `sp-save-status sp-save-status-${stateName}`;
+        if (typeof container.setAttribute === 'function') {
+            container.setAttribute('role', stateName === 'failed' || stateName === 'stale' ? 'alert' : 'status');
+            container.setAttribute('aria-live', stateName === 'failed' || stateName === 'stale' ? 'assertive' : 'polite');
+        }
+        clearElementChildren(container);
+
+        if (!shouldShow) return container;
+
+        if (typeof container.appendChild !== 'function') {
+            container.textContent = getMessage(messageKey);
+            return container;
+        }
+
+        const label = document.createElement('span');
+        label.className = 'sp-save-status-label';
+        label.textContent = getMessage(messageKey);
+        container.appendChild(label);
+
+        if (stateName === 'failed' || stateName === 'stale') {
+            appendSaveStatusAction(container, 'ui_save_status_retry', retryCurrentSave);
+        }
+        if (stateName === 'recovery_available') {
+            appendSaveStatusAction(container, 'ui_recovery_restore', restoreRecoverySnapshotFromUi);
+            appendSaveStatusAction(container, 'ui_recovery_dismiss', dismissRecoverySnapshotFromUi, 'sp-save-status-action sp-save-status-action-muted');
+        }
+
+        return container;
+    }
+
+    function getDiagnosticsInfo() {
+        const saveStatus = getSaveStatus ? getSaveStatus() : {};
+        const recovery = readRecoverySnapshot ? readRecoverySnapshot() : null;
+        const importBackup = readImportBackupSnapshot();
+        const latestNativeFailure = nativeActionFailureHistory[0] || null;
+        return {
+            notebookId: projectId || '',
+            sourceCount: sourcesByKey.size,
+            groupCount: groupsById.size,
+            tagCount: tagsById.size,
+            saveRevision: saveStatus.lastSaveRevision || getSnapshotSaveRevision(buildPersistableState()),
+            savedAt: saveStatus.lastSavedAt || '',
+            saveStatus: saveStatus.state || 'idle',
+            lastSaveError: saveStatus.lastError || '',
+            recoveryAvailable: Boolean(recovery),
+            recoveryCreatedAt: recovery?.createdAt || '',
+            recoveryBaseRevision: Number(recovery?.baseRevision) || 0,
+            importBackupAvailable: Boolean(importBackup),
+            importBackupCreatedAt: importBackup?.createdAt || '',
+            importBackupCounts: importBackup ? {
+                sourceCount: Number(importBackup.sourceCount) || 0,
+                groupCount: Number(importBackup.groupCount) || 0,
+                tagCount: Number(importBackup.tagCount) || 0
+            } : null,
+            lastNativeActionFailure: latestNativeFailure,
+            nativeActionFailureHistory: nativeActionFailureHistory.map((failure) => Object.assign({}, failure))
+        };
+    }
+
+    function getDiagnosticsText() {
+        return JSON.stringify(getDiagnosticsInfo(), null, 2);
     }
 
     function showCrashBanner(message) {
@@ -668,7 +1299,25 @@
 
         try {
             scrollObserver.disconnect();
-            scrollObserver.observe(nextObservedArea, { childList: true, subtree: true });
+            scrollObserver.observe(nextObservedArea, {
+                childList: true,
+                subtree: true,
+                characterData: true,
+                attributes: true,
+                attributeFilter: [
+                    'aria-label',
+                    'title',
+                    'alt',
+                    'data-source-id',
+                    'data-document-id',
+                    'data-doc-id',
+                    'data-file-id',
+                    'data-drive-id',
+                    'data-resource-id',
+                    'data-testid',
+                    'href'
+                ]
+            });
             observedNativeScrollArea = nextObservedArea;
         } catch (error) {
             observedNativeScrollArea = null;
@@ -824,140 +1473,305 @@
     }
 
     // --- Batch Delete Deletion Engine ---
+    const NON_BLOCKING_BATCH_DELETE_FAILURE_REASONS = new Set([
+        'source_missing',
+        'source_unavailable'
+    ]);
+
+    function shouldStopBatchDeleteAfterFailure(reason) {
+        return !NON_BLOCKING_BATCH_DELETE_FAILURE_REASONS.has(reason || '');
+    }
+
     async function executeBatchDelete() {
         if (pendingBatchKeys.size === 0 || isDeletingSources) return;
         isDeletingSources = true;
+        render();
 
         const keysToDelete = Array.from(pendingBatchKeys);
         const total = keysToDelete.length;
         let deletedCount = 0;
+        let failedCount = 0;
+        let firstFailureReason = '';
 
-        showToast(getMessage('ui_deleting_count', [total.toString()]));
+        try {
+            showToast(getMessage('ui_deleting_count', [total.toString()]), { variant: 'info' });
 
-        for (const key of keysToDelete) {
-            const source = sourcesByKey.get(key);
-            if (!source || source.isDisabled) continue;
-
-            // Step 1: Find and click the native more options button
-            let nativeMoreBtn = findElement(DEPS.moreBtn, source.element);
-
-            // Fallback: If disconnected, try to re-query the DOM
-            if (!nativeMoreBtn || !document.body.contains(nativeMoreBtn)) {
-                const freshCheckbox = findFreshCheckbox(key);
-                if (freshCheckbox) {
-                    const freshRow = freshCheckbox.closest(DEPS.row[0]) || freshCheckbox.closest(DEPS.row[1]);
-                    if (freshRow) {
-                        nativeMoreBtn = findElement(DEPS.moreBtn, freshRow);
+            for (const key of keysToDelete) {
+                try {
+                    const result = await deleteNativeSource(key);
+                    if (result && result.deleted) {
+                        deletedCount++;
+                    } else {
+                        const reason = result?.reason || 'native_delete_error';
+                        failedCount++;
+                        if (!firstFailureReason) {
+                            firstFailureReason = reason;
+                        }
+                        if (shouldStopBatchDeleteAfterFailure(reason)) {
+                            break;
+                        }
                     }
+                } catch (error) {
+                    failedCount++;
+                    if (!firstFailureReason) {
+                        firstFailureReason = 'native_delete_error';
+                    }
+                    console.error('NotebookLM Source Management: Error during automated deletion step', error);
                 }
             }
+        } finally {
+            isDeletingSources = false;
+            pendingBatchKeys.clear();
+            state.isBatchMode = false;
+            closeSourceActionMenu();
 
-            if (!nativeMoreBtn) continue;
-
-            nativeMoreBtn.click();
-
-            // Step 2: Wait for the CDK overlay menu to appear and contain the Delete option
             try {
-                // The delay is important to let the UI react (framework animation/rendering)
-                await new Promise(resolve => setTimeout(resolve, 150));
-
-                // Usually the delete button has an aria-label="Delete" or text content "Delete" / "移除"
-                // The exact DOM structure depends on NotebookLM's locale. We look for a menu item
-                // containing the delete icon or the word "delete" (case insensitive in english).
-                const menuItems = document.querySelectorAll('.cdk-overlay-container [role="menuitem"]');
-                let deleteMenuItem = null;
-                for (const item of menuItems) {
-                    const iconText = (item.querySelector('mat-icon')?.textContent || '').trim().toLowerCase();
-                    if (iconText === 'delete' || iconText === 'delete_forever' || iconText === 'remove_circle') {
-                        deleteMenuItem = item;
-                        break;
-                    }
-                    const ariaLabel = (item.getAttribute('aria-label') || '').toLowerCase();
-                    const testId = item.getAttribute('data-testid') || '';
-                    if (ariaLabel.includes('delete') || ariaLabel.includes('remove') || testId.includes('delete') || testId.includes('remove')) {
-                        deleteMenuItem = item;
-                        break;
-                    }
-                    const text = item.textContent.toLowerCase();
-                    if (text.includes('delete') || text.includes('remove') ||
-                        text.includes('删除') || text.includes('移除') ||
-                        text.includes('supprimer') || text.includes('löschen') || text.includes('eliminar') ||
-                        text.includes('削除') || text.includes('삭제')) {
-                        deleteMenuItem = item;
-                        break;
-                    }
+                if (deletedCount > 0) {
+                    showToast(getMessage('ui_deleted_toast', [deletedCount.toString()]), { variant: 'success' });
                 }
-
-                if (deleteMenuItem) {
-                    deleteMenuItem.click();
-
-                    // Wait for the confirmation dialog to appear after clicking delete
-                    await new Promise(resolve => setTimeout(resolve, 150));
-
-                    const dialogs = document.querySelectorAll('mat-dialog-container, [role="dialog"], .cdk-dialog-container');
-                    let confirmBtn = null;
-                    for (const dialog of dialogs) {
-                        const buttons = dialog.querySelectorAll('button');
-                        const cancelPatterns = /cancel|取消|annuler|abbrechen|cancelar|キャンセル|취소/;
-
-                        for (const btn of buttons) {
-                            const btnText = btn.textContent.toLowerCase();
-                            if (cancelPatterns.test(btnText)) continue;
-
-                            const ariaLabel = (btn.getAttribute('aria-label') || '').toLowerCase();
-                            const isPrimaryButton = btn.className.includes('primary') || btn.className.includes('warn');
-                            const hasCheckIcon = btn.querySelector('mat-icon')?.textContent.trim() === 'check';
-                            const deleteConfirmPattern = /delete|remove|削除|삭제|删除|移除|supprimer|löschen|eliminar|yes|ok|confirm|确定|确认/;
-
-                            if (isPrimaryButton || hasCheckIcon || deleteConfirmPattern.test(btnText) || deleteConfirmPattern.test(ariaLabel)) {
-                                confirmBtn = btn;
-                                break;
-                            }
-                        }
-
-                        if (!confirmBtn && buttons.length > 0) {
-                            const warnBtn = Array.from(buttons).find(b => {
-                                const t = b.textContent.toLowerCase();
-                                return !cancelPatterns.test(t) && (b.className.includes('warn') || b.className.includes('primary'));
-                            });
-                            if (warnBtn) {
-                                confirmBtn = warnBtn;
-                            }
-                        }
-
-                        if (confirmBtn) break;
-                    }
-
-                    if (confirmBtn) {
-                        confirmBtn.click();
-                        deletedCount++;
-                        // Limit delay to 50ms for hyper-fast batch delete visual effect while still allowing DOM tear down
-                        await new Promise(resolve => setTimeout(resolve, 50));
-                    } else {
-                        console.warn(`NotebookLM Source Management: Could not find confirmation button in dialog for source key: ${key}`);
-                        // Try to close dialog by clicking escape or backdrop if possible, fallback to body click
-                        document.body.click();
-                    }
-
-                } else {
-                    // Close menu if delete button wasn't found (safety)
-                    document.body.click();
-                    console.warn(`NotebookLM Source Management: Could not find delete menu item for source key: ${key}`);
+                if (failedCount > 0) {
+                    showToast(getNativeActionFailureMessage('delete', firstFailureReason), { variant: 'error' });
                 }
-            } catch (err) {
-                console.error("NotebookLM Source Management: Error during automated deletion step", err);
-                document.body.click(); // ensure menu is closed
+            } finally {
+                render(); // The heartbeat observer will catch the actual DOM removals eventually
             }
         }
+    }
 
-        // Cleanup after all deletions are processed
-        isDeletingSources = false;
-        pendingBatchKeys.clear();
-        state.isBatchMode = false;
+    const IMPORT_EXPORT_FORMAT = 'notebooklm-source-management-config';
+
+    function getSessionStorageObject() {
+        const storage = globalThis.sessionStorage || window?.sessionStorage;
+        return storage && typeof storage.getItem === 'function' ? storage : null;
+    }
+
+    function getImportBackupKey(targetProjectId = projectId) {
+        return targetProjectId ? `sourcesPlusImportBackup_${targetProjectId}` : '';
+    }
+
+    function getPersistableStateCounts(snapshot) {
+        return {
+            sourceCount: Object.keys(snapshot?.sourceStateById || {}).length,
+            groupCount: Object.keys(snapshot?.groupsById || {}).length,
+            tagCount: Object.keys(snapshot?.tagsById || {}).length
+        };
+    }
+
+    function writeImportBackupSnapshot(reason = 'before_import') {
+        const storage = getSessionStorageObject();
+        const key = getImportBackupKey();
+        if (!storage || !key) return null;
+
+        const snapshot = cloneSerializableData(buildPersistableState());
+        const payload = Object.assign({
+            snapshot,
+            createdAt: new Date().toISOString(),
+            reason
+        }, getPersistableStateCounts(snapshot));
+
+        try {
+            storage.setItem(key, JSON.stringify(payload));
+            return payload;
+        } catch (error) {
+            console.warn('NotebookLM Source Management: Import backup write failed:', error);
+            return null;
+        }
+    }
+
+    function readImportBackupSnapshot(targetProjectId = projectId) {
+        const storage = getSessionStorageObject();
+        const key = getImportBackupKey(targetProjectId);
+        if (!storage || !key) return null;
+
+        try {
+            const rawValue = storage.getItem(key);
+            if (!rawValue) return null;
+            const parsed = JSON.parse(rawValue);
+            if (!parsed || typeof parsed !== 'object' || !parsed.snapshot) return null;
+            return parsed;
+        } catch (error) {
+            console.warn('NotebookLM Source Management: Import backup read failed:', error);
+            return null;
+        }
+    }
+
+    function clearImportBackupSnapshot(targetProjectId = projectId) {
+        const storage = getSessionStorageObject();
+        const key = getImportBackupKey(targetProjectId);
+        if (!storage || !key) return false;
+
+        try {
+            storage.removeItem(key);
+            return true;
+        } catch (error) {
+            console.warn('NotebookLM Source Management: Import backup clear failed:', error);
+            return false;
+        }
+    }
+
+    function restoreImportBackupSnapshotFromUi() {
+        const backup = readImportBackupSnapshot();
+        if (!backup?.snapshot) {
+            showToast(getMessage('ui_settings_import_backup_unavailable'), { variant: 'error' });
+            return false;
+        }
+
+        if (!applyPersistableSnapshotToRuntime(backup.snapshot)) {
+            showToast(getMessage('ui_settings_import_backup_restore_failed'), { variant: 'error' });
+            return false;
+        }
+
         closeSourceActionMenu();
+        render();
+        return Promise.resolve(saveState({ immediate: true, critical: true, recordUndo: false }))
+            .then((result) => {
+                if (result && result.ok === false) {
+                    showToast(getMessage('ui_settings_import_backup_restore_failed'), { variant: 'error' });
+                    return false;
+                }
+                clearImportBackupSnapshot();
+                showToast(getMessage('ui_settings_import_backup_restored'), { variant: 'success' });
+                return true;
+            })
+            .catch((error) => {
+                console.warn('NotebookLM Source Management: Import backup restore save failed:', error);
+                showToast(getMessage('ui_settings_import_backup_restore_failed'), { variant: 'error' });
+                return false;
+            });
+    }
 
-        showToast(getMessage('ui_deleted_toast', [deletedCount.toString()]));
-        render(); // The heartbeat observer will catch the actual DOM removals eventually
+    function createExportConfigPayload() {
+        const manifest = globalThis.chrome?.runtime?.getManifest?.() || {};
+        return {
+            format: IMPORT_EXPORT_FORMAT,
+            formatVersion: 1,
+            extensionVersion: manifest.version || '',
+            exportedAt: new Date().toISOString(),
+            data: buildPersistableState()
+        };
+    }
+
+    function getExportConfigText() {
+        return JSON.stringify(createExportConfigPayload(), null, 2);
+    }
+
+    function unwrapImportConfigPayload(parsedConfig) {
+        if (!parsedConfig || typeof parsedConfig !== 'object') return null;
+        if (parsedConfig.format === IMPORT_EXPORT_FORMAT && parsedConfig.data) {
+            return parsedConfig.data;
+        }
+        return parsedConfig;
+    }
+
+    function parseImportConfigText(text) {
+        const rawText = String(text || '').trim();
+        if (!rawText) {
+            return { ok: false, reason: 'empty' };
+        }
+
+        try {
+            const parsedConfig = JSON.parse(rawText);
+            const normalizedState = normalizeLoadedState(unwrapImportConfigPayload(parsedConfig));
+            if (!normalizedState || !hasPersistableManagerState(normalizedState)) {
+                return { ok: false, reason: 'invalid' };
+            }
+            return { ok: true, state: normalizedState };
+        } catch (error) {
+            return { ok: false, reason: 'invalid' };
+        }
+    }
+
+    function collectImportSourceRefs(importState) {
+        const refs = new Set();
+        const visitChild = (child) => {
+            if (child?.type === 'source' && child.key) {
+                refs.add(child.key);
+            }
+            if (child?.type === 'group' && child.id) {
+                const group = importState.groupsById?.[child.id];
+                (Array.isArray(group?.children) ? group.children : []).forEach(visitChild);
+            }
+        };
+
+        Object.values(importState.groupsById || {}).forEach((group) => {
+            (Array.isArray(group?.children) ? group.children : []).forEach(visitChild);
+        });
+        (Array.isArray(importState.ungrouped) ? importState.ungrouped : []).forEach((sourceKey) => {
+            if (sourceKey) refs.add(sourceKey);
+        });
+        Object.keys(importState.sourceStateById || {}).forEach((sourceKey) => refs.add(sourceKey));
+        return refs;
+    }
+
+    function previewImportConfig(text) {
+        const parsed = parseImportConfigText(text);
+        if (!parsed.ok) return parsed;
+
+        const sourceLookup = buildSourceLookup(Array.from(sourcesByKey.values()));
+        const sourceRefs = collectImportSourceRefs(parsed.state);
+        const matchedSourceKeys = new Set();
+        const matchedSourceDetails = [];
+        const unmatchedSourceDetails = [];
+        sourceRefs.forEach((storedKey) => {
+            const sourceRecord = parsed.state.sourceStateById?.[storedKey] || null;
+            const resolvedKey = resolveStoredSourceKey(storedKey, sourceLookup, sourceRecord);
+            const detail = {
+                storedKey,
+                resolvedKey: resolvedKey || '',
+                title: sourceRecord?.title || sourceRecord?.normalizedTitle || storedKey
+            };
+            if (resolvedKey) {
+                matchedSourceKeys.add(resolvedKey);
+                matchedSourceDetails.push(detail);
+            } else {
+                unmatchedSourceDetails.push(detail);
+            }
+        });
+
+        return {
+            ok: true,
+            state: parsed.state,
+            totalSources: sourceRefs.size,
+            matchedSources: matchedSourceKeys.size,
+            matchedSourceDetails,
+            unmatchedSourceDetails,
+            groupCount: Object.keys(parsed.state.groupsById || {}).length,
+            tagCount: Object.keys(parsed.state.tagsById || {}).length
+        };
+    }
+
+    function applyImportConfig(text) {
+        const preview = previewImportConfig(text);
+        if (!preview.ok) {
+            showToast(getMessage(preview.reason === 'empty'
+                ? 'ui_settings_import_empty'
+                : 'ui_settings_import_invalid'), { variant: 'error' });
+            return preview;
+        }
+
+        const importedState = preview.state;
+        writeImportBackupSnapshot();
+        if (importedState.customHeight != null) {
+            customHeight = importedState.customHeight;
+            const container = shadowRoot?.querySelector?.('.sp-container');
+            if (container) container.style.height = `${customHeight}px`;
+        }
+
+        const restoreResult = restoreInitialLoadedState(importedState);
+        if (restoreResult.deferred) {
+            render();
+            showToast(getMessage('ui_settings_import_deferred'), { variant: 'info' });
+            return { ...preview, ok: false, reason: 'deferred' };
+        }
+
+        render();
+        saveState({ immediate: true, critical: true });
+        showToast(getMessage('ui_settings_imported_toast'), {
+            variant: 'success',
+            actionLabel: getMessage('ui_settings_restore_import_backup'),
+            onAction: restoreImportBackupSnapshotFromUi
+        });
+        return preview;
     }
     // ==========================================
     // DATA AND UTILS
@@ -1020,10 +1834,12 @@
         attachedSourcePanel = null;
         observedNativeScrollArea = null;
         managerStatusReason = 'manager_not_ready';
+        resetUndoHistoryBaseline();
     }
 
     function cleanupManagerResources() {
         clearScheduledPanelLifecycleSync();
+        clearNativeRenameWatcher();
         invalidateManagerInstance();
         if (routeRecoveryTimeout) {
             clearTimeout(routeRecoveryTimeout);
@@ -1035,6 +1851,7 @@
         }
         observedNativeScrollArea = null;
         document.removeEventListener('change', handleOriginalCheckboxChange, true);
+        document.removeEventListener('keydown', handleUndoKeydown, true);
         document.removeEventListener('click', handleDocumentOutsideClick, true);
         if (shadowRoot && typeof shadowRoot.removeEventListener === 'function') {
             shadowRoot.removeEventListener('scroll', handleSourceActionMenuViewportChange, true);
@@ -1098,8 +1915,9 @@
         render();
         if (pendingRestore.shouldUpgradeStorage) {
             pendingStorageUpgrade = false;
-            saveState();
+            saveState({ recordUndo: false });
         }
+        resetUndoHistoryBaseline();
     }
 
     function syncManagerWithPanelLifecycle() {
@@ -1280,6 +2098,7 @@
 
         const containerHtml = createManagerShell(el, chrome);
         shadowRoot.appendChild(containerHtml);
+        renderSaveStatus();
 
         if (window && typeof window.addEventListener === 'function') {
             window.addEventListener('pagehide', handlePageLifecyclePersistence);
@@ -1310,9 +2129,10 @@
             document.documentElement.removeEventListener('mouseup', stopDrag, false);
             container.style.userSelect = '';
             customHeight = parseInt(container.style.height, 10);
-            saveState({ immediate: true }); // Save the new height immediately
+            saveState({ immediate: true, critical: true }); // Save the new height immediately
         }
 
+        shadowRoot.getElementById('sp-settings-btn').addEventListener('click', () => renderSettingsModal());
         shadowRoot.getElementById('sp-new-group-btn').addEventListener('click', () => handleAddNewGroup());
         shadowRoot.getElementById('sp-manage-tags-btn').addEventListener('click', () => renderTagModal());
 
@@ -1361,6 +2181,7 @@
         shadowRoot.addEventListener('click', handleSearchOutsideClick);
         shadowRoot.addEventListener('scroll', handleSourceActionMenuViewportChange, true);
         document.addEventListener('click', handleDocumentOutsideClick, true);
+        document.addEventListener('keydown', handleUndoKeydown, true);
         syncSearchUi();
 
         const listContainer = shadowRoot.querySelector('#sources-list');
@@ -1405,7 +2226,8 @@
             if (reattachState) {
                 applyLoadedStateToManager(reattachState);
                 completeInitialStateLoad();
-                saveState({ immediate: true });
+                saveState({ immediate: true, critical: true, recordUndo: false });
+                resetUndoHistoryBaseline();
                 return;
             }
 
@@ -1413,6 +2235,7 @@
             loadState((loadedState) => {
                 applyLoadedStateToManager(loadedState);
                 completeInitialStateLoad();
+                resetUndoHistoryBaseline();
             }, {
                 expectedProjectId: projectId,
                 instanceToken: managerInstanceToken
@@ -1507,13 +2330,18 @@
             extractSourceIconImageUrl,
             findFreshCheckbox,
             getTagStyleVars,
+            getTagColorPresets,
             getSourceTagIds,
             groupHasRenderableDescendant,
+            handleSourceIconImageError,
+            bindSourceIconFallbackDelegation,
             hasActiveRenderFilters,
             isSourceEffectivelyEnabled,
             normalizeTagColor,
             normalizeLoadedState,
             processClickQueue,
+            resolveStoredSourceKeyWithReason,
+            buildSingleSourcePositionalRemap,
             removeGroupFromTree,
             scanAndSyncSources,
             setSourceTagIds,
@@ -1526,14 +2354,51 @@
             tagsById,
             sourceTagsById,
             executeBatchDelete,
+            executeBatchMoveToUngrouped,
+            canMoveSourceToUngrouped,
+            moveSourceToUngrouped,
+            deleteNativeSource,
+            openNativeSourceDetails,
+            createExportConfigPayload,
+            getExportConfigText,
+            parseImportConfigText,
+            previewImportConfig,
+            applyImportConfig,
+            getImportBackupKey,
+            writeImportBackupSnapshot,
+            readImportBackupSnapshot,
+            clearImportBackupSnapshot,
+            restoreImportBackupSnapshotFromUi,
+            renderSettingsModal,
+            undoLastOperation,
             executeMoveToFolder,
+            executeBatchTagUpdate,
+            renderBatchTagModal,
+            collectMoveFolderOptions,
             loadState,
             pendingBatchKeys,
             sourcesByKey,
             state,
             DEPS,
             saveState,
+            enqueueStateSave,
+            waitForPendingStateSave,
+            preparePersistableSnapshot,
+            prepareRuntimeSaveSnapshot,
+            getSnapshotSaveRevision,
+            getSaveStatus,
+            setSaveStatus,
+            getRecoveryKey,
+            writeRecoverySnapshot,
+            readRecoverySnapshot,
+            clearRecoverySnapshot,
+            detectRecoverySnapshotAvailability,
             flushPendingStateSave,
+            renderSaveStatus,
+            restoreRecoverySnapshotFromUi,
+            dismissRecoverySnapshotFromUi,
+            getDiagnosticsInfo,
+            getDiagnosticsText,
             getManagerStatus,
             focusManagerPanel,
             handleAddNewGroup,
@@ -1541,6 +2406,7 @@
             handlePageLifecyclePersistence,
             handleRouteChanged,
             hasPersistedSourceRefs,
+            restorePersistedSnapshotWithoutDom,
             hasRenderableSourceRows,
             findSourcePanel,
             findSourcePanelContent,
@@ -1558,10 +2424,82 @@
             toggleSourceActionMenu,
             closeSourceActionMenu,
             handleSourceActionSelection,
+            getNativeDialogMetadata,
+            getNativeDialogFingerprint,
+            isNativeDeleteConfirmDialog,
+            findNativeDeleteConfirmDialogs,
+            getNativeDeleteMenuItemScore,
+            getNativeRenameMenuItemScore,
+            scoreNativeMenuItemAction,
+            findNativeActionMenuItem,
+            findNativeDeleteMenuItem,
+            findNativeRenameMenuItem,
+            findNativeDeleteConfirmButton,
+            findNativeSourceDetailsMenuItem,
+            triggerNativeSourceDetailsDirectWithResult,
+            triggerNativeSourceDetailsViaNativeMenuWithResult,
+            triggerNativeSourceRenameWithResult,
+            getNativeActionFailureMessage,
+            _createBatchCountMessageChildrenForTest: createBatchCountMessageChildren,
+            _collectBatchCountSnapshotForTest: collectBatchCountSnapshot,
+            _animateBatchCountElementForTest: animateBatchCountElement,
+            _animateBatchCountChangesForTest: animateBatchCountChanges,
+            _clearSpotlightSurfaceForTest: clearSpotlightSurface,
+            _updateSpotlightSurfaceFromPointerForTest: updateSpotlightSurfaceFromPointer,
+            _handleSpotlightPointerMoveForTest: handleSpotlightPointerMove,
+            _handleSpotlightPointerLeaveForTest: handleSpotlightPointerLeave,
+            _bindSpotlightPointerTrackingForTest: bindSpotlightPointerTracking,
+            _getNormalizedSearchQueryForTest: getNormalizedSearchQuery,
+            _parseSearchQueryForTest: parseSearchQuery,
+            _parseRenderSearchQueryForTest: parseRenderSearchQuery,
+            _sourceMatchesSearchQueryForTest: sourceMatchesSearchQuery,
+            _createHighlightedTextChildrenForTest: createHighlightedTextChildren,
+            _getSearchHighlightTermsForTest: getSearchHighlightTerms,
+            _collectSearchExpandedGroupIdsForTest: collectSearchExpandedGroupIds,
+            _clearDragFeedbackForTest: clearDragFeedback,
+            _getDropIntentForTest: getDropIntent,
+            _getSourceTreePositionForTest: getSourceTreePosition,
+            _getGroupTreePositionForTest: getGroupTreePosition,
+            _isNoopTreeMoveForTest: isNoopTreeMove,
+            _getRenderedSourceActionMenuItemsForTest: getRenderedSourceActionMenuItems,
+            _findRenderedSourceActionMenuForTest: findRenderedSourceActionMenu,
+            _focusSourceActionMenuItemForTest: focusSourceActionMenuItem,
+            _focusSourceActionMenuButtonForTest: focusSourceActionMenuButton,
+            _handleSourceActionMenuKeydownForTest: handleSourceActionMenuKeydown,
             _applySourcePanelSurfaceColorForTest: applySourcePanelSurfaceColor,
+            _queryNativeDialogsForTest: queryNativeDialogs,
+            _waitForNativeDialogsForTest: waitForNativeDialogs,
+            _getPersistableStateSignatureForTest: getPersistableStateSignature,
+            _shouldSaveAfterMutationSyncForTest: shouldSaveAfterMutationSync,
+            _getMutationRelevanceForTest: getMutationRelevance,
+            _handleDomChangesForTest: handleDomChanges,
+            _startNativeRenameWatcherForTest: startNativeRenameWatcher,
+            _runNativeRenameSyncPassForTest: runNativeRenameSyncPass,
+            _clearNativeRenameWatcherForTest: clearNativeRenameWatcher,
+            _getModalFocusableElementsForTest: getModalFocusableElements,
+            _focusModalInitialElementForTest: focusModalInitialElement,
+            _handleModalKeyboardEventForTest: handleModalKeyboardEvent,
+            _bindModalKeyboardNavigationForTest: bindModalKeyboardNavigation,
+            _rememberModalFocusRestoreTargetForTest: rememberModalFocusRestoreTarget,
+            _restoreModalFocusForTest: restoreModalFocus,
+            _closeManagedModalForTest: closeManagedModal,
+            _prepareModalOpenForTest: prepareModalOpen,
+            _createModalItemStaggerStyleForTest: createModalItemStaggerStyle,
+            _closeBatchTagModalForTest: closeBatchTagModal,
+            _getModalTagColorPresetsForTest: () => getModalTagColorPresets(),
             _getClickQueueLength: () => clickQueue.length,
             _getIsDeletingSources: () => isDeletingSources,
             _getIsSyncingState: () => isSyncingState,
+            _showToastForTest: showToast,
+            _showUndoableToastForTest: showUndoableToast,
+            _getToastQueueLengthForTest: () => toastQueue.length,
+            _getActiveToastItemForTest: () => activeToastItem,
+            _hideActiveToastForTest: hideActiveToast,
+            _getUndoStackLengthForTest: () => undoStack.length,
+            _resetUndoHistoryBaselineForTest: resetUndoHistoryBaseline,
+            _setUndoBaselineSnapshotForTest: setUndoBaselineSnapshot,
+            _handleUndoKeydownForTest: handleUndoKeydown,
+            _isEditableUndoTargetForTest: isEditableUndoTarget,
             _setIsDeletingSources: (val) => { isDeletingSources = val; },
             _getFreshRowCache: () => freshRowCache,
             _getPendingStorageUpgrade: () => pendingStorageUpgrade,
@@ -1574,8 +2512,8 @@
             _getPanelResizeObserverForTest: () => panelResizeObserver,
             _getExtensionEnabledForTest: () => isExtensionEnabled,
             _flushPendingInitialLoadedStateForTest: flushPendingInitialLoadedState,
-            _debouncedScanAndSyncForTest: () => {
-                debouncedScanAndSync();
+            _debouncedScanAndSyncForTest: (options) => {
+                debouncedScanAndSync(options);
                 if (typeof debouncedScanAndSync.flush === 'function') {
                     debouncedScanAndSync.flush();
                 }
@@ -1599,11 +2537,17 @@
             _getSourceActionMenuItemsForTest: (sourceKey) => getSourceActionMenuItems(sourceKey),
             _getSourceActionSubmenuItemsForTest: (sourceKey, submenuAction) => getSourceActionSubmenuItems(sourceKey, submenuAction),
             _triggerNativeSourceDetailsDirectForTest: (sourceKey) => triggerNativeSourceDetailsDirect(sourceKey),
+            _triggerNativeSourceDetailsDirectResultForTest: (sourceKey) => triggerNativeSourceDetailsDirectWithResult(sourceKey),
             _triggerNativeSourceDetailsViaNativeMenuForTest: (sourceKey) => triggerNativeSourceDetailsViaNativeMenu(sourceKey),
+            _triggerNativeSourceDetailsViaNativeMenuResultForTest: (sourceKey) => triggerNativeSourceDetailsViaNativeMenuWithResult(sourceKey),
+            _triggerNativeSourceRenameForTest: (sourceKey) => triggerNativeSourceRename(sourceKey),
+            _triggerNativeSourceRenameResultForTest: (sourceKey) => triggerNativeSourceRenameWithResult(sourceKey),
             _setSourceActionInvokerForTest: (name, fn) => {
                 setSourceActionInvoker(name, fn);
             },
             _handleInteractionForTest: handleInteraction,
+            _handleDropForTest: handleDrop,
+            _handleDragEndForTest: handleDragEnd,
             _setShadowRootForTest: (val) => { shadowRoot = val; extensionHost = val && val.host ? val.host : null; },
             _setExtensionEnabledForTest: (val) => { isExtensionEnabled = Boolean(val); },
             _setManagerRuntimeForTest: ({ extensionHost: nextHost = null, shadowRoot: nextShadowRoot = null } = {}) => {
@@ -1623,7 +2567,11 @@
                 state.filterQuery = '';
                 state.isBatchMode = false;
                 pendingBatchKeys.clear();
+                toastQueue.length = 0;
+                activeToastItem = null;
+                clearToastTimeout();
                 isDeletingSources = false;
+                nativeActionFailureHistory = [];
                 groupsById.clear();
                 sourcesByKey.clear();
                 tagsById.clear();
@@ -1662,6 +2610,7 @@
                 activeIsolationGroupId = null;
                 isSearchExpanded = false;
                 closeSourceActionMenu();
+                resetUndoHistoryBaseline();
                 resetSourceActionInvokers();
                 if (focusHighlightTimeout) {
                     clearTimeout(focusHighlightTimeout);

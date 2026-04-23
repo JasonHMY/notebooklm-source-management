@@ -52,6 +52,9 @@
         const showToast = typeof deps.showToast === 'function'
             ? deps.showToast
             : (typeof runtime.showToast === 'function' ? runtime.showToast : () => {});
+        const showUndoableToast = typeof deps.showUndoableToast === 'function'
+            ? deps.showUndoableToast
+            : showToast;
         const render = typeof deps.render === 'function'
             ? deps.render
             : (typeof runtime.render === 'function' ? runtime.render : () => {});
@@ -76,6 +79,9 @@
         const renderMoveToFolderModal = typeof deps.renderMoveToFolderModal === 'function'
             ? deps.renderMoveToFolderModal
             : (typeof runtime.renderMoveToFolderModal === 'function' ? runtime.renderMoveToFolderModal : () => {});
+        const renderBatchTagModal = typeof deps.renderBatchTagModal === 'function'
+            ? deps.renderBatchTagModal
+            : (typeof runtime.renderBatchTagModal === 'function' ? runtime.renderBatchTagModal : () => {});
         const getSourceActionInvokers = typeof deps.getSourceActionInvokers === 'function'
             ? deps.getSourceActionInvokers
             : () => (deps.sourceActionInvokers || runtime.sourceActionInvokers || {});
@@ -184,7 +190,7 @@
 
             buildParentMap();
             render();
-            saveState({ immediate: true });
+            saveState({ immediate: true, critical: true });
         }
 
         function syncSourceToPage(source, desiredState) {
@@ -263,6 +269,102 @@
             } else {
                 state.ungrouped = (Array.isArray(state.ungrouped) ? state.ungrouped : []).filter((k) => k !== key);
             }
+        }
+
+        function isBatchOperableSource(source) {
+            return Boolean(source && !source.isDisabled && !source.isLoading);
+        }
+
+        function collectSourceKeysInTreeOrder() {
+            const state = getState();
+            const groupsById = getGroupsById();
+            const orderedKeys = [];
+            const visitGroup = (groupId) => {
+                const group = groupsById.get(groupId);
+                if (!group || !Array.isArray(group.children)) return;
+                group.children.forEach((child) => {
+                    if (child.type === 'source' && child.key) {
+                        orderedKeys.push(child.key);
+                    } else if (child.type === 'group' && child.id) {
+                        visitGroup(child.id);
+                    }
+                });
+            };
+
+            (Array.isArray(state.groups) ? state.groups : []).forEach(visitGroup);
+            (Array.isArray(state.ungrouped) ? state.ungrouped : []).forEach((sourceKey) => {
+                if (sourceKey) orderedKeys.push(sourceKey);
+            });
+            return orderedKeys;
+        }
+
+        function finishSuccessfulBatchOperation(messageKey, count) {
+            const state = getState();
+            const pendingBatchKeys = getPendingBatchKeys();
+            pendingBatchKeys.clear();
+            state.isBatchMode = false;
+            closeSourceActionMenu();
+            saveState({ immediate: true, critical: true });
+            render();
+            showUndoableToast(getMessage(messageKey, [String(count)]), { variant: 'success' });
+        }
+
+        function executeBatchMoveToUngrouped() {
+            const state = getState();
+            const sourcesByKey = getSourcesByKey();
+            const pendingBatchKeys = getPendingBatchKeys();
+            const selectedKeys = new Set(pendingBatchKeys);
+            const movableKeys = collectSourceKeysInTreeOrder().filter((sourceKey) => {
+                const source = sourcesByKey.get(sourceKey);
+                return selectedKeys.has(sourceKey) &&
+                    isBatchOperableSource(source) &&
+                    Boolean(findParentGroupOfSource(sourceKey));
+            });
+
+            if (movableKeys.length === 0) {
+                showToast(getMessage('ui_batch_no_sources_changed'), { variant: 'info' });
+                return false;
+            }
+
+            state.ungrouped = Array.isArray(state.ungrouped) ? state.ungrouped : [];
+            movableKeys.forEach((sourceKey) => {
+                removeSourceFromTree(sourceKey);
+                if (!state.ungrouped.includes(sourceKey)) {
+                    state.ungrouped.push(sourceKey);
+                }
+            });
+            buildParentMap();
+            finishSuccessfulBatchOperation('ui_batch_ungrouped_toast', movableKeys.length);
+            return true;
+        }
+
+        function finishKeyboardTreeMove(messageKey) {
+            closeSourceActionMenu();
+            buildParentMap();
+            render();
+            saveState({ immediate: true, critical: true });
+            showUndoableToast(getMessage(messageKey), { variant: 'success' });
+        }
+
+        function canMoveSourceToUngrouped(sourceKey) {
+            const source = getSourcesByKey().get(sourceKey);
+            return Boolean(isBatchOperableSource(source) && findParentGroupOfSource(sourceKey));
+        }
+
+        function moveSourceToUngrouped(sourceKey) {
+            const state = getState();
+            if (!canMoveSourceToUngrouped(sourceKey)) {
+                showToast(getMessage('ui_keyboard_move_unavailable'), { variant: 'info' });
+                return false;
+            }
+
+            state.ungrouped = Array.isArray(state.ungrouped) ? state.ungrouped : [];
+            removeSourceFromTree(sourceKey);
+            if (!state.ungrouped.includes(sourceKey)) {
+                state.ungrouped.push(sourceKey);
+            }
+            finishKeyboardTreeMove('ui_keyboard_moved_ungrouped_toast');
+            return true;
         }
 
         function removeGroupFromTree(id) {
@@ -385,9 +487,34 @@
                     const oldEffectiveStates = collectEffectiveSourceStates();
                     group.enabled = target.checked;
                     syncSourcesToEffectiveState(oldEffectiveStates);
-                    saveState({ immediate: true });
+                    saveState({ immediate: true, critical: true });
                     render();
                 }
+                return;
+            }
+
+            const batchCheckbox = target.closest('.sp-batch-checkbox');
+            if (batchCheckbox) {
+                const batchSourceKey = batchCheckbox.dataset.sourceKey;
+                const source = batchSourceKey ? sourcesByKey.get(batchSourceKey) : null;
+
+                if (!source || source.isDisabled || source.isLoading) {
+                    if (batchSourceKey) {
+                        pendingBatchKeys.delete(batchSourceKey);
+                    }
+                    if (typeof batchCheckbox.checked === 'boolean') {
+                        batchCheckbox.checked = false;
+                    }
+                    render();
+                    return;
+                }
+
+                if (batchCheckbox.checked) {
+                    pendingBatchKeys.add(batchSourceKey);
+                } else {
+                    pendingBatchKeys.delete(batchSourceKey);
+                }
+                render();
                 return;
             }
 
@@ -398,7 +525,7 @@
                     if (source && !source.isDisabled) {
                         source.enabled = target.checked;
                         syncSourceToPage(source, isSourceEffectivelyEnabled(source));
-                        saveState({ immediate: true });
+                        saveState({ immediate: true, critical: true });
                         render();
                     }
                 }
@@ -418,6 +545,10 @@
                 }
 
                 if (state.isBatchMode) {
+                    if (!source || source.isDisabled || source.isLoading) {
+                        return;
+                    }
+
                     if (pendingBatchKeys.has(sourceKey)) {
                         pendingBatchKeys.delete(sourceKey);
                     } else {
@@ -440,22 +571,10 @@
                     if (source) {
                         source.enabled = checkbox.checked;
                         syncSourceToPage(source, isSourceEffectivelyEnabled(source));
-                        saveState({ immediate: true });
+                        saveState({ immediate: true, critical: true });
                         render();
                     }
                 }
-                return;
-            }
-
-            const batchCheckbox = target.closest('.sp-batch-checkbox');
-            if (batchCheckbox) {
-                const batchSourceKey = batchCheckbox.dataset.sourceKey;
-                if (pendingBatchKeys.has(batchSourceKey)) {
-                    pendingBatchKeys.delete(batchSourceKey);
-                } else {
-                    pendingBatchKeys.add(batchSourceKey);
-                }
-                render();
                 return;
             }
 
@@ -468,6 +587,21 @@
 
             if (target.closest('.sp-confirm-delete-btn') && !getIsDeletingSources() && pendingBatchKeys.size > 0) {
                 executeBatchDelete();
+                return;
+            }
+
+            if (target.closest('.sp-batch-ungroup-btn') && pendingBatchKeys.size > 0 && !getIsDeletingSources()) {
+                executeBatchMoveToUngrouped();
+                return;
+            }
+
+            if (target.closest('.sp-batch-add-tags-btn') && pendingBatchKeys.size > 0 && !getIsDeletingSources()) {
+                renderBatchTagModal('add', pendingBatchKeys);
+                return;
+            }
+
+            if (target.closest('.sp-batch-remove-tags-btn') && pendingBatchKeys.size > 0 && !getIsDeletingSources()) {
+                renderBatchTagModal('remove', pendingBatchKeys);
                 return;
             }
 
@@ -518,7 +652,7 @@
                     setActiveIsolationGroupId(null);
                 }
                 buildParentMap();
-                saveState({ immediate: true });
+                saveState({ immediate: true, critical: true });
                 render();
             }
         }
@@ -565,7 +699,7 @@
                         syncSourceToPage(source, desiredState);
                     }
 
-                    saveState({ immediate: true });
+                    saveState({ immediate: true, critical: true });
                     render();
                 }
             }
@@ -596,7 +730,7 @@
                 const newTitle = input.value.trim();
                 if (newTitle) group.title = newTitle;
                 cleanup();
-                saveState({ immediate: true });
+                saveState({ immediate: true, critical: true });
             };
             const handleKey = (e) => {
                 if (e.key === 'Enter') {
@@ -666,83 +800,197 @@
             }
         }
 
-        function handleDrop(e) {
+        function clearDragFeedback(root = getShadowRoot()) {
+            if (!root || typeof root.querySelectorAll !== 'function') return 0;
+            const nodes = Array.from(root.querySelectorAll('.dragging, .drag-over-top, .drag-over-bottom, .drag-into'));
+            nodes.forEach((node) => {
+                if (node?.classList && typeof node.classList.remove === 'function') {
+                    node.classList.remove('dragging', 'drag-over-top', 'drag-over-bottom', 'drag-into');
+                }
+            });
+            return nodes.length;
+        }
+
+        function getSourceTreePosition(sourceKey) {
+            const state = getState();
+            const parentGroup = findParentGroupOfSource(sourceKey);
+            if (parentGroup) {
+                return {
+                    list: parentGroup.children,
+                    index: parentGroup.children.findIndex((child) => child.type === 'source' && child.key === sourceKey),
+                    parentGroup
+                };
+            }
+
+            state.ungrouped = Array.isArray(state.ungrouped) ? state.ungrouped : [];
+            return {
+                list: state.ungrouped,
+                index: state.ungrouped.indexOf(sourceKey),
+                parentGroup: null
+            };
+        }
+
+        function getGroupTreePosition(groupId) {
+            const state = getState();
+            const groupsById = getGroupsById();
+            const parentId = getParentMap().get(groupId);
+            if (parentId) {
+                const parentGroup = groupsById.get(parentId);
+                return {
+                    list: parentGroup?.children || [],
+                    index: parentGroup?.children?.findIndex((child) => child.type === 'group' && child.id === groupId) ?? -1,
+                    parentGroup: parentGroup || null
+                };
+            }
+
+            state.groups = Array.isArray(state.groups) ? state.groups : [];
+            return {
+                list: state.groups,
+                index: state.groups.indexOf(groupId),
+                parentGroup: null
+            };
+        }
+
+        function getNormalizedInsertionIndex(targetList, insertIndex, originalPosition = null) {
+            const list = Array.isArray(targetList) ? targetList : [];
+            let nextIndex = Number.isInteger(insertIndex) && insertIndex >= 0 ? insertIndex : list.length;
+            if (originalPosition && originalPosition.list === list && nextIndex > originalPosition.index) {
+                nextIndex -= 1;
+            }
+            const maxIndex = originalPosition && originalPosition.list === list
+                ? Math.max(0, list.length - 1)
+                : list.length;
+            return Math.max(0, Math.min(nextIndex, maxIndex));
+        }
+
+        function isNoopTreeMove(originalPosition, targetList, insertIndex) {
+            if (!originalPosition || originalPosition.index < 0) return true;
+            const nextIndex = getNormalizedInsertionIndex(targetList, insertIndex, originalPosition);
+            return originalPosition.list === targetList && originalPosition.index === nextIndex;
+        }
+
+        function getDropIntent(dropTarget, isInto, isAbove) {
             const state = getState();
             const groupsById = getGroupsById();
             const parentMap = getParentMap();
+
+            if (dropTarget.classList.contains('group-container')) {
+                const targetGroupId = dropTarget.dataset.groupId;
+                const targetGroup = groupsById.get(targetGroupId);
+                if (!targetGroup) return null;
+
+                if (isInto) {
+                    return {
+                        targetGroup,
+                        targetList: targetGroup.children,
+                        insertIndex: -1
+                    };
+                }
+
+                const parentId = parentMap.get(targetGroupId);
+                if (parentId) {
+                    const parentGroup = groupsById.get(parentId);
+                    if (!parentGroup) return null;
+                    let insertIndex = parentGroup.children.findIndex((child) => child.type === 'group' && child.id === targetGroupId);
+                    if (!isAbove && insertIndex !== -1) insertIndex += 1;
+                    return {
+                        targetGroup: parentGroup,
+                        targetList: parentGroup.children,
+                        insertIndex
+                    };
+                }
+
+                state.groups = Array.isArray(state.groups) ? state.groups : [];
+                let insertIndex = state.groups.indexOf(targetGroupId);
+                if (!isAbove && insertIndex !== -1) insertIndex += 1;
+                return {
+                    targetGroup: null,
+                    targetList: state.groups,
+                    insertIndex
+                };
+            }
+
+            if (dropTarget.classList.contains('source-item')) {
+                const targetSourceKey = dropTarget.dataset.sourceKey;
+                const targetGroup = findParentGroupOfSource(targetSourceKey);
+                const targetList = targetGroup
+                    ? targetGroup.children
+                    : (state.ungrouped = Array.isArray(state.ungrouped) ? state.ungrouped : []);
+                let insertIndex = targetGroup
+                    ? targetGroup.children.findIndex((child) => child.type === 'source' && child.key === targetSourceKey)
+                    : targetList.indexOf(targetSourceKey);
+                if (!isAbove && insertIndex !== -1) insertIndex += 1;
+                return {
+                    targetGroup,
+                    targetList,
+                    insertIndex
+                };
+            }
+
+            return null;
+        }
+
+        function handleDrop(e) {
+            const state = getState();
+            const groupsById = getGroupsById();
             const dropTarget = e.target.closest('.group-container, .source-item');
-            if (!dropTarget) return;
+            if (!dropTarget) {
+                clearDragFeedback();
+                return;
+            }
             e.preventDefault();
 
             const isInto = dropTarget.classList.contains('drag-into');
             const isAbove = dropTarget.classList.contains('drag-over-top');
-            dropTarget.classList.remove('drag-over-top', 'drag-over-bottom', 'drag-into');
+            const intent = getDropIntent(dropTarget, isInto, isAbove);
+            clearDragFeedback();
 
             const sourceKey = e.dataTransfer.getData('application/source-key');
             const draggedGroupId = e.dataTransfer.getData('application/group-id');
-
-            let targetGroup = null;
-            let insertIndex = -1;
-
-            if (dropTarget.classList.contains('group-container')) {
-                const targetGroupId = dropTarget.dataset.groupId;
-                targetGroup = groupsById.get(targetGroupId);
-                if (!isInto && targetGroup) {
-                    const parentId = parentMap.get(targetGroupId);
-                    if (parentId) {
-                        const parentGroup = groupsById.get(parentId);
-                        insertIndex = parentGroup.children.findIndex((c) => c.id === targetGroupId);
-                        targetGroup = parentGroup;
-                    } else {
-                        insertIndex = state.groups.indexOf(targetGroupId);
-                        targetGroup = null;
-                    }
-                    if (!isAbove && insertIndex !== -1) insertIndex++;
-                }
-            } else if (dropTarget.classList.contains('source-item')) {
-                const targetSourceKey = dropTarget.dataset.sourceKey;
-                targetGroup = findParentGroupOfSource(targetSourceKey);
-                if (targetGroup) {
-                    insertIndex = targetGroup.children.findIndex((c) => c.key === targetSourceKey);
-                } else {
-                    insertIndex = state.ungrouped.indexOf(targetSourceKey);
-                }
-                if (!isAbove && insertIndex !== -1) insertIndex++;
-            }
+            if (!intent) return;
+            let didMove = false;
 
             if (sourceKey) {
-                removeSourceFromTree(sourceKey);
-                if (targetGroup) {
-                    if (insertIndex !== -1) targetGroup.children.splice(insertIndex, 0, { type: 'source', key: sourceKey });
-                    else targetGroup.children.push({ type: 'source', key: sourceKey });
-                } else {
-                    if (insertIndex !== -1) state.ungrouped.splice(insertIndex, 0, sourceKey);
-                    else state.ungrouped.push(sourceKey);
+                const originalPosition = getSourceTreePosition(sourceKey);
+                if (isNoopTreeMove(originalPosition, intent.targetList, intent.insertIndex)) {
+                    return;
                 }
+                const insertionIndex = getNormalizedInsertionIndex(intent.targetList, intent.insertIndex, originalPosition);
+                removeSourceFromTree(sourceKey);
+                if (intent.targetGroup) {
+                    intent.targetGroup.children.splice(insertionIndex, 0, { type: 'source', key: sourceKey });
+                } else {
+                    state.ungrouped.splice(insertionIndex, 0, sourceKey);
+                }
+                didMove = true;
             } else if (draggedGroupId) {
                 const draggedGroupObj = groupsById.get(draggedGroupId);
-                if (!targetGroup) {
-                    removeGroupFromTree(draggedGroupId);
-                    if (insertIndex !== -1) state.groups.splice(insertIndex, 0, draggedGroupId);
-                    else state.groups.push(draggedGroupId);
-                } else if (draggedGroupId !== targetGroup.id && !isDescendant(targetGroup, draggedGroupObj, groupsById)) {
-                    removeGroupFromTree(draggedGroupId);
-                    if (insertIndex !== -1) targetGroup.children.splice(insertIndex, 0, { type: 'group', id: draggedGroupId });
-                    else targetGroup.children.push({ type: 'group', id: draggedGroupId });
+                if (!draggedGroupObj) return;
+                if (intent.targetGroup && isDescendant(intent.targetGroup, draggedGroupObj, groupsById)) {
+                    return;
                 }
+                const originalPosition = getGroupTreePosition(draggedGroupId);
+                if (isNoopTreeMove(originalPosition, intent.targetList, intent.insertIndex)) {
+                    return;
+                }
+                const insertionIndex = getNormalizedInsertionIndex(intent.targetList, intent.insertIndex, originalPosition);
+                removeGroupFromTree(draggedGroupId);
+                if (intent.targetGroup) {
+                    intent.targetGroup.children.splice(insertionIndex, 0, { type: 'group', id: draggedGroupId });
+                } else {
+                    state.groups.splice(insertionIndex, 0, draggedGroupId);
+                }
+                didMove = true;
             }
 
+            if (!didMove) return;
             buildParentMap();
             render();
-            saveState({ immediate: true });
+            saveState({ immediate: true, critical: true });
         }
 
         function handleDragEnd(e) {
-            const shadowRoot = getShadowRoot();
-            const draggedItem = shadowRoot?.querySelector?.('.dragging');
-            if (draggedItem) {
-                draggedItem.classList.remove('dragging');
-            }
+            clearDragFeedback();
         }
 
         return {
@@ -751,6 +999,11 @@
             processClickQueue,
             findParentGroupOfSource,
             removeSourceFromTree,
+            isBatchOperableSource,
+            collectSourceKeysInTreeOrder,
+            executeBatchMoveToUngrouped,
+            canMoveSourceToUngrouped,
+            moveSourceToUngrouped,
             removeGroupFromTree,
             toggleGroupCollapse,
             handleInteraction,
@@ -760,7 +1013,12 @@
             handleDragOver,
             handleDragLeave,
             handleDrop,
-            handleDragEnd
+            handleDragEnd,
+            clearDragFeedback,
+            getDropIntent,
+            getSourceTreePosition,
+            getGroupTreePosition,
+            isNoopTreeMove
         };
     }
 

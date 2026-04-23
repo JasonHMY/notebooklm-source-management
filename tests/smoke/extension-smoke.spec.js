@@ -288,6 +288,11 @@ test.describe.serial('extension smoke', () => {
 
         expect(configuredState.tagLabel).toBe('Pinned');
 
+        await expect.poll(async () => {
+            const stored = await readProjectState('persist', bridgePage);
+            return Object.keys(stored.primary?.sourceTagsById || {}).length;
+        }, { timeout: 10_000 }).toBeGreaterThan(0);
+
         const storedBeforeReload = await readProjectState('persist', bridgePage);
         expect(storedBeforeReload.primary?.groupsById).toBeTruthy();
         expect(Object.values(storedBeforeReload.primary.groupsById)).toHaveLength(1);
@@ -313,5 +318,202 @@ test.describe.serial('extension smoke', () => {
 
         const storedAfterReload = await readProjectState('persist', bridgePage);
         expect(storedAfterReload.primary).toEqual(storedBeforeReload.primary);
+    });
+
+    test('restores an import backup and preserves dragged source ordering after reload', async () => {
+        const notebookPage = await env.context.newPage();
+        await notebookPage.goto('https://notebooklm.google.com/notebook/import-sort');
+        env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
+        const bridgePage = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
+
+        await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
+        await notebookPage.evaluate(() => window.__waitForFixtureHydration('full'));
+
+        const restoredOrder = await notebookPage.evaluate(async () => {
+            const getRoot = () => document.querySelector('#sources-plus-root')?.shadowRoot || null;
+            const waitForValue = async (readValue, errorMessage, timeoutMs = 5_000) => {
+                const start = Date.now();
+                while ((Date.now() - start) < timeoutMs) {
+                    const value = readValue();
+                    if (value) return value;
+                    await new Promise((resolve) => window.setTimeout(resolve, 25));
+                }
+                throw new Error(errorMessage);
+            };
+            const waitForRoot = () => waitForValue(getRoot, 'Manager root missing.');
+            const waitForSelector = (selector, errorMessage, timeoutMs = 5_000) => (
+                waitForValue(() => getRoot()?.querySelector(selector) || null, errorMessage, timeoutMs)
+            );
+            const clickSelector = async (selector, errorMessage, timeoutMs = 5_000) => {
+                const target = await waitForSelector(selector, errorMessage, timeoutMs);
+                target.click();
+                return target;
+            };
+            const clickRestoreImportToastAction = async () => {
+                const action = await waitForValue(() => {
+                    const toastAction = getRoot()?.querySelector('.sp-toast.show .sp-toast-action');
+                    const label = toastAction?.textContent?.trim().toLowerCase() || '';
+                    return toastAction && !['undo', '撤销', 'deshacer'].includes(label) ? toastAction : null;
+                }, 'Restore previous state toast action missing.', 8_000);
+                action.click();
+                return action;
+            };
+            const readSourceTitles = () => Array.from(getRoot()?.querySelectorAll('.source-item .source-title-text') || [])
+                .map((node) => node.textContent?.trim())
+                .filter(Boolean);
+            const waitForFirstTitle = async (expectedTitle) => waitForValue(() => {
+                const titles = readSourceTitles();
+                return titles[0] === expectedTitle ? titles : null;
+            }, `Expected first source title ${expectedTitle}.`);
+            const dragFirstSourceAfterSecond = async () => {
+                const rows = Array.from(getRoot()?.querySelectorAll('.source-item') || []);
+                if (rows.length < 2) throw new Error('Expected at least two source rows.');
+
+                const dataTransfer = new DataTransfer();
+                rows[0].dispatchEvent(new DragEvent('dragstart', {
+                    bubbles: true,
+                    cancelable: true,
+                    dataTransfer
+                }));
+
+                const targetRect = rows[1].getBoundingClientRect();
+                rows[1].dispatchEvent(new DragEvent('dragover', {
+                    bubbles: true,
+                    cancelable: true,
+                    dataTransfer,
+                    clientY: targetRect.bottom - 1
+                }));
+                rows[1].dispatchEvent(new DragEvent('drop', {
+                    bubbles: true,
+                    cancelable: true,
+                    dataTransfer
+                }));
+                rows[0].dispatchEvent(new DragEvent('dragend', {
+                    bubbles: true,
+                    cancelable: true,
+                    dataTransfer
+                }));
+            };
+
+            await waitForRoot();
+            const initialOrder = readSourceTitles();
+            if (initialOrder.length < 2) throw new Error('Expected at least two sources.');
+
+            await dragFirstSourceAfterSecond();
+            const movedOrder = await waitForFirstTitle(initialOrder[1]);
+
+            await clickSelector('#sp-settings-btn', 'Settings button missing.');
+            const importTextarea = await waitForSelector('.sp-settings-import-textarea', 'Import textarea missing.');
+            importTextarea.value = JSON.stringify({
+                format: 'notebooklm-source-management-config',
+                data: {
+                    schemaVersion: 3,
+                    groups: ['imported-smoke-group'],
+                    groupsById: {
+                        'imported-smoke-group': {
+                            id: 'imported-smoke-group',
+                            title: 'Imported smoke group',
+                            children: []
+                        }
+                    },
+                    ungrouped: [],
+                    sourceStateById: {},
+                    customHeight: null,
+                    tagsById: {},
+                    tagOrder: [],
+                    sourceTagsById: {}
+                }
+            });
+            importTextarea.dispatchEvent(new Event('input', { bubbles: true }));
+            await clickSelector('.sp-settings-preview-import-btn', 'Preview import button missing.');
+            await clickSelector('.sp-settings-apply-import-btn', 'Apply import button missing.');
+            await clickRestoreImportToastAction();
+
+            return waitForFirstTitle(movedOrder[0]);
+        });
+
+        expect(restoredOrder[0]).toBe('Notebook import-sort source B');
+        expect(restoredOrder[1]).toBe('Notebook import-sort source A');
+
+        await expect.poll(async () => {
+            const stored = await readProjectState('import-sort', bridgePage);
+            return stored.primary?.ungrouped?.[0] || '';
+        }, { timeout: 10_000 }).toContain('import-sort-source-b');
+
+        await notebookPage.reload();
+        await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
+        await notebookPage.evaluate(() => window.__waitForFixtureHydration('full'));
+
+        await expect.poll(async () => notebookPage.evaluate(() => {
+            const root = document.querySelector('#sources-plus-root')?.shadowRoot;
+            return Array.from(root?.querySelectorAll('.source-item .source-title-text') || [])
+                .map((node) => node.textContent.trim());
+        }), { timeout: 20_000 }).toEqual([
+            'Notebook import-sort source B',
+            'Notebook import-sort source A'
+        ]);
+    });
+
+    test('rejects stale saves without overwriting newer storage state', async () => {
+        const notebookPage = await env.context.newPage();
+        await notebookPage.goto('https://notebooklm.google.com/notebook/stale-save');
+        env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
+        const bridgePage = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
+
+        await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
+        await notebookPage.evaluate(() => window.__waitForFixtureHydration('full'));
+
+        const protectedState = {
+            schemaVersion: 3,
+            groups: ['protected-group'],
+            groupsById: {
+                'protected-group': {
+                    id: 'protected-group',
+                    title: 'Protected group',
+                    children: []
+                }
+            },
+            ungrouped: [],
+            sourceStateById: {},
+            customHeight: null,
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {},
+            _saveRevision: 10,
+            _savedAt: '2026-04-22T00:00:00.000Z'
+        };
+
+        await bridgePage.evaluate(async ({ projectId, state }) => {
+            const key = `sourcesPlusState_${projectId}`;
+            await new Promise((resolve) => {
+                chrome.storage.local.set({
+                    [key]: state,
+                    [`${key}__backup`]: state
+                }, resolve);
+            });
+        }, { projectId: 'stale-save', state: protectedState });
+
+        await notebookPage.evaluate(async () => {
+            const getRoot = () => document.querySelector('#sources-plus-root')?.shadowRoot || null;
+            const start = Date.now();
+            while ((Date.now() - start) < 5_000) {
+                const button = getRoot()?.querySelector('#sp-new-group-btn');
+                if (button) {
+                    button.click();
+                    return;
+                }
+                await new Promise((resolve) => window.setTimeout(resolve, 25));
+            }
+            throw new Error('New group button missing.');
+        });
+
+        await expect.poll(async () => {
+            const stored = await readProjectState('stale-save', bridgePage);
+            return stored.primary?._saveRevision || 0;
+        }, { timeout: 5_000 }).toBe(10);
+
+        const storedAfterStaleSave = await readProjectState('stale-save', bridgePage);
+        expect(storedAfterStaleSave.primary).toEqual(protectedState);
+        expect(storedAfterStaleSave.backup).toEqual(protectedState);
     });
 });

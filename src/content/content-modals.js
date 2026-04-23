@@ -5,6 +5,9 @@
         const getDocument = typeof deps.getDocument === 'function'
             ? deps.getDocument
             : () => (typeof document !== 'undefined' ? document : null);
+        const getWindow = typeof deps.getWindow === 'function'
+            ? deps.getWindow
+            : () => (typeof window !== 'undefined' ? window : null);
         const getShadowRoot = typeof deps.getShadowRoot === 'function'
             ? deps.getShadowRoot
             : () => (deps.shadowRoot || null);
@@ -20,12 +23,21 @@
         const getSourceTagsById = typeof deps.getSourceTagsById === 'function'
             ? deps.getSourceTagsById
             : () => (deps.sourceTagsById || new Map());
+        const getSourcesByKey = typeof deps.getSourcesByKey === 'function'
+            ? deps.getSourcesByKey
+            : () => (deps.sourcesByKey || new Map());
         const getPendingBatchKeys = typeof deps.getPendingBatchKeys === 'function'
             ? deps.getPendingBatchKeys
             : () => (deps.pendingBatchKeys || new Set());
         const getMessage = typeof deps.getMessage === 'function'
             ? deps.getMessage
             : (key) => key;
+        const showToast = typeof deps.showToast === 'function'
+            ? deps.showToast
+            : () => {};
+        const showUndoableToast = typeof deps.showUndoableToast === 'function'
+            ? deps.showUndoableToast
+            : showToast;
         const el = typeof deps.el === 'function'
             ? deps.el
             : (typeof globalThis.el === 'function' ? globalThis.el : null);
@@ -62,6 +74,24 @@
         const setSourceTagIds = typeof deps.setSourceTagIds === 'function'
             ? deps.setSourceTagIds
             : () => {};
+        const getExportConfigText = typeof deps.getExportConfigText === 'function'
+            ? deps.getExportConfigText
+            : () => '{}';
+        const previewImportConfig = typeof deps.previewImportConfig === 'function'
+            ? deps.previewImportConfig
+            : () => ({ ok: false, reason: 'unavailable' });
+        const applyImportConfig = typeof deps.applyImportConfig === 'function'
+            ? deps.applyImportConfig
+            : () => ({ ok: false, reason: 'unavailable' });
+        const getDiagnosticsInfo = typeof deps.getDiagnosticsInfo === 'function'
+            ? deps.getDiagnosticsInfo
+            : () => ({});
+        const getDiagnosticsText = typeof deps.getDiagnosticsText === 'function'
+            ? deps.getDiagnosticsText
+            : () => JSON.stringify(getDiagnosticsInfo(), null, 2);
+        const renderSaveStatus = typeof deps.renderSaveStatus === 'function'
+            ? deps.renderSaveStatus
+            : () => null;
         const normalizeTagColor = typeof deps.normalizeTagColor === 'function'
             ? deps.normalizeTagColor
             : (value) => value || null;
@@ -74,18 +104,22 @@
         const getTagColorPreviewStyle = typeof deps.getTagColorPreviewStyle === 'function'
             ? deps.getTagColorPreviewStyle
             : () => '';
+        const contentConfig = globalThis.NSM_CONTENT_CONFIG || {};
 
-        const TAG_COLOR_PRESETS = [
-            '#007AFF',
-            '#34C759',
-            '#FF9500',
-            '#FF3B30',
-            '#AF52DE',
-            '#5AC8FA',
-            '#FF2D55',
-            '#8E8E93'
-        ];
-        const TAG_COLOR_HEX_PATTERN = /^#([0-9A-F]{6})$/;
+        const TAG_COLOR_PRESETS = Array.isArray(contentConfig.TAG_COLOR_PRESETS)
+            ? contentConfig.TAG_COLOR_PRESETS
+            : ['#007AFF'];
+        const MODAL_ITEM_STAGGER_MAX_INDEX = 10;
+
+        function getCappedModalMotionIndex(index) {
+            const normalizedIndex = Number.isFinite(index) ? Math.max(0, index) : 0;
+            return Math.min(normalizedIndex, MODAL_ITEM_STAGGER_MAX_INDEX);
+        }
+
+        function createModalItemStaggerStyle(index, baseStyle = '') {
+            const motionStyle = `--sp-modal-item-index:${getCappedModalMotionIndex(index)};`;
+            return [baseStyle, motionStyle].filter(Boolean).join('');
+        }
 
         function getTagColorRgb(color) {
             const normalizedColor = normalizeTagColor(color);
@@ -104,25 +138,635 @@
             return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
         }
 
-        function closeMoveToFolderModal() {
-            const shadowRoot = getShadowRoot();
-            if (!shadowRoot) return;
-            const backdrop = shadowRoot.getElementById('sp-move-backdrop');
-            const modal = shadowRoot.getElementById('sp-move-modal');
+        function getTagColorPresets() {
+            return [...TAG_COLOR_PRESETS];
+        }
 
-            if (modal && backdrop) {
+        const MODAL_FOCUSABLE_SELECTOR = [
+            'button:not([disabled])',
+            '[href]',
+            'input:not([disabled])',
+            'select:not([disabled])',
+            'textarea:not([disabled])',
+            '[tabindex]:not([tabindex="-1"])'
+        ].join(', ');
+
+        function getModalFocusableElements(modal) {
+            if (!modal || typeof modal.querySelectorAll !== 'function') return [];
+
+            return Array.from(modal.querySelectorAll(MODAL_FOCUSABLE_SELECTOR))
+                .filter((element) => {
+                    if (!element || typeof element.focus !== 'function') return false;
+                    if (element.disabled || element.getAttribute?.('aria-hidden') === 'true') return false;
+                    if (String(element.getAttribute?.('tabindex') || '') === '-1') return false;
+                    return true;
+                });
+        }
+
+        function getModalActiveElement(modal) {
+            const root = typeof modal?.getRootNode === 'function' ? modal.getRootNode() : null;
+            return root?.activeElement || getDocument()?.activeElement || null;
+        }
+
+        function focusModalInitialElement(modal, preferredTarget = null) {
+            const target = typeof preferredTarget === 'function'
+                ? preferredTarget()
+                : preferredTarget;
+            if (target && typeof target.focus === 'function') {
+                target.focus();
+                return target;
+            }
+
+            const focusableElements = getModalFocusableElements(modal);
+            const fallbackTarget = focusableElements[0] || modal;
+            if (fallbackTarget && typeof fallbackTarget.focus === 'function') {
+                fallbackTarget.focus();
+                return fallbackTarget;
+            }
+
+            return null;
+        }
+
+        function handleModalKeyboardEvent(event, modal, closeModal) {
+            if (!event || !modal) return false;
+
+            if (event.key === 'Escape') {
+                event.preventDefault?.();
+                if (typeof closeModal === 'function') {
+                    closeModal();
+                }
+                return true;
+            }
+
+            if (event.key !== 'Tab') return false;
+
+            const focusableElements = getModalFocusableElements(modal);
+            if (focusableElements.length === 0) {
+                event.preventDefault?.();
+                if (typeof modal.focus === 'function') modal.focus();
+                return true;
+            }
+
+            const firstElement = focusableElements[0];
+            const lastElement = focusableElements[focusableElements.length - 1];
+            const activeElement = getModalActiveElement(modal);
+
+            if (event.shiftKey && (!activeElement || activeElement === firstElement)) {
+                event.preventDefault?.();
+                lastElement.focus();
+                return true;
+            }
+
+            if (!event.shiftKey && activeElement === lastElement) {
+                event.preventDefault?.();
+                firstElement.focus();
+                return true;
+            }
+
+            return false;
+        }
+
+        function bindModalKeyboardNavigation(modal, options = {}) {
+            if (!modal || typeof modal.addEventListener !== 'function') {
+                return {
+                    focusInitial: () => focusModalInitialElement(modal, options.initialFocusTarget),
+                    dispose: () => {}
+                };
+            }
+
+            if (typeof modal.setAttribute === 'function') {
+                modal.setAttribute('role', 'dialog');
+                modal.setAttribute('aria-modal', 'true');
+                modal.setAttribute('tabindex', '-1');
+            }
+
+            const closeModal = typeof options.closeModal === 'function' ? options.closeModal : () => {};
+            const handleKeydown = (event) => handleModalKeyboardEvent(event, modal, closeModal);
+            modal.addEventListener('keydown', handleKeydown);
+
+            return {
+                focusInitial: () => focusModalInitialElement(modal, options.initialFocusTarget),
+                dispose: () => {
+                    if (typeof modal.removeEventListener === 'function') {
+                        modal.removeEventListener('keydown', handleKeydown);
+                    }
+                }
+            };
+        }
+
+        const modalFocusRestoreTargets = new Map();
+
+        function getCurrentFocusElement() {
+            const shadowRoot = getShadowRoot();
+            if (shadowRoot?.activeElement) return shadowRoot.activeElement;
+            return getDocument()?.activeElement || null;
+        }
+
+        function resolveModalFocusRestoreTarget(activeElement) {
+            const shadowRoot = getShadowRoot();
+            if (!activeElement || !shadowRoot) return activeElement || null;
+
+            const menuItem = activeElement.closest?.('.sp-source-actions-menu-item');
+            const sourceKey = menuItem?.dataset?.sourceKey;
+            if (!sourceKey || typeof shadowRoot.querySelectorAll !== 'function') return activeElement;
+
+            return Array.from(shadowRoot.querySelectorAll('.sp-source-actions-button'))
+                .find((button) => button?.dataset?.sourceKey === sourceKey) || activeElement;
+        }
+
+        function rememberModalFocusRestoreTarget(modalId) {
+            if (!modalId || modalFocusRestoreTargets.has(modalId)) {
+                return modalFocusRestoreTargets.get(modalId) || null;
+            }
+
+            const activeElement = getCurrentFocusElement();
+            const restoreTarget = resolveModalFocusRestoreTarget(activeElement);
+            if (restoreTarget && typeof restoreTarget.focus === 'function') {
+                modalFocusRestoreTargets.set(modalId, restoreTarget);
+            }
+            return restoreTarget || null;
+        }
+
+        function restoreModalFocus(modalId) {
+            const restoreTarget = modalFocusRestoreTargets.get(modalId);
+            modalFocusRestoreTargets.delete(modalId);
+            if (
+                restoreTarget &&
+                restoreTarget.isConnected !== false &&
+                typeof restoreTarget.focus === 'function'
+            ) {
+                restoreTarget.focus();
+                return restoreTarget;
+            }
+            return null;
+        }
+
+        function removeModalNode(node) {
+            if (!node) return;
+            if (node.parentNode && typeof node.parentNode.removeChild === 'function') {
+                node.parentNode.removeChild(node);
+                return;
+            }
+            if (typeof node.remove === 'function') {
+                node.remove();
+            }
+        }
+
+        function closeManagedModal(modalId, backdropId, options = {}) {
+            const shadowRoot = getShadowRoot();
+            if (!shadowRoot) return null;
+            const backdrop = shadowRoot.getElementById(backdropId);
+            const modal = shadowRoot.getElementById(modalId);
+            const {
+                immediate = false,
+                restoreFocus = true
+            } = options;
+
+            const finalizeClose = () => {
+                removeModalNode(backdrop);
+                removeModalNode(modal);
+                return restoreFocus ? restoreModalFocus(modalId) : null;
+            };
+
+            if (!immediate && modal && backdrop) {
                 modal.classList.remove('visible');
                 modal.classList.add('closing');
                 backdrop.classList.remove('visible');
 
                 setTimeout(() => {
-                    if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
-                    if (modal.parentNode) modal.parentNode.removeChild(modal);
+                    finalizeClose();
                 }, 300);
-            } else {
-                if (backdrop) backdrop.remove();
-                if (modal) modal.remove();
+                return null;
             }
+
+            return finalizeClose();
+        }
+
+        function prepareModalOpen(modalId, backdropId) {
+            const shadowRoot = getShadowRoot();
+            if (!shadowRoot) return;
+            const existingModal = shadowRoot.getElementById(modalId);
+            if (!existingModal) {
+                rememberModalFocusRestoreTarget(modalId);
+            }
+            closeManagedModal(modalId, backdropId, {
+                immediate: true,
+                restoreFocus: false
+            });
+        }
+
+        function closeMoveToFolderModal(options = {}) {
+            return closeManagedModal('sp-move-modal', 'sp-move-backdrop', options);
+        }
+
+        function closeTagModal(options = {}) {
+            return closeManagedModal('sp-tag-modal', 'sp-tag-backdrop', options);
+        }
+
+        function closeBatchTagModal(options = {}) {
+            return closeManagedModal('sp-batch-tag-modal', 'sp-batch-tag-backdrop', options);
+        }
+
+        function closeSettingsModal(options = {}) {
+            return closeManagedModal('sp-settings-modal', 'sp-settings-backdrop', options);
+        }
+
+        function getImportPreviewMessage(preview) {
+            if (!preview) return '';
+            if (!preview.ok) {
+                return getMessage(preview.reason === 'empty'
+                    ? 'ui_settings_import_empty'
+                    : 'ui_settings_import_invalid');
+            }
+            return getMessage('ui_settings_import_preview_summary', [
+                String(preview.matchedSources || 0),
+                String(preview.totalSources || 0),
+                String(preview.groupCount || 0),
+                String(preview.tagCount || 0)
+            ]);
+        }
+
+        function getPreviewSourceLabel(detail) {
+            if (!detail || typeof detail !== 'object') return '';
+            return String(detail.title || detail.storedKey || detail.resolvedKey || '').trim();
+        }
+
+        function createPreviewSourceList(titleKey, details, emptyKey = '') {
+            const normalizedDetails = Array.isArray(details) ? details : [];
+            const nodes = [
+                el('div', { className: 'sp-settings-preview-detail-title' }, [
+                    getMessage(titleKey, [String(normalizedDetails.length)])
+                ])
+            ];
+
+            if (normalizedDetails.length === 0 && emptyKey) {
+                nodes.push(el('div', { className: 'sp-settings-preview-empty' }, [getMessage(emptyKey)]));
+                return nodes;
+            }
+
+            const visibleDetails = normalizedDetails.slice(0, 5);
+            if (visibleDetails.length > 0) {
+                nodes.push(el('ul', { className: 'sp-settings-preview-list' }, visibleDetails.map((detail) => {
+                    const label = getPreviewSourceLabel(detail) || getMessage('ui_source_untitled');
+                    return el('li', { className: 'sp-settings-preview-item' }, [label]);
+                })));
+            }
+
+            const remainingCount = normalizedDetails.length - visibleDetails.length;
+            if (remainingCount > 0) {
+                nodes.push(el('div', { className: 'sp-settings-preview-more' }, [
+                    getMessage('ui_settings_import_preview_more', [String(remainingCount)])
+                ]));
+            }
+
+            return nodes;
+        }
+
+        function createImportPreviewDetailNodes(preview) {
+            if (!preview?.ok) return [];
+            return [
+                el('div', { className: 'sp-settings-preview-details' }, [
+                    ...createPreviewSourceList(
+                        'ui_settings_import_preview_matched',
+                        preview.matchedSourceDetails || []
+                    ),
+                    ...createPreviewSourceList(
+                        'ui_settings_import_preview_unmatched',
+                        preview.unmatchedSourceDetails || [],
+                        'ui_settings_import_preview_no_unmatched'
+                    )
+                ])
+            ];
+        }
+
+        function copySettingsTextToClipboard(text, textarea, successKey = 'ui_settings_export_copied', failureKey = 'ui_settings_export_copy_failed') {
+            const navigatorObj = getWindow()?.navigator || globalThis.navigator;
+            if (navigatorObj?.clipboard?.writeText) {
+                Promise.resolve(navigatorObj.clipboard.writeText(text))
+                    .then(() => showToast(getMessage(successKey), { variant: 'success' }))
+                    .catch(() => showToast(getMessage(failureKey), { variant: 'error' }));
+                return true;
+            }
+
+            if (textarea && typeof textarea.select === 'function') {
+                textarea.select();
+            }
+            showToast(getMessage(failureKey), { variant: 'error' });
+            return false;
+        }
+
+        function getSettingsExportFileName() {
+            const date = new Date();
+            const dateText = Number.isFinite(date.getTime()) ? date.toISOString().slice(0, 10) : 'export';
+            return `notebooklm-source-management-config-${dateText}.json`;
+        }
+
+        function downloadSettingsExportText(text) {
+            const documentObj = getDocument();
+            const windowObj = getWindow() || globalThis;
+            const BlobCtor = windowObj.Blob || globalThis.Blob;
+            const URLObj = windowObj.URL || globalThis.URL;
+            if (!documentObj || typeof BlobCtor !== 'function' || !URLObj?.createObjectURL) {
+                showToast(getMessage('ui_settings_export_download_failed'), { variant: 'error' });
+                return false;
+            }
+
+            const blob = new BlobCtor([String(text || '')], { type: 'application/json' });
+            const url = URLObj.createObjectURL(blob);
+            const anchor = documentObj.createElement('a');
+            anchor.href = url;
+            anchor.download = getSettingsExportFileName();
+            anchor.style.display = 'none';
+            documentObj.body?.appendChild?.(anchor);
+            anchor.click?.();
+            anchor.remove?.();
+            windowObj.setTimeout?.(() => URLObj.revokeObjectURL?.(url), 0);
+            showToast(getMessage('ui_settings_export_downloaded'), { variant: 'success' });
+            return true;
+        }
+
+        function readSettingsImportFile(file, onText) {
+            const windowObj = getWindow() || globalThis;
+            const FileReaderCtor = windowObj.FileReader || globalThis.FileReader;
+            if (!file || typeof FileReaderCtor !== 'function') {
+                showToast(getMessage('ui_settings_import_file_invalid'), { variant: 'error' });
+                return false;
+            }
+
+            const reader = new FileReaderCtor();
+            reader.onload = () => {
+                if (typeof onText === 'function') {
+                    onText(String(reader.result || ''));
+                }
+            };
+            reader.onerror = () => {
+                showToast(getMessage('ui_settings_import_file_invalid'), { variant: 'error' });
+            };
+            reader.readAsText(file);
+            return true;
+        }
+
+        function getDiagnosticsDisplayRows() {
+            const diagnostics = getDiagnosticsInfo() || {};
+            const failureCount = Array.isArray(diagnostics.nativeActionFailureHistory)
+                ? diagnostics.nativeActionFailureHistory.length
+                : (diagnostics.lastNativeActionFailure ? 1 : 0);
+            const latestNativeFailureReason = diagnostics.lastNativeActionFailure?.reason || '-';
+            const nativeFailureSummary = failureCount > 1
+                ? `${latestNativeFailureReason} (+${failureCount - 1})`
+                : latestNativeFailureReason;
+            return [
+                ['ui_diagnostics_notebook_id', diagnostics.notebookId || '-'],
+                ['ui_diagnostics_sources', String(diagnostics.sourceCount ?? 0)],
+                ['ui_diagnostics_groups', String(diagnostics.groupCount ?? 0)],
+                ['ui_diagnostics_tags', String(diagnostics.tagCount ?? 0)],
+                ['ui_diagnostics_save_revision', String(diagnostics.saveRevision ?? 0)],
+                ['ui_diagnostics_saved_at', diagnostics.savedAt || '-'],
+                ['ui_diagnostics_save_status', diagnostics.saveStatus || 'idle'],
+                ['ui_diagnostics_last_save_error', diagnostics.lastSaveError || '-'],
+                ['ui_diagnostics_recovery', diagnostics.recoveryAvailable ? getMessage('ui_yes') : getMessage('ui_no')],
+                ['ui_diagnostics_import_backup', diagnostics.importBackupAvailable ? getMessage('ui_yes') : getMessage('ui_no')],
+                ['ui_diagnostics_native_failure_history', nativeFailureSummary]
+            ];
+        }
+
+        function createDiagnosticsGrid() {
+            const nodes = [];
+            getDiagnosticsDisplayRows().forEach(([labelKey, value]) => {
+                nodes.push(el('div', { className: 'sp-settings-diagnostics-key' }, [getMessage(labelKey)]));
+                nodes.push(el('div', { className: 'sp-settings-diagnostics-value', title: String(value) }, [String(value)]));
+            });
+            return el('div', { className: 'sp-settings-diagnostics-grid' }, nodes);
+        }
+
+        function copyDiagnosticsTextToClipboard() {
+            return copySettingsTextToClipboard(
+                getDiagnosticsText(),
+                null,
+                'ui_settings_diagnostics_copied',
+                'ui_settings_diagnostics_copy_failed'
+            );
+        }
+
+        function renderSettingsModal(modalState = {}) {
+            const shadowRoot = getShadowRoot();
+            if (!shadowRoot || !el) return false;
+
+            const normalizedModalState = modalState && typeof modalState === 'object' ? modalState : {};
+            const importText = String(normalizedModalState.importText || '');
+            const preview = Object.prototype.hasOwnProperty.call(normalizedModalState, 'preview')
+                ? normalizedModalState.preview
+                : (importText.trim() ? previewImportConfig(importText) : null);
+            const exportText = getExportConfigText();
+
+            prepareModalOpen('sp-settings-modal', 'sp-settings-backdrop');
+
+            const backdrop = el('div', { className: 'sp-overlay-backdrop', id: 'sp-settings-backdrop' });
+            const modal = el('div', {
+                className: 'sp-folder-modal sp-settings-modal',
+                id: 'sp-settings-modal',
+                role: 'dialog',
+                'aria-modal': 'true',
+                'aria-labelledby': 'sp-settings-modal-title',
+                tabindex: '-1'
+            });
+            const header = el('div', { className: 'sp-folder-modal-header' }, [
+                el('h3', { className: 'sp-folder-modal-title', id: 'sp-settings-modal-title' }, [getMessage('ui_settings')])
+            ]);
+            const content = el('div', { className: 'sp-folder-modal-content sp-settings-modal-content' });
+            const exportTextarea = el('textarea', {
+                className: 'sp-settings-textarea sp-settings-export-textarea',
+                readonly: true,
+                spellcheck: 'false',
+                'aria-label': getMessage('ui_settings_export_title')
+            });
+            exportTextarea.value = exportText;
+            const importTextarea = el('textarea', {
+                className: 'sp-settings-textarea sp-settings-import-textarea',
+                spellcheck: 'false',
+                placeholder: getMessage('ui_settings_import_placeholder'),
+                'aria-label': getMessage('ui_settings_import_title')
+            });
+            importTextarea.value = importText;
+
+            const previewMessage = getImportPreviewMessage(preview);
+            const previewClassName = 'sp-settings-import-preview' + (preview?.ok ? ' is-valid' : (preview ? ' is-invalid' : ''));
+            const importFileInput = el('input', {
+                type: 'file',
+                accept: 'application/json,.json',
+                className: 'sp-settings-file-input',
+                tabindex: '-1',
+                'aria-hidden': 'true'
+            });
+
+            content.appendChild(el('section', { className: 'sp-settings-section' }, [
+                el('div', { className: 'sp-settings-section-header' }, [
+                    el('h4', { className: 'sp-settings-section-title' }, [getMessage('ui_settings_export_title')]),
+                    el('div', { className: 'sp-settings-action-row' }, [
+                        el('button', { type: 'button', className: 'sp-button sp-settings-copy-export-btn sp-glare-hover' }, [
+                            getMessage('ui_settings_copy_json')
+                        ]),
+                        el('button', { type: 'button', className: 'sp-button sp-settings-download-export-btn sp-glare-hover' }, [
+                            getMessage('ui_settings_download_json')
+                        ])
+                    ])
+                ]),
+                exportTextarea
+            ]));
+            content.appendChild(el('section', { className: 'sp-settings-section' }, [
+                el('div', { className: 'sp-settings-section-header' }, [
+                    el('h4', { className: 'sp-settings-section-title' }, [getMessage('ui_settings_import_title')]),
+                    el('div', { className: 'sp-settings-action-row' }, [
+                        el('button', { type: 'button', className: 'sp-button sp-settings-choose-import-btn sp-glare-hover' }, [
+                            getMessage('ui_settings_choose_json')
+                        ]),
+                        el('button', { type: 'button', className: 'sp-button sp-settings-preview-import-btn sp-glare-hover' }, [
+                            getMessage('ui_settings_preview_import')
+                        ])
+                    ])
+                ]),
+                importFileInput,
+                importTextarea,
+                el('div', { className: previewClassName, 'aria-live': 'polite' }, [
+                    previewMessage,
+                    ...createImportPreviewDetailNodes(preview)
+                ])
+            ]));
+            content.appendChild(el('section', {
+                id: 'sp-settings-save-status-section',
+                className: 'sp-settings-section sp-settings-save-status-section',
+                hidden: true
+            }, [
+                el('div', { className: 'sp-settings-section-header' }, [
+                    el('h4', { className: 'sp-settings-section-title' }, [getMessage('ui_settings_save_status_title')])
+                ]),
+                el('div', {
+                    id: 'sp-settings-save-status',
+                    className: 'sp-save-status sp-save-status-idle',
+                    role: 'status',
+                    'aria-live': 'polite',
+                    hidden: true
+                })
+            ]));
+            content.appendChild(el('section', { className: 'sp-settings-section sp-settings-diagnostics-section' }, [
+                el('div', { className: 'sp-settings-section-header' }, [
+                    el('h4', { className: 'sp-settings-section-title' }, [getMessage('ui_settings_diagnostics_title')]),
+                    el('div', { className: 'sp-settings-action-row' }, [
+                        el('button', { type: 'button', className: 'sp-button sp-settings-copy-diagnostics-btn sp-glare-hover' }, [
+                            getMessage('ui_settings_copy_diagnostics')
+                        ])
+                    ])
+                ]),
+                createDiagnosticsGrid()
+            ]));
+
+            const footer = el('div', { className: 'sp-folder-modal-footer' }, [
+                el('button', { type: 'button', className: 'sp-modal-cancel' }, [getMessage('ui_cancel')]),
+                el('button', {
+                    type: 'button',
+                    className: 'sp-button sp-settings-apply-import-btn sp-glare-hover',
+                    disabled: !(preview && preview.ok)
+                }, [getMessage('ui_settings_apply_import')])
+            ]);
+
+            modal.appendChild(header);
+            modal.appendChild(content);
+            modal.appendChild(footer);
+            shadowRoot.appendChild(backdrop);
+            shadowRoot.appendChild(modal);
+            renderSaveStatus();
+
+            content.querySelector('.sp-settings-copy-export-btn')?.addEventListener('click', () => {
+                copySettingsTextToClipboard(exportText, exportTextarea);
+            });
+            content.querySelector('.sp-settings-download-export-btn')?.addEventListener('click', () => {
+                downloadSettingsExportText(exportText);
+            });
+            content.querySelector('.sp-settings-copy-diagnostics-btn')?.addEventListener('click', () => {
+                copyDiagnosticsTextToClipboard();
+            });
+            content.querySelector('.sp-settings-choose-import-btn')?.addEventListener('click', () => {
+                importFileInput.click?.();
+            });
+            importFileInput.addEventListener('change', () => {
+                const file = importFileInput.files?.[0];
+                readSettingsImportFile(file, (fileText) => {
+                    renderSettingsModal({
+                        importText: fileText,
+                        preview: previewImportConfig(fileText)
+                    });
+                });
+            });
+            content.querySelector('.sp-settings-preview-import-btn')?.addEventListener('click', () => {
+                renderSettingsModal({
+                    importText: importTextarea.value,
+                    preview: previewImportConfig(importTextarea.value)
+                });
+            });
+            importTextarea.addEventListener('input', () => {
+                const applyButton = modal.querySelector('.sp-settings-apply-import-btn');
+                if (applyButton) applyButton.disabled = true;
+            });
+            footer.querySelector('.sp-modal-cancel')?.addEventListener('click', closeSettingsModal);
+            footer.querySelector('.sp-settings-apply-import-btn')?.addEventListener('click', () => {
+                const result = applyImportConfig(importTextarea.value);
+                if (result && result.ok) {
+                    closeSettingsModal();
+                    return;
+                }
+                renderSettingsModal({
+                    importText: importTextarea.value,
+                    preview: result || previewImportConfig(importTextarea.value)
+                });
+            });
+            backdrop.addEventListener('click', closeSettingsModal);
+
+            const modalKeyboard = bindModalKeyboardNavigation(modal, {
+                closeModal: closeSettingsModal,
+                initialFocusTarget: () => modal.querySelector('.sp-settings-copy-export-btn') || modal.querySelector('.sp-modal-cancel')
+            });
+            requestAnimationFrame(() => {
+                backdrop.classList.add('visible');
+                modal.classList.add('visible');
+                modalKeyboard.focusInitial();
+            });
+
+            return true;
+        }
+
+        function normalizeSourceKeyList(sourceKeys) {
+            const rawKeys = Array.isArray(sourceKeys)
+                ? sourceKeys
+                : (typeof sourceKeys === 'string' ? [sourceKeys] : Array.from(sourceKeys || []));
+            const seen = new Set();
+            return rawKeys.reduce((acc, key) => {
+                if (typeof key !== 'string' || !key || seen.has(key)) return acc;
+                seen.add(key);
+                acc.push(key);
+                return acc;
+            }, []);
+        }
+
+        function collectMoveFolderOptions(groupIds, level = 0, visitedGroupIds = new Set()) {
+            const groupsById = getGroupsById();
+            const options = [];
+
+            (Array.isArray(groupIds) ? groupIds : []).forEach((groupId) => {
+                if (!groupId || visitedGroupIds.has(groupId)) return;
+
+                const group = groupsById.get(groupId);
+                if (!group) return;
+
+                visitedGroupIds.add(groupId);
+                options.push({ group, level });
+
+                const childGroupIds = (Array.isArray(group.children) ? group.children : [])
+                    .filter((child) => child && child.type === 'group')
+                    .map((child) => child.id);
+                options.push(...collectMoveFolderOptions(childGroupIds, level + 1, visitedGroupIds));
+            });
+
+            return options;
         }
 
         function renderMoveToFolderModal(sourceKeys) {
@@ -132,29 +776,45 @@
             const keys = Array.isArray(sourceKeys) ? sourceKeys : (typeof sourceKeys === 'string' ? [sourceKeys] : Array.from(sourceKeys));
             if (keys.length === 0) return;
 
-            closeMoveToFolderModal();
+            prepareModalOpen('sp-move-modal', 'sp-move-backdrop');
 
             const state = getState() || {};
-            const groupsById = getGroupsById();
             const backdrop = el('div', { className: 'sp-overlay-backdrop', id: 'sp-move-backdrop' });
-            const modal = el('div', { className: 'sp-folder-modal', id: 'sp-move-modal' });
+            const modal = el('div', {
+                className: 'sp-folder-modal',
+                id: 'sp-move-modal',
+                role: 'dialog',
+                'aria-modal': 'true',
+                'aria-labelledby': 'sp-move-modal-title',
+                tabindex: '-1'
+            });
 
             const header = el('div', { className: 'sp-folder-modal-header' }, [
-                el('h3', { className: 'sp-folder-modal-title' }, [getMessage('ui_move_to_folder')])
+                el('h3', { className: 'sp-folder-modal-title', id: 'sp-move-modal-title' }, [getMessage('ui_move_to_folder')])
             ]);
 
             const content = el('div', { className: 'sp-folder-modal-content' });
 
             let folderFound = false;
+            let modalItemIndex = 0;
             const groupIds = Array.isArray(state.groups) ? state.groups : [];
-            groupIds.forEach((groupId) => {
-                const group = groupsById.get(groupId);
+            collectMoveFolderOptions(groupIds).forEach(({ group, level }) => {
                 if (group) {
                     folderFound = true;
-                    const folderBtn = el('button', { className: 'sp-folder-option' }, [
+                    const indentStyle = level > 0 ? `padding-left:${12 + (level * 18)}px;` : '';
+                    const folderBtn = el('button', {
+                        type: 'button',
+                        className: 'sp-folder-option',
+                        dataset: {
+                            groupId: group.id,
+                            level: String(level)
+                        },
+                        style: createModalItemStaggerStyle(modalItemIndex, indentStyle)
+                    }, [
                         el('span', { className: 'google-symbols' }, ['folder']),
                         el('span', { className: 'sp-folder-option-title' }, [group.title || getMessage('ui_group_untitled')])
                     ]);
+                    modalItemIndex += 1;
 
                     folderBtn.addEventListener('click', () => {
                         executeMoveToFolder(keys, group.id);
@@ -169,7 +829,7 @@
             }
 
             const footer = el('div', { className: 'sp-folder-modal-footer' }, [
-                el('button', { className: 'sp-modal-cancel' }, [getMessage('ui_cancel')])
+                el('button', { type: 'button', className: 'sp-modal-cancel' }, [getMessage('ui_cancel')])
             ]);
 
             footer.querySelector('.sp-modal-cancel').addEventListener('click', closeMoveToFolderModal);
@@ -184,9 +844,15 @@
             shadowRoot.appendChild(backdrop);
             shadowRoot.appendChild(modal);
 
+            const modalKeyboard = bindModalKeyboardNavigation(modal, {
+                closeModal: closeMoveToFolderModal,
+                initialFocusTarget: () => modal.querySelector('.sp-folder-option') || modal.querySelector('.sp-modal-cancel')
+            });
+
             requestAnimationFrame(() => {
                 backdrop.classList.add('visible');
                 modal.classList.add('visible');
+                modalKeyboard.focusInitial();
             });
         }
 
@@ -194,7 +860,7 @@
             const state = getState() || {};
             const groupsById = getGroupsById();
             const pendingBatchKeys = getPendingBatchKeys();
-            const sourcesByKey = typeof deps.getSourcesByKey === 'function' ? deps.getSourcesByKey() : new Map();
+            const sourcesByKey = getSourcesByKey();
             const targetGroup = groupsById.get(targetGroupId);
             if (!targetGroup) {
                 closeMoveToFolderModal();
@@ -221,31 +887,9 @@
 
             closeSourceActionMenu();
             buildParentMap();
-            saveState({ immediate: true });
+            saveState({ immediate: true, critical: true });
             render();
             closeMoveToFolderModal();
-        }
-
-        function closeTagModal() {
-            const shadowRoot = getShadowRoot();
-            if (!shadowRoot) return;
-            const backdrop = shadowRoot.getElementById('sp-tag-backdrop');
-            const modal = shadowRoot.getElementById('sp-tag-modal');
-
-            if (modal && backdrop) {
-                modal.classList.remove('visible');
-                modal.classList.add('closing');
-                backdrop.classList.remove('visible');
-
-                setTimeout(() => {
-                    if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
-                    if (modal.parentNode) modal.parentNode.removeChild(modal);
-                }, 300);
-                return;
-            }
-
-            if (backdrop) backdrop.remove();
-            if (modal) modal.remove();
         }
 
         function createTagColorControl(initialColor, options = {}) {
@@ -481,12 +1125,185 @@
             };
         }
 
+        function executeBatchTagUpdate(mode, sourceKeys, tagIds) {
+            const normalizedMode = mode === 'remove' ? 'remove' : 'add';
+            const state = getState() || {};
+            const pendingBatchKeys = getPendingBatchKeys();
+            const sourcesByKey = getSourcesByKey();
+            const tagsById = getTagsById();
+            const selectedTagIds = Array.from(tagIds || []).filter((tagId) => tagsById.has(tagId));
+            const keys = normalizeSourceKeyList(sourceKeys).filter((sourceKey) => {
+                const source = sourcesByKey.get(sourceKey);
+                return source && !source.isDisabled && !source.isLoading;
+            });
+
+            if (keys.length === 0 || selectedTagIds.length === 0) {
+                closeBatchTagModal();
+                return false;
+            }
+
+            const selectedTagIdSet = new Set(selectedTagIds);
+            keys.forEach((sourceKey) => {
+                const currentTagIds = getSourceTagIds(sourceKey);
+                const nextTagIds = normalizedMode === 'remove'
+                    ? currentTagIds.filter((tagId) => !selectedTagIdSet.has(tagId))
+                    : Array.from(new Set([...currentTagIds, ...selectedTagIds]));
+                setSourceTagIds(sourceKey, nextTagIds);
+            });
+
+            state.isBatchMode = false;
+            pendingBatchKeys.clear();
+            closeSourceActionMenu();
+            saveState({ immediate: true, critical: true });
+            render();
+            closeBatchTagModal();
+            showUndoableToast(getMessage(
+                normalizedMode === 'remove' ? 'ui_batch_tags_removed_toast' : 'ui_batch_tags_added_toast',
+                [String(keys.length)]
+            ), { variant: 'success' });
+            return true;
+        }
+
+        function renderBatchTagModal(mode, sourceKeys, modalState = null) {
+            const shadowRoot = getShadowRoot();
+            const state = getState() || {};
+            const tagsById = getTagsById();
+            if (!shadowRoot || !el) return;
+
+            const normalizedMode = mode === 'remove' ? 'remove' : 'add';
+            const keys = normalizeSourceKeyList(sourceKeys);
+            if (keys.length === 0) return;
+
+            const normalizedModalState = modalState && typeof modalState === 'object' ? modalState : {};
+            const selectedTagIds = new Set(normalizedModalState.draftTagIds || []);
+
+            prepareModalOpen('sp-batch-tag-modal', 'sp-batch-tag-backdrop');
+
+            const backdrop = el('div', { className: 'sp-overlay-backdrop', id: 'sp-batch-tag-backdrop' });
+            const modal = el('div', {
+                className: 'sp-folder-modal sp-tag-modal sp-batch-tag-modal',
+                id: 'sp-batch-tag-modal',
+                role: 'dialog',
+                'aria-modal': 'true',
+                'aria-labelledby': 'sp-batch-tag-modal-title',
+                tabindex: '-1'
+            });
+            const titleKey = normalizedMode === 'remove' ? 'ui_batch_remove_tags_title' : 'ui_batch_add_tags_title';
+            const header = el('div', { className: 'sp-folder-modal-header' }, [
+                el('h3', { className: 'sp-folder-modal-title', id: 'sp-batch-tag-modal-title' }, [getMessage(titleKey)])
+            ]);
+            const content = el('div', { className: 'sp-folder-modal-content sp-tag-modal-content' });
+
+            if (normalizedMode === 'add') {
+                const createEditor = createTagEditor({
+                    className: 'sp-tag-create-row',
+                    submitLabel: getMessage('ui_create_tag'),
+                    submitButtonId: 'sp-create-batch-tag-btn',
+                    inputId: 'sp-batch-tag-name-input',
+                    initialColor: getDefaultTagColor(),
+                    onSubmit: ({ label, color }) => {
+                        const newTagId = createTag(label, { color });
+                        if (!newTagId) return;
+
+                        selectedTagIds.add(newTagId);
+                        saveState({ immediate: true, critical: true });
+                        render();
+                        renderBatchTagModal(normalizedMode, keys, { draftTagIds: Array.from(selectedTagIds) });
+                    }
+                });
+                content.appendChild(createEditor.root);
+            }
+
+            const tagOrder = Array.isArray(state.tagOrder) ? state.tagOrder : [];
+            if (tagOrder.length === 0) {
+                content.appendChild(el('div', { className: 'sp-folder-empty' }, [
+                    normalizedMode === 'remove' ? getMessage('ui_no_tags_to_remove') : getMessage('ui_no_tags')
+                ]));
+            } else {
+                let modalItemIndex = 0;
+                tagOrder.forEach((tagId) => {
+                    const tag = tagsById.get(tagId);
+                    if (!tag) return;
+
+                    content.appendChild(el('label', {
+                        className: 'sp-tag-option sp-batch-tag-option',
+                        style: createModalItemStaggerStyle(modalItemIndex)
+                    }, [
+                        el('input', {
+                            type: 'checkbox',
+                            className: 'sp-tag-option-checkbox sp-batch-tag-option-checkbox',
+                            dataset: { tagId },
+                            checked: selectedTagIds.has(tagId)
+                        }),
+                        el('span', {
+                            className: 'sp-tag-row-color' + (tag.color ? '' : ' is-neutral'),
+                            style: getTagColorPreviewStyle(tag.color)
+                        }),
+                        el('span', { className: 'sp-tag-option-label' }, [tag.label])
+                    ]));
+                    modalItemIndex += 1;
+                });
+            }
+
+            const applyButton = el('button', {
+                type: 'button',
+                className: 'sp-button',
+                id: 'sp-apply-batch-tags-btn',
+                disabled: selectedTagIds.size === 0
+            }, [getMessage('ui_apply_tags')]);
+            const footer = el('div', { className: 'sp-folder-modal-footer' }, [
+                el('button', { type: 'button', className: 'sp-modal-cancel' }, [getMessage('ui_cancel')]),
+                applyButton
+            ]);
+
+            footer.querySelector('.sp-modal-cancel').addEventListener('click', closeBatchTagModal);
+            applyButton.addEventListener('click', () => {
+                executeBatchTagUpdate(normalizedMode, keys, selectedTagIds);
+            });
+            backdrop.addEventListener('click', (event) => {
+                if (event.target === backdrop) {
+                    closeBatchTagModal();
+                }
+            });
+
+            modal.appendChild(header);
+            modal.appendChild(content);
+            modal.appendChild(footer);
+            shadowRoot.appendChild(backdrop);
+            shadowRoot.appendChild(modal);
+
+            modal.querySelectorAll('.sp-batch-tag-option-checkbox').forEach((checkbox) => {
+                checkbox.addEventListener('change', () => {
+                    const tagId = checkbox.dataset.tagId;
+                    if (!tagId) return;
+                    if (checkbox.checked) selectedTagIds.add(tagId);
+                    else selectedTagIds.delete(tagId);
+                    applyButton.disabled = selectedTagIds.size === 0;
+                });
+            });
+
+            const modalKeyboard = bindModalKeyboardNavigation(modal, {
+                closeModal: closeBatchTagModal,
+                initialFocusTarget: () => (
+                    normalizedMode === 'add'
+                        ? modal.querySelector('#sp-batch-tag-name-input')
+                        : modal.querySelector('.sp-batch-tag-option-checkbox')
+                ) || modal.querySelector('.sp-modal-cancel')
+            });
+
+            requestAnimationFrame(() => {
+                backdrop.classList.add('visible');
+                modal.classList.add('visible');
+                modalKeyboard.focusInitial();
+            });
+        }
+
         function renderTagModal(sourceKey = null, modalState = null) {
             const shadowRoot = getShadowRoot();
             const state = getState() || {};
             const tagsById = getTagsById();
             const sourceTagsById = getSourceTagsById();
-            const sourcesByKey = typeof deps.getSourcesByKey === 'function' ? deps.getSourcesByKey() : new Map();
+            const sourcesByKey = getSourcesByKey();
             if (!shadowRoot || !el) return;
 
             const normalizedModalState = Array.isArray(modalState)
@@ -499,13 +1316,20 @@
             const usageCounts = getTagUsageCounts();
             const editingTagId = !source ? normalizedModalState.editingTagId || null : null;
 
-            closeTagModal();
+            prepareModalOpen('sp-tag-modal', 'sp-tag-backdrop');
 
             const backdrop = el('div', { className: 'sp-overlay-backdrop', id: 'sp-tag-backdrop' });
-            const modal = el('div', { className: 'sp-folder-modal sp-tag-modal', id: 'sp-tag-modal' });
+            const modal = el('div', {
+                className: 'sp-folder-modal sp-tag-modal',
+                id: 'sp-tag-modal',
+                role: 'dialog',
+                'aria-modal': 'true',
+                'aria-labelledby': 'sp-tag-modal-title',
+                tabindex: '-1'
+            });
             const title = source ? getMessage('ui_edit_tags') : getMessage('ui_manage_tags');
             const header = el('div', { className: 'sp-folder-modal-header' }, [
-                el('h3', { className: 'sp-folder-modal-title' }, [title])
+                el('h3', { className: 'sp-folder-modal-title', id: 'sp-tag-modal-title' }, [title])
             ]);
             const content = el('div', { className: 'sp-folder-modal-content sp-tag-modal-content' });
 
@@ -523,12 +1347,12 @@
                     if (source) {
                         selectedTagIds.add(newTagId);
                         render();
-                        saveState({ immediate: true });
+                        saveState({ immediate: true, critical: true });
                         renderTagModal(sourceKey, { draftTagIds: Array.from(selectedTagIds) });
                         return;
                     }
 
-                    saveState({ immediate: true });
+                    saveState({ immediate: true, critical: true });
                     render();
                     renderTagModal();
                 }
@@ -541,11 +1365,15 @@
                     source ? getMessage('ui_no_tags_for_source') : getMessage('ui_no_tags')
                 ]));
             } else if (source) {
+                let modalItemIndex = 0;
                 tagOrder.forEach((tagId) => {
                     const tag = tagsById.get(tagId);
                     if (!tag) return;
 
-                    content.appendChild(el('label', { className: 'sp-tag-option' }, [
+                    content.appendChild(el('label', {
+                        className: 'sp-tag-option',
+                        style: createModalItemStaggerStyle(modalItemIndex)
+                    }, [
                         el('input', {
                             type: 'checkbox',
                             className: 'sp-tag-option-checkbox',
@@ -554,8 +1382,10 @@
                         }),
                         el('span', { className: 'sp-tag-option-label' }, [tag.label])
                     ]));
+                    modalItemIndex += 1;
                 });
             } else {
+                let modalItemIndex = 0;
                 tagOrder.forEach((tagId) => {
                     const tag = tagsById.get(tagId);
                     if (!tag) return;
@@ -583,13 +1413,14 @@
                         if (!shouldDelete) return;
 
                         deleteTag(tagId);
-                        saveState({ immediate: true });
+                        saveState({ immediate: true, critical: true });
                         render();
                         renderTagModal();
                     });
 
                     const item = el('div', {
-                        className: 'sp-tag-manage-item' + (editingTagId === tagId ? ' is-editing' : '')
+                        className: 'sp-tag-manage-item' + (editingTagId === tagId ? ' is-editing' : ''),
+                        style: createModalItemStaggerStyle(modalItemIndex)
                     }, [
                         el('div', { className: 'sp-tag-row' }, [
                             el('span', {
@@ -618,7 +1449,7 @@
                                 const result = updateTag(tagId, { label, color });
                                 if (!result || result !== tagId) return;
 
-                                saveState({ immediate: true });
+                                saveState({ immediate: true, critical: true });
                                 render();
                                 renderTagModal();
                             }
@@ -627,14 +1458,15 @@
                     }
 
                     content.appendChild(item);
+                    modalItemIndex += 1;
                 });
             }
 
             const footerChildren = [
-                el('button', { className: 'sp-modal-cancel' }, [getMessage('ui_cancel')])
+                el('button', { type: 'button', className: 'sp-modal-cancel' }, [getMessage('ui_cancel')])
             ];
             if (source) {
-                footerChildren.push(el('button', { className: 'sp-button', id: 'sp-save-tags-btn' }, [getMessage('ui_save')]));
+                footerChildren.push(el('button', { type: 'button', className: 'sp-button', id: 'sp-save-tags-btn' }, [getMessage('ui_save')]));
             }
             const footer = el('div', { className: 'sp-folder-modal-footer' }, footerChildren);
 
@@ -660,32 +1492,56 @@
                             return acc;
                         }, []);
                     setSourceTagIds(sourceKey, nextTagIds);
-                    saveState({ immediate: true });
+                    saveState({ immediate: true, critical: true });
                     render();
                     closeTagModal();
                 });
             }
 
+            const modalKeyboard = bindModalKeyboardNavigation(modal, {
+                closeModal: closeTagModal,
+                initialFocusTarget: () => (
+                    editingTagId
+                        ? modal.querySelector(`#sp-edit-tag-${editingTagId}`)
+                        : modal.querySelector('#sp-tag-name-input')
+                ) || modal.querySelector('.sp-modal-cancel')
+            });
+
             requestAnimationFrame(() => {
                 backdrop.classList.add('visible');
                 modal.classList.add('visible');
-
-                const focusTarget = editingTagId
-                    ? modal.querySelector(`#sp-edit-tag-${editingTagId}`)
-                    : modal.querySelector('#sp-tag-name-input');
-                if (focusTarget && typeof focusTarget.focus === 'function') {
-                    focusTarget.focus();
-                }
+                modalKeyboard.focusInitial();
             });
         }
 
         return {
             renderMoveToFolderModal,
             closeMoveToFolderModal,
+            closeSettingsModal,
+            renderSettingsModal,
+            getImportPreviewMessage,
+            createImportPreviewDetailNodes,
+            copySettingsTextToClipboard,
+            downloadSettingsExportText,
+            readSettingsImportFile,
             executeMoveToFolder,
+            collectMoveFolderOptions,
             closeTagModal,
+            closeBatchTagModal,
+            executeBatchTagUpdate,
+            renderBatchTagModal,
             createTagColorControl,
             createTagEditor,
+            getModalFocusableElements,
+            focusModalInitialElement,
+            handleModalKeyboardEvent,
+            bindModalKeyboardNavigation,
+            rememberModalFocusRestoreTarget,
+            restoreModalFocus,
+            closeManagedModal,
+            prepareModalOpen,
+            createModalItemStaggerStyle,
+            getTagColorPresets,
             renderTagModal
         };
     }

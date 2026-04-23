@@ -128,6 +128,173 @@
     "ui_filter_sources": {
         "message": "Filtrar fuentes"
     },
+    "ui_filter_sources_v2": {
+        "message": "Buscar fuentes, etiquetas y carpetas"
+    },
+    "ui_search_results_count": {
+        "message": "$1 resultado(s)",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            }
+        }
+    },
+    "ui_settings": {
+        "message": "Configuración"
+    },
+    "ui_settings_save_status_title": {
+        "message": "Estado de guardado"
+    },
+    "ui_settings_export_title": {
+        "message": "Exportar configuración"
+    },
+    "ui_settings_import_title": {
+        "message": "Importar configuración"
+    },
+    "ui_settings_copy_json": {
+        "message": "Copiar JSON"
+    },
+    "ui_settings_download_json": {
+        "message": "Descargar JSON"
+    },
+    "ui_settings_choose_json": {
+        "message": "Elegir JSON"
+    },
+    "ui_settings_preview_import": {
+        "message": "Vista previa"
+    },
+    "ui_settings_apply_import": {
+        "message": "Aplicar importación"
+    },
+    "ui_settings_import_placeholder": {
+        "message": "Pega aquí el JSON exportado"
+    },
+    "ui_settings_import_preview_summary": {
+        "message": "$1/$2 fuente(s) coinciden · $3 carpeta(s) · $4 etiqueta(s)",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" },
+            "3": { "content": "$3" },
+            "4": { "content": "$4" }
+        }
+    },
+    "ui_settings_import_preview_matched": {
+        "message": "$1 fuente(s) coinciden",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_settings_import_preview_unmatched": {
+        "message": "$1 fuente(s) sin coincidencia",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_settings_import_preview_no_unmatched": {
+        "message": "No hay fuentes sin coincidencia"
+    },
+    "ui_settings_import_preview_more": {
+        "message": "+$1 más",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_settings_import_empty": {
+        "message": "Pega primero un JSON de configuración."
+    },
+    "ui_settings_import_invalid": {
+        "message": "No se pudo leer este JSON de configuración."
+    },
+    "ui_settings_imported_toast": {
+        "message": "Configuración importada"
+    },
+    "ui_settings_restore_import_backup": {
+        "message": "Restaurar estado anterior"
+    },
+    "ui_settings_import_backup_unavailable": {
+        "message": "La copia previa a la importación no está disponible."
+    },
+    "ui_settings_import_backup_restore_failed": {
+        "message": "No se pudo restaurar la copia previa a la importación."
+    },
+    "ui_settings_import_backup_restored": {
+        "message": "Copia previa a la importación restaurada."
+    },
+    "ui_settings_import_deferred": {
+        "message": "La configuración se importará cuando terminen de cargarse las fuentes."
+    },
+    "ui_settings_export_copied": {
+        "message": "Configuración copiada"
+    },
+    "ui_settings_export_downloaded": {
+        "message": "Configuración descargada"
+    },
+    "ui_settings_export_copy_failed": {
+        "message": "No se pudo copiar la configuración"
+    },
+    "ui_settings_export_download_failed": {
+        "message": "No se pudo descargar la configuración"
+    },
+    "ui_settings_import_file_invalid": {
+        "message": "No se pudo leer ese archivo JSON"
+    },
+    "ui_settings_diagnostics_title": {
+        "message": "Diagnóstico"
+    },
+    "ui_settings_copy_diagnostics": {
+        "message": "Copiar diagnóstico"
+    },
+    "ui_settings_diagnostics_copied": {
+        "message": "Diagnóstico copiado"
+    },
+    "ui_settings_diagnostics_copy_failed": {
+        "message": "No se pudo copiar el diagnóstico"
+    },
+    "ui_diagnostics_notebook_id": {
+        "message": "Notebook"
+    },
+    "ui_diagnostics_sources": {
+        "message": "Fuentes"
+    },
+    "ui_diagnostics_groups": {
+        "message": "Grupos"
+    },
+    "ui_diagnostics_tags": {
+        "message": "Etiquetas"
+    },
+    "ui_diagnostics_save_revision": {
+        "message": "Revisión guardada"
+    },
+    "ui_diagnostics_saved_at": {
+        "message": "Guardado a las"
+    },
+    "ui_diagnostics_save_status": {
+        "message": "Estado de guardado"
+    },
+    "ui_diagnostics_last_save_error": {
+        "message": "Último error de guardado"
+    },
+    "ui_diagnostics_recovery": {
+        "message": "Recuperación"
+    },
+    "ui_diagnostics_import_backup": {
+        "message": "Copia previa a la importación"
+    },
+    "ui_diagnostics_native_failure": {
+        "message": "Fallo nativo"
+    },
+    "ui_diagnostics_native_failure_history": {
+        "message": "Historial de fallos nativos"
+    },
+    "ui_undo_action": {
+        "message": "Deshacer"
+    },
+    "ui_undo_toast": {
+        "message": "Se deshizo la última acción"
+    },
+    "ui_undo_empty": {
+        "message": "No hay nada que deshacer"
+    },
     "ui_new_group": {
         "message": "Nuevo grupo"
     },
@@ -231,6 +398,51 @@
     "ui_save": {
         "message": "Guardar"
     },
+    "ui_save_failed": {
+        "message": "No se pudo guardar. Reintenta antes de actualizar."
+    },
+    "ui_save_stale_failed": {
+        "message": "El guardado se bloqueó porque otra pestaña tiene cambios más recientes."
+    },
+    "ui_save_status_saving": {
+        "message": "Guardando..."
+    },
+    "ui_save_status_saved": {
+        "message": "Guardado ahora"
+    },
+    "ui_save_status_failed": {
+        "message": "Error al guardar"
+    },
+    "ui_save_status_stale": {
+        "message": "Hay cambios más recientes"
+    },
+    "ui_save_status_recovery": {
+        "message": "Recuperación disponible"
+    },
+    "ui_save_status_retry": {
+        "message": "Reintentar"
+    },
+    "ui_recovery_restore": {
+        "message": "Restaurar"
+    },
+    "ui_recovery_dismiss": {
+        "message": "Descartar"
+    },
+    "ui_recovery_unavailable": {
+        "message": "La instantánea de recuperación no está disponible."
+    },
+    "ui_recovery_restore_failed": {
+        "message": "No se pudo restaurar la instantánea de recuperación."
+    },
+    "ui_recovery_restored": {
+        "message": "Instantánea de recuperación restaurada."
+    },
+    "ui_yes": {
+        "message": "Sí"
+    },
+    "ui_no": {
+        "message": "No"
+    },
     "ui_tag_delete": {
         "message": "Eliminar etiqueta"
     },
@@ -270,6 +482,69 @@
                 "content": "$1"
             }
         }
+    },
+    "ui_batch_add_tags_count": {
+        "message": "Agregar etiquetas ($1)",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            }
+        }
+    },
+    "ui_batch_remove_tags_count": {
+        "message": "Quitar etiquetas ($1)",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            }
+        }
+    },
+    "ui_batch_ungroup_count": {
+        "message": "Sin agrupar ($1)",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            }
+        }
+    },
+    "ui_batch_add_tags_title": {
+        "message": "Agregar etiquetas"
+    },
+    "ui_batch_remove_tags_title": {
+        "message": "Quitar etiquetas"
+    },
+    "ui_apply_tags": {
+        "message": "Aplicar etiquetas"
+    },
+    "ui_batch_tags_added_toast": {
+        "message": "Etiquetas agregadas a $1 fuente(s)",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            }
+        }
+    },
+    "ui_batch_tags_removed_toast": {
+        "message": "Etiquetas quitadas de $1 fuente(s)",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            }
+        }
+    },
+    "ui_no_tags_to_remove": {
+        "message": "No hay etiquetas disponibles para quitar."
+    },
+    "ui_batch_ungrouped_toast": {
+        "message": "Se movieron $1 fuente(s) a Sin agrupar",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            }
+        }
+    },
+    "ui_batch_no_sources_changed": {
+        "message": "No se pudo cambiar ninguna fuente seleccionada."
     },
     "ui_cancel": {
         "message": "Cancelar"
@@ -316,14 +591,62 @@
     "ui_view_source_details": {
         "message": "Ver detalles de la fuente"
     },
+    "ui_rename_source": {
+        "message": "Renombrar fuente"
+    },
+    "ui_rename_source_unavailable": {
+        "message": "No se pudo renombrar la fuente ahora mismo"
+    },
+    "ui_rename_source_failed": {
+        "message": "No se pudo abrir el cambio de nombre de esta fuente. Actualiza NotebookLM e inténtalo de nuevo."
+    },
+    "ui_delete_source": {
+        "message": "Eliminar fuente"
+    },
+    "ui_delete_source_unavailable": {
+        "message": "No se pudo eliminar la fuente ahora mismo"
+    },
+    "ui_delete_source_failed": {
+        "message": "No se pudo iniciar la eliminación de esta fuente. Actualiza NotebookLM e inténtalo de nuevo."
+    },
     "ui_source_details_unavailable": {
         "message": "Los detalles de la fuente no están disponibles ahora mismo"
     },
-    "ui_open_native_menu": {
-        "message": "Abrir menú de NotebookLM"
+    "ui_source_details_failed": {
+        "message": "No se pudieron abrir los detalles de la fuente. Actualiza NotebookLM e inténtalo de nuevo."
+    },
+    "ui_retry": {
+        "message": "Reintentar"
+    },
+    "ui_native_action_source_unavailable": {
+        "message": "Esta fuente aún no está disponible."
+    },
+    "ui_native_action_menu_button_missing": {
+        "message": "No se encontró el botón de menú de fuente de NotebookLM."
+    },
+    "ui_native_action_menu_item_missing": {
+        "message": "No se encontró la opción de menú correspondiente de NotebookLM."
+    },
+    "ui_native_action_confirm_dialog_missing": {
+        "message": "No se encontró el diálogo de confirmación de NotebookLM."
+    },
+    "ui_native_action_confirm_button_missing": {
+        "message": "No se encontró el botón de confirmación de NotebookLM."
+    },
+    "ui_native_action_failed": {
+        "message": "Es posible que haya cambiado la estructura de la página de NotebookLM."
     },
     "ui_move_to_folder": {
         "message": "Mover a carpeta"
+    },
+    "ui_move_to_ungrouped": {
+        "message": "Mover a Sin agrupar"
+    },
+    "ui_keyboard_move_unavailable": {
+        "message": "Este elemento no se puede mover ahí."
+    },
+    "ui_keyboard_moved_ungrouped_toast": {
+        "message": "Movido a Sin agrupar"
     },
     "ui_empty_folders": {
         "message": "Todavía no hay carpetas disponibles.\nPrimero crea una."

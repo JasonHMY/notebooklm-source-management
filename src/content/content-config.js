@@ -18,8 +18,22 @@
         ]
     };
 
+    const TAG_COLOR_PRESETS = [
+        '#007AFF',
+        '#34C759',
+        '#FF9500',
+        '#FF3B30',
+        '#AF52DE',
+        '#5AC8FA',
+        '#FF2D55',
+        '#8E8E93'
+    ];
+    const TAG_COLOR_HEX_PATTERN = /^#([0-9A-F]{6})$/;
+
     const contentConfig = {
         DEPS,
+        TAG_COLOR_PRESETS,
+        TAG_COLOR_HEX_PATTERN,
         SCROLL_AREA_SELECTOR: DEPS.scroll[0],
         SOURCE_TITLE_SELECTOR: DEPS.title[0],
         SOURCE_CHECKBOX_SELECTOR: DEPS.checkbox[0],
