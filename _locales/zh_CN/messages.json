@@ -250,6 +250,18 @@
     "ui_settings_diagnostics_copy_failed": {
         "message": "无法复制诊断信息"
     },
+    "ui_settings_feedback_title": {
+        "message": "问题反馈"
+    },
+    "ui_settings_feedback_body": {
+        "message": "在 Chrome Web Store 留下问题反馈或建议。"
+    },
+    "ui_settings_open_web_store_feedback": {
+        "message": "打开 Chrome Web Store 反馈"
+    },
+    "ui_settings_feedback_open_failed": {
+        "message": "无法打开 Chrome Web Store 反馈页面"
+    },
     "ui_diagnostics_notebook_id": {
         "message": "Notebook"
     },

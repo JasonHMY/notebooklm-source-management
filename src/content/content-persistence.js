@@ -16,6 +16,12 @@
                 .toLowerCase();
         const getSourceTagIds = typeof ctx.getSourceTagIds === 'function' ? ctx.getSourceTagIds : () => [];
         const getSerializedTag = typeof ctx.getSerializedTag === 'function' ? ctx.getSerializedTag : (tag) => tag;
+        const buildNormalizedTagState = typeof ctx.buildNormalizedTagState === 'function'
+            ? ctx.buildNormalizedTagState
+            : null;
+        const appendGroupChildIfAcyclic = typeof ctx.appendGroupChildIfAcyclic === 'function'
+            ? ctx.appendGroupChildIfAcyclic
+            : null;
         const scanAndSyncSources = typeof ctx.scanAndSyncSources === 'function' ? ctx.scanAndSyncSources : () => false;
         const findSourcePanel = typeof ctx.findSourcePanel === 'function' ? ctx.findSourcePanel : () => null;
         const isSourcePanelRenderable = typeof ctx.isSourcePanelRenderable === 'function' ? ctx.isSourcePanelRenderable : () => true;
@@ -1004,8 +1010,14 @@
                 if (!nextGroup) return;
 
                 (Array.isArray(rawGroup?.children) ? rawGroup.children : []).forEach((child) => {
-                    if (child?.type === 'group' && child.id !== groupId && groupsById.has(child.id)) {
-                        nextGroup.children.push({ type: 'group', id: child.id });
+                    if (
+                        child?.type === 'group' &&
+                        (
+                            appendGroupChildIfAcyclic
+                                ? appendGroupChildIfAcyclic(groupsById, groupId, child.id)
+                                : appendGroupChildIfAcyclicLocal(groupsById, groupId, child.id)
+                        )
+                    ) {
                         return;
                     }
 
@@ -1031,18 +1043,28 @@
             });
 
             tagsById.clear();
-            getMapLikeEntries(loadedState.tagsById || {}).forEach(([tagId, tag]) => {
-                if (tag && typeof tag === 'object') {
-                    tagsById.set(tagId, { ...tag, id: tag.id || tagId });
-                }
-            });
-            state.tagOrder = (Array.isArray(loadedState.tagOrder) ? loadedState.tagOrder : [])
-                .filter((tagId) => tagsById.has(tagId));
+            const normalizedTagState = buildNormalizedTagState ? buildNormalizedTagState(loadedState) : null;
+            const rawToSafeTagId = normalizedTagState?.rawToSafeTagId || null;
+            if (normalizedTagState) {
+                normalizedTagState.nextTagsById.forEach((tag, tagId) => {
+                    tagsById.set(tagId, tag);
+                });
+                state.tagOrder = normalizedTagState.nextTagOrder;
+            } else {
+                getMapLikeEntries(loadedState.tagsById || {}).forEach(([tagId, tag]) => {
+                    if (tag && typeof tag === 'object') {
+                        tagsById.set(tagId, { ...tag, id: tag.id || tagId });
+                    }
+                });
+                state.tagOrder = (Array.isArray(loadedState.tagOrder) ? loadedState.tagOrder : [])
+                    .filter((tagId) => tagsById.has(tagId));
+            }
 
             sourceTagsById.clear();
             getMapLikeEntries(loadedState.sourceTagsById || {}).forEach(([sourceKey, tagIds]) => {
                 if (!sourceKeys.has(sourceKey)) return;
                 const validTagIds = (Array.isArray(tagIds) ? tagIds : [])
+                    .map((tagId) => rawToSafeTagId?.get?.(tagId) || tagId)
                     .filter((tagId) => tagsById.has(tagId));
                 if (validTagIds.length > 0) {
                     sourceTagsById.set(sourceKey, validTagIds);
@@ -1053,6 +1075,32 @@
                 state.activeTagId = null;
             }
 
+            return true;
+        }
+
+        function appendGroupChildIfAcyclicLocal(groupsById, parentGroupId, childGroupId) {
+            const parentGroup = groupsById.get(parentGroupId);
+            if (!parentGroup || !childGroupId || childGroupId === parentGroupId || !groupsById.has(childGroupId)) {
+                return false;
+            }
+
+            const stack = [childGroupId];
+            const visited = new Set();
+            while (stack.length > 0) {
+                const groupId = stack.pop();
+                if (!groupId || visited.has(groupId)) continue;
+                if (groupId === parentGroupId) return false;
+                visited.add(groupId);
+
+                const group = groupsById.get(groupId);
+                (Array.isArray(group?.children) ? group.children : []).forEach((child) => {
+                    if (child?.type === 'group' && child.id && !visited.has(child.id)) {
+                        stack.push(child.id);
+                    }
+                });
+            }
+
+            parentGroup.children.push({ type: 'group', id: childGroupId });
             return true;
         }
 

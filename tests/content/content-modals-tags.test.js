@@ -479,6 +479,32 @@ describe('modal option motion', () => {
         expect(modals.createModalItemStaggerStyle(12, 'padding-left:48px;')).toBe('padding-left:48px;--sp-modal-item-index:10;');
     });
 
+    it('rejects oversized import files before reading them', () => {
+        global.NSM_CONTENT_CONFIG = {
+            TAG_COLOR_PRESETS: ['#007AFF'],
+            IMPORT_CONFIG_MAX_FILE_BYTES: 4
+        };
+        const showToast = jest.fn();
+        global.window.FileReader = jest.fn();
+        const { modals } = createModalMotionTestRuntime({ showToast });
+
+        expect(modals.readSettingsImportFile({ size: 5 }, jest.fn())).toBe(false);
+        expect(global.window.FileReader).not.toHaveBeenCalled();
+        expect(showToast).toHaveBeenCalledWith('ui_settings_import_file_invalid', { variant: 'error' });
+    });
+
+    it('focuses tag edit inputs with selector-unsafe ids without throwing', () => {
+        const unsafeTagId = 'bad"] id';
+        const state = { tagOrder: [unsafeTagId] };
+        const tagsById = new Map([
+            [unsafeTagId, { id: unsafeTagId, label: 'Unsafe Id', color: '#007AFF' }]
+        ]);
+        const { modals, shadowRoot } = createModalMotionTestRuntime({ state, tagsById });
+
+        expect(() => modals.renderTagModal(null, { editingTagId: unsafeTagId })).not.toThrow();
+        expect(shadowRoot.querySelector('#sp-edit-tag-bad_id')).toBeTruthy();
+    });
+
     it('renders settings import/export UI and enables apply after a valid preview', () => {
         const previewImportConfig = jest.fn(() => ({
             ok: true,
@@ -497,6 +523,11 @@ describe('modal option motion', () => {
         const writeText = jest.fn(() => Promise.resolve());
         const getDiagnosticsText = jest.fn(() => '{"notebookId":"diagnostic-test","sourceCount":2}');
         global.window.navigator = { clipboard: { writeText } };
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'OPEN_WEB_STORE_FEEDBACK' && typeof cb === 'function') {
+                cb({ success: true, url: 'https://chrome.google.com/webstore/detail/test-extension-id/reviews' });
+            }
+        });
         const renderSaveStatus = jest.fn();
         const { modals, shadowRoot } = createModalMotionTestRuntime({
             getExportConfigText: () => '{"format":"notebooklm-source-management-config"}',
@@ -527,6 +558,8 @@ describe('modal option motion', () => {
 
         const modal = shadowRoot.getElementById('sp-settings-modal');
         expect(modal).toBeTruthy();
+        const settingsContent = shadowRoot.querySelector('.sp-settings-modal-content');
+        expect(settingsContent.children[0].classList.contains('sp-settings-feedback-section')).toBe(true);
         expect(shadowRoot.querySelector('.sp-settings-export-textarea').value).toContain('notebooklm-source-management-config');
         expect(shadowRoot.querySelector('.sp-settings-import-preview').textContent).toContain('ui_settings_import_preview_summary:2,3,1,4');
         expect(shadowRoot.querySelector('.sp-settings-import-preview').textContent).toContain('ui_settings_import_preview_matched:1');
@@ -536,24 +569,81 @@ describe('modal option motion', () => {
         expect(shadowRoot.querySelector('.sp-settings-apply-import-btn').disabled).toBe(false);
         expect(shadowRoot.querySelector('.sp-settings-download-export-btn')).toBeTruthy();
         expect(shadowRoot.querySelector('.sp-settings-choose-import-btn')).toBeTruthy();
+        const exportSection = shadowRoot.querySelector('.sp-settings-export-section');
+        const exportToggle = exportSection.querySelector('.sp-settings-collapsible-toggle');
+        const exportBody = exportSection.querySelector('.sp-settings-collapsible-body');
+        expect(exportSection.classList.contains('is-collapsed')).toBe(true);
+        expect(exportToggle.getAttribute('aria-expanded')).toBe('false');
+        expect(exportBody.getAttribute('aria-hidden')).toBe('true');
+        expect(exportBody.inert).toBe(true);
+        const importSection = shadowRoot.querySelector('.sp-settings-import-section');
+        const importToggle = importSection.querySelector('.sp-settings-collapsible-toggle');
+        const importBody = importSection.querySelector('.sp-settings-collapsible-body');
+        expect(importSection.classList.contains('is-expanded')).toBe(true);
+        expect(importToggle.getAttribute('aria-expanded')).toBe('true');
+        expect(importBody.getAttribute('aria-hidden')).toBe('false');
+        expect(importBody.inert).toBe(false);
         expect(shadowRoot.querySelector('.sp-settings-save-status-section')).toBeTruthy();
         expect(shadowRoot.getElementById('sp-settings-save-status')).toBeTruthy();
         expect(renderSaveStatus).toHaveBeenCalled();
-        expect(shadowRoot.querySelector('.sp-settings-diagnostics-section')).toBeTruthy();
+        const feedbackSection = shadowRoot.querySelector('.sp-settings-feedback-section');
+        expect(feedbackSection).toBeTruthy();
+        expect(feedbackSection.textContent).toContain('ui_settings_feedback_title');
+        expect(feedbackSection.textContent).toContain('ui_settings_feedback_body');
+        expect(feedbackSection.querySelector('.sp-settings-copy-diagnostics-btn')).toBeFalsy();
+        expect(shadowRoot.querySelector('.sp-settings-open-web-store-feedback-btn')).toBeTruthy();
+        const diagnosticsSection = shadowRoot.querySelector('.sp-settings-diagnostics-section');
+        const diagnosticsToggle = diagnosticsSection.querySelector('.sp-settings-collapsible-toggle');
+        const diagnosticsBody = diagnosticsSection.querySelector('.sp-settings-collapsible-body');
+        const diagnosticsCopyButton = shadowRoot.querySelector('.sp-settings-copy-diagnostics-btn');
+        expect(diagnosticsSection).toBeTruthy();
+        expect(diagnosticsToggle).toBeTruthy();
+        expect(diagnosticsBody).toBeTruthy();
+        expect(diagnosticsSection.classList.contains('is-collapsed')).toBe(true);
+        expect(diagnosticsToggle.getAttribute('aria-expanded')).toBe('false');
+        expect(diagnosticsBody.getAttribute('aria-hidden')).toBe('true');
+        expect(diagnosticsBody.inert).toBe(true);
         expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('ui_diagnostics_notebook_id');
         expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('diagnostic-test');
         expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('ui_diagnostics_import_backup');
         expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('ui_diagnostics_native_failure_history');
         expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('menu_item_missing');
         expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('(+1)');
-        expect(shadowRoot.querySelector('.sp-settings-copy-diagnostics-btn')).toBeTruthy();
+        expect(diagnosticsCopyButton).toBeTruthy();
+
+        diagnosticsToggle.dispatchEvent({ type: 'click' });
+        expect(diagnosticsSection.classList.contains('is-expanded')).toBe(true);
+        expect(diagnosticsToggle.getAttribute('aria-expanded')).toBe('true');
+        expect(diagnosticsBody.getAttribute('aria-hidden')).toBe('false');
+        expect(diagnosticsBody.inert).toBe(false);
 
         shadowRoot.querySelector('.sp-settings-apply-import-btn').dispatchEvent({ type: 'click' });
         expect(applyImportConfig).toHaveBeenCalledWith('{"data":{}}');
 
-        shadowRoot.querySelector('.sp-settings-copy-diagnostics-btn').dispatchEvent({ type: 'click' });
+        diagnosticsCopyButton.dispatchEvent({ type: 'click' });
         expect(getDiagnosticsText).toHaveBeenCalled();
         expect(writeText).toHaveBeenCalledWith('{"notebookId":"diagnostic-test","sourceCount":2}');
+
+        shadowRoot.querySelector('.sp-settings-open-web-store-feedback-btn').dispatchEvent({ type: 'click' });
+        expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(
+            { type: 'OPEN_WEB_STORE_FEEDBACK' },
+            expect.any(Function)
+        );
+    });
+
+    it('shows a localized toast when Chrome Web Store feedback cannot open', () => {
+        const showToast = jest.fn();
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'OPEN_WEB_STORE_FEEDBACK' && typeof cb === 'function') {
+                cb({ success: false, errorCode: 'tab_create_failed' });
+            }
+        });
+        const { modals, shadowRoot } = createModalMotionTestRuntime({ showToast });
+
+        expect(modals.renderSettingsModal()).toBe(true);
+        shadowRoot.querySelector('.sp-settings-open-web-store-feedback-btn').dispatchEvent({ type: 'click' });
+
+        expect(showToast).toHaveBeenCalledWith('ui_settings_feedback_open_failed', { variant: 'error' });
     });
 
     it('uses the undoable toast hook for batch tag success messages', () => {
@@ -930,6 +1020,44 @@ describe('tag persistence and filtering', () => {
         }, true);
 
         expect(mod.getSourceTagIds(descriptor.key)).toEqual([tagId]);
+    });
+
+    it('remaps imported selector-unsafe tag ids and keeps source assignments', () => {
+        const taggedRow = createMockSourceRow({ title: 'Tagged Source', ariaLabel: 'Tagged Source', stableToken: 'doc-tagged', checked: true });
+        const descriptor = mod.createSourceDescriptor(taggedRow.row, new Map(), new Map());
+        const rawTagId = 'bad"] tag';
+
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [taggedRow.row] : []
+        ));
+
+        mod.scanAndSyncSources({
+            schemaVersion: 3,
+            groups: [],
+            groupsById: {},
+            ungrouped: [descriptor.legacyKey],
+            sourceStateById: {
+                [descriptor.legacyKey]: {
+                    enabled: true,
+                    title: 'Tagged Source',
+                    normalizedTitle: 'tagged source',
+                    fingerprint: descriptor.fingerprint,
+                    identityType: descriptor.identityType
+                }
+            },
+            tagsById: {
+                [rawTagId]: { id: rawTagId, label: 'Unsafe' }
+            },
+            tagOrder: [rawTagId],
+            sourceTagsById: {
+                [descriptor.legacyKey]: [rawTagId]
+            }
+        }, true);
+
+        const [safeTagId] = Array.from(mod.tagsById.keys());
+        expect(safeTagId).toBe('bad_tag');
+        expect(mod.tagsById.get(safeTagId)).toMatchObject({ id: safeTagId, label: 'Unsafe' });
+        expect(mod.getSourceTagIds(descriptor.key)).toEqual([safeTagId]);
     });
 
     it('loads stored tag colors while tolerating legacy tags without color', () => {

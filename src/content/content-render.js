@@ -1171,8 +1171,10 @@
                 ]);
             };
 
-            const renderGroup = (group, level) => {
-                if (!shouldRenderGroup(group)) return null;
+            const renderGroup = (group, level, ancestorGroupIds = new Set()) => {
+                if (!group || ancestorGroupIds.has(group.id) || !shouldRenderGroup(group)) return null;
+                const nextAncestorGroupIds = new Set(ancestorGroupIds);
+                nextAncestorGroupIds.add(group.id);
 
                 const isGated = !group.enabled || !areAllAncestorsEnabled(group.id) || !isGroupWithinActiveIsolation(group.id);
                 const { on, total } = getGroupEffectiveState(group);
@@ -1191,7 +1193,7 @@
 
                     const childGroup = groupsById.get(child.id);
                     if (!childGroup) return;
-                    const childElement = renderGroup(childGroup, level + 1);
+                    const childElement = renderGroup(childGroup, level + 1, nextAncestorGroupIds);
                     if (childElement) childrenElements.push(childElement);
                 });
 

@@ -1,6 +1,7 @@
 const NOTEBOOKLM_HOME_URL = 'https://notebooklm.google.com/';
 const NOTEBOOKLM_URL_PATTERN = 'https://notebooklm.google.com/*';
 const NOTEBOOKLM_NOTEBOOK_PREFIX = 'https://notebooklm.google.com/notebook/';
+const CHROME_WEB_STORE_DETAIL_URL_PREFIX = 'https://chrome.google.com/webstore/detail/';
 const EXTENSION_ENABLED_KEY = 'extensionEnabled';
 const ERROR_CODES = {
     INVALID_STORAGE_KEY: 'invalid_storage_key',
@@ -77,6 +78,61 @@ function openNewNotebookLmHome(sendResponse) {
             action: 'opened-new-home',
             tabId: tab && tab.id,
             url: (tab && tab.url) || NOTEBOOKLM_HOME_URL
+        });
+    });
+}
+
+function getManifestWebStoreFeedbackUrl(manifest = globalThis.chrome?.runtime?.getManifest?.()) {
+    const homepageUrl = typeof manifest?.homepage_url === 'string' ? manifest.homepage_url : '';
+    if (!homepageUrl) return '';
+
+    try {
+        const url = new URL(homepageUrl);
+        const path = url.pathname.replace(/\/+$/, '');
+        const isChromeWebStoreUrl = (
+            (url.hostname === 'chromewebstore.google.com' && path.startsWith('/detail/')) ||
+            (url.hostname === 'chrome.google.com' && path.startsWith('/webstore/detail/'))
+        );
+        if (!isChromeWebStoreUrl) return '';
+
+        return `${url.origin}${path.endsWith('/reviews') ? path : `${path}/reviews`}`;
+    } catch (error) {
+        return '';
+    }
+}
+
+function getWebStoreFeedbackUrl(
+    extensionId = globalThis.chrome?.runtime?.id,
+    manifest = globalThis.chrome?.runtime?.getManifest?.()
+) {
+    const manifestFeedbackUrl = getManifestWebStoreFeedbackUrl(manifest);
+    if (manifestFeedbackUrl) {
+        return manifestFeedbackUrl;
+    }
+
+    if (typeof extensionId !== 'string' || !extensionId.trim()) {
+        return '';
+    }
+    return `${CHROME_WEB_STORE_DETAIL_URL_PREFIX}${encodeURIComponent(extensionId.trim())}/reviews`;
+}
+
+function openWebStoreFeedback(sendResponse) {
+    const url = getWebStoreFeedbackUrl();
+    if (!url || !chrome.tabs || typeof chrome.tabs.create !== 'function') {
+        sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
+        return;
+    }
+
+    chrome.tabs.create({ url }, (tab) => {
+        if (chrome.runtime.lastError) {
+            sendResponse({ success: false, errorCode: ERROR_CODES.TAB_CREATE_FAILED });
+            return;
+        }
+
+        sendResponse({
+            success: true,
+            tabId: tab && tab.id,
+            url
         });
     });
 }
@@ -343,6 +399,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return true;
     }
 
+    if (request.type === 'OPEN_WEB_STORE_FEEDBACK') {
+        openWebStoreFeedback(sendResponse);
+        return true;
+    }
+
     if (request.type === 'GET_EXTENSION_ENABLED') {
         getExtensionEnabled(sendResponse);
         return true;
@@ -402,6 +463,7 @@ if (typeof module !== 'undefined' && module.exports) {
         NOTEBOOKLM_NOTEBOOK_PREFIX,
         EXTENSION_ENABLED_KEY,
         ERROR_CODES,
+        CHROME_WEB_STORE_DETAIL_URL_PREFIX,
         getStateBackupKey,
         getSnapshotSaveRevision,
         getRequestBaseRevision,
@@ -413,6 +475,9 @@ if (typeof module !== 'undefined' && module.exports) {
         isNotebookHomeTab,
         pickPreferredNotebookTab,
         isAuthorizedNotebookSender,
+        getManifestWebStoreFeedbackUrl,
+        getWebStoreFeedbackUrl,
+        openWebStoreFeedback,
         getExtensionEnabled,
         setExtensionEnabled
     };

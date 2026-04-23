@@ -898,6 +898,59 @@ describe('manager launcher messaging', () => {
         expect(global.window.location.reload).not.toHaveBeenCalled();
     });
 
+    it('recovers when lifecycle sync sees a notebook URL after a missed SPA route event', async () => {
+        const { panel, header } = createMockPanel({ visible: true });
+        const initHarness = createInitShadowRoot();
+        let firstDiv = true;
+
+        mod._setProjectId(null);
+        global.window.location.pathname = '/notebook/fresh-project';
+        global.window.location.href = 'https://notebooklm.google.com/notebook/fresh-project';
+        global.document.querySelector = jest.fn(() => panel);
+        global.chrome.storage.local.get.mockImplementation((keys, cb) => {
+            if (typeof cb === 'function') cb({});
+        });
+        global.document.createElement = jest.fn((tag) => {
+            if (tag === 'div' && firstDiv) {
+                firstDiv = false;
+                return {
+                    id: '',
+                    attachShadow: jest.fn(() => initHarness.shadowRoot),
+                    remove: jest.fn(),
+                    isConnected: true
+                };
+            }
+
+            return {
+                appendChild: jest.fn(),
+                cloneNode: jest.fn(function cloneNode() { return this; }),
+                setAttribute: jest.fn(),
+                getAttribute: jest.fn(() => null),
+                addEventListener: jest.fn(),
+                remove: jest.fn(),
+                classList: { add: jest.fn(), remove: jest.fn() },
+                dataset: {},
+                matches: jest.fn(() => false),
+                closest: jest.fn(() => null),
+                querySelector: jest.fn(() => null),
+                querySelectorAll: jest.fn(() => []),
+                textContent: '',
+                style: {}
+            };
+        });
+
+        mod.syncManagerWithPanelLifecycle();
+        await Promise.resolve();
+
+        expect(header.insertAdjacentElement).toHaveBeenCalledTimes(1);
+        expect(mod._getAttachedSourcePanelForTest()).toBe(panel);
+        expect(global.chrome.storage.local.get).toHaveBeenCalledWith(
+            ['sourcesPlusState_fresh-project', 'sourcesPlusState_fresh-project__backup'],
+            expect.any(Function)
+        );
+        expect(global.window.location.reload).not.toHaveBeenCalled();
+    });
+
     it('reinitializes without immediate reload when the user switches between notebook routes', () => {
         mod._setProjectId('old-project');
         global.window.location.pathname = '/notebook/new-project';

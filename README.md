@@ -1,7 +1,7 @@
 # NotebookLM Source Management
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-2.6.7-green.svg)
+![Version](https://img.shields.io/badge/version-2.6.9-green.svg)
 
 A Chrome extension that makes source management inside Google NotebookLM less awkward.
 
@@ -20,6 +20,7 @@ It runs directly inside NotebookLM's source panel. The toolbar icon is only a la
 - Open source details, rename sources, and delete sources from a single plugin menu.
 - Undo recent plugin-side organization changes with `Command+Z` on macOS or `Ctrl+Z` on Windows/Linux.
 - Export and import a notebook's organization config from the settings panel.
+- Open the Chrome Web Store feedback page from settings, with an optional diagnostics copy step for bug reports.
 - Turn the in-page manager on or off from the toolbar popup without deleting saved data.
 - Switch between English, Spanish, and Simplified Chinese.
 - Use local icon font assets instead of depending on remote Google Symbols font loading.
@@ -68,6 +69,8 @@ The current Playwright smoke coverage is intentionally small:
 This extension does not send NotebookLM content to external servers. State stays in the browser, and this release does not include analytics, telemetry, or crash reporting.
 
 Import/export config files are generated locally in your browser. They contain this extension's saved folder order, tags, enabled state, and related per-notebook organization data.
+
+The settings panel can open the Chrome Web Store feedback page. Diagnostics are not sent automatically; if you copy and paste them into a review or support comment, that submission is handled by Chrome Web Store.
 
 See [PRIVACY.md](PRIVACY.md) for the full privacy note.
 

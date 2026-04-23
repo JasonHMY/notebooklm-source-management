@@ -62,7 +62,26 @@
             : () => [];
         const isDescendant = typeof ctx.isDescendant === 'function'
             ? ctx.isDescendant
-            : (typeof globalThis.isDescendant === 'function' ? globalThis.isDescendant : () => false);
+            : (typeof globalThis.isDescendant === 'function' ? globalThis.isDescendant : defaultIsDescendant);
+
+        function defaultIsDescendant(possibleChild, possibleParent, groupsById) {
+            if (!possibleChild || !possibleParent || possibleChild.id === possibleParent.id) return true;
+            if (!groupsById || typeof groupsById.get !== 'function') return false;
+
+            const stack = [possibleParent];
+            const visited = new Set();
+            while (stack.length > 0) {
+                const group = stack.pop();
+                if (!group || visited.has(group.id)) continue;
+                visited.add(group.id);
+                for (const child of group.children || []) {
+                    if (child?.type !== 'group') continue;
+                    if (child.id === possibleChild.id) return true;
+                    if (!visited.has(child.id)) stack.push(groupsById.get(child.id));
+                }
+            }
+            return false;
+        }
 
         function getEffectivelyEnabledSources() {
             const state = getState() || {};
@@ -70,8 +89,10 @@
             const sourcesByKey = getSourcesByKey();
             const effectivelyEnabled = new Map();
 
-            const visit = (group, ancestorsEnabled) => {
-                if (!group) return;
+            const visit = (group, ancestorsEnabled, ancestorGroupIds = new Set()) => {
+                if (!group || ancestorGroupIds.has(group.id)) return;
+                const nextAncestorGroupIds = new Set(ancestorGroupIds);
+                nextAncestorGroupIds.add(group.id);
                 const currentEffectivelyEnabled = ancestorsEnabled && Boolean(group.enabled);
                 for (const child of group.children || []) {
                     if (child.type === 'source') {
@@ -81,7 +102,7 @@
                         }
                     } else if (child.type === 'group') {
                         const subGroup = groupsById.get(child.id);
-                        if (subGroup) visit(subGroup, currentEffectivelyEnabled);
+                        if (subGroup) visit(subGroup, currentEffectivelyEnabled, nextAncestorGroupIds);
                     }
                 }
             };
@@ -105,8 +126,13 @@
             const parentMap = getParentMap();
             const groupsById = getGroupsById();
             let parentId = parentMap.get(keyOrId);
+            const visitedParentIds = new Set();
 
             while (parentId) {
+                if (visitedParentIds.has(parentId)) {
+                    return false;
+                }
+                visitedParentIds.add(parentId);
                 const parentGroup = groupsById.get(parentId);
                 if (!parentGroup || !parentGroup.enabled) {
                     return false;
@@ -141,7 +167,12 @@
 
             const parentMap = getParentMap();
             let currentParentId = parentMap.get(sourceKey);
+            const visitedParentIds = new Set();
             while (currentParentId) {
+                if (visitedParentIds.has(currentParentId)) {
+                    return false;
+                }
+                visitedParentIds.add(currentParentId);
                 if (currentParentId === activeIsolationGroupId) {
                     return true;
                 }
@@ -300,8 +331,10 @@
             return Boolean(parseSearchQuery(state.filterQuery || '').hasQuery || state.activeTagId);
         }
 
-        function groupHasRenderableDescendant(group) {
-            if (!group) return false;
+        function groupHasRenderableDescendant(group, ancestorGroupIds = new Set()) {
+            if (!group || ancestorGroupIds.has(group.id)) return false;
+            const nextAncestorGroupIds = new Set(ancestorGroupIds);
+            nextAncestorGroupIds.add(group.id);
             const state = getState() || {};
             const searchCriteria = parseSearchQuery(state.filterQuery || '');
             if (groupMatchesSearchCriteria(group, searchCriteria)) {
@@ -320,7 +353,7 @@
                 }
 
                 const childGroup = groupsById.get(child.id);
-                if (childGroup && groupHasRenderableDescendant(childGroup)) {
+                if (childGroup && groupHasRenderableDescendant(childGroup, nextAncestorGroupIds)) {
                     return true;
                 }
             }
@@ -590,7 +623,8 @@
             handleDocumentOutsideClick,
             handleSourceActionMenuViewportChange,
             collectEffectiveSourceStates,
-            syncSourcesToEffectiveState
+            syncSourcesToEffectiveState,
+            isDescendant
         };
     }
 

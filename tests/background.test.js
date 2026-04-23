@@ -16,11 +16,13 @@ describe('background.js message listener', () => {
         // Mock chrome API
         global.chrome = {
             runtime: {
+                id: 'abcdefghijklmnopabcdefghijklmnop',
                 onMessage: {
                     addListener: jest.fn((cb) => {
                         listener = cb;
                     })
                 },
+                getManifest: jest.fn(() => ({})),
                 lastError: undefined
             },
             tabs: {
@@ -743,6 +745,69 @@ describe('background.js message listener', () => {
         expect(mockSendResponse).toHaveBeenCalledWith({
             success: false,
             errorCode: 'tabs_query_failed'
+        });
+        expect(result).toBe(true);
+    });
+
+    it('should build Chrome Web Store reviews from the runtime extension id for feedback requests', () => {
+        const result = listener({ type: 'OPEN_WEB_STORE_FEEDBACK' }, {}, mockSendResponse);
+
+        expect(global.chrome.tabs.create).toHaveBeenCalledWith(
+            { url: 'https://chrome.google.com/webstore/detail/abcdefghijklmnopabcdefghijklmnop/reviews' },
+            expect.any(Function)
+        );
+        expect(mockSendResponse).toHaveBeenCalledWith({
+            success: true,
+            tabId: 99,
+            url: 'https://chrome.google.com/webstore/detail/abcdefghijklmnopabcdefghijklmnop/reviews'
+        });
+        expect(result).toBe(true);
+    });
+
+    it('should prefer a Chrome Web Store homepage_url when one is configured for feedback requests', () => {
+        global.chrome.runtime.getManifest.mockReturnValueOnce({
+            homepage_url: 'https://chromewebstore.google.com/detail/custom-extension/customabcdefghijklmnopqrstuvwx'
+        });
+
+        const result = listener({ type: 'OPEN_WEB_STORE_FEEDBACK' }, {}, mockSendResponse);
+
+        expect(global.chrome.tabs.create).toHaveBeenCalledWith(
+            { url: 'https://chromewebstore.google.com/detail/custom-extension/customabcdefghijklmnopqrstuvwx/reviews' },
+            expect.any(Function)
+        );
+        expect(mockSendResponse).toHaveBeenCalledWith({
+            success: true,
+            tabId: 99,
+            url: 'https://chromewebstore.google.com/detail/custom-extension/customabcdefghijklmnopqrstuvwx/reviews'
+        });
+        expect(result).toBe(true);
+    });
+
+    it('should reject feedback requests when the runtime extension id is missing', () => {
+        delete global.chrome.runtime.id;
+
+        const result = listener({ type: 'OPEN_WEB_STORE_FEEDBACK' }, {}, mockSendResponse);
+
+        expect(global.chrome.tabs.create).not.toHaveBeenCalled();
+        expect(mockSendResponse).toHaveBeenCalledWith({
+            success: false,
+            errorCode: 'runtime_failure'
+        });
+        expect(result).toBe(true);
+    });
+
+    it('should surface a tab create failure when Chrome Web Store feedback cannot open', () => {
+        global.chrome.tabs.create.mockImplementationOnce((createProperties, cb) => {
+            global.chrome.runtime.lastError = { message: 'tab create failed' };
+            cb(null);
+            global.chrome.runtime.lastError = undefined;
+        });
+
+        const result = listener({ type: 'OPEN_WEB_STORE_FEEDBACK' }, {}, mockSendResponse);
+
+        expect(mockSendResponse).toHaveBeenCalledWith({
+            success: false,
+            errorCode: 'tab_create_failed'
         });
         expect(result).toBe(true);
     });

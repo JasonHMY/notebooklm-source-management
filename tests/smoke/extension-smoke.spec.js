@@ -214,6 +214,52 @@ test.describe.serial('extension smoke', () => {
         expect(navigationCountAfter).toBe(navigationCountBefore);
     });
 
+    test('reattaches after leaving a notebook for home and opening another notebook', async () => {
+        const notebookPage = await env.context.newPage();
+
+        await notebookPage.goto('https://notebooklm.google.com/notebook/a');
+        env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
+        const bridgePage = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
+
+        await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
+
+        const navigationCountBefore = await notebookPage.evaluate(() => performance.getEntriesByType('navigation').length);
+
+        await notebookPage.evaluate(() => {
+            history.pushState({}, '', '/');
+            document.title = 'NotebookLM Home';
+            document.body.innerHTML = '<main class="home-shell">NotebookLM Home</main>';
+        });
+
+        await expect(notebookPage.locator('#sources-plus-root')).toHaveCount(0);
+
+        await notebookPage.evaluate((nextSources) => {
+            window.__swapNotebook({
+                notebookId: 'b',
+                sources: nextSources
+            });
+        }, defaultSourcesForNotebook('b'));
+
+        await expect(notebookPage.locator('[data-testid="source-title"]').first()).toHaveText('Notebook b source A', { timeout: 20_000 });
+        await expect(notebookPage.locator('#sources-plus-root')).toBeVisible();
+
+        const status = await bridgePage.evaluate(async () => {
+            const tabs = await chrome.tabs.query({ url: 'https://notebooklm.google.com/*' });
+            const targetTab = tabs.find((tab) => tab.url && tab.url.includes('/notebook/b'));
+
+            if (!targetTab || typeof targetTab.id !== 'number') {
+                throw new Error('Reopened notebook tab was not found.');
+            }
+
+            return chrome.tabs.sendMessage(targetTab.id, { type: 'GET_MANAGER_STATUS' });
+        });
+
+        const navigationCountAfter = await notebookPage.evaluate(() => performance.getEntriesByType('navigation').length);
+
+        expect(status).toEqual({ ready: true, reason: 'ready' });
+        expect(navigationCountAfter).toBe(navigationCountBefore);
+    });
+
     test('preserves folders and tags across a hard reload with staged source hydration', async () => {
         const notebookPage = await env.context.newPage();
         await notebookPage.goto('https://notebooklm.google.com/notebook/persist?fixture=staged');
@@ -403,6 +449,7 @@ test.describe.serial('extension smoke', () => {
             const movedOrder = await waitForFirstTitle(initialOrder[1]);
 
             await clickSelector('#sp-settings-btn', 'Settings button missing.');
+            await clickSelector('.sp-settings-import-section .sp-settings-collapsible-toggle', 'Import configuration toggle missing.');
             const importTextarea = await waitForSelector('.sp-settings-import-textarea', 'Import textarea missing.');
             importTextarea.value = JSON.stringify({
                 format: 'notebooklm-source-management-config',

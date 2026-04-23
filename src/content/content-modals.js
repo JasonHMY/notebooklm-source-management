@@ -110,6 +110,9 @@
             ? contentConfig.TAG_COLOR_PRESETS
             : ['#007AFF'];
         const MODAL_ITEM_STAGGER_MAX_INDEX = 10;
+        const IMPORT_CONFIG_MAX_FILE_BYTES = Number.isFinite(Number(contentConfig.IMPORT_CONFIG_MAX_FILE_BYTES))
+            ? Number(contentConfig.IMPORT_CONFIG_MAX_FILE_BYTES)
+            : 2 * 1024 * 1024;
 
         function getCappedModalMotionIndex(index) {
             const normalizedIndex = Number.isFinite(index) ? Math.max(0, index) : 0;
@@ -492,6 +495,10 @@
                 showToast(getMessage('ui_settings_import_file_invalid'), { variant: 'error' });
                 return false;
             }
+            if (Number.isFinite(Number(file.size)) && Number(file.size) > IMPORT_CONFIG_MAX_FILE_BYTES) {
+                showToast(getMessage('ui_settings_import_file_invalid'), { variant: 'error' });
+                return false;
+            }
 
             const reader = new FileReaderCtor();
             reader.onload = () => {
@@ -548,6 +555,31 @@
             );
         }
 
+        function openWebStoreFeedback() {
+            const runtime = globalThis.chrome?.runtime || null;
+            if (!runtime || typeof runtime.sendMessage !== 'function') {
+                showToast(getMessage('ui_settings_feedback_open_failed'), { variant: 'error' });
+                return Promise.resolve(false);
+            }
+
+            return new Promise((resolve) => {
+                try {
+                    runtime.sendMessage({ type: 'OPEN_WEB_STORE_FEEDBACK' }, (response) => {
+                        if (runtime.lastError || !response || response.success === false) {
+                            showToast(getMessage('ui_settings_feedback_open_failed'), { variant: 'error' });
+                            resolve(false);
+                            return;
+                        }
+
+                        resolve(true);
+                    });
+                } catch (error) {
+                    showToast(getMessage('ui_settings_feedback_open_failed'), { variant: 'error' });
+                    resolve(false);
+                }
+            });
+        }
+
         function renderSettingsModal(modalState = {}) {
             const shadowRoot = getShadowRoot();
             if (!shadowRoot || !el) return false;
@@ -599,39 +631,137 @@
                 'aria-hidden': 'true'
             });
 
-            content.appendChild(el('section', { className: 'sp-settings-section' }, [
+            const createCollapsibleSettingsSection = ({
+                className = '',
+                titleKey,
+                contentId,
+                initiallyExpanded = false,
+                children = []
+            }) => {
+                const body = el('div', {
+                    id: contentId,
+                    className: 'sp-settings-collapsible-body',
+                    'aria-hidden': initiallyExpanded ? 'false' : 'true'
+                }, [
+                    el('div', { className: 'sp-settings-collapsible-inner' }, children)
+                ]);
+                body.inert = !initiallyExpanded;
+
+                const toggle = el('button', {
+                    type: 'button',
+                    className: 'sp-settings-collapsible-toggle',
+                    'aria-expanded': initiallyExpanded ? 'true' : 'false',
+                    'aria-controls': contentId,
+                    title: getMessage(initiallyExpanded ? 'ui_collapse' : 'ui_expand')
+                }, [
+                    el('span', { className: 'sp-settings-section-title' }, [getMessage(titleKey)]),
+                    el('span', { className: 'google-symbols sp-settings-collapsible-chevron', 'aria-hidden': 'true' }, ['expand_more'])
+                ]);
+
+                const sectionClassName = [
+                    'sp-settings-section',
+                    'sp-settings-collapsible-section',
+                    className,
+                    initiallyExpanded ? 'is-expanded' : 'is-collapsed'
+                ].filter(Boolean).join(' ');
+                const section = el('section', { className: sectionClassName }, [
+                    el('div', { className: 'sp-settings-section-header sp-settings-collapsible-header' }, [
+                        toggle
+                    ]),
+                    body
+                ]);
+
+                const setExpanded = (expanded) => {
+                    section.classList.toggle('is-expanded', expanded);
+                    section.classList.toggle('is-collapsed', !expanded);
+                    toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+                    toggle.setAttribute('title', getMessage(expanded ? 'ui_collapse' : 'ui_expand'));
+                    body.setAttribute('aria-hidden', expanded ? 'false' : 'true');
+                    body.inert = !expanded;
+                };
+                toggle.addEventListener('click', () => {
+                    setExpanded(toggle.getAttribute('aria-expanded') !== 'true');
+                });
+
+                return { body, section, setExpanded, toggle };
+            };
+
+            content.appendChild(el('section', { className: 'sp-settings-section sp-settings-feedback-section' }, [
                 el('div', { className: 'sp-settings-section-header' }, [
-                    el('h4', { className: 'sp-settings-section-title' }, [getMessage('ui_settings_export_title')]),
+                    el('h4', { className: 'sp-settings-section-title' }, [getMessage('ui_settings_feedback_title')]),
                     el('div', { className: 'sp-settings-action-row' }, [
+                        el('button', { type: 'button', className: 'sp-button sp-settings-open-web-store-feedback-btn sp-glare-hover' }, [
+                            getMessage('ui_settings_open_web_store_feedback')
+                        ])
+                    ])
+                ]),
+                el('p', { className: 'sp-settings-feedback-body' }, [
+                    getMessage('ui_settings_feedback_body')
+                ])
+            ]));
+
+            const exportSection = createCollapsibleSettingsSection({
+                className: 'sp-settings-export-section',
+                titleKey: 'ui_settings_export_title',
+                contentId: 'sp-settings-export-content',
+                children: [
+                    el('div', { className: 'sp-settings-action-row sp-settings-collapsible-actions' }, [
                         el('button', { type: 'button', className: 'sp-button sp-settings-copy-export-btn sp-glare-hover' }, [
                             getMessage('ui_settings_copy_json')
                         ]),
                         el('button', { type: 'button', className: 'sp-button sp-settings-download-export-btn sp-glare-hover' }, [
                             getMessage('ui_settings_download_json')
                         ])
-                    ])
-                ]),
-                exportTextarea
-            ]));
-            content.appendChild(el('section', { className: 'sp-settings-section' }, [
-                el('div', { className: 'sp-settings-section-header' }, [
-                    el('h4', { className: 'sp-settings-section-title' }, [getMessage('ui_settings_import_title')]),
-                    el('div', { className: 'sp-settings-action-row' }, [
+                    ]),
+                    exportTextarea
+                ]
+            });
+            content.appendChild(exportSection.section);
+
+            const importSection = createCollapsibleSettingsSection({
+                className: 'sp-settings-import-section',
+                titleKey: 'ui_settings_import_title',
+                contentId: 'sp-settings-import-content',
+                initiallyExpanded: Boolean(importText.trim() || preview),
+                children: [
+                    el('div', { className: 'sp-settings-action-row sp-settings-collapsible-actions' }, [
                         el('button', { type: 'button', className: 'sp-button sp-settings-choose-import-btn sp-glare-hover' }, [
                             getMessage('ui_settings_choose_json')
                         ]),
                         el('button', { type: 'button', className: 'sp-button sp-settings-preview-import-btn sp-glare-hover' }, [
                             getMessage('ui_settings_preview_import')
                         ])
+                    ]),
+                    importFileInput,
+                    importTextarea,
+                    el('div', { className: previewClassName, 'aria-live': 'polite' }, [
+                        previewMessage,
+                        ...createImportPreviewDetailNodes(preview)
                     ])
-                ]),
-                importFileInput,
-                importTextarea,
-                el('div', { className: previewClassName, 'aria-live': 'polite' }, [
-                    previewMessage,
-                    ...createImportPreviewDetailNodes(preview)
-                ])
-            ]));
+                ]
+            });
+            content.appendChild(importSection.section);
+
+            const diagnosticsCopyButton = el('button', {
+                type: 'button',
+                className: 'sp-button sp-settings-copy-diagnostics-btn sp-glare-hover'
+            }, [
+                getMessage('ui_settings_copy_diagnostics')
+            ]);
+            const diagnosticsSection = createCollapsibleSettingsSection({
+                className: 'sp-settings-diagnostics-section',
+                titleKey: 'ui_settings_diagnostics_title',
+                contentId: 'sp-settings-diagnostics-content',
+                children: [
+                    el('div', { className: 'sp-settings-action-row sp-settings-collapsible-actions' }, [
+                        diagnosticsCopyButton
+                    ]),
+                    createDiagnosticsGrid()
+                ]
+            });
+
+            content.appendChild(diagnosticsSection.section);
+
             content.appendChild(el('section', {
                 id: 'sp-settings-save-status-section',
                 className: 'sp-settings-section sp-settings-save-status-section',
@@ -647,17 +777,6 @@
                     'aria-live': 'polite',
                     hidden: true
                 })
-            ]));
-            content.appendChild(el('section', { className: 'sp-settings-section sp-settings-diagnostics-section' }, [
-                el('div', { className: 'sp-settings-section-header' }, [
-                    el('h4', { className: 'sp-settings-section-title' }, [getMessage('ui_settings_diagnostics_title')]),
-                    el('div', { className: 'sp-settings-action-row' }, [
-                        el('button', { type: 'button', className: 'sp-button sp-settings-copy-diagnostics-btn sp-glare-hover' }, [
-                            getMessage('ui_settings_copy_diagnostics')
-                        ])
-                    ])
-                ]),
-                createDiagnosticsGrid()
             ]));
 
             const footer = el('div', { className: 'sp-folder-modal-footer' }, [
@@ -682,8 +801,13 @@
             content.querySelector('.sp-settings-download-export-btn')?.addEventListener('click', () => {
                 downloadSettingsExportText(exportText);
             });
-            content.querySelector('.sp-settings-copy-diagnostics-btn')?.addEventListener('click', () => {
-                copyDiagnosticsTextToClipboard();
+            Array.from(content.querySelectorAll?.('.sp-settings-copy-diagnostics-btn') || []).forEach((button) => {
+                button.addEventListener('click', () => {
+                    copyDiagnosticsTextToClipboard();
+                });
+            });
+            content.querySelector('.sp-settings-open-web-store-feedback-btn')?.addEventListener('click', () => {
+                openWebStoreFeedback();
             });
             content.querySelector('.sp-settings-choose-import-btn')?.addEventListener('click', () => {
                 importFileInput.click?.();
@@ -1442,7 +1566,7 @@
                             initialColor: tag.color,
                             submitLabel: getMessage('ui_tag_update'),
                             submitButtonClassName: 'sp-button',
-                            inputId: `sp-edit-tag-${tagId}`,
+                            inputId: getEditTagInputId(tagId),
                             allowUnsetColor: true,
                             onCancel: () => renderTagModal(),
                             onSubmit: ({ label, color }) => {
@@ -1502,7 +1626,7 @@
                 closeModal: closeTagModal,
                 initialFocusTarget: () => (
                     editingTagId
-                        ? modal.querySelector(`#sp-edit-tag-${editingTagId}`)
+                        ? modal.querySelector(`#${getCssEscapedId(getEditTagInputId(editingTagId))}`)
                         : modal.querySelector('#sp-tag-name-input')
                 ) || modal.querySelector('.sp-modal-cancel')
             });
@@ -1512,6 +1636,18 @@
                 modal.classList.add('visible');
                 modalKeyboard.focusInitial();
             });
+        }
+
+        function getEditTagInputId(tagId) {
+            return `sp-edit-tag-${String(tagId || '').replace(/[^A-Za-z0-9_-]+/g, '_')}`;
+        }
+
+        function getCssEscapedId(id) {
+            const windowObj = getWindow() || globalThis;
+            if (windowObj.CSS && typeof windowObj.CSS.escape === 'function') {
+                return windowObj.CSS.escape(id);
+            }
+            return String(id || '').replace(/[^A-Za-z0-9_-]/g, '\\$&');
         }
 
         return {

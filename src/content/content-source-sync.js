@@ -659,7 +659,7 @@
                 ? buildResolvedSourceStateById(sourceLookup, loadedState)
                 : new Map();
             const resolvedSourceTagsById = isFirstLoad
-                ? buildResolvedSourceTagsById(sourceLookup, loadedState)
+                ? buildResolvedSourceTagsById(sourceLookup, loadedState, normalizedTagState?.rawToSafeTagId || null)
                 : new Map();
 
             if (isFirstLoad && normalizedTagState) {

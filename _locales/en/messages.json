@@ -250,6 +250,18 @@
     "ui_settings_diagnostics_copy_failed": {
         "message": "Could not copy diagnostics"
     },
+    "ui_settings_feedback_title": {
+        "message": "Feedback"
+    },
+    "ui_settings_feedback_body": {
+        "message": "Share bugs and suggestions on the Chrome Web Store."
+    },
+    "ui_settings_open_web_store_feedback": {
+        "message": "Open Chrome Web Store feedback"
+    },
+    "ui_settings_feedback_open_failed": {
+        "message": "Could not open Chrome Web Store feedback"
+    },
     "ui_diagnostics_notebook_id": {
         "message": "Notebook"
     },

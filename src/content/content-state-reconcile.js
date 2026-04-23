@@ -292,8 +292,7 @@
                 if (!nextGroup) return;
 
                 group.children.forEach((child) => {
-                    if (child.type === 'group' && nextGroupsById.has(child.id) && child.id !== groupId) {
-                        nextGroup.children.push({ type: 'group', id: child.id });
+                    if (child.type === 'group' && appendGroupChildIfAcyclic(nextGroupsById, groupId, child.id)) {
                         return;
                     }
 
@@ -392,18 +391,20 @@
             const nextTagsById = new Map();
             const rawTagsById = loadedState && typeof loadedState.tagsById === 'object' ? loadedState.tagsById : {};
             const preferredOrder = Array.isArray(loadedState && loadedState.tagOrder) ? loadedState.tagOrder : [];
-            const seenTagIds = new Set();
+            const rawToSafeTagId = new Map();
+            const safeTagIds = new Set();
             const nextTagOrder = [];
 
             const registerTag = (tagId) => {
-                if (!tagId || seenTagIds.has(tagId)) return;
+                if (!tagId || rawToSafeTagId.has(tagId)) return;
                 const rawTag = rawTagsById[tagId];
                 const label = normalizeTagLabel(rawTag && (rawTag.label || rawTag.title || rawTag.name || ''));
                 if (!label) return;
-                seenTagIds.add(tagId);
-                nextTagOrder.push(tagId);
-                nextTagsById.set(tagId, {
-                    id: tagId,
+                const safeTagId = createSafeTagId(tagId, safeTagIds);
+                rawToSafeTagId.set(tagId, safeTagId);
+                nextTagOrder.push(safeTagId);
+                nextTagsById.set(safeTagId, {
+                    id: safeTagId,
                     label,
                     color: normalizeTagColor(rawTag && rawTag.color)
                 });
@@ -412,10 +413,10 @@
             preferredOrder.forEach(registerTag);
             Object.keys(rawTagsById).forEach(registerTag);
 
-            return { nextTagsById, nextTagOrder };
+            return { nextTagsById, nextTagOrder, rawToSafeTagId };
         }
 
-        function buildResolvedSourceTagsById(sourceLookup, loadedState) {
+        function buildResolvedSourceTagsById(sourceLookup, loadedState, rawToSafeTagId = null) {
             const resolvedSourceTags = new Map();
             if (!loadedState || !loadedState.sourceTagsById) return resolvedSourceTags;
 
@@ -426,11 +427,43 @@
 
                 resolvedSourceTags.set(
                     resolvedKey,
-                    Array.from(new Set(Array.isArray(rawTagIds) ? rawTagIds.filter(Boolean) : []))
+                    Array.from(new Set((Array.isArray(rawTagIds) ? rawTagIds : [])
+                        .map((tagId) => rawToSafeTagId?.get?.(tagId) || tagId)
+                        .filter((tagId) => rawToSafeTagId ? rawToSafeTagIdHasValue(rawToSafeTagId, tagId) : Boolean(tagId))))
                 );
             });
 
             return resolvedSourceTags;
+        }
+
+        function rawToSafeTagIdHasValue(rawToSafeTagId, safeTagId) {
+            if (!safeTagId) return false;
+            for (const value of rawToSafeTagId.values()) {
+                if (value === safeTagId) return true;
+            }
+            return false;
+        }
+
+        function createSafeTagId(rawTagId, usedTagIds) {
+            const rawText = String(rawTagId || '').trim();
+            const safePattern = /^[A-Za-z0-9_-]{1,80}$/;
+            const sanitizedText = rawText
+                .replace(/[^A-Za-z0-9_-]+/g, '_')
+                .replace(/^_+|_+$/g, '')
+                .slice(0, 80);
+            const base = safePattern.test(rawText)
+                ? rawText
+                : (sanitizedText || 'tag_imported');
+
+            let candidate = base;
+            let suffix = 1;
+            while (usedTagIds.has(candidate)) {
+                const suffixText = `_${suffix}`;
+                candidate = `${base.slice(0, Math.max(1, 80 - suffixText.length))}${suffixText}`;
+                suffix += 1;
+            }
+            usedTagIds.add(candidate);
+            return candidate;
         }
 
         function reconcilePersistedTree(loadedState, sourceLookup) {
@@ -452,8 +485,7 @@
                 if (!nextGroup) return;
 
                 (Array.isArray(rawGroup.children) ? rawGroup.children : []).forEach((child) => {
-                    if (child.type === 'group' && nextGroupsById.has(child.id) && child.id !== groupId) {
-                        nextGroup.children.push({ type: 'group', id: child.id });
+                    if (child.type === 'group' && appendGroupChildIfAcyclic(nextGroupsById, groupId, child.id)) {
                         return;
                     }
 
@@ -494,6 +526,40 @@
             };
         }
 
+        function hasGroupPathToTarget(groupsById, startGroupId, targetGroupId) {
+            if (!startGroupId || !targetGroupId || startGroupId === targetGroupId) return true;
+            const stack = [startGroupId];
+            const visited = new Set();
+
+            while (stack.length > 0) {
+                const groupId = stack.pop();
+                if (!groupId || visited.has(groupId)) continue;
+                if (groupId === targetGroupId) return true;
+                visited.add(groupId);
+
+                const group = groupsById.get(groupId);
+                (Array.isArray(group?.children) ? group.children : []).forEach((child) => {
+                    if (child?.type === 'group' && child.id && !visited.has(child.id)) {
+                        stack.push(child.id);
+                    }
+                });
+            }
+
+            return false;
+        }
+
+        function appendGroupChildIfAcyclic(groupsById, parentGroupId, childGroupId) {
+            const parentGroup = groupsById.get(parentGroupId);
+            if (!parentGroup || !childGroupId || childGroupId === parentGroupId || !groupsById.has(childGroupId)) {
+                return false;
+            }
+            if (hasGroupPathToTarget(groupsById, childGroupId, parentGroupId)) {
+                return false;
+            }
+            parentGroup.children.push({ type: 'group', id: childGroupId });
+            return true;
+        }
+
         return {
             buildSourceLookup,
             resolveStoredSourceKey,
@@ -504,7 +570,8 @@
             buildResolvedSourceStateById,
             buildNormalizedTagState,
             buildResolvedSourceTagsById,
-            reconcilePersistedTree
+            reconcilePersistedTree,
+            appendGroupChildIfAcyclic
         };
     }
 

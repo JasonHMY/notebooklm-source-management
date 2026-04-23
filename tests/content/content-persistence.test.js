@@ -934,6 +934,47 @@ describe('settings import/export configuration', () => {
         expect(mod.previewImportConfig('{bad json')).toMatchObject({ ok: false, reason: 'invalid' });
     });
 
+    it('rejects imported group trees that contain cycles', () => {
+        const preview = mod.previewImportConfig(JSON.stringify({
+            format: 'notebooklm-source-management-config',
+            data: {
+                schemaVersion: 3,
+                groups: ['group-a'],
+                groupsById: {
+                    'group-a': { id: 'group-a', title: 'A', children: [{ type: 'group', id: 'group-b' }] },
+                    'group-b': { id: 'group-b', title: 'B', children: [{ type: 'group', id: 'group-a' }] }
+                },
+                ungrouped: [],
+                sourceStateById: {},
+                tagsById: {},
+                tagOrder: [],
+                sourceTagsById: {}
+            }
+        }));
+
+        expect(preview).toMatchObject({ ok: false, reason: 'invalid' });
+    });
+
+    it('rejects imported configs that exceed complexity limits', () => {
+        const groupsById = {};
+        for (let index = 0; index < globalThis.NSM_CONTENT_CONFIG.IMPORT_CONFIG_MAX_GROUPS + 1; index += 1) {
+            groupsById[`group-${index}`] = { id: `group-${index}`, title: `Group ${index}`, children: [] };
+        }
+
+        const preview = mod.previewImportConfig(JSON.stringify({
+            schemaVersion: 3,
+            groups: Object.keys(groupsById),
+            groupsById,
+            ungrouped: [],
+            sourceStateById: {},
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {}
+        }));
+
+        expect(preview).toMatchObject({ ok: false, reason: 'invalid' });
+    });
+
     it('writes an import backup before applying configuration and exposes a restore action', () => {
         mod._setProjectId('project-import');
         mod._setShadowRootForTest({

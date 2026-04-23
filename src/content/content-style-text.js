@@ -1736,6 +1736,87 @@
                 font-weight: 700;
                 color: var(--sp-text-primary);
             }
+            .sp-settings-feedback-body {
+                margin: 0;
+                color: var(--sp-text-secondary);
+                font-size: 12px;
+                line-height: 1.45;
+            }
+            .sp-settings-collapsible-section {
+                gap: 0;
+            }
+            .sp-settings-collapsible-header {
+                align-items: stretch;
+            }
+            .sp-settings-collapsible-toggle {
+                width: 100%;
+                min-height: 24px;
+                border: 0;
+                border-radius: 8px;
+                padding: 0;
+                background: transparent;
+                color: var(--sp-text-primary);
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 12px;
+                text-align: left;
+                transition:
+                    color var(--sp-motion-base) var(--sp-ease-standard),
+                    background-color var(--sp-motion-base) var(--sp-ease-standard),
+                    box-shadow var(--sp-motion-base) var(--sp-ease-standard);
+            }
+            .sp-settings-collapsible-toggle:hover,
+            .sp-settings-collapsible-toggle:focus-visible {
+                color: var(--sp-accent);
+            }
+            .sp-settings-collapsible-toggle:focus-visible {
+                outline: none;
+                box-shadow: var(--sp-search-focus-ring);
+            }
+            .sp-settings-collapsible-chevron {
+                flex: 0 0 auto;
+                font-size: 20px;
+                color: var(--sp-text-secondary);
+                transition:
+                    color var(--sp-motion-base) var(--sp-ease-standard),
+                    transform var(--sp-motion-medium) var(--sp-ease-emphasized);
+            }
+            .sp-settings-collapsible-toggle:hover .sp-settings-collapsible-chevron,
+            .sp-settings-collapsible-toggle:focus-visible .sp-settings-collapsible-chevron {
+                color: var(--sp-accent);
+            }
+            .sp-settings-collapsible-section.is-expanded .sp-settings-collapsible-chevron {
+                transform: rotate(180deg);
+            }
+            .sp-settings-collapsible-body {
+                display: grid;
+                grid-template-rows: 0fr;
+                opacity: 0;
+                transform: translateY(-4px);
+                transition:
+                    grid-template-rows var(--sp-motion-medium) var(--sp-ease-emphasized),
+                    opacity var(--sp-motion-base) var(--sp-ease-standard),
+                    transform var(--sp-motion-medium) var(--sp-ease-emphasized);
+            }
+            .sp-settings-collapsible-section.is-expanded .sp-settings-collapsible-body {
+                grid-template-rows: 1fr;
+                opacity: 1;
+                transform: translateY(0);
+            }
+            .sp-settings-collapsible-inner {
+                min-height: 0;
+                overflow: hidden;
+                display: grid;
+                gap: 8px;
+            }
+            .sp-settings-collapsible-section.is-expanded .sp-settings-collapsible-inner {
+                padding-top: 8px;
+            }
+            .sp-settings-collapsible-actions {
+                justify-content: flex-start;
+            }
             .sp-settings-file-input {
                 display: none;
             }

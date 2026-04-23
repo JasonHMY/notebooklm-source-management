@@ -96,17 +96,24 @@ function debounce(func, wait) {
  */
 function isDescendant(possibleChild, possibleParent, groupsById) {
     if (!possibleChild || !possibleParent || possibleChild.id === possibleParent.id) return true;
-    const visit = (g) => {
-        if (!g) return false;
-        return g.children.some(c => {
-            if (c.type === 'group') {
-                if (c.id === possibleChild.id) return true;
-                return visit(groupsById.get(c.id));
+    if (!groupsById || typeof groupsById.get !== 'function') return false;
+
+    const stack = [possibleParent];
+    const visited = new Set();
+    while (stack.length > 0) {
+        const group = stack.pop();
+        if (!group || visited.has(group.id)) continue;
+        visited.add(group.id);
+
+        for (const child of group.children || []) {
+            if (child?.type !== 'group') continue;
+            if (child.id === possibleChild.id) return true;
+            if (!visited.has(child.id)) {
+                stack.push(groupsById.get(child.id));
             }
-            return false;
-        });
-    };
-    return visit(possibleParent);
+        }
+    }
+    return false;
 }
 
 /**

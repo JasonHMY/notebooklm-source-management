@@ -190,4 +190,10 @@ describe('isDescendant function', () => {
     test('returns false if checking parent as descendant of child', () => {
         expect(isDescendant(groupsById.get('group1'), groupsById.get('group2'), groupsById)).toBe(false);
     });
+
+    test('does not recurse forever when stored groups contain a cycle', () => {
+        groupsById.get('group3').children.push({ type: 'group', id: 'group1' });
+
+        expect(isDescendant(groupsById.get('group4'), groupsById.get('group1'), groupsById)).toBe(false);
+    });
 });

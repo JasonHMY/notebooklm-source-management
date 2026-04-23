@@ -42,6 +42,12 @@
         DEPS,
         SOURCE_CHECKBOX_SELECTOR,
         STORAGE_SCHEMA_VERSION,
+        IMPORT_CONFIG_MAX_FILE_BYTES,
+        IMPORT_CONFIG_MAX_GROUPS,
+        IMPORT_CONFIG_MAX_TAGS,
+        IMPORT_CONFIG_MAX_SOURCES,
+        IMPORT_CONFIG_MAX_CHILD_REFS,
+        IMPORT_CONFIG_MAX_TREE_DEPTH,
         GLOBAL_OVERLAY_STYLE_ID,
         ROUTE_REINIT_MAX_ATTEMPTS,
         ROUTE_REINIT_RETRY_DELAY_MS
@@ -72,6 +78,7 @@
     let keyByElement = new WeakMap();
     let shadowRoot = null;
     let projectId = getProjectId();
+    let currentUrl = getCurrentLocationHref();
     let parentMap = new Map();
     let isSyncingState = false;
     let clickQueue = [];
@@ -257,7 +264,8 @@
         buildResolvedSourceStateById,
         buildNormalizedTagState,
         buildResolvedSourceTagsById,
-        reconcilePersistedTree
+        reconcilePersistedTree,
+        appendGroupChildIfAcyclic
     } = stateReconcileModule;
 
     const sourceActionsModule = createContentSourceActions({
@@ -666,6 +674,8 @@
         onSaveStatusChange: (status) => renderSaveStatus(status),
         getSourceTagIds,
         getSerializedTag,
+        buildNormalizedTagState,
+        appendGroupChildIfAcyclic,
         scanAndSyncSources: (...args) => scanAndSyncSources(...args),
         findSourcePanel: (...args) => findSourcePanel(...args),
         isSourcePanelRenderable: (...args) => isSourcePanelRenderable(...args),
@@ -976,6 +986,16 @@
             return pathSegments[notebookIndex + 1];
         }
         return null;
+    }
+
+    function getCurrentLocationHref() {
+        if (window.location && typeof window.location.href === 'string') {
+            return window.location.href;
+        }
+        if (globalThis.location && typeof globalThis.location.href === 'string') {
+            return globalThis.location.href;
+        }
+        return '';
     }
 
     let toastTimeout = null;
@@ -1668,11 +1688,17 @@
         if (!rawText) {
             return { ok: false, reason: 'empty' };
         }
+        if (getImportConfigTextByteLength(rawText) > getImportConfigLimit(IMPORT_CONFIG_MAX_FILE_BYTES, 2 * 1024 * 1024)) {
+            return { ok: false, reason: 'invalid' };
+        }
 
         try {
             const parsedConfig = JSON.parse(rawText);
             const normalizedState = normalizeLoadedState(unwrapImportConfigPayload(parsedConfig));
             if (!normalizedState || !hasPersistableManagerState(normalizedState)) {
+                return { ok: false, reason: 'invalid' };
+            }
+            if (getImportStateValidationError(normalizedState)) {
                 return { ok: false, reason: 'invalid' };
             }
             return { ok: true, state: normalizedState };
@@ -1681,20 +1707,107 @@
         }
     }
 
+    function getImportConfigLimit(value, fallback) {
+        const normalized = Number(value);
+        return Number.isFinite(normalized) && normalized > 0 ? normalized : fallback;
+    }
+
+    function getImportConfigTextByteLength(text) {
+        if (typeof TextEncoder === 'function') {
+            return new TextEncoder().encode(String(text || '')).length;
+        }
+        return String(text || '').length;
+    }
+
+    function getImportStateValidationError(importState) {
+        const groupsById = importState && typeof importState.groupsById === 'object' ? importState.groupsById : {};
+        const groupEntries = Object.entries(groupsById);
+        const tagCount = Object.keys(importState.tagsById || {}).length;
+        const sourceRefs = new Set(Object.keys(importState.sourceStateById || {}));
+        let childRefCount = 0;
+
+        if (groupEntries.length > getImportConfigLimit(IMPORT_CONFIG_MAX_GROUPS, 1000)) return 'too_large';
+        if (tagCount > getImportConfigLimit(IMPORT_CONFIG_MAX_TAGS, 500)) return 'too_large';
+
+        for (const [, group] of groupEntries) {
+            const children = Array.isArray(group?.children) ? group.children : [];
+            childRefCount += children.length;
+            if (childRefCount > getImportConfigLimit(IMPORT_CONFIG_MAX_CHILD_REFS, 10000)) return 'too_large';
+            children.forEach((child) => {
+                if (child?.type === 'source' && child.key) sourceRefs.add(child.key);
+            });
+        }
+
+        (Array.isArray(importState.ungrouped) ? importState.ungrouped : []).forEach((sourceKey) => {
+            if (sourceKey) sourceRefs.add(sourceKey);
+        });
+        if (sourceRefs.size > getImportConfigLimit(IMPORT_CONFIG_MAX_SOURCES, 5000)) return 'too_large';
+
+        return getImportGroupTreeValidationError(groupsById);
+    }
+
+    function getImportGroupTreeValidationError(groupsById) {
+        const maxDepth = getImportConfigLimit(IMPORT_CONFIG_MAX_TREE_DEPTH, 50);
+        const visitStateById = new Map();
+        const groupIds = Object.keys(groupsById || {});
+
+        for (const rootGroupId of groupIds) {
+            if (visitStateById.get(rootGroupId) === 'done') continue;
+            const stack = [{ groupId: rootGroupId, childIndex: 0, depth: 1 }];
+
+            while (stack.length > 0) {
+                const frame = stack[stack.length - 1];
+                if (frame.depth > maxDepth) return 'too_deep';
+                if (!visitStateById.has(frame.groupId)) {
+                    visitStateById.set(frame.groupId, 'visiting');
+                }
+
+                const group = groupsById[frame.groupId];
+                const children = Array.isArray(group?.children) ? group.children : [];
+                let advanced = false;
+                while (frame.childIndex < children.length) {
+                    const child = children[frame.childIndex];
+                    frame.childIndex += 1;
+                    if (child?.type !== 'group' || !child.id || !groupsById[child.id]) continue;
+                    const childVisitState = visitStateById.get(child.id);
+                    if (child.id === frame.groupId || childVisitState === 'visiting') return 'cycle';
+                    if (childVisitState === 'done') continue;
+                    stack.push({ groupId: child.id, childIndex: 0, depth: frame.depth + 1 });
+                    advanced = true;
+                    break;
+                }
+
+                if (!advanced) {
+                    visitStateById.set(frame.groupId, 'done');
+                    stack.pop();
+                }
+            }
+        }
+
+        return null;
+    }
+
     function collectImportSourceRefs(importState) {
         const refs = new Set();
-        const visitChild = (child) => {
-            if (child?.type === 'source' && child.key) {
-                refs.add(child.key);
-            }
-            if (child?.type === 'group' && child.id) {
-                const group = importState.groupsById?.[child.id];
-                (Array.isArray(group?.children) ? group.children : []).forEach(visitChild);
-            }
+        const groupsById = importState.groupsById || {};
+        const visitedGroups = new Set();
+        const visitGroup = (groupId) => {
+            if (!groupId || visitedGroups.has(groupId)) return;
+            visitedGroups.add(groupId);
+            const group = groupsById[groupId];
+            (Array.isArray(group?.children) ? group.children : []).forEach((child) => {
+                if (child?.type === 'source' && child.key) {
+                    refs.add(child.key);
+                    return;
+                }
+                if (child?.type === 'group' && child.id) {
+                    visitGroup(child.id);
+                }
+            });
         };
 
-        Object.values(importState.groupsById || {}).forEach((group) => {
-            (Array.isArray(group?.children) ? group.children : []).forEach(visitChild);
+        Object.keys(groupsById).forEach((groupId) => {
+            visitGroup(groupId);
         });
         (Array.isArray(importState.ungrouped) ? importState.ungrouped : []).forEach((sourceKey) => {
             if (sourceKey) refs.add(sourceKey);
@@ -1920,7 +2033,27 @@
         resetUndoHistoryBaseline();
     }
 
+    function syncRouteWithCurrentLocation() {
+        const latestUrl = getCurrentLocationHref();
+        const latestProjectId = getProjectId();
+
+        if (latestUrl !== currentUrl) {
+            currentUrl = latestUrl;
+        }
+
+        if (latestProjectId === projectId) {
+            return false;
+        }
+
+        handleRouteChanged();
+        return true;
+    }
+
     function syncManagerWithPanelLifecycle() {
+        if (syncRouteWithCurrentLocation()) {
+            return;
+        }
+
         if (!projectId || !isExtensionEnabled) {
             if (!projectId) {
                 managerStatusReason = 'not_on_notebook_page';
@@ -2035,6 +2168,7 @@
     }
 
     function handleRouteChanged() {
+        currentUrl = getCurrentLocationHref();
         const newProjectId = getProjectId();
         if (!newProjectId) {
             if (projectId) {
@@ -2285,10 +2419,10 @@
     }
 
     // Monitor for SPA route changes via History API interception
-    let currentUrl = location.href;
     const onRouteChange = () => {
-        if (location.href !== currentUrl) {
-            currentUrl = location.href;
+        const nextUrl = getCurrentLocationHref();
+        if (nextUrl !== currentUrl) {
+            currentUrl = nextUrl;
             handleRouteChanged();
         }
     };
@@ -2304,13 +2438,14 @@
         onRouteChange();
     };
     window.addEventListener('popstate', onRouteChange);
+    window.addEventListener('hashchange', onRouteChange);
 
-    // Narrower observer for panel lifecycle only (no subtree attribute watching)
+    // Observe a stable root so route-driven NotebookLM body swaps still trigger recovery.
     panelLifecycleObserver = new MutationObserver(() => {
+        onRouteChange();
         schedulePanelLifecycleSync();
     });
-    const sourcePanelParent = findSourcePanel()?.parentElement || document.body;
-    panelLifecycleObserver.observe(sourcePanelParent, {
+    panelLifecycleObserver.observe(document.body, {
         childList: true,
         subtree: true,
         attributes: true,
@@ -2520,7 +2655,15 @@
             },
             _setCustomHeight: (val) => { customHeight = val; },
             _setManagerStatusReason: (val) => { managerStatusReason = val; },
-            _setProjectId: (val) => { projectId = val; },
+            _setProjectId: (val) => {
+                projectId = val;
+                if (window.location && typeof window.location === 'object') {
+                    window.location.pathname = typeof val === 'string' && val
+                        ? `/notebook/${val}`
+                        : '/';
+                }
+                currentUrl = getCurrentLocationHref();
+            },
             _setAwaitingInitialStateLoadForTest: (val) => { isAwaitingInitialStateLoad = Boolean(val); },
             _setSourceDetailViewRequestedForTest: (val) => { sourceDetailViewRequested = Boolean(val); },
             _setSourceDetailViewReadySuppressionUntilForTest: (val) => { sourceDetailViewReadySuppressionUntil = Number(val) || 0; },
@@ -2579,6 +2722,7 @@
                 parentMap.clear();
                 customHeight = null;
                 projectId = null;
+                currentUrl = getCurrentLocationHref();
                 shadowRoot = document.createElement('div').attachShadow({ mode: 'open' }); // Mock shadowRoot for testing showToast
                 extensionHost = shadowRoot.host;
                 freshRowCache = null;
