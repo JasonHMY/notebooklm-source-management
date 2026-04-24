@@ -353,6 +353,15 @@
     "ui_diagnostics_last_save_error": {
         "message": "最近保存错误"
     },
+    "ui_diagnostics_stale_local_revision": {
+        "message": "过期本地版本"
+    },
+    "ui_diagnostics_stale_remote_revision": {
+        "message": "最新远端版本"
+    },
+    "ui_diagnostics_stale_detected_at": {
+        "message": "冲突检测时间"
+    },
     "ui_diagnostics_storage_usage": {
         "message": "存储使用量"
     },
@@ -508,13 +517,16 @@
         "message": "保存失败"
     },
     "ui_save_status_stale": {
-        "message": "存在更新的修改"
+        "message": "另一个标签页有更新修改"
     },
     "ui_save_status_recovery": {
         "message": "有可恢复内容"
     },
     "ui_save_status_retry": {
         "message": "重试"
+    },
+    "ui_save_status_refresh": {
+        "message": "刷新"
     },
     "ui_recovery_restore": {
         "message": "恢复"

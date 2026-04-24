@@ -353,6 +353,15 @@
     "ui_diagnostics_last_save_error": {
         "message": "Last save error"
     },
+    "ui_diagnostics_stale_local_revision": {
+        "message": "Stale local revision"
+    },
+    "ui_diagnostics_stale_remote_revision": {
+        "message": "Latest remote revision"
+    },
+    "ui_diagnostics_stale_detected_at": {
+        "message": "Stale detected at"
+    },
     "ui_diagnostics_storage_usage": {
         "message": "Storage usage"
     },
@@ -508,13 +517,16 @@
         "message": "Save failed"
     },
     "ui_save_status_stale": {
-        "message": "Newer changes exist"
+        "message": "Another tab has newer changes"
     },
     "ui_save_status_recovery": {
         "message": "Recovery available"
     },
     "ui_save_status_retry": {
         "message": "Retry"
+    },
+    "ui_save_status_refresh": {
+        "message": "Refresh"
     },
     "ui_recovery_restore": {
         "message": "Restore"

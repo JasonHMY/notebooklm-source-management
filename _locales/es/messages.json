@@ -353,6 +353,15 @@
     "ui_diagnostics_last_save_error": {
         "message": "Último error de guardado"
     },
+    "ui_diagnostics_stale_local_revision": {
+        "message": "Revisión local obsoleta"
+    },
+    "ui_diagnostics_stale_remote_revision": {
+        "message": "Última revisión remota"
+    },
+    "ui_diagnostics_stale_detected_at": {
+        "message": "Conflicto detectado"
+    },
     "ui_diagnostics_storage_usage": {
         "message": "Uso de almacenamiento"
     },
@@ -508,13 +517,16 @@
         "message": "Error al guardar"
     },
     "ui_save_status_stale": {
-        "message": "Hay cambios más recientes"
+        "message": "Otra pestaña tiene cambios más recientes"
     },
     "ui_save_status_recovery": {
         "message": "Recuperación disponible"
     },
     "ui_save_status_retry": {
         "message": "Reintentar"
+    },
+    "ui_save_status_refresh": {
+        "message": "Actualizar"
     },
     "ui_recovery_restore": {
         "message": "Restaurar"

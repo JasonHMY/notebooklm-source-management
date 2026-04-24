@@ -338,6 +338,9 @@ describe('saveState', () => {
             state: 'stale',
             lastError: 'stale_revision',
             currentRevision: 7,
+            lastStaleLocalRevision: 0,
+            lastStaleRemoteRevision: 7,
+            lastStaleDetectedAt: expect.any(String),
             recoveryAvailable: true
         });
         expect(mod._getActiveToastItemForTest()).toMatchObject({
@@ -448,6 +451,42 @@ describe('saveState', () => {
             }),
             expect.any(Function)
         );
+    });
+
+    it('renders stale save status with retry and refresh actions', () => {
+        seedPersistedState();
+        const statusContainer = global.document.createElement('div');
+        const statusSection = global.document.createElement('section');
+        mod._setShadowRootForTest({
+            host: { isConnected: true },
+            getElementById: jest.fn((id) => {
+                if (id === 'sp-settings-save-status') return statusContainer;
+                if (id === 'sp-settings-save-status-section') return statusSection;
+                return null;
+            }),
+            querySelector: jest.fn(() => null)
+        });
+
+        mod.renderSaveStatus({ state: 'stale' });
+
+        expect(statusContainer.hidden).toBe(false);
+        expect(statusSection.hidden).toBe(false);
+        expect(statusContainer.className).toBe('sp-save-status sp-save-status-stale');
+        expect(statusContainer.setAttribute).toHaveBeenCalledWith('role', 'alert');
+        expect(statusContainer.setAttribute).toHaveBeenCalledWith('aria-live', 'assertive');
+        expect(statusContainer.childNodes.map((node) => node.textContent)).toEqual([
+            'ui_save_status_stale',
+            'ui_save_status_retry',
+            'ui_save_status_refresh'
+        ]);
+
+        statusContainer.childNodes[2].dispatchEvent({
+            type: 'click',
+            preventDefault: jest.fn(),
+            stopPropagation: jest.fn()
+        });
+
+        expect(global.window.location.reload).toHaveBeenCalledTimes(1);
     });
 
     it('renders recovery actions and can dismiss a recovery snapshot', () => {
@@ -572,6 +611,13 @@ describe('saveState', () => {
             groupCount: 2,
             tagCount: 3
         }));
+        mod.setSaveStatus({
+            state: 'stale',
+            lastError: 'stale_revision',
+            lastStaleLocalRevision: 4,
+            lastStaleRemoteRevision: 7,
+            lastStaleDetectedAt: '2026-04-22T00:06:00.000Z'
+        });
 
         const diagnostics = JSON.parse(mod.getDiagnosticsText());
 
@@ -580,6 +626,11 @@ describe('saveState', () => {
             sourceCount: 4,
             groupCount: 2,
             tagCount: 0,
+            saveStatus: 'stale',
+            lastSaveError: 'stale_revision',
+            lastStaleLocalRevision: 4,
+            lastStaleRemoteRevision: 7,
+            lastStaleDetectedAt: '2026-04-22T00:06:00.000Z',
             recoveryAvailable: true,
             importBackupAvailable: true,
             importBackupCreatedAt: '2026-04-22T00:05:00.000Z',

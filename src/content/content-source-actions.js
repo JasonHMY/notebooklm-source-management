@@ -2,6 +2,7 @@
     'use strict';
 
     function createContentSourceActions(deps = {}) {
+        const runtime = deps.runtime && typeof deps.runtime === 'object' ? deps.runtime : deps;
         const getDocument = typeof deps.getDocument === 'function'
             ? deps.getDocument
             : () => (typeof document !== 'undefined' ? document : null);
@@ -130,6 +131,14 @@
 
         function createNativeActionResult(ok, reason = '') {
             return ok ? { ok: true } : { ok: false, reason: reason || 'native_action_error' };
+        }
+
+        function markNativeSourceDeleted(sourceKey) {
+            if (!sourceKey) return;
+            if (!(runtime.recentNativeDeletedSourceKeys instanceof Set)) {
+                runtime.recentNativeDeletedSourceKeys = new Set();
+            }
+            runtime.recentNativeDeletedSourceKeys.add(sourceKey);
         }
 
         function getNativeActionFailureMessage(action, reason) {
@@ -1252,6 +1261,7 @@
                 if (!deleteConfirmed) {
                     return { deleted: false, reason: 'delete_not_confirmed' };
                 }
+                markNativeSourceDeleted(sourceKey);
                 return { deleted: true };
             } catch (error) {
                 console.error('NotebookLM Source Management: Error during native source deletion.', error);

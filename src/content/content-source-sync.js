@@ -599,18 +599,28 @@
             const currentKeys = new Set((currentSources || []).map((source) => source.key).filter(Boolean));
             if (currentKeys.size === 0) return true;
 
-            const resolvedCurrentKeys = new Set();
+            const missingPreviousKeys = [];
             previousSourceRecordsByKey.forEach((sourceRecord, storedKey) => {
                 const resolution = resolveStoredSourceKeyWithReason(storedKey, sourceLookup, sourceRecord);
-                if (resolution?.key && currentKeys.has(resolution.key)) {
-                    resolvedCurrentKeys.add(resolution.key);
+                if (!resolution?.key || !currentKeys.has(resolution.key)) {
+                    missingPreviousKeys.push(resolution?.key || storedKey);
                 }
             });
 
-            const missingPreviousCount = Math.max(0, previousCount - resolvedCurrentKeys.size);
-            if (missingPreviousCount === 0) return false;
+            if (missingPreviousKeys.length === 0) return false;
 
-            return (currentSources || []).some((source) => source?.key && !resolvedCurrentKeys.has(source.key));
+            const recentNativeDeletedSourceKeys = runtime.recentNativeDeletedSourceKeys instanceof Set
+                ? runtime.recentNativeDeletedSourceKeys
+                : null;
+            if (
+                recentNativeDeletedSourceKeys &&
+                missingPreviousKeys.every((key) => recentNativeDeletedSourceKeys.has(key))
+            ) {
+                missingPreviousKeys.forEach((key) => recentNativeDeletedSourceKeys.delete(key));
+                return false;
+            }
+
+            return true;
         }
 
         function scanAndSyncSources(loadedState, isFirstLoad = false) {

@@ -120,7 +120,10 @@
             storageUsageRatio: 0,
             storageWarning: false,
             lastStorageError: '',
-            historyEntryCount: 0
+            historyEntryCount: 0,
+            lastStaleLocalRevision: 0,
+            lastStaleRemoteRevision: 0,
+            lastStaleDetectedAt: ''
         };
 
         function getSaveStatus() {
@@ -832,7 +835,10 @@
                                 storageUsageRatio: hasStorageMetadata ? storageMetadata.storageUsageRatio : currentStatus.storageUsageRatio,
                                 storageWarning: hasStorageMetadata ? storageMetadata.storageWarning : currentStatus.storageWarning,
                                 lastStorageError: '',
-                                historyEntryCount: hasStorageMetadata ? storageMetadata.historyEntryCount : currentStatus.historyEntryCount
+                                historyEntryCount: hasStorageMetadata ? storageMetadata.historyEntryCount : currentStatus.historyEntryCount,
+                                lastStaleLocalRevision: 0,
+                                lastStaleRemoteRevision: 0,
+                                lastStaleDetectedAt: ''
                             });
                             if (options.critical) {
                                 clearRecoverySnapshot();
@@ -841,6 +847,15 @@
                             const lastStorageError = result.reason === 'storage_quota_exceeded'
                                 ? 'storage_quota_exceeded'
                                 : getSaveStatus().lastStorageError || '';
+                            const staleRemoteRevision = result.reason === 'stale_revision'
+                                ? Number(result.runtimeResult?.currentRevision) || ctx.lastKnownSaveRevision
+                                : currentStatus.lastStaleRemoteRevision || 0;
+                            const staleLocalRevision = result.reason === 'stale_revision'
+                                ? baseRevision
+                                : currentStatus.lastStaleLocalRevision || 0;
+                            const staleDetectedAt = result.reason === 'stale_revision'
+                                ? new Date().toISOString()
+                                : currentStatus.lastStaleDetectedAt || '';
                             setSaveStatus({
                                 state: result.reason === 'stale_revision' ? 'stale' : 'failed',
                                 lastError: result.reason || 'save_failed',
@@ -851,7 +866,10 @@
                                 storageUsageRatio: hasStorageMetadata ? storageMetadata.storageUsageRatio : currentStatus.storageUsageRatio,
                                 storageWarning: hasStorageMetadata ? storageMetadata.storageWarning : currentStatus.storageWarning,
                                 lastStorageError,
-                                historyEntryCount: hasStorageMetadata ? storageMetadata.historyEntryCount : currentStatus.historyEntryCount
+                                historyEntryCount: hasStorageMetadata ? storageMetadata.historyEntryCount : currentStatus.historyEntryCount,
+                                lastStaleLocalRevision: staleLocalRevision,
+                                lastStaleRemoteRevision: staleRemoteRevision,
+                                lastStaleDetectedAt: staleDetectedAt
                             });
                             if (options.critical) {
                                 writeRecoverySnapshot(saveSnapshot, {

@@ -52,6 +52,53 @@ describe('scanAndSyncSources', () => {
         expect(Array.from(mod.sourcesByKey.values()).map((source) => source.title)).toEqual(['Current Source']);
     });
 
+    it('preserves current notebook state when the current panel virtualizes to a partial row set', () => {
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const firstRow = createMockSourceRow({ title: 'Virtual Source A', stableToken: 'virtual-a', checked: true });
+        const secondRow = createMockSourceRow({ title: 'Virtual Source B', stableToken: 'virtual-b', checked: true });
+        const thirdRow = createMockSourceRow({ title: 'Virtual Source C', stableToken: 'virtual-c', checked: true });
+        const firstDescriptor = mod.createSourceDescriptor(firstRow.row, new Map(), new Map());
+        const secondDescriptor = mod.createSourceDescriptor(secondRow.row, new Map(), new Map());
+        const thirdDescriptor = mod.createSourceDescriptor(thirdRow.row, new Map(), new Map());
+
+        mod._setProjectId('test-project');
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+        panel.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [firstRow.row, secondRow.row, thirdRow.row] : []
+        ));
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [firstRow.row, secondRow.row, thirdRow.row] : []
+        ));
+        mod.scanAndSyncSources(null, true);
+        global.chrome.runtime.sendMessage.mockClear();
+
+        panel.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [secondRow.row] : []
+        ));
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [firstRow.row, secondRow.row, thirdRow.row] : []
+        ));
+        mod._debouncedScanAndSyncForTest();
+        mod.flushPendingStateSave();
+
+        expect(mod.state.ungrouped).toEqual([
+            firstDescriptor.key,
+            secondDescriptor.key,
+            thirdDescriptor.key
+        ]);
+        expect(Array.from(mod.sourcesByKey.keys()).sort()).toEqual([
+            firstDescriptor.key,
+            secondDescriptor.key,
+            thirdDescriptor.key
+        ].sort());
+        expect(global.chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+            expect.objectContaining({ type: 'SAVE_STATE' }),
+            expect.any(Function)
+        );
+    });
+
     it('hydrates v2 state, appends new sources, and preserves loading metadata', () => {
         const first = createMockSourceRow({ title: 'First Source', stableToken: 'doc-1', checked: true });
         const second = createMockSourceRow({ title: 'First Source', stableToken: null, iconName: 'video_youtube', loading: true });

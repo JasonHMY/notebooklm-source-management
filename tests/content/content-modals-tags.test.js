@@ -565,6 +565,9 @@ describe('modal option motion', () => {
                 storageUsageRatio: 0.8,
                 storageWarning: true,
                 lastStorageError: 'storage_quota_exceeded',
+                lastStaleLocalRevision: 4,
+                lastStaleRemoteRevision: 7,
+                lastStaleDetectedAt: '2026-04-22T00:02:00.000Z',
                 historyEntryCount: 3,
                 recoveryAvailable: true,
                 importBackupAvailable: true,
@@ -639,6 +642,10 @@ describe('modal option motion', () => {
         expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('ui_diagnostics_storage_warning');
         expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('ui_diagnostics_last_storage_error');
         expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('storage_quota_exceeded');
+        expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('ui_diagnostics_stale_local_revision');
+        expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('ui_diagnostics_stale_remote_revision');
+        expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('ui_diagnostics_stale_detected_at');
+        expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('2026-04-22T00:02:00.000Z');
         expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('ui_diagnostics_history_entries');
         expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('ui_diagnostics_native_failure_history');
         expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('menu_item_missing');

@@ -27,4 +27,25 @@ jobs:
           CI: true
           PLAYWRIGHT_HEADLESS: true
 
+      - name: Upload Playwright artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-artifacts
+          path: |
+            output/playwright
+            test-results
+          if-no-files-found: ignore
+          retention-days: 14
+
       - run: npm run package
+        if: always()
+
+      - name: Upload package artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: extension-package
+          path: release/*.zip
+          if-no-files-found: ignore
+          retention-days: 14

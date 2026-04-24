@@ -554,6 +554,41 @@ describe('deleteNativeSource', () => {
         expect(confirmButton.click).toHaveBeenCalled();
     });
 
+    it('recognizes a Spanish native delete confirmation dialog', async () => {
+        const { moreButton, isNativeMenuOpened } = seedSourceWithMoreButton();
+        let deleteClicked = false;
+        const deleteMenuItem = createDeleteMenuItem({
+            textContent: 'Eliminar fuente',
+            iconText: '',
+            onClick: () => {
+                deleteClicked = true;
+            }
+        });
+        const confirmButton = {
+            textContent: 'Eliminar',
+            className: 'mat-mdc-button-primary',
+            click: jest.fn(),
+            querySelector: jest.fn(() => null),
+            getAttribute: jest.fn(() => null)
+        };
+        const dialog = {
+            textContent: '¿Eliminar esta fuente?',
+            getAttribute: jest.fn(() => null),
+            querySelectorAll: jest.fn(sel => (sel === 'button' ? [confirmButton] : []))
+        };
+
+        global.document.querySelectorAll = jest.fn(sel => {
+            if (sel.includes('[role="menuitem"]')) return isNativeMenuOpened() ? [deleteMenuItem] : [];
+            if (sel.includes('dialog')) return deleteClicked ? [dialog] : [];
+            return [];
+        });
+
+        await expect(mod.deleteNativeSource('key1')).resolves.toEqual({ deleted: true });
+        expect(moreButton.click).toHaveBeenCalled();
+        expect(deleteMenuItem.click).toHaveBeenCalled();
+        expect(confirmButton.click).toHaveBeenCalled();
+    });
+
     it('does not report success when the delete dialog closes but the source row remains', async () => {
         const { isNativeMenuOpened } = seedSourceWithMoreButton();
         const sourceRow = mod.sourcesByKey.get('key1').element;

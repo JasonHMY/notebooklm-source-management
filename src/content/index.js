@@ -296,6 +296,7 @@
         getShadowRoot: () => shadowRoot,
         getDEPS: () => DEPS,
         getMessage,
+        runtime: runtimeContext,
         showToast: (...args) => showToast(...args),
         render: (...args) => render(...args),
         sourceMatchesCurrentFilters: (...args) => sourceMatchesCurrentFilters(...args),
@@ -1201,6 +1202,20 @@
         return saveState({ immediate: true, critical: true, recordUndo: false });
     }
 
+    function refreshForLatestState() {
+        try {
+            const locationObject = (typeof window !== 'undefined' && window.location)
+                || globalThis.location;
+            if (locationObject && typeof locationObject.reload === 'function') {
+                locationObject.reload();
+                return true;
+            }
+        } catch (error) {
+            console.warn('NotebookLM Source Management: Failed to reload after stale save.', error);
+        }
+        return false;
+    }
+
     function restoreRecoverySnapshotFromUi() {
         const recovery = readRecoverySnapshot();
         if (!recovery?.snapshot) {
@@ -1274,6 +1289,9 @@
         if (stateName === 'failed' || stateName === 'stale') {
             appendSaveStatusAction(container, 'ui_save_status_retry', retryCurrentSave);
         }
+        if (stateName === 'stale') {
+            appendSaveStatusAction(container, 'ui_save_status_refresh', refreshForLatestState, 'sp-save-status-action sp-save-status-action-muted');
+        }
         if (stateName === 'recovery_available') {
             appendSaveStatusAction(container, 'ui_recovery_restore', restoreRecoverySnapshotFromUi);
             appendSaveStatusAction(container, 'ui_recovery_dismiss', dismissRecoverySnapshotFromUi, 'sp-save-status-action sp-save-status-action-muted');
@@ -1301,6 +1319,9 @@
             storageUsageRatio: Number(saveStatus.storageUsageRatio) || 0,
             storageWarning: Boolean(saveStatus.storageWarning),
             lastStorageError: saveStatus.lastStorageError || '',
+            lastStaleLocalRevision: Number(saveStatus.lastStaleLocalRevision) || 0,
+            lastStaleRemoteRevision: Number(saveStatus.lastStaleRemoteRevision) || 0,
+            lastStaleDetectedAt: saveStatus.lastStaleDetectedAt || '',
             historyEntryCount: Array.isArray(stateHistoryEntries)
                 ? stateHistoryEntries.length
                 : Number(saveStatus.historyEntryCount) || 0,
@@ -2903,6 +2924,9 @@
                 clearToastTimeout();
                 isDeletingSources = false;
                 nativeActionFailureHistory = [];
+                if (runtimeContext.recentNativeDeletedSourceKeys instanceof Set) {
+                    runtimeContext.recentNativeDeletedSourceKeys.clear();
+                }
                 groupsById.clear();
                 sourcesByKey.clear();
                 tagsById.clear();
