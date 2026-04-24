@@ -83,6 +83,21 @@
         const applyImportConfig = typeof deps.applyImportConfig === 'function'
             ? deps.applyImportConfig
             : () => ({ ok: false, reason: 'unavailable' });
+        const getSourceRepairReport = typeof deps.getSourceRepairReport === 'function'
+            ? deps.getSourceRepairReport
+            : () => ({ totalSources: 0, matchedSources: 0, unmatchedSources: 0, ambiguousSources: 0, matched: [], unmatched: [], ambiguous: [] });
+        const getSourceRepairOptions = typeof deps.getSourceRepairOptions === 'function'
+            ? deps.getSourceRepairOptions
+            : () => [];
+        const applySourceRepairRemaps = typeof deps.applySourceRepairRemaps === 'function'
+            ? deps.applySourceRepairRemaps
+            : () => Promise.resolve(false);
+        const getStateHistoryEntries = typeof deps.getStateHistoryEntries === 'function'
+            ? deps.getStateHistoryEntries
+            : () => [];
+        const restoreStateHistoryEntry = typeof deps.restoreStateHistoryEntry === 'function'
+            ? deps.restoreStateHistoryEntry
+            : () => Promise.resolve(false);
         const getDiagnosticsInfo = typeof deps.getDiagnosticsInfo === 'function'
             ? deps.getDiagnosticsInfo
             : () => ({});
@@ -546,6 +561,108 @@
             return el('div', { className: 'sp-settings-diagnostics-grid' }, nodes);
         }
 
+        function createSourceRepairNodes(report = getSourceRepairReport()) {
+            const normalizedReport = report || {};
+            const repairItems = [
+                ...(Array.isArray(normalizedReport.unmatched) ? normalizedReport.unmatched : []),
+                ...(Array.isArray(normalizedReport.ambiguous) ? normalizedReport.ambiguous : [])
+            ];
+            const sourceOptions = Array.isArray(getSourceRepairOptions()) ? getSourceRepairOptions() : [];
+            const nodes = [
+                el('p', { className: 'sp-settings-helper-text sp-source-repair-summary' }, [
+                    getMessage('ui_source_repair_summary', [
+                        String(normalizedReport.matchedSources || 0),
+                        String(normalizedReport.totalSources || 0),
+                        String(normalizedReport.unmatchedSources || 0),
+                        String(normalizedReport.ambiguousSources || 0)
+                    ])
+                ])
+            ];
+
+            if (repairItems.length === 0) {
+                nodes.push(el('div', { className: 'sp-settings-empty-state sp-source-repair-empty' }, [
+                    getMessage('ui_source_repair_healthy')
+                ]));
+                return nodes;
+            }
+
+            nodes.push(el('div', { className: 'sp-source-repair-list' }, repairItems.map((item) => (
+                el('div', { className: 'sp-source-repair-item' }, [
+                    el('div', { className: 'sp-source-repair-copy' }, [
+                        el('div', { className: 'sp-source-repair-title' }, [
+                            item.title || item.storedKey || getMessage('ui_source_untitled')
+                        ]),
+                        el('div', { className: 'sp-source-repair-meta' }, [
+                            getMessage('ui_source_repair_reason', [item.reason || 'unresolved'])
+                        ])
+                    ]),
+                    el('select', {
+                        className: 'sp-source-repair-select',
+                        dataset: { storedKey: item.storedKey || '' },
+                        'aria-label': getMessage('ui_source_repair_select_source', [item.title || item.storedKey || ''])
+                    }, [
+                        el('option', { value: '' }, [getMessage('ui_source_repair_skip')]),
+                        ...sourceOptions.map((source) => el('option', { value: source.key }, [
+                            source.title || source.key
+                        ]))
+                    ])
+                ])
+            ))));
+
+            nodes.push(el('div', { className: 'sp-settings-action-row sp-settings-collapsible-actions' }, [
+                el('button', {
+                    type: 'button',
+                    className: 'sp-button sp-source-repair-apply-btn sp-glare-hover',
+                    disabled: true
+                }, [getMessage('ui_source_repair_apply')])
+            ]));
+            return nodes;
+        }
+
+        function formatHistoryEntryLabel(entry) {
+            const createdAt = entry?.createdAt ? String(entry.createdAt).replace('T', ' ').slice(0, 19) : '-';
+            return getMessage('ui_history_entry_summary', [
+                createdAt,
+                String(entry?.sourceCount ?? 0),
+                String(entry?.groupCount ?? 0),
+                String(entry?.tagCount ?? 0),
+                entry?.reason || '-'
+            ]);
+        }
+
+        function createHistoryNodes(entries = getStateHistoryEntries()) {
+            const historyEntries = Array.isArray(entries) ? entries : [];
+            if (historyEntries.length === 0) {
+                return [
+                    el('div', { className: 'sp-settings-empty-state sp-history-empty' }, [
+                        getMessage('ui_history_empty')
+                    ])
+                ];
+            }
+
+            return [
+                el('div', { className: 'sp-history-list' }, historyEntries.map((entry) => (
+                    el('div', { className: 'sp-history-item' }, [
+                        el('div', { className: 'sp-history-copy' }, [
+                            el('div', { className: 'sp-history-title' }, [
+                                formatHistoryEntryLabel(entry)
+                            ]),
+                            el('div', { className: 'sp-history-meta' }, [
+                                getMessage('ui_diagnostics_save_revision'),
+                                ': ',
+                                String(entry.saveRevision || 0)
+                            ])
+                        ]),
+                        el('button', {
+                            type: 'button',
+                            className: 'sp-button sp-history-restore-btn sp-glare-hover',
+                            dataset: { historyId: entry.id }
+                        }, [getMessage('ui_history_restore')])
+                    ])
+                )))
+            ];
+        }
+
         function copyDiagnosticsTextToClipboard() {
             return copySettingsTextToClipboard(
                 getDiagnosticsText(),
@@ -742,6 +859,24 @@
             });
             content.appendChild(importSection.section);
 
+            const sourceRepairReport = getSourceRepairReport();
+            const repairSection = createCollapsibleSettingsSection({
+                className: 'sp-settings-source-repair-section',
+                titleKey: 'ui_source_repair_title',
+                contentId: 'sp-settings-source-repair-content',
+                initiallyExpanded: Boolean((sourceRepairReport?.unmatchedSources || 0) + (sourceRepairReport?.ambiguousSources || 0)),
+                children: createSourceRepairNodes(sourceRepairReport)
+            });
+            content.appendChild(repairSection.section);
+
+            const historySection = createCollapsibleSettingsSection({
+                className: 'sp-settings-history-section',
+                titleKey: 'ui_history_title',
+                contentId: 'sp-settings-history-content',
+                children: createHistoryNodes(getStateHistoryEntries())
+            });
+            content.appendChild(historySection.section);
+
             const diagnosticsCopyButton = el('button', {
                 type: 'button',
                 className: 'sp-button sp-settings-copy-diagnostics-btn sp-glare-hover'
@@ -831,17 +966,59 @@
                 const applyButton = modal.querySelector('.sp-settings-apply-import-btn');
                 if (applyButton) applyButton.disabled = true;
             });
-            footer.querySelector('.sp-modal-cancel')?.addEventListener('click', closeSettingsModal);
-            footer.querySelector('.sp-settings-apply-import-btn')?.addEventListener('click', () => {
-                const result = applyImportConfig(importTextarea.value);
-                if (result && result.ok) {
-                    closeSettingsModal();
-                    return;
-                }
-                renderSettingsModal({
-                    importText: importTextarea.value,
-                    preview: result || previewImportConfig(importTextarea.value)
+            Array.from(content.querySelectorAll?.('.sp-source-repair-select') || []).forEach((select) => {
+                select.addEventListener('change', () => {
+                    const applyButton = modal.querySelector('.sp-source-repair-apply-btn');
+                    if (!applyButton) return;
+                    const hasSelection = Array.from(modal.querySelectorAll('.sp-source-repair-select'))
+                        .some((item) => Boolean(item.value));
+                    applyButton.disabled = !hasSelection;
                 });
+            });
+            content.querySelector('.sp-source-repair-apply-btn')?.addEventListener('click', () => {
+                const remaps = {};
+                Array.from(modal.querySelectorAll('.sp-source-repair-select')).forEach((select) => {
+                    const storedKey = select.dataset?.storedKey || '';
+                    if (storedKey && select.value) {
+                        remaps[storedKey] = select.value;
+                    }
+                });
+                applySourceRepairRemaps(remaps).then((ok) => {
+                    if (ok) closeSettingsModal();
+                });
+            });
+            Array.from(content.querySelectorAll?.('.sp-history-restore-btn') || []).forEach((button) => {
+                button.addEventListener('click', () => {
+                    const historyId = button.dataset?.historyId || '';
+                    restoreStateHistoryEntry(historyId).then((ok) => {
+                        if (ok) closeSettingsModal();
+                    });
+                });
+            });
+            footer.querySelector('.sp-modal-cancel')?.addEventListener('click', closeSettingsModal);
+            const applyImportButton = footer.querySelector('.sp-settings-apply-import-btn');
+            applyImportButton?.addEventListener('click', () => {
+                const importText = importTextarea.value;
+                applyImportButton.disabled = true;
+                applyImportButton.setAttribute('aria-busy', 'true');
+                Promise.resolve(applyImportConfig(importText))
+                    .then((result) => {
+                        if (result && result.ok) {
+                            closeSettingsModal();
+                            return;
+                        }
+                        renderSettingsModal({
+                            importText,
+                            preview: result || previewImportConfig(importText)
+                        });
+                    })
+                    .catch((error) => {
+                        console.warn('NotebookLM Source Management: Import failed.', error);
+                        renderSettingsModal({
+                            importText,
+                            preview: previewImportConfig(importText)
+                        });
+                    });
             });
             backdrop.addEventListener('click', closeSettingsModal);
 

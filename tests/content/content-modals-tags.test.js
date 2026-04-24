@@ -187,6 +187,19 @@ const createModalMotionTestRuntime = ({
     getExportConfigText = jest.fn(() => '{"data":{}}'),
     previewImportConfig = jest.fn(() => ({ ok: false, reason: 'empty' })),
     applyImportConfig = jest.fn(() => ({ ok: false, reason: 'invalid' })),
+    getSourceRepairReport = jest.fn(() => ({
+        totalSources: 0,
+        matchedSources: 0,
+        unmatchedSources: 0,
+        ambiguousSources: 0,
+        matched: [],
+        unmatched: [],
+        ambiguous: []
+    })),
+    getSourceRepairOptions = jest.fn(() => []),
+    applySourceRepairRemaps = jest.fn(() => Promise.resolve(true)),
+    getStateHistoryEntries = jest.fn(() => []),
+    restoreStateHistoryEntry = jest.fn(() => Promise.resolve(true)),
     getDiagnosticsInfo = jest.fn(() => ({
         notebookId: 'notebook-test',
         sourceCount: 2,
@@ -225,6 +238,11 @@ const createModalMotionTestRuntime = ({
         getExportConfigText,
         previewImportConfig,
         applyImportConfig,
+        getSourceRepairReport,
+        getSourceRepairOptions,
+        applySourceRepairRemaps,
+        getStateHistoryEntries,
+        restoreStateHistoryEntry,
         getDiagnosticsInfo,
         getDiagnosticsText,
         renderSaveStatus,
@@ -583,6 +601,10 @@ describe('modal option motion', () => {
         expect(importToggle.getAttribute('aria-expanded')).toBe('true');
         expect(importBody.getAttribute('aria-hidden')).toBe('false');
         expect(importBody.inert).toBe(false);
+        expect(shadowRoot.querySelector('.sp-settings-source-repair-section')).toBeTruthy();
+        expect(shadowRoot.querySelector('.sp-source-repair-empty').textContent).toContain('ui_source_repair_healthy');
+        expect(shadowRoot.querySelector('.sp-settings-history-section')).toBeTruthy();
+        expect(shadowRoot.querySelector('.sp-history-empty').textContent).toContain('ui_history_empty');
         expect(shadowRoot.querySelector('.sp-settings-save-status-section')).toBeTruthy();
         expect(shadowRoot.getElementById('sp-settings-save-status')).toBeTruthy();
         expect(renderSaveStatus).toHaveBeenCalled();
@@ -629,6 +651,58 @@ describe('modal option motion', () => {
             { type: 'OPEN_WEB_STORE_FEEDBACK' },
             expect.any(Function)
         );
+    });
+
+    it('renders source repair and history actions in settings', async () => {
+        const applySourceRepairRemaps = jest.fn(() => Promise.resolve(true));
+        const restoreStateHistoryEntry = jest.fn(() => Promise.resolve(true));
+        const { modals, shadowRoot } = createModalMotionTestRuntime({
+            getSourceRepairReport: () => ({
+                totalSources: 2,
+                matchedSources: 1,
+                unmatchedSources: 1,
+                ambiguousSources: 0,
+                matched: [],
+                unmatched: [{ storedKey: 'old-source', title: 'Old Source', reason: 'unresolved' }],
+                ambiguous: []
+            }),
+            getSourceRepairOptions: () => [
+                { key: 'current-source', title: 'Current Source' }
+            ],
+            applySourceRepairRemaps,
+            getStateHistoryEntries: () => [{
+                id: 'history-1',
+                createdAt: '2026-04-22T00:00:00.000Z',
+                reason: 'save',
+                sourceCount: 2,
+                groupCount: 1,
+                tagCount: 0,
+                saveRevision: 3,
+                snapshot: { groups: ['group1'] }
+            }],
+            restoreStateHistoryEntry
+        });
+
+        expect(modals.renderSettingsModal()).toBe(true);
+
+        const repairSelect = shadowRoot.querySelector('.sp-source-repair-select');
+        const repairButton = shadowRoot.querySelector('.sp-source-repair-apply-btn');
+        expect(repairSelect).toBeTruthy();
+        expect(repairButton.disabled).toBe(true);
+
+        repairSelect.value = 'current-source';
+        repairSelect.dispatchEvent({ type: 'change' });
+        expect(repairButton.disabled).toBe(false);
+
+        repairButton.dispatchEvent({ type: 'click' });
+        await Promise.resolve();
+        expect(applySourceRepairRemaps).toHaveBeenCalledWith({
+            'old-source': 'current-source'
+        });
+
+        shadowRoot.querySelector('.sp-history-restore-btn').dispatchEvent({ type: 'click' });
+        await Promise.resolve();
+        expect(restoreStateHistoryEntry).toHaveBeenCalledWith('history-1');
     });
 
     it('shows a localized toast when Chrome Web Store feedback cannot open', () => {

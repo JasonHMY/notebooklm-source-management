@@ -554,6 +554,41 @@ describe('deleteNativeSource', () => {
         expect(confirmButton.click).toHaveBeenCalled();
     });
 
+    it('does not report success when the delete dialog closes but the source row remains', async () => {
+        const { isNativeMenuOpened } = seedSourceWithMoreButton();
+        const sourceRow = mod.sourcesByKey.get('key1').element;
+        let dialogOpen = false;
+        const deleteMenuItem = createDeleteMenuItem({
+            onClick: () => {
+                dialogOpen = true;
+            }
+        });
+        const confirmButton = {
+            textContent: 'Delete',
+            className: 'mat-mdc-button-primary',
+            click: jest.fn(() => {
+                dialogOpen = false;
+            }),
+            querySelector: jest.fn(() => null),
+            getAttribute: jest.fn(() => null)
+        };
+        const dialog = createConfirmDialog([confirmButton]);
+
+        global.document.body.contains = jest.fn(() => true);
+        global.document.querySelectorAll = jest.fn(sel => {
+            if (mod.DEPS.row.includes(sel)) return [sourceRow];
+            if (sel.includes('[role="menuitem"]')) return isNativeMenuOpened() ? [deleteMenuItem] : [];
+            if (sel.includes('dialog')) return dialogOpen ? [dialog] : [];
+            return [];
+        });
+
+        await expect(mod.deleteNativeSource('key1')).resolves.toEqual({
+            deleted: false,
+            reason: 'delete_not_confirmed'
+        });
+        expect(confirmButton.click).toHaveBeenCalled();
+    });
+
     it('finds the native more button on a fresh row even when the checkbox selector no longer matches', async () => {
         let nativeMenuOpened = false;
         let deleteClicked = false;

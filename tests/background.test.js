@@ -109,7 +109,7 @@ describe('background.js message listener', () => {
         const result = listener(request, validSender, mockSendResponse);
 
         expect(global.chrome.storage.local.set).toHaveBeenCalledWith(
-            {
+            expect.objectContaining({
                 'sourcesPlusState_123': expect.objectContaining({
                     ...request.data,
                     _saveRevision: 1,
@@ -119,8 +119,9 @@ describe('background.js message listener', () => {
                     ...request.data,
                     _saveRevision: 1,
                     _savedAt: expect.any(String)
-                })
-            },
+                }),
+                'sourcesPlusHistory_123': expect.any(Array)
+            }),
             expect.any(Function)
         );
         expect(mockSendResponse).toHaveBeenCalledWith({
@@ -216,7 +217,7 @@ describe('background.js message listener', () => {
         listener(request, validSender, mockSendResponse);
 
         expect(global.chrome.storage.local.set).toHaveBeenCalledWith(
-            {
+            expect.objectContaining({
                 sourcesPlusState_123: expect.objectContaining({
                     ...request.data,
                     _saveRevision: 6,
@@ -226,8 +227,9 @@ describe('background.js message listener', () => {
                     ...request.data,
                     _saveRevision: 6,
                     _savedAt: expect.any(String)
-                })
-            },
+                }),
+                sourcesPlusHistory_123: expect.any(Array)
+            }),
             expect.any(Function)
         );
         expect(mockSendResponse).toHaveBeenCalledWith({
@@ -256,7 +258,7 @@ describe('background.js message listener', () => {
         listener(request, validSender, mockSendResponse);
 
         expect(global.chrome.storage.local.set).toHaveBeenCalledWith(
-            {
+            expect.objectContaining({
                 sourcesPlusState_123: expect.objectContaining({
                     ...request.data,
                     _saveRevision: 6,
@@ -266,8 +268,9 @@ describe('background.js message listener', () => {
                     ...request.data,
                     _saveRevision: 6,
                     _savedAt: expect.any(String)
-                })
-            },
+                }),
+                sourcesPlusHistory_123: expect.any(Array)
+            }),
             expect.any(Function)
         );
         expect(mockSendResponse).toHaveBeenCalledWith({
@@ -595,6 +598,183 @@ describe('background.js message listener', () => {
         expect(mockSendResponse).toHaveBeenCalledWith({
             success: true,
             data: null
+        });
+    });
+
+    it('loads state history entries for authorized notebook senders', () => {
+        const history = [{
+            id: 'entry-1',
+            createdAt: '2026-04-22T00:00:00.000Z',
+            reason: 'save',
+            sourceCount: 1,
+            groupCount: 1,
+            tagCount: 0,
+            saveRevision: 2,
+            snapshot: {
+                _saveRevision: 2,
+                groups: ['group1'],
+                groupsById: { group1: { id: 'group1', children: [{ type: 'source', key: 'source_1' }] } },
+                sourceStateById: { source_1: { enabled: true } }
+            }
+        }];
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({ sourcesPlusHistory_123: history });
+        });
+
+        listener({ type: 'LOAD_STATE_HISTORY', key: 'sourcesPlusHistory_123' }, validSender, mockSendResponse);
+
+        expect(global.chrome.storage.local.get).toHaveBeenCalledWith(
+            ['sourcesPlusHistory_123'],
+            expect.any(Function)
+        );
+        expect(mockSendResponse).toHaveBeenCalledWith({
+            success: true,
+            history
+        });
+    });
+
+    it('appends state history entries with de-duplication and a five entry limit', () => {
+        const makeEntry = (index) => ({
+            id: `entry-${index}`,
+            createdAt: `2026-04-22T00:0${index}:00.000Z`,
+            reason: 'save',
+            snapshot: {
+                groups: [`group-${index}`],
+                groupsById: { [`group-${index}`]: { id: `group-${index}`, children: [] } },
+                sourceStateById: {}
+            }
+        });
+        const existing = [1, 2, 3, 4, 5].map(makeEntry);
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({ sourcesPlusHistory_123: existing });
+        });
+
+        listener({
+            type: 'APPEND_STATE_HISTORY',
+            key: 'sourcesPlusHistory_123',
+            entry: makeEntry(6)
+        }, validSender, mockSendResponse);
+
+        const savedHistory = global.chrome.storage.local.set.mock.calls[0][0].sourcesPlusHistory_123;
+        expect(savedHistory).toHaveLength(5);
+        expect(savedHistory.map((entry) => entry.id)).toEqual([
+            'entry-6',
+            'entry-1',
+            'entry-2',
+            'entry-3',
+            'entry-4'
+        ]);
+        expect(mockSendResponse).toHaveBeenCalledWith({
+            success: true,
+            history: savedHistory
+        });
+    });
+
+    it('serializes concurrent state history appends for the same key', async () => {
+        const makeEntry = (index) => ({
+            id: `entry-${index}`,
+            createdAt: `2026-04-22T00:0${index}:00.000Z`,
+            reason: 'manual',
+            snapshot: {
+                groups: [`group-${index}`],
+                groupsById: { [`group-${index}`]: { id: `group-${index}`, children: [] } },
+                sourceStateById: {}
+            }
+        });
+        const store = { sourcesPlusHistory_123: [] };
+        const pendingGets = [];
+        const responses = [];
+        global.chrome.storage.local.get.mockImplementation((keys, cb) => {
+            pendingGets.push({ keys, cb });
+        });
+        global.chrome.storage.local.set.mockImplementation((payload, cb) => {
+            Object.assign(store, payload);
+            cb();
+        });
+
+        listener({
+            type: 'APPEND_STATE_HISTORY',
+            key: 'sourcesPlusHistory_123',
+            entry: makeEntry(1)
+        }, validSender, (response) => responses.push(response));
+        listener({
+            type: 'APPEND_STATE_HISTORY',
+            key: 'sourcesPlusHistory_123',
+            entry: makeEntry(2)
+        }, validSender, (response) => responses.push(response));
+
+        expect(pendingGets).toHaveLength(1);
+        pendingGets.shift().cb({ ...store });
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(pendingGets).toHaveLength(1);
+        pendingGets.shift().cb({ ...store });
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(responses).toHaveLength(2);
+        expect(store.sourcesPlusHistory_123.map((entry) => entry.id)).toEqual([
+            'entry-2',
+            'entry-1'
+        ]);
+    });
+
+    it('waits for a pending history append before loading history for the same key', async () => {
+        const entry = {
+            id: 'entry-1',
+            createdAt: '2026-04-22T00:01:00.000Z',
+            reason: 'manual',
+            snapshot: {
+                groups: ['group-1'],
+                groupsById: { 'group-1': { id: 'group-1', children: [] } },
+                sourceStateById: {}
+            }
+        };
+        const store = { sourcesPlusHistory_123: [] };
+        const pendingGets = [];
+        const appendResponses = [];
+        const loadResponses = [];
+        global.chrome.storage.local.get.mockImplementation((keys, cb) => {
+            pendingGets.push({ keys, cb });
+        });
+        global.chrome.storage.local.set.mockImplementation((payload, cb) => {
+            Object.assign(store, payload);
+            cb();
+        });
+
+        listener({
+            type: 'APPEND_STATE_HISTORY',
+            key: 'sourcesPlusHistory_123',
+            entry
+        }, validSender, (response) => appendResponses.push(response));
+        listener({
+            type: 'LOAD_STATE_HISTORY',
+            key: 'sourcesPlusHistory_123'
+        }, validSender, (response) => loadResponses.push(response));
+
+        expect(pendingGets).toHaveLength(1);
+        expect(loadResponses).toHaveLength(0);
+
+        pendingGets.shift().cb({ ...store });
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(appendResponses).toHaveLength(1);
+        expect(pendingGets).toHaveLength(1);
+        pendingGets.shift().cb({ ...store });
+
+        expect(loadResponses).toHaveLength(1);
+        expect(loadResponses[0].history.map((historyEntry) => historyEntry.id)).toEqual(['entry-1']);
+    });
+
+    it('rejects state history messages with invalid keys', () => {
+        listener({ type: 'LOAD_STATE_HISTORY', key: 'sourcesPlusState_123' }, validSender, mockSendResponse);
+
+        expect(global.chrome.storage.local.get).not.toHaveBeenCalled();
+        expect(mockSendResponse).toHaveBeenCalledWith({
+            success: false,
+            errorCode: 'invalid_storage_key'
         });
     });
 

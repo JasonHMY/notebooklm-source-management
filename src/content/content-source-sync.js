@@ -370,7 +370,9 @@
 
             freshRowCache.delete(sourceKey);
 
-            const sourceElements = getSourceElements();
+            const sourcePanel = findSourcePanel();
+            const sourceRoot = sourcePanel || getDocument();
+            const sourceElements = getSourceElements(sourceRoot);
             const stableTokenMatches = [];
             const fingerprintMatches = [];
             const depsConfig = getDEPS();
@@ -630,7 +632,9 @@
                 });
             }
 
-            const sourceElements = getSourceElements();
+            const sourcePanel = findSourcePanel();
+            const sourceRoot = sourcePanel || getDocument();
+            const sourceElements = getSourceElements(sourceRoot);
             if (sourceElements.length === 0 && Array.from(getDocument()?.body?.children || []).length > 2) {
                 // The native panel can be empty while NotebookLM is still loading initial results.
             }

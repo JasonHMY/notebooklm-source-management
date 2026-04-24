@@ -1880,6 +1880,55 @@
                 white-space: nowrap;
                 color: var(--sp-text-secondary);
             }
+            .sp-settings-helper-text,
+            .sp-settings-empty-state {
+                margin: 0;
+                font-size: 12px;
+                line-height: 1.45;
+                color: var(--sp-text-secondary);
+            }
+            .sp-source-repair-list,
+            .sp-history-list {
+                display: grid;
+                gap: 8px;
+            }
+            .sp-source-repair-item,
+            .sp-history-item {
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) minmax(150px, auto);
+                gap: 10px;
+                align-items: center;
+                padding: 8px;
+                border: 1px solid var(--sp-border-light);
+                border-radius: 10px;
+                background: var(--sp-bg-secondary);
+            }
+            .sp-source-repair-title,
+            .sp-history-title {
+                min-width: 0;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                color: var(--sp-text-primary);
+                font-size: 12px;
+                font-weight: 700;
+            }
+            .sp-source-repair-meta,
+            .sp-history-meta {
+                margin-top: 2px;
+                color: var(--sp-text-secondary);
+                font-size: 11px;
+            }
+            .sp-source-repair-select {
+                min-width: 150px;
+                max-width: 220px;
+                border: 1px solid var(--sp-border-light);
+                border-radius: 8px;
+                background: var(--sp-bg-button);
+                color: var(--sp-text-primary);
+                font-size: 12px;
+                padding: 6px 8px;
+            }
             .sp-settings-save-status-section .sp-save-status {
                 width: fit-content;
                 max-width: 100%;

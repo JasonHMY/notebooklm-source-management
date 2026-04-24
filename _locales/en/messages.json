@@ -262,6 +262,73 @@
     "ui_settings_feedback_open_failed": {
         "message": "Could not open Chrome Web Store feedback"
     },
+    "ui_source_repair_title": {
+        "message": "Source Repair"
+    },
+    "ui_source_repair_summary": {
+        "message": "$1/$2 source(s) matched · $3 unmatched · $4 needs review",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" },
+            "3": { "content": "$3" },
+            "4": { "content": "$4" }
+        }
+    },
+    "ui_source_repair_healthy": {
+        "message": "All saved sources match the current notebook."
+    },
+    "ui_source_repair_reason": {
+        "message": "Reason: $1",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_source_repair_select_source": {
+        "message": "Choose current source for $1",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_source_repair_skip": {
+        "message": "Skip"
+    },
+    "ui_source_repair_apply": {
+        "message": "Apply Repair"
+    },
+    "ui_source_repair_no_selection": {
+        "message": "Choose at least one source to repair."
+    },
+    "ui_source_repair_applied": {
+        "message": "Source repair applied"
+    },
+    "ui_source_repair_failed": {
+        "message": "Could not apply source repair"
+    },
+    "ui_history_title": {
+        "message": "Version History"
+    },
+    "ui_history_empty": {
+        "message": "No version history yet."
+    },
+    "ui_history_entry_summary": {
+        "message": "$1 · $2 source(s) · $3 folder(s) · $4 tag(s) · $5",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" },
+            "3": { "content": "$3" },
+            "4": { "content": "$4" },
+            "5": { "content": "$5" }
+        }
+    },
+    "ui_history_restore": {
+        "message": "Restore"
+    },
+    "ui_history_restored": {
+        "message": "Version restored"
+    },
+    "ui_history_restore_failed": {
+        "message": "Could not restore that version"
+    },
     "ui_diagnostics_notebook_id": {
         "message": "Notebook"
     },

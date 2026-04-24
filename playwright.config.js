@@ -11,7 +11,7 @@ module.exports = defineConfig({
         timeout: 15_000
     },
     use: {
-        headless: false,
+        headless: process.env.CI === 'true',
         viewport: {
             width: 1440,
             height: 1024

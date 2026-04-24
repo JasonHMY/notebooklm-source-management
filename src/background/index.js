@@ -3,6 +3,9 @@ const NOTEBOOKLM_URL_PATTERN = 'https://notebooklm.google.com/*';
 const NOTEBOOKLM_NOTEBOOK_PREFIX = 'https://notebooklm.google.com/notebook/';
 const CHROME_WEB_STORE_DETAIL_URL_PREFIX = 'https://chrome.google.com/webstore/detail/';
 const EXTENSION_ENABLED_KEY = 'extensionEnabled';
+const STATE_KEY_PREFIX = 'sourcesPlusState_';
+const STATE_HISTORY_KEY_PREFIX = 'sourcesPlusHistory_';
+const STATE_HISTORY_LIMIT = 5;
 const ERROR_CODES = {
     INVALID_STORAGE_KEY: 'invalid_storage_key',
     RUNTIME_FAILURE: 'runtime_failure',
@@ -223,6 +226,10 @@ function getStateBackupKey(primaryKey) {
     return `${primaryKey}__backup`;
 }
 
+function getStateHistoryKey(primaryKey) {
+    return `${STATE_HISTORY_KEY_PREFIX}${String(primaryKey || '').replace(/^sourcesPlusState_/, '')}`;
+}
+
 function hasRestorableStateSnapshot(snapshot) {
     if (!snapshot || typeof snapshot !== 'object') return false;
     if (Array.isArray(snapshot.groups) && snapshot.groups.length > 0) return true;
@@ -247,6 +254,101 @@ function cloneSerializableData(value) {
     } catch (error) {
         return value;
     }
+}
+
+function getStableComparableHistoryValue(value, seenValues = new WeakSet()) {
+    if (value == null || typeof value !== 'object') return value;
+    if (seenValues.has(value)) return null;
+    seenValues.add(value);
+
+    try {
+        if (Array.isArray(value)) {
+            return value.map((item) => getStableComparableHistoryValue(item, seenValues));
+        }
+
+        return Object.keys(value)
+            .filter((key) => key !== '_saveRevision' && key !== '_savedAt')
+            .sort()
+            .reduce((acc, key) => {
+                acc[key] = getStableComparableHistoryValue(value[key], seenValues);
+                return acc;
+            }, {});
+    } finally {
+        seenValues.delete(value);
+    }
+}
+
+function getHistorySnapshotSignature(snapshot) {
+    try {
+        return JSON.stringify(getStableComparableHistoryValue(snapshot || null));
+    } catch (error) {
+        return '';
+    }
+}
+
+function getPersistableStateCounts(snapshot) {
+    return {
+        sourceCount: Object.keys(snapshot?.sourceStateById || {}).length,
+        groupCount: Object.keys(snapshot?.groupsById || {}).length,
+        tagCount: Object.keys(snapshot?.tagsById || {}).length
+    };
+}
+
+function normalizeHistoryEntry(entry, fallbackReason = 'save') {
+    if (!entry || typeof entry !== 'object' || !entry.snapshot || !hasRestorableStateSnapshot(entry.snapshot)) {
+        return null;
+    }
+    const counts = getPersistableStateCounts(entry.snapshot);
+    const createdAt = typeof entry.createdAt === 'string' && entry.createdAt
+        ? entry.createdAt
+        : new Date().toISOString();
+    return {
+        id: typeof entry.id === 'string' && entry.id ? entry.id : `history:${createdAt}:${Math.random()}`,
+        createdAt,
+        reason: typeof entry.reason === 'string' && entry.reason ? entry.reason : fallbackReason,
+        sourceCount: Number(entry.sourceCount) || counts.sourceCount,
+        groupCount: Number(entry.groupCount) || counts.groupCount,
+        tagCount: Number(entry.tagCount) || counts.tagCount,
+        saveRevision: Number(entry.saveRevision) || getSnapshotSaveRevision(entry.snapshot),
+        snapshot: cloneSerializableData(entry.snapshot)
+    };
+}
+
+function normalizeStateHistoryEntries(entries) {
+    return (Array.isArray(entries) ? entries : [])
+        .map((entry) => normalizeHistoryEntry(entry))
+        .filter(Boolean)
+        .slice(0, STATE_HISTORY_LIMIT);
+}
+
+function appendHistoryEntry(existingEntries, entry) {
+    const normalizedEntry = normalizeHistoryEntry(entry);
+    if (!normalizedEntry) {
+        return normalizeStateHistoryEntries(existingEntries);
+    }
+
+    const nextSignature = getHistorySnapshotSignature(normalizedEntry.snapshot);
+    return [
+        normalizedEntry,
+        ...normalizeStateHistoryEntries(existingEntries).filter((existingEntry) => (
+            getHistorySnapshotSignature(existingEntry.snapshot) !== nextSignature
+        ))
+    ].slice(0, STATE_HISTORY_LIMIT);
+}
+
+function createHistoryEntryFromSnapshot(snapshot, reason = 'save') {
+    const counts = getPersistableStateCounts(snapshot);
+    const createdAt = new Date().toISOString();
+    return normalizeHistoryEntry({
+        id: `history:${createdAt}:${getSnapshotSaveRevision(snapshot) || 0}`,
+        createdAt,
+        reason,
+        sourceCount: counts.sourceCount,
+        groupCount: counts.groupCount,
+        tagCount: counts.tagCount,
+        saveRevision: getSnapshotSaveRevision(snapshot),
+        snapshot
+    }, reason);
 }
 
 function getRequestBaseRevision(request) {
@@ -308,8 +410,9 @@ function writeStateWithRevisionGuard(request, sendResponse) {
     const key = request.key;
     const data = request.data;
     const backupKey = getStateBackupKey(key);
+    const historyKey = getStateHistoryKey(key);
     const baseRevision = getRequestBaseRevision(request);
-    chrome.storage.local.get([key, backupKey], (existingData) => {
+    chrome.storage.local.get([key, backupKey, historyKey], (existingData) => {
         if (chrome.runtime.lastError) {
             console.error('NotebookLM Source Management background save error:', chrome.runtime.lastError);
             sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
@@ -340,6 +443,10 @@ function writeStateWithRevisionGuard(request, sendResponse) {
         const storagePayload = { [key]: savedState };
         if (hasRestorableStateSnapshot(savedState)) {
             storagePayload[backupKey] = savedState;
+            storagePayload[historyKey] = appendHistoryEntry(
+                existingData && typeof existingData === 'object' ? existingData[historyKey] : [],
+                createHistoryEntryFromSnapshot(savedState, request.critical ? 'critical_save' : 'save')
+            );
         }
 
         chrome.storage.local.set(storagePayload, () => {
@@ -357,36 +464,95 @@ function writeStateWithRevisionGuard(request, sendResponse) {
     });
 }
 
-function enqueueStateWrite(request, sendResponse) {
+function loadStateHistoryNow(request, sendResponse) {
     const key = request.key;
-    const createTask = () => new Promise((resolve) => {
+    chrome.storage.local.get([key], (data) => {
+        if (chrome.runtime.lastError) {
+            sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
+            return;
+        }
+
+        sendResponse({
+            success: true,
+            history: normalizeStateHistoryEntries(data && typeof data === 'object' ? data[key] : [])
+        });
+    });
+}
+
+function appendStateHistoryNow(request, sendResponse) {
+    const key = request.key;
+    chrome.storage.local.get([key], (data) => {
+        if (chrome.runtime.lastError) {
+            sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
+            return;
+        }
+
+        const history = appendHistoryEntry(
+            data && typeof data === 'object' ? data[key] : [],
+            request.entry
+        );
+        chrome.storage.local.set({ [key]: history }, () => {
+            if (chrome.runtime.lastError) {
+                sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
+                return;
+            }
+            sendResponse({ success: true, history });
+        });
+    });
+}
+
+function enqueueStorageTask(key, createTask) {
+    const previousTask = stateSaveQueueByKey.get(key);
+
+    let storageTask;
+    if (previousTask) {
+        storageTask = previousTask.catch(() => null).then(createTask);
+    } else {
+        try {
+            storageTask = Promise.resolve(createTask());
+        } catch (error) {
+            storageTask = Promise.reject(error);
+        }
+    }
+
+    stateSaveQueueByKey.set(key, storageTask);
+    storageTask.finally(() => {
+        if (stateSaveQueueByKey.get(key) === storageTask) {
+            stateSaveQueueByKey.delete(key);
+        }
+    }).catch(() => {});
+
+    return storageTask;
+}
+
+function enqueueStateWrite(request, sendResponse) {
+    enqueueStorageTask(request.key, () => new Promise((resolve) => {
         writeStateWithRevisionGuard(request, (response) => {
             sendResponse(response);
             resolve(response);
         });
-    });
-    const previousTask = stateSaveQueueByKey.get(key);
+    }));
+}
 
-    if (!previousTask) {
-        const saveTask = createTask();
-        stateSaveQueueByKey.set(key, saveTask);
-        saveTask.finally(() => {
-            if (stateSaveQueueByKey.get(key) === saveTask) {
-                stateSaveQueueByKey.delete(key);
-            }
-        }).catch(() => {});
+function loadStateHistory(request, sendResponse) {
+    const pendingTask = stateSaveQueueByKey.get(request.key);
+    if (!pendingTask) {
+        loadStateHistoryNow(request, sendResponse);
         return;
     }
 
-    const saveTask = previousTask
+    pendingTask
         .catch(() => null)
-        .then(createTask);
-    stateSaveQueueByKey.set(key, saveTask);
-    saveTask.finally(() => {
-        if (stateSaveQueueByKey.get(key) === saveTask) {
-            stateSaveQueueByKey.delete(key);
-        }
-    }).catch(() => {});
+        .then(() => loadStateHistoryNow(request, sendResponse));
+}
+
+function appendStateHistory(request, sendResponse) {
+    enqueueStorageTask(request.key, () => new Promise((resolve) => {
+        appendStateHistoryNow(request, (response) => {
+            sendResponse(response);
+            resolve(response);
+        });
+    }));
 }
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -414,7 +580,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return true;
     }
 
-    if (request.type !== 'SAVE_STATE' && request.type !== 'LOAD_STATE') {
+    if (
+        request.type !== 'SAVE_STATE' &&
+        request.type !== 'LOAD_STATE' &&
+        request.type !== 'LOAD_STATE_HISTORY' &&
+        request.type !== 'APPEND_STATE_HISTORY'
+    ) {
         return;
     }
 
@@ -425,7 +596,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     if (request.type === 'SAVE_STATE') {
-        if (typeof request.key !== 'string' || !request.key.startsWith('sourcesPlusState_')) {
+        if (typeof request.key !== 'string' || !request.key.startsWith(STATE_KEY_PREFIX)) {
             console.warn('NotebookLM Source Management: Received SAVE_STATE with invalid key:', request.key);
             sendResponse({ success: false, errorCode: ERROR_CODES.INVALID_STORAGE_KEY });
             return;
@@ -435,7 +606,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return true;
     }
 
-    if (typeof request.key !== 'string' || !request.key.startsWith('sourcesPlusState_')) {
+    if (request.type === 'LOAD_STATE_HISTORY' || request.type === 'APPEND_STATE_HISTORY') {
+        if (typeof request.key !== 'string' || !request.key.startsWith(STATE_HISTORY_KEY_PREFIX)) {
+            console.warn(`NotebookLM Source Management: Received ${request.type} with invalid key:`, request.key);
+            sendResponse({ success: false, errorCode: ERROR_CODES.INVALID_STORAGE_KEY });
+            return;
+        }
+
+        if (request.type === 'LOAD_STATE_HISTORY') {
+            loadStateHistory(request, sendResponse);
+            return true;
+        }
+
+        appendStateHistory(request, sendResponse);
+        return true;
+    }
+
+    if (typeof request.key !== 'string' || !request.key.startsWith(STATE_KEY_PREFIX)) {
         console.warn('NotebookLM Source Management: Received LOAD_STATE with invalid key:', request.key);
         sendResponse({ success: false, errorCode: ERROR_CODES.INVALID_STORAGE_KEY });
         return;
@@ -462,10 +649,16 @@ if (typeof module !== 'undefined' && module.exports) {
         NOTEBOOKLM_HOME_URL,
         NOTEBOOKLM_NOTEBOOK_PREFIX,
         EXTENSION_ENABLED_KEY,
+        STATE_HISTORY_KEY_PREFIX,
+        STATE_HISTORY_LIMIT,
         ERROR_CODES,
         CHROME_WEB_STORE_DETAIL_URL_PREFIX,
         getStateBackupKey,
+        getStateHistoryKey,
         getSnapshotSaveRevision,
+        normalizeStateHistoryEntries,
+        appendHistoryEntry,
+        createHistoryEntryFromSnapshot,
         getRequestBaseRevision,
         isStaleStateWrite,
         isStaleBaseRevision,

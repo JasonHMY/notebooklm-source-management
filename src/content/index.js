@@ -1,6 +1,22 @@
 (function () {
     'use strict';
 
+    const CONTENT_INSTANCE_KEY = '__NSM_CONTENT_SCRIPT_INSTANCE__';
+    const previousContentInstance = globalThis[CONTENT_INSTANCE_KEY];
+    if (previousContentInstance && typeof previousContentInstance.destroy === 'function') {
+        try {
+            previousContentInstance.destroy('reinitialized');
+        } catch (error) {
+            console.warn('NotebookLM Source Management: Failed to tear down previous content instance.', error);
+        }
+    }
+
+    const contentInstance = {
+        destroyed: false,
+        destroy: null
+    };
+    globalThis[CONTENT_INSTANCE_KEY] = contentInstance;
+
     // --- Selectors & Dependencies ---
     const contentConfig = globalThis.NSM_CONTENT_CONFIG;
     const sourceDescriptorHelpers = globalThis.NSM_SOURCE_DESCRIPTOR_HELPERS;
@@ -111,6 +127,7 @@
     let panelLifecycleTimeout = null;
     let panelLifecycleObserver = null;
     let nativeRenameWatcherTimeout = null;
+    let stateHistoryEntries = [];
     const NATIVE_ACTION_FAILURE_HISTORY_LIMIT = 5;
     let nativeActionFailureHistory = [];
     const MANAGER_ACTIVE_CLASS = 'sources-plus-manager-active';
@@ -185,6 +202,7 @@
     bindRuntimeProperty('panelLifecycleAnimationFrame', () => panelLifecycleAnimationFrame, (value) => { panelLifecycleAnimationFrame = value; });
     bindRuntimeProperty('panelLifecycleTimeout', () => panelLifecycleTimeout, (value) => { panelLifecycleTimeout = value; });
     bindRuntimeProperty('panelLifecycleObserver', () => panelLifecycleObserver, (value) => { panelLifecycleObserver = value; });
+    bindRuntimeProperty('stateHistoryEntries', () => stateHistoryEntries, (value) => { stateHistoryEntries = Array.isArray(value) ? value : []; });
     bindRuntimeProperty('debouncedPanelLifecycleSync', () => debouncedPanelLifecycleSync);
     bindRuntimeProperty('syncManagerWithPanelLifecycle', () => syncManagerWithPanelLifecycle);
 
@@ -258,6 +276,8 @@
         buildSourceLookup,
         resolveStoredSourceKey,
         resolveStoredSourceKeyWithReason,
+        buildSourceMatchReport,
+        applySourceRemapsToSnapshot,
         snapshotExistingSourceRecords,
         buildSingleSourcePositionalRemap,
         remapExistingStateToCurrentSources,
@@ -448,6 +468,11 @@
         getExportConfigText: (...args) => getExportConfigText(...args),
         previewImportConfig: (...args) => previewImportConfig(...args),
         applyImportConfig: (...args) => applyImportConfig(...args),
+        getSourceRepairReport: (...args) => getSourceRepairReport(...args),
+        getSourceRepairOptions: (...args) => getSourceRepairOptions(...args),
+        applySourceRepairRemaps: (...args) => applySourceRepairRemaps(...args),
+        getStateHistoryEntries: (...args) => getStateHistoryEntries(...args),
+        restoreStateHistoryEntry: (...args) => restoreStateHistoryEntryFromUi(...args),
         getDiagnosticsInfo: (...args) => getDiagnosticsInfo(...args),
         getDiagnosticsText: (...args) => getDiagnosticsText(...args),
         renderSaveStatus: (...args) => renderSaveStatus(...args),
@@ -689,6 +714,11 @@
     const {
         hasRestorableStateSnapshot,
         getStateBackupKey,
+        getStateHistoryKey,
+        getStateHistoryEntries,
+        setStateHistoryEntries,
+        loadStateHistory,
+        appendStateHistorySnapshot,
         pickPreferredStoredState,
         writeStateToLocalStorage,
         sendStateToStorage,
@@ -1577,6 +1607,57 @@
         };
     }
 
+    function getSourceRepairReport(snapshot = buildPersistableState()) {
+        const sourceLookup = buildSourceLookup(Array.from(sourcesByKey.values()));
+        return buildSourceMatchReport(snapshot, sourceLookup);
+    }
+
+    function getSourceRepairOptions() {
+        return Array.from(sourcesByKey.values()).map((source) => ({
+            key: source.key,
+            title: source.title || source.normalizedTitle || source.key
+        }));
+    }
+
+    function applySourceRepairRemaps(remaps) {
+        const sourceRemaps = remaps instanceof Map
+            ? remaps
+            : new Map(Object.entries(remaps || {}).filter(([, value]) => Boolean(value)));
+        if (sourceRemaps.size === 0) {
+            showToast(getMessage('ui_source_repair_no_selection'), { variant: 'info' });
+            return Promise.resolve(false);
+        }
+
+        const currentSnapshot = cloneSerializableData(buildPersistableState());
+        const repairedSnapshot = applySourceRemapsToSnapshot(currentSnapshot, sourceRemaps);
+        return Promise.resolve(appendStateHistorySnapshot(currentSnapshot, 'before_source_repair'))
+            .then(() => {
+                if (!applyPersistableSnapshotToRuntime(repairedSnapshot)) {
+                    showToast(getMessage('ui_source_repair_failed'), { variant: 'error' });
+                    return false;
+                }
+
+                closeSourceActionMenu();
+                render();
+                return Promise.resolve(saveState({ immediate: true, critical: true, recordUndo: false }))
+                    .then((result) => {
+                        if (result && result.ok === false) {
+                            showToast(getMessage('ui_source_repair_failed'), { variant: 'error' });
+                            return false;
+                        }
+                        return loadStateHistory().then(() => {
+                            showToast(getMessage('ui_source_repair_applied'), { variant: 'success' });
+                            return true;
+                        });
+                    });
+            })
+            .catch((error) => {
+                console.warn('NotebookLM Source Management: Source repair failed:', error);
+                showToast(getMessage('ui_source_repair_failed'), { variant: 'error' });
+                return false;
+            });
+    }
+
     function writeImportBackupSnapshot(reason = 'before_import') {
         const storage = getSessionStorageObject();
         const key = getImportBackupKey();
@@ -1656,6 +1737,42 @@
             .catch((error) => {
                 console.warn('NotebookLM Source Management: Import backup restore save failed:', error);
                 showToast(getMessage('ui_settings_import_backup_restore_failed'), { variant: 'error' });
+                return false;
+            });
+    }
+
+    function restoreStateHistoryEntryFromUi(historyEntryId) {
+        const entry = stateHistoryEntries.find((item) => item?.id === historyEntryId);
+        if (!entry?.snapshot) {
+            showToast(getMessage('ui_history_restore_failed'), { variant: 'error' });
+            return Promise.resolve(false);
+        }
+
+        const currentSnapshot = cloneSerializableData(buildPersistableState());
+        return Promise.resolve(appendStateHistorySnapshot(currentSnapshot, 'before_history_restore'))
+            .then(() => {
+                if (!applyPersistableSnapshotToRuntime(entry.snapshot)) {
+                    showToast(getMessage('ui_history_restore_failed'), { variant: 'error' });
+                    return false;
+                }
+
+                closeSourceActionMenu();
+                render();
+                return Promise.resolve(saveState({ immediate: true, critical: true, recordUndo: false }))
+                    .then((result) => {
+                        if (result && result.ok === false) {
+                            showToast(getMessage('ui_history_restore_failed'), { variant: 'error' });
+                            return false;
+                        }
+                        return loadStateHistory().then(() => {
+                            showToast(getMessage('ui_history_restored'), { variant: 'success' });
+                            return true;
+                        });
+                    });
+            })
+            .catch((error) => {
+                console.warn('NotebookLM Source Management: History restore failed:', error);
+                showToast(getMessage('ui_history_restore_failed'), { variant: 'error' });
                 return false;
             });
     }
@@ -1853,7 +1970,7 @@
         };
     }
 
-    function applyImportConfig(text) {
+    async function applyImportConfig(text) {
         const preview = previewImportConfig(text);
         if (!preview.ok) {
             showToast(getMessage(preview.reason === 'empty'
@@ -1863,6 +1980,7 @@
         }
 
         const importedState = preview.state;
+        await appendStateHistorySnapshot(buildPersistableState(), 'before_import');
         writeImportBackupSnapshot();
         if (importedState.customHeight != null) {
             customHeight = importedState.customHeight;
@@ -1878,7 +1996,10 @@
         }
 
         render();
-        saveState({ immediate: true, critical: true });
+        const saveResult = await saveState({ immediate: true, critical: true });
+        if (saveResult && saveResult.ok === false) {
+            return { ...preview, ok: false, reason: saveResult.reason || 'save_failed' };
+        }
         showToast(getMessage('ui_settings_imported_toast'), {
             variant: 'success',
             actionLabel: getMessage('ui_settings_restore_import_backup'),
@@ -1970,7 +2091,9 @@
             shadowRoot.removeEventListener('scroll', handleSourceActionMenuViewportChange, true);
         }
         if (shadowRoot && shadowRoot.host) {
-            shadowRoot.host.remove();
+            if (typeof shadowRoot.host.remove === 'function') {
+                shadowRoot.host.remove();
+            }
             shadowRoot = null;
         }
         extensionHost = null;
@@ -2266,7 +2389,9 @@
             saveState({ immediate: true, critical: true }); // Save the new height immediately
         }
 
-        shadowRoot.getElementById('sp-settings-btn').addEventListener('click', () => renderSettingsModal());
+        shadowRoot.getElementById('sp-settings-btn').addEventListener('click', () => {
+            loadStateHistory().finally(() => renderSettingsModal());
+        });
         shadowRoot.getElementById('sp-new-group-btn').addEventListener('click', () => handleAddNewGroup());
         shadowRoot.getElementById('sp-manage-tags-btn').addEventListener('click', () => renderTagModal());
 
@@ -2429,14 +2554,16 @@
 
     const originalPushState = history.pushState;
     const originalReplaceState = history.replaceState;
-    history.pushState = function (...args) {
+    const patchedPushState = function (...args) {
         originalPushState.apply(this, args);
         onRouteChange();
     };
-    history.replaceState = function (...args) {
+    const patchedReplaceState = function (...args) {
         originalReplaceState.apply(this, args);
         onRouteChange();
     };
+    history.pushState = patchedPushState;
+    history.replaceState = patchedReplaceState;
     window.addEventListener('popstate', onRouteChange);
     window.addEventListener('hashchange', onRouteChange);
 
@@ -2451,6 +2578,48 @@
         attributes: true,
         attributeFilter: ['class', 'style', 'hidden', 'aria-hidden']
     });
+
+    function destroyContentInstance() {
+        if (contentInstance.destroyed) return;
+        contentInstance.destroyed = true;
+
+        try {
+            teardown();
+        } catch (error) {
+            console.warn('NotebookLM Source Management: Content teardown failed.', error);
+        }
+
+        try {
+            if (
+                chrome.runtime &&
+                chrome.runtime.onMessage &&
+                typeof chrome.runtime.onMessage.removeListener === 'function'
+            ) {
+                chrome.runtime.onMessage.removeListener(handleManagerMessage);
+            }
+        } catch (error) {
+            console.warn('NotebookLM Source Management: Runtime listener cleanup failed.', error);
+        }
+
+        if (history.pushState === patchedPushState) {
+            history.pushState = originalPushState;
+        }
+        if (history.replaceState === patchedReplaceState) {
+            history.replaceState = originalReplaceState;
+        }
+        window.removeEventListener('popstate', onRouteChange);
+        window.removeEventListener('hashchange', onRouteChange);
+
+        if (panelLifecycleObserver) {
+            panelLifecycleObserver.disconnect();
+            panelLifecycleObserver = null;
+        }
+        if (globalThis[CONTENT_INSTANCE_KEY] === contentInstance) {
+            delete globalThis[CONTENT_INSTANCE_KEY];
+        }
+    }
+
+    contentInstance.destroy = destroyContentInstance;
 
     // Expose internals for testing
     if (typeof module !== 'undefined' && module.exports) {
@@ -2476,6 +2645,8 @@
             normalizeLoadedState,
             processClickQueue,
             resolveStoredSourceKeyWithReason,
+            buildSourceMatchReport,
+            applySourceRemapsToSnapshot,
             buildSingleSourcePositionalRemap,
             removeGroupFromTree,
             scanAndSyncSources,
@@ -2500,6 +2671,14 @@
             previewImportConfig,
             applyImportConfig,
             getImportBackupKey,
+            getSourceRepairReport,
+            getSourceRepairOptions,
+            applySourceRepairRemaps,
+            getStateHistoryKey,
+            getStateHistoryEntries,
+            loadStateHistory,
+            appendStateHistorySnapshot,
+            restoreStateHistoryEntryFromUi,
             writeImportBackupSnapshot,
             readImportBackupSnapshot,
             clearImportBackupSnapshot,
@@ -2646,6 +2825,7 @@
             _getObservedNativeScrollAreaForTest: () => observedNativeScrollArea,
             _getPanelResizeObserverForTest: () => panelResizeObserver,
             _getExtensionEnabledForTest: () => isExtensionEnabled,
+            _destroyContentInstanceForTest: destroyContentInstance,
             _flushPendingInitialLoadedStateForTest: flushPendingInitialLoadedState,
             _debouncedScanAndSyncForTest: (options) => {
                 debouncedScanAndSync(options);
@@ -2749,6 +2929,7 @@
                 }
                 activeRouteRecoveryToken = 0;
                 routeRecoveryTimeout = null;
+                stateHistoryEntries = [];
                 state.tagOrder = [];
                 state.activeTagId = null;
                 activeIsolationGroupId = null;

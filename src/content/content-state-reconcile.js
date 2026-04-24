@@ -15,6 +15,7 @@
             const byElement = new WeakMap();
             const sourceByKey = new Map();
             const orderedKeys = [];
+            const legacyKeyBuckets = new Map();
             const stableTokenBuckets = new Map();
             const fingerprintBuckets = new Map();
             const titleBuckets = new Map();
@@ -28,6 +29,10 @@
                     byElement.set(source.element, source.key);
                 }
 
+                if (source.legacyKey) {
+                    if (!legacyKeyBuckets.has(source.legacyKey)) legacyKeyBuckets.set(source.legacyKey, []);
+                    legacyKeyBuckets.get(source.legacyKey).push(source.key);
+                }
                 if (source.stableToken) {
                     if (!stableTokenBuckets.has(source.stableToken)) stableTokenBuckets.set(source.stableToken, []);
                     stableTokenBuckets.get(source.stableToken).push(source.key);
@@ -59,6 +64,10 @@
                 byElement,
                 sourceByKey,
                 orderedKeys,
+                legacyKeyBuckets,
+                stableTokenBuckets,
+                fingerprintBuckets,
+                titleBuckets,
                 uniqueByStableToken,
                 uniqueByFingerprint,
                 uniqueByTitle
@@ -152,6 +161,256 @@
 
         function resolveStoredSourceKey(storedKey, sourceLookup, sourceRecord = null) {
             return resolveStoredSourceKeyWithReason(storedKey, sourceLookup, sourceRecord).key;
+        }
+
+        function collectPersistedSourceRefs(snapshot) {
+            const refs = new Set();
+            const groupsById = snapshot && typeof snapshot.groupsById === 'object' ? snapshot.groupsById : {};
+            const visitedGroups = new Set();
+
+            const visitGroup = (groupId) => {
+                if (!groupId || visitedGroups.has(groupId)) return;
+                visitedGroups.add(groupId);
+                const group = groupsById[groupId];
+                (Array.isArray(group?.children) ? group.children : []).forEach((child) => {
+                    if (child?.type === 'source' && child.key) {
+                        refs.add(child.key);
+                        return;
+                    }
+                    if (child?.type === 'group' && child.id) {
+                        visitGroup(child.id);
+                    }
+                });
+            };
+
+            Object.keys(groupsById).forEach(visitGroup);
+            (Array.isArray(snapshot?.ungrouped) ? snapshot.ungrouped : []).forEach((sourceKey) => {
+                if (sourceKey) refs.add(sourceKey);
+            });
+            Object.keys(snapshot?.sourceStateById || {}).forEach((sourceKey) => {
+                if (sourceKey) refs.add(sourceKey);
+            });
+            return refs;
+        }
+
+        function getSourceRepairTitle(sourceRecord, storedKey) {
+            return String(
+                sourceRecord?.title ||
+                sourceRecord?.normalizedTitle ||
+                storedKey ||
+                ''
+            );
+        }
+
+        function createSourceCandidateDetail(sourceLookup, sourceKey, reason) {
+            const source = sourceLookup?.sourceByKey?.get?.(sourceKey) || null;
+            return {
+                key: sourceKey,
+                title: source?.title || source?.normalizedTitle || sourceKey,
+                reason
+            };
+        }
+
+        function addSourceCandidate(candidates, seenKeys, sourceLookup, sourceKey, reason) {
+            if (!sourceKey || seenKeys.has(sourceKey)) return;
+            seenKeys.add(sourceKey);
+            candidates.push(createSourceCandidateDetail(sourceLookup, sourceKey, reason));
+        }
+
+        function addSourceCandidateBucket(candidates, seenKeys, sourceLookup, bucket, reason) {
+            (Array.isArray(bucket) ? bucket : []).forEach((sourceKey) => {
+                addSourceCandidate(candidates, seenKeys, sourceLookup, sourceKey, reason);
+            });
+        }
+
+        function getSourceRepairCandidates(storedKey, sourceLookup, sourceRecord = null) {
+            const candidates = [];
+            const seenKeys = new Set();
+            if (!sourceLookup) return candidates;
+
+            addSourceCandidateBucket(
+                candidates,
+                seenKeys,
+                sourceLookup,
+                sourceLookup.legacyKeyBuckets?.get?.(storedKey),
+                'legacy'
+            );
+
+            if (sourceRecord?.stableToken) {
+                addSourceCandidateBucket(
+                    candidates,
+                    seenKeys,
+                    sourceLookup,
+                    sourceLookup.stableTokenBuckets?.get?.(sourceRecord.stableToken),
+                    'stable-token'
+                );
+            }
+
+            if (sourceRecord?.fingerprint) {
+                addSourceCandidateBucket(
+                    candidates,
+                    seenKeys,
+                    sourceLookup,
+                    sourceLookup.fingerprintBuckets?.get?.(sourceRecord.fingerprint),
+                    'fingerprint'
+                );
+            }
+
+            const normalizedTitle = normalizeSourceText(
+                sourceRecord && (sourceRecord.normalizedTitle || sourceRecord.title)
+            );
+            if (normalizedTitle) {
+                addSourceCandidateBucket(
+                    candidates,
+                    seenKeys,
+                    sourceLookup,
+                    sourceLookup.titleBuckets?.get?.(normalizedTitle),
+                    'unique-title'
+                );
+            }
+
+            return candidates;
+        }
+
+        function buildSourceMatchReport(snapshot, sourceLookup) {
+            const sourceRefs = collectPersistedSourceRefs(snapshot);
+            const matched = [];
+            const unmatched = [];
+            const ambiguous = [];
+
+            sourceRefs.forEach((storedKey) => {
+                const sourceRecord = snapshot?.sourceStateById?.[storedKey] || null;
+                const resolution = resolveStoredSourceKeyWithReason(storedKey, sourceLookup, sourceRecord);
+                const baseItem = {
+                    storedKey,
+                    title: getSourceRepairTitle(sourceRecord, storedKey),
+                    reason: resolution.reason || 'unresolved',
+                    resolvedKey: resolution.key || '',
+                    candidates: []
+                };
+
+                if (resolution.key) {
+                    matched.push(baseItem);
+                    return;
+                }
+
+                const candidates = getSourceRepairCandidates(storedKey, sourceLookup, sourceRecord);
+                if (candidates.length > 0) {
+                    ambiguous.push({
+                        ...baseItem,
+                        reason: candidates[0]?.reason || 'ambiguous',
+                        candidates
+                    });
+                    return;
+                }
+
+                unmatched.push(baseItem);
+            });
+
+            return {
+                totalSources: sourceRefs.size,
+                matchedSources: matched.length,
+                unmatchedSources: unmatched.length,
+                ambiguousSources: ambiguous.length,
+                matched,
+                unmatched,
+                ambiguous
+            };
+        }
+
+        function normalizeSourceRemaps(remaps) {
+            if (remaps instanceof Map) {
+                return new Map(Array.from(remaps.entries()).filter(([from, to]) => from && to && from !== to));
+            }
+            if (Array.isArray(remaps)) {
+                return new Map(remaps
+                    .map((entry) => Array.isArray(entry)
+                        ? entry
+                        : [entry?.storedKey || entry?.from || entry?.sourceKey, entry?.resolvedKey || entry?.to || entry?.targetKey])
+                    .filter(([from, to]) => from && to && from !== to));
+            }
+            if (remaps && typeof remaps === 'object') {
+                return new Map(Object.entries(remaps).filter(([from, to]) => from && to && from !== to));
+            }
+            return new Map();
+        }
+
+        function applySourceRemapsToSnapshot(snapshot, remaps) {
+            const sourceRemaps = normalizeSourceRemaps(remaps);
+            const clonedSnapshot = JSON.parse(JSON.stringify(snapshot || {}));
+            if (sourceRemaps.size === 0) return clonedSnapshot;
+
+            const mapSourceKey = (sourceKey) => sourceRemaps.get(sourceKey) || sourceKey;
+            const seenTreeSourceRefs = new Set();
+            const groupsById = clonedSnapshot.groupsById && typeof clonedSnapshot.groupsById === 'object'
+                ? clonedSnapshot.groupsById
+                : {};
+
+            Object.values(groupsById).forEach((group) => {
+                if (!group || !Array.isArray(group.children)) return;
+                const nextChildren = [];
+                group.children.forEach((child) => {
+                    if (child?.type !== 'source') {
+                        nextChildren.push(child);
+                        return;
+                    }
+                    const nextKey = mapSourceKey(child.key);
+                    if (!nextKey || seenTreeSourceRefs.has(nextKey)) return;
+                    seenTreeSourceRefs.add(nextKey);
+                    nextChildren.push({ ...child, key: nextKey });
+                });
+                group.children = nextChildren;
+            });
+
+            clonedSnapshot.ungrouped = (Array.isArray(clonedSnapshot.ungrouped) ? clonedSnapshot.ungrouped : [])
+                .map(mapSourceKey)
+                .filter((sourceKey) => {
+                    if (!sourceKey || seenTreeSourceRefs.has(sourceKey)) return false;
+                    seenTreeSourceRefs.add(sourceKey);
+                    return true;
+                });
+
+            const sourceStateById = clonedSnapshot.sourceStateById && typeof clonedSnapshot.sourceStateById === 'object'
+                ? clonedSnapshot.sourceStateById
+                : {};
+            const nextSourceStateById = {};
+            Object.entries(sourceStateById).forEach(([sourceKey, sourceRecord]) => {
+                if (sourceRemaps.has(sourceKey)) return;
+                nextSourceStateById[sourceKey] = sourceRecord;
+            });
+            Object.entries(sourceStateById).forEach(([sourceKey, sourceRecord]) => {
+                if (!sourceRemaps.has(sourceKey)) return;
+                nextSourceStateById[mapSourceKey(sourceKey)] = sourceRecord;
+            });
+            clonedSnapshot.sourceStateById = nextSourceStateById;
+
+            const sourceTagsById = clonedSnapshot.sourceTagsById && typeof clonedSnapshot.sourceTagsById === 'object'
+                ? clonedSnapshot.sourceTagsById
+                : {};
+            const nextSourceTagsById = {};
+            const mergeTagIds = (targetSourceKey, tagIds) => {
+                if (!targetSourceKey) return;
+                const nextTagIds = new Set(Array.isArray(nextSourceTagsById[targetSourceKey])
+                    ? nextSourceTagsById[targetSourceKey]
+                    : []);
+                (Array.isArray(tagIds) ? tagIds : []).forEach((tagId) => {
+                    if (tagId) nextTagIds.add(tagId);
+                });
+                if (nextTagIds.size > 0) {
+                    nextSourceTagsById[targetSourceKey] = Array.from(nextTagIds);
+                }
+            };
+            Object.entries(sourceTagsById).forEach(([sourceKey, tagIds]) => {
+                if (sourceRemaps.has(sourceKey)) return;
+                mergeTagIds(sourceKey, tagIds);
+            });
+            Object.entries(sourceTagsById).forEach(([sourceKey, tagIds]) => {
+                if (!sourceRemaps.has(sourceKey)) return;
+                mergeTagIds(mapSourceKey(sourceKey), tagIds);
+            });
+            clonedSnapshot.sourceTagsById = nextSourceTagsById;
+
+            return clonedSnapshot;
         }
 
         function snapshotExistingSourceRecords() {
@@ -562,8 +821,11 @@
 
         return {
             buildSourceLookup,
+            buildSourceMatchReport,
             resolveStoredSourceKey,
             resolveStoredSourceKeyWithReason,
+            applySourceRemapsToSnapshot,
+            collectPersistedSourceRefs,
             snapshotExistingSourceRecords,
             buildSingleSourcePositionalRemap,
             remapExistingStateToCurrentSources,

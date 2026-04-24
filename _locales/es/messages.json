@@ -262,6 +262,73 @@
     "ui_settings_feedback_open_failed": {
         "message": "No se pudieron abrir los comentarios de Chrome Web Store"
     },
+    "ui_source_repair_title": {
+        "message": "Reparar fuentes"
+    },
+    "ui_source_repair_summary": {
+        "message": "$1/$2 fuente(s) coinciden · $3 sin coincidencia · $4 requieren revisión",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" },
+            "3": { "content": "$3" },
+            "4": { "content": "$4" }
+        }
+    },
+    "ui_source_repair_healthy": {
+        "message": "Todas las fuentes guardadas coinciden con el notebook actual."
+    },
+    "ui_source_repair_reason": {
+        "message": "Motivo: $1",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_source_repair_select_source": {
+        "message": "Elegir fuente actual para $1",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_source_repair_skip": {
+        "message": "Omitir"
+    },
+    "ui_source_repair_apply": {
+        "message": "Aplicar reparación"
+    },
+    "ui_source_repair_no_selection": {
+        "message": "Elige al menos una fuente para reparar."
+    },
+    "ui_source_repair_applied": {
+        "message": "Reparación aplicada"
+    },
+    "ui_source_repair_failed": {
+        "message": "No se pudo aplicar la reparación"
+    },
+    "ui_history_title": {
+        "message": "Historial de versiones"
+    },
+    "ui_history_empty": {
+        "message": "Aún no hay historial de versiones."
+    },
+    "ui_history_entry_summary": {
+        "message": "$1 · $2 fuente(s) · $3 carpeta(s) · $4 etiqueta(s) · $5",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" },
+            "3": { "content": "$3" },
+            "4": { "content": "$4" },
+            "5": { "content": "$5" }
+        }
+    },
+    "ui_history_restore": {
+        "message": "Restaurar"
+    },
+    "ui_history_restored": {
+        "message": "Versión restaurada"
+    },
+    "ui_history_restore_failed": {
+        "message": "No se pudo restaurar esa versión"
+    },
     "ui_diagnostics_notebook_id": {
         "message": "Notebook"
     },

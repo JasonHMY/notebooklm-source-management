@@ -108,6 +108,22 @@ describe('manager launcher messaging', () => {
         });
     });
 
+    it('cleans up the previous content instance when the script is injected twice', () => {
+        const firstMessageHandler = mod.handleManagerMessage;
+        const firstPatchedPushState = global.history.pushState;
+
+        jest.resetModules();
+        const secondMod = require('../../src/content/index.js');
+
+        expect(global.chrome.runtime.onMessage.addListener).toHaveBeenCalledTimes(2);
+        expect(global.chrome.runtime.onMessage.removeListener).toHaveBeenCalledWith(firstMessageHandler);
+        expect(global.window.removeEventListener).toHaveBeenCalledWith('popstate', expect.any(Function));
+        expect(global.window.removeEventListener).toHaveBeenCalledWith('hashchange', expect.any(Function));
+        expect(global.history.pushState).not.toBe(firstPatchedPushState);
+
+        secondMod._destroyContentInstanceForTest();
+    });
+
     it('tears down the manager when DISABLE_MANAGER is received', () => {
         const mockHost = {
             isConnected: true,

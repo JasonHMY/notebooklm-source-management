@@ -262,6 +262,73 @@
     "ui_settings_feedback_open_failed": {
         "message": "无法打开 Chrome Web Store 反馈页面"
     },
+    "ui_source_repair_title": {
+        "message": "来源修复"
+    },
+    "ui_source_repair_summary": {
+        "message": "$1/$2 个来源已匹配 · $3 个未匹配 · $4 个需要确认",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" },
+            "3": { "content": "$3" },
+            "4": { "content": "$4" }
+        }
+    },
+    "ui_source_repair_healthy": {
+        "message": "所有已保存来源都能匹配当前笔记本。"
+    },
+    "ui_source_repair_reason": {
+        "message": "原因：$1",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_source_repair_select_source": {
+        "message": "为 $1 选择当前来源",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_source_repair_skip": {
+        "message": "跳过"
+    },
+    "ui_source_repair_apply": {
+        "message": "应用修复"
+    },
+    "ui_source_repair_no_selection": {
+        "message": "请至少选择一个要修复的来源。"
+    },
+    "ui_source_repair_applied": {
+        "message": "来源修复已应用"
+    },
+    "ui_source_repair_failed": {
+        "message": "无法应用来源修复"
+    },
+    "ui_history_title": {
+        "message": "版本历史"
+    },
+    "ui_history_empty": {
+        "message": "暂无版本历史。"
+    },
+    "ui_history_entry_summary": {
+        "message": "$1 · $2 个来源 · $3 个文件夹 · $4 个标签 · $5",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" },
+            "3": { "content": "$3" },
+            "4": { "content": "$4" },
+            "5": { "content": "$5" }
+        }
+    },
+    "ui_history_restore": {
+        "message": "恢复"
+    },
+    "ui_history_restored": {
+        "message": "版本已恢复"
+    },
+    "ui_history_restore_failed": {
+        "message": "无法恢复该版本"
+    },
     "ui_diagnostics_notebook_id": {
         "message": "Notebook"
     },

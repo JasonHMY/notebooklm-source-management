@@ -792,11 +792,11 @@ describe('saveState', () => {
         expect(global.chrome.runtime.sendMessage).toHaveBeenCalledTimes(1);
     });
 
-    it('writes the latest state directly to local storage when the page becomes hidden', () => {
+    it('writes the latest state through the save queue when the page becomes hidden', async () => {
         const projectId = seedPersistedState();
 
         global.document.visibilityState = 'hidden';
-        mod.handlePageLifecyclePersistence({ type: 'visibilitychange' });
+        await mod.handlePageLifecyclePersistence({ type: 'visibilitychange' });
 
         const payload = global.chrome.storage.local.set.mock.calls[0][0];
         expect(payload[`sourcesPlusState_${projectId}`]).toMatchObject(expectedPersistableState);
@@ -805,7 +805,46 @@ describe('saveState', () => {
         expect(payload[`sourcesPlusState_${projectId}__backup`]).toEqual(payload[`sourcesPlusState_${projectId}`]);
     });
 
-    it('writes the best preserved snapshot when the page hides during a loading refresh window', () => {
+    it('queues lifecycle local saves behind pending runtime saves and assigns a fresh revision', async () => {
+        const projectId = seedPersistedState();
+        const pendingRuntimeCallbacks = [];
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            pendingRuntimeCallbacks.push({ message, cb });
+        });
+
+        const runtimeSave = mod.saveState({ immediate: true, critical: true });
+        mod.state.ungrouped.push('source4');
+        mod.sourcesByKey.set('source4', {
+            enabled: true,
+            title: 'Source 4',
+            normalizedTitle: 'source 4',
+            stableToken: 'doc-4',
+            fingerprint: 'source 4||article',
+            identityType: 'stable-token'
+        });
+
+        global.document.visibilityState = 'hidden';
+        const lifecycleSave = mod.handlePageLifecyclePersistence({ type: 'visibilitychange' });
+
+        expect(global.chrome.storage.local.set).not.toHaveBeenCalled();
+        pendingRuntimeCallbacks[0].cb({
+            success: true,
+            saveRevision: 5,
+            savedAt: '2026-04-22T00:00:01.000Z'
+        });
+        await runtimeSave;
+        await lifecycleSave;
+
+        const payload = global.chrome.storage.local.set.mock.calls[0][0];
+        const savedState = payload[`sourcesPlusState_${projectId}`];
+        expect(savedState._saveRevision).toBe(6);
+        expect(savedState.ungrouped).toContain('source4');
+        expect(savedState.sourceStateById.source4).toMatchObject({
+            title: 'Source 4'
+        });
+    });
+
+    it('writes the best preserved snapshot when the page hides during a loading refresh window', async () => {
         const projectId = seedPersistedState();
         const { panel } = createMockPanel({ visible: true, contentVisible: true });
 
@@ -825,7 +864,7 @@ describe('saveState', () => {
         mod.sourcesByKey.clear();
 
         global.document.visibilityState = 'hidden';
-        mod.handlePageLifecyclePersistence({ type: 'visibilitychange' });
+        await mod.handlePageLifecyclePersistence({ type: 'visibilitychange' });
 
         const payload = global.chrome.storage.local.set.mock.calls[0][0];
         expect(payload[`sourcesPlusState_${projectId}`]).toMatchObject(expectedPersistableState);
@@ -929,6 +968,130 @@ describe('settings import/export configuration', () => {
         });
     });
 
+    it('builds a source repair report with matched, ambiguous, and unmatched sources', () => {
+        mod.sourcesByKey.set('current-stable', {
+            key: 'current-stable',
+            legacyKey: 'current-stable',
+            title: 'Current Stable',
+            normalizedTitle: 'current stable',
+            stableToken: 'doc-1',
+            fingerprint: 'current stable||article'
+        });
+        mod.sourcesByKey.set('candidate-a', {
+            key: 'candidate-a',
+            legacyKey: 'candidate-a',
+            title: 'Duplicate',
+            normalizedTitle: 'duplicate',
+            stableToken: '',
+            fingerprint: 'candidate a||article'
+        });
+        mod.sourcesByKey.set('candidate-b', {
+            key: 'candidate-b',
+            legacyKey: 'candidate-b',
+            title: 'Duplicate',
+            normalizedTitle: 'duplicate',
+            stableToken: '',
+            fingerprint: 'candidate b||article'
+        });
+
+        const report = mod.getSourceRepairReport({
+            schemaVersion: 3,
+            groups: ['group'],
+            groupsById: {
+                group: {
+                    id: 'group',
+                    title: 'Group',
+                    children: [
+                        { type: 'source', key: 'old-stable' },
+                        { type: 'source', key: 'old-duplicate' },
+                        { type: 'source', key: 'missing' }
+                    ]
+                }
+            },
+            ungrouped: [],
+            sourceStateById: {
+                'old-stable': {
+                    title: 'Old Stable',
+                    normalizedTitle: 'old stable',
+                    stableToken: 'doc-1',
+                    fingerprint: 'old stable||article'
+                },
+                'old-duplicate': {
+                    title: 'Duplicate',
+                    normalizedTitle: 'duplicate',
+                    stableToken: '',
+                    fingerprint: 'old duplicate||article'
+                },
+                missing: {
+                    title: 'Missing',
+                    normalizedTitle: 'missing',
+                    stableToken: '',
+                    fingerprint: 'missing||article'
+                }
+            },
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {}
+        });
+
+        expect(report).toMatchObject({
+            totalSources: 3,
+            matchedSources: 1,
+            ambiguousSources: 1,
+            unmatchedSources: 1,
+            matched: [{ storedKey: 'old-stable', resolvedKey: 'current-stable', reason: 'stable-token' }],
+            unmatched: [{ storedKey: 'missing' }]
+        });
+        expect(report.ambiguous[0]).toMatchObject({
+            storedKey: 'old-duplicate',
+            candidates: [
+                { key: 'candidate-a', reason: 'unique-title' },
+                { key: 'candidate-b', reason: 'unique-title' }
+            ]
+        });
+    });
+
+    it('applies source remaps to tree refs, source state, and tag assignments', () => {
+        const remapped = mod.applySourceRemapsToSnapshot({
+            schemaVersion: 3,
+            groups: ['group'],
+            groupsById: {
+                group: {
+                    id: 'group',
+                    title: 'Group',
+                    children: [
+                        { type: 'source', key: 'old-source' },
+                        { type: 'source', key: 'current-source' }
+                    ]
+                }
+            },
+            ungrouped: ['old-source', 'loose-source'],
+            sourceStateById: {
+                'old-source': { enabled: false, title: 'Old Source' },
+                'current-source': { enabled: true, title: 'Current Source' },
+                'loose-source': { enabled: true, title: 'Loose Source' }
+            },
+            tagsById: { tag1: { id: 'tag1', label: 'Tag' } },
+            tagOrder: ['tag1'],
+            sourceTagsById: {
+                'old-source': ['tag1'],
+                'current-source': ['tag-old']
+            }
+        }, { 'old-source': 'current-source' });
+
+        expect(remapped.groupsById.group.children).toEqual([
+            { type: 'source', key: 'current-source' }
+        ]);
+        expect(remapped.ungrouped).toEqual(['loose-source']);
+        expect(remapped.sourceStateById).toMatchObject({
+            'current-source': { enabled: false, title: 'Old Source' },
+            'loose-source': { enabled: true, title: 'Loose Source' }
+        });
+        expect(remapped.sourceTagsById).toEqual({
+            'current-source': ['tag-old', 'tag1']
+        });
+    });
+
     it('rejects empty or invalid import text', () => {
         expect(mod.previewImportConfig('')).toMatchObject({ ok: false, reason: 'empty' });
         expect(mod.previewImportConfig('{bad json')).toMatchObject({ ok: false, reason: 'invalid' });
@@ -975,7 +1138,7 @@ describe('settings import/export configuration', () => {
         expect(preview).toMatchObject({ ok: false, reason: 'invalid' });
     });
 
-    it('writes an import backup before applying configuration and exposes a restore action', () => {
+    it('writes an import backup before applying configuration and exposes a restore action', async () => {
         mod._setProjectId('project-import');
         mod._setShadowRootForTest({
             host: { isConnected: true },
@@ -985,7 +1148,7 @@ describe('settings import/export configuration', () => {
         mod.state.groups = ['before'];
         mod.groupsById.set('before', { id: 'before', title: 'Before', children: [] });
 
-        const result = mod.applyImportConfig(JSON.stringify({
+        const result = await mod.applyImportConfig(JSON.stringify({
             format: 'notebooklm-source-management-config',
             data: {
                 schemaVersion: 3,
@@ -1015,6 +1178,64 @@ describe('settings import/export configuration', () => {
             variant: 'success',
             actionLabel: 'ui_settings_restore_import_backup'
         });
+    });
+
+    it('waits for the before_import history snapshot before applying and saving imported state', async () => {
+        mod._setProjectId('project-import-order');
+        mod.state.groups = ['before'];
+        mod.groupsById.set('before', { id: 'before', title: 'Before', children: [] });
+
+        const events = [];
+        let resolveHistoryAppend;
+        global.chrome.runtime.sendMessage = jest.fn((message, callback) => {
+            if (message?.type === 'APPEND_STATE_HISTORY') {
+                events.push('history_append_started');
+                resolveHistoryAppend = () => {
+                    events.push('history_append_resolved');
+                    callback({ success: true, history: [message.entry] });
+                };
+                return;
+            }
+            if (message?.type === 'SAVE_STATE') {
+                events.push('critical_save');
+                callback({
+                    success: true,
+                    saveRevision: (Number(message.baseRevision) || 0) + 1,
+                    savedAt: '2026-04-22T00:00:00.000Z'
+                });
+            }
+        });
+
+        const importPromise = mod.applyImportConfig(JSON.stringify({
+            format: 'notebooklm-source-management-config',
+            data: {
+                schemaVersion: 3,
+                groups: ['after'],
+                groupsById: {
+                    after: { id: 'after', title: 'After', children: [] }
+                },
+                ungrouped: [],
+                sourceStateById: {},
+                tagsById: {},
+                tagOrder: [],
+                sourceTagsById: {}
+            }
+        }));
+
+        await Promise.resolve();
+        expect(events).toEqual(['history_append_started']);
+        expect(mod.state.groups).toEqual(['before']);
+
+        resolveHistoryAppend();
+        const result = await importPromise;
+
+        expect(result.ok).toBe(true);
+        expect(events).toEqual([
+            'history_append_started',
+            'history_append_resolved',
+            'critical_save'
+        ]);
+        expect(mod.state.groups).toEqual(['after']);
     });
 
     it('restores the import backup, saves it critically, and clears the backup', async () => {

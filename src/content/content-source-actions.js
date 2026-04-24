@@ -118,6 +118,7 @@
             confirm_dialog_missing: 'ui_native_action_confirm_dialog_missing',
             confirm_dialog_unmatched: 'ui_native_action_confirm_dialog_missing',
             confirm_button_missing: 'ui_native_action_confirm_button_missing',
+            delete_not_confirmed: 'ui_native_action_failed',
             native_action_error: 'ui_native_action_failed',
             native_delete_error: 'ui_native_action_failed'
         };
@@ -871,6 +872,61 @@
             return resolveFreshRowEntry(sourceKey)?.row || null;
         }
 
+        function queryNativeSourceRows() {
+            const doc = getDocument();
+            if (!doc || typeof doc.querySelectorAll !== 'function') return [];
+
+            const selectors = Array.isArray(getDEPS().row)
+                ? getDEPS().row
+                : [getDEPS().row];
+            const seen = new Set();
+            const rows = [];
+            selectors
+                .filter((selector) => typeof selector === 'string' && selector.trim())
+                .forEach((selector) => {
+                    try {
+                        Array.from(doc.querySelectorAll(selector)).forEach((row) => {
+                            if (!row || seen.has(row)) return;
+                            seen.add(row);
+                            rows.push(row);
+                        });
+                    } catch (error) {
+                        // Ignore unsupported selector variants in test or older DOM contexts.
+                    }
+                });
+            return rows;
+        }
+
+        function isElementInDocument(element) {
+            if (!element) return false;
+            const doc = getDocument();
+            if (doc?.body && typeof doc.body.contains === 'function') {
+                return doc.body.contains(element);
+            }
+            return Boolean(element.isConnected);
+        }
+
+        async function waitForNativeSourceRowRemoval(sourceKey, originalRow = null, originalRowCount = 0, maxAttempts = 10, delayMs = 100) {
+            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+                const freshRow = resolveFreshSourceRow(sourceKey);
+                const sourceRows = queryNativeSourceRows();
+                const listShrank = originalRowCount > 0 && sourceRows.length < originalRowCount;
+                if (!freshRow || !isElementInDocument(freshRow)) {
+                    return true;
+                }
+                if (originalRow && !isElementInDocument(originalRow)) {
+                    return true;
+                }
+                if (listShrank) {
+                    return true;
+                }
+                if (attempt < maxAttempts - 1) {
+                    await new Promise((resolve) => setTimeout(resolve, delayMs));
+                }
+            }
+            return false;
+        }
+
         function createSyntheticActivationEvent(type) {
             const eventInit = {
                 bubbles: true,
@@ -1149,6 +1205,8 @@
             if (!nativeMoreBtn || typeof nativeMoreBtn.click !== 'function') {
                 return { deleted: false, reason: 'menu_button_missing' };
             }
+            const sourceRowBeforeDelete = resolveFreshSourceRow(sourceKey) || source.element || null;
+            const sourceRowCountBeforeDelete = queryNativeSourceRows().length || (sourceRowBeforeDelete ? 1 : 0);
 
             const existingMenuFingerprints = new Set(
                 queryNativeMenuItems().map((item) => getNativeMenuItemFingerprint(item))
@@ -1186,6 +1244,14 @@
 
                 confirmButton.click();
                 await waitForNativeDialogsToClose(confirmDialogs);
+                const deleteConfirmed = await waitForNativeSourceRowRemoval(
+                    sourceKey,
+                    sourceRowBeforeDelete,
+                    sourceRowCountBeforeDelete
+                );
+                if (!deleteConfirmed) {
+                    return { deleted: false, reason: 'delete_not_confirmed' };
+                }
                 return { deleted: true };
             } catch (error) {
                 console.error('NotebookLM Source Management: Error during native source deletion.', error);

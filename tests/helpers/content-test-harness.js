@@ -22,6 +22,7 @@ const CONTENT_HELPER_GLOBALS = [
 ];
 
 const setupGlobalMocks = () => {
+    delete globalThis.__NSM_CONTENT_SCRIPT_INSTANCE__;
     global.__resizeObserverInstances = [];
     global.__rafCallbacks = [];
     const sessionStorageData = new Map();
@@ -194,10 +195,21 @@ const setupGlobalMocks = () => {
             sendMessage: jest.fn((message, cb) => {
                 if (message?.type === 'SAVE_STATE' && typeof cb === 'function') {
                     cb({ success: true, saveRevision: (Number(message.baseRevision) || 0) + 1, savedAt: '2026-04-22T00:00:00.000Z' });
+                    return;
+                }
+                if (message?.type === 'APPEND_STATE_HISTORY' && typeof cb === 'function') {
+                    cb({ success: true, history: message.entry ? [message.entry] : [] });
+                    return;
+                }
+                if (message?.type === 'LOAD_STATE_HISTORY' && typeof cb === 'function') {
+                    cb({ success: true, history: [] });
                 }
             }),
             lastError: null,
-            onMessage: { addListener: jest.fn() }
+            onMessage: {
+                addListener: jest.fn(),
+                removeListener: jest.fn()
+            }
         },
         storage: {
             local: {
@@ -604,6 +616,7 @@ const teardownGlobalMocks = () => {
     delete global.getMessage;
     delete global.queueMicrotask;
     CONTENT_HELPER_GLOBALS.forEach((key) => delete global[key]);
+    delete globalThis.__NSM_CONTENT_SCRIPT_INSTANCE__;
     delete global.__resizeObserverInstances;
     delete global.__rafCallbacks;
 };

@@ -350,6 +350,167 @@
             return `${primaryKey}__backup`;
         }
 
+        function getStateHistoryKey(projectId = ctx.projectId) {
+            return projectId ? `sourcesPlusHistory_${projectId}` : '';
+        }
+
+        function getStateHistorySnapshotSignature(snapshot) {
+            return getPersistableSnapshotSignature(snapshot);
+        }
+
+        function getPersistableStateCounts(snapshot) {
+            return {
+                sourceCount: getMapLikeEntries(snapshot?.sourceStateById || {}).length,
+                groupCount: getMapLikeEntries(snapshot?.groupsById || {}).length,
+                tagCount: getMapLikeEntries(snapshot?.tagsById || {}).length
+            };
+        }
+
+        function normalizeStateHistoryEntries(entries) {
+            const list = Array.isArray(entries) ? entries : [];
+            return list
+                .filter((entry) => entry && typeof entry === 'object' && entry.snapshot && hasPersistableManagerState(entry.snapshot))
+                .slice(0, 5)
+                .map((entry) => ({
+                    id: typeof entry.id === 'string' && entry.id ? entry.id : `history-${Date.now()}-${Math.random()}`,
+                    createdAt: typeof entry.createdAt === 'string' ? entry.createdAt : '',
+                    reason: typeof entry.reason === 'string' ? entry.reason : 'manual',
+                    sourceCount: Number(entry.sourceCount) || getPersistableStateCounts(entry.snapshot).sourceCount,
+                    groupCount: Number(entry.groupCount) || getPersistableStateCounts(entry.snapshot).groupCount,
+                    tagCount: Number(entry.tagCount) || getPersistableStateCounts(entry.snapshot).tagCount,
+                    saveRevision: getSnapshotSaveRevision(entry.snapshot) || Number(entry.saveRevision) || 0,
+                    snapshot: cloneSerializableData(entry.snapshot)
+                }));
+        }
+
+        function setStateHistoryEntries(entries) {
+            ctx.stateHistoryEntries = normalizeStateHistoryEntries(entries);
+            return ctx.stateHistoryEntries;
+        }
+
+        function getStateHistoryEntries() {
+            return normalizeStateHistoryEntries(ctx.stateHistoryEntries || []);
+        }
+
+        function loadStateHistory(projectId = ctx.projectId) {
+            const key = getStateHistoryKey(projectId);
+            if (!key) {
+                return Promise.resolve(setStateHistoryEntries([]));
+            }
+
+            const readLocalHistory = () => new Promise((resolve) => {
+                if (!chromeApi?.storage?.local?.get) {
+                    resolve(setStateHistoryEntries([]));
+                    return;
+                }
+
+                try {
+                    chromeApi.storage.local.get([key], (data) => {
+                        if (chromeApi.runtime?.lastError) {
+                            resolve(setStateHistoryEntries([]));
+                            return;
+                        }
+                        resolve(setStateHistoryEntries(data?.[key] || []));
+                    });
+                } catch (error) {
+                    resolve(setStateHistoryEntries([]));
+                }
+            });
+
+            if (!chromeApi?.runtime?.sendMessage) {
+                return readLocalHistory();
+            }
+
+            return new Promise((resolve) => {
+                try {
+                    chromeApi.runtime.sendMessage({ type: 'LOAD_STATE_HISTORY', key }, (response) => {
+                        if (chromeApi.runtime.lastError || !response || response.success === false) {
+                            readLocalHistory().then(resolve);
+                            return;
+                        }
+                        resolve(setStateHistoryEntries(response.history || []));
+                    });
+                } catch (error) {
+                    readLocalHistory().then(resolve);
+                }
+            });
+        }
+
+        function appendStateHistorySnapshot(snapshot = buildPersistableState(), reason = 'manual') {
+            if (!ctx.projectId || !hasPersistableManagerState(snapshot)) {
+                return Promise.resolve(getStateHistoryEntries());
+            }
+
+            const key = getStateHistoryKey();
+            const payloadSnapshot = cloneSerializableData(snapshot);
+            const counts = getPersistableStateCounts(payloadSnapshot);
+            const entry = {
+                id: `${ctx.projectId}:${Date.now()}`,
+                createdAt: new Date().toISOString(),
+                reason,
+                sourceCount: counts.sourceCount,
+                groupCount: counts.groupCount,
+                tagCount: counts.tagCount,
+                saveRevision: getSnapshotSaveRevision(payloadSnapshot),
+                snapshot: payloadSnapshot
+            };
+
+            const appendLocally = () => new Promise((resolve) => {
+                if (!chromeApi?.storage?.local?.get || !chromeApi?.storage?.local?.set) {
+                    resolve(getStateHistoryEntries());
+                    return;
+                }
+
+                try {
+                    chromeApi.storage.local.get([key], (data) => {
+                        if (chromeApi.runtime?.lastError) {
+                            resolve(getStateHistoryEntries());
+                            return;
+                        }
+                        const existingEntries = normalizeStateHistoryEntries(data?.[key] || []);
+                        const nextSignature = getStateHistorySnapshotSignature(payloadSnapshot);
+                        const nextEntries = [
+                            entry,
+                            ...existingEntries.filter((item) => (
+                                getStateHistorySnapshotSignature(item.snapshot) !== nextSignature
+                            ))
+                        ].slice(0, 5);
+                        chromeApi.storage.local.set({ [key]: nextEntries }, () => {
+                            if (chromeApi.runtime?.lastError) {
+                                resolve(getStateHistoryEntries());
+                                return;
+                            }
+                            resolve(setStateHistoryEntries(nextEntries));
+                        });
+                    });
+                } catch (error) {
+                    resolve(getStateHistoryEntries());
+                }
+            });
+
+            if (!chromeApi?.runtime?.sendMessage) {
+                return appendLocally();
+            }
+
+            return new Promise((resolve) => {
+                try {
+                    chromeApi.runtime.sendMessage({
+                        type: 'APPEND_STATE_HISTORY',
+                        key,
+                        entry
+                    }, (response) => {
+                        if (chromeApi.runtime.lastError || !response || response.success === false) {
+                            appendLocally().then(resolve);
+                            return;
+                        }
+                        resolve(setStateHistoryEntries(response.history || []));
+                    });
+                } catch (error) {
+                    appendLocally().then(resolve);
+                }
+            });
+        }
+
         function pickPreferredStoredState(primaryState, backupState) {
             const preferredPrimaryState = getComparableStoredState(primaryState, backupState);
             if (preferredPrimaryState !== primaryState) {
@@ -566,9 +727,7 @@
 
         function enqueueStateSave(key, rawSnapshot, options = {}) {
             const clientSaveId = createClientSaveId();
-            const snapshot = options.skipRuntimeMessage
-                ? preparePersistableSnapshot(rawSnapshot)
-                : prepareRuntimeSaveSnapshot(rawSnapshot);
+            const snapshot = prepareRuntimeSaveSnapshot(rawSnapshot);
             if (options.critical) {
                 writeRecoverySnapshot(snapshot, {
                     reason: options.reason || 'critical_save',
@@ -577,12 +736,15 @@
             }
             const runSave = () => {
                 const baseRevision = Number(ctx.lastKnownSaveRevision) || 0;
+                const saveSnapshot = options.skipRuntimeMessage
+                    ? preparePersistableSnapshot(snapshot)
+                    : snapshot;
                 setSaveStatus({
                     state: 'saving',
                     lastError: '',
                     clientSaveId
                 });
-                return sendStateToStorage(key, snapshot, Object.assign({}, options, {
+                return sendStateToStorage(key, saveSnapshot, Object.assign({}, options, {
                         baseRevision,
                         clientSaveId
                     }))
@@ -590,9 +752,9 @@
                         if (result.ok) {
                             const saveRevision = result.runtimeResult?.saveRevision
                                 || getSnapshotSaveRevision(result.localData)
-                                || getSnapshotSaveRevision(snapshot)
+                                || getSnapshotSaveRevision(saveSnapshot)
                                 || ctx.lastKnownSaveRevision;
-                            const savedAt = result.runtimeResult?.savedAt || result.localData?._savedAt || snapshot._savedAt || new Date().toISOString();
+                            const savedAt = result.runtimeResult?.savedAt || result.localData?._savedAt || saveSnapshot._savedAt || new Date().toISOString();
                             if (saveRevision > ctx.lastKnownSaveRevision) {
                                 ctx.lastKnownSaveRevision = saveRevision;
                             }
@@ -615,7 +777,7 @@
                                 clientSaveId
                             });
                             if (options.critical) {
-                                writeRecoverySnapshot(snapshot, {
+                                writeRecoverySnapshot(saveSnapshot, {
                                     reason: result.reason || 'save_failed',
                                     clientSaveId,
                                     failed: true
@@ -662,32 +824,12 @@
 
         function saveLifecycleSnapshotToLocalStorage(key, rawSnapshot) {
             writeRecoverySnapshot(rawSnapshot, { reason: 'page_lifecycle' });
-            const snapshot = preparePersistableSnapshot(rawSnapshot);
-            return writeStateToLocalStorage(key, snapshot)
-                .then((result) => {
-                    if (result.ok) {
-                        const revision = getSnapshotSaveRevision(snapshot);
-                        if (revision > ctx.lastKnownSaveRevision) {
-                            ctx.lastKnownSaveRevision = revision;
-                        }
-                        setSaveStatus({
-                            state: 'saved',
-                            lastSavedAt: snapshot._savedAt || new Date().toISOString(),
-                            lastSaveRevision: revision,
-                            currentRevision: revision,
-                            lastError: ''
-                        });
-                        clearRecoverySnapshot();
-                    } else {
-                        setSaveStatus({
-                            state: 'failed',
-                            lastError: result.reason || 'save_failed',
-                            recoveryAvailable: true
-                        });
-                    }
-                    notifyCriticalSaveFailure(result);
-                    return result;
-                });
+            return prepareAndQueueStateSave(key, rawSnapshot, {
+                skipRuntimeMessage: true,
+                critical: true,
+                reason: 'page_lifecycle',
+                recordUndo: false
+            });
         }
 
         const debouncedStorageSet = typeof debounceFn === 'function'
@@ -1114,7 +1256,7 @@
 
             const sourcePanel = findSourcePanel();
             const panelState = getSourcePanelState(sourcePanel);
-            if (!hasRenderableSourceRows() || panelState.state !== 'ready') {
+            if (!hasRenderableSourceRows(sourcePanel) || panelState.state !== 'ready') {
                 return true;
             }
 
@@ -1298,6 +1440,11 @@
         return {
             hasRestorableStateSnapshot,
             getStateBackupKey,
+            getStateHistoryKey,
+            getStateHistoryEntries,
+            setStateHistoryEntries,
+            loadStateHistory,
+            appendStateHistorySnapshot,
             pickPreferredStoredState,
             writeStateToLocalStorage,
             sendStateToStorage,

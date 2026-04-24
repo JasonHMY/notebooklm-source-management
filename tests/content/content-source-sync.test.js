@@ -31,6 +31,27 @@ describe('scanAndSyncSources', () => {
 
     afterEach(teardownGlobalMocks);
 
+    it('scans rows from the current source panel instead of hidden stale panels', () => {
+        const stale = createMockSourceRow({ title: 'Hidden Old Source', stableToken: 'old-doc', checked: true });
+        const current = createMockSourceRow({ title: 'Current Source', stableToken: 'current-doc', checked: true });
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        panel.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [current.row] : []
+        ));
+
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [stale.row, current.row] : []
+        ));
+
+        mod.scanAndSyncSources({}, true);
+
+        expect(panel.querySelectorAll).toHaveBeenCalled();
+        expect(Array.from(mod.sourcesByKey.values()).map((source) => source.title)).toEqual(['Current Source']);
+    });
+
     it('hydrates v2 state, appends new sources, and preserves loading metadata', () => {
         const first = createMockSourceRow({ title: 'First Source', stableToken: 'doc-1', checked: true });
         const second = createMockSourceRow({ title: 'First Source', stableToken: null, iconName: 'video_youtube', loading: true });
