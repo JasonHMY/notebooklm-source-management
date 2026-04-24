@@ -353,6 +353,18 @@
     "ui_diagnostics_last_save_error": {
         "message": "Último error de guardado"
     },
+    "ui_diagnostics_storage_usage": {
+        "message": "Uso de almacenamiento"
+    },
+    "ui_diagnostics_storage_warning": {
+        "message": "Advertencia de almacenamiento"
+    },
+    "ui_diagnostics_last_storage_error": {
+        "message": "Último error de almacenamiento"
+    },
+    "ui_diagnostics_history_entries": {
+        "message": "Entradas del historial"
+    },
     "ui_diagnostics_recovery": {
         "message": "Recuperación"
     },
@@ -482,6 +494,9 @@
     },
     "ui_save_stale_failed": {
         "message": "El guardado se bloqueó porque otra pestaña tiene cambios más recientes."
+    },
+    "ui_save_quota_failed": {
+        "message": "No hay suficiente almacenamiento para guardar. Exporta la configuración o borra el historial de versiones y reintenta."
     },
     "ui_save_status_saving": {
         "message": "Guardando..."

@@ -114,7 +114,13 @@
             currentRevision: 0,
             recoveryAvailable: false,
             recoveryCreatedAt: '',
-            clientSaveId: ''
+            clientSaveId: '',
+            storageUsageBytes: 0,
+            storageQuotaBytes: 0,
+            storageUsageRatio: 0,
+            storageWarning: false,
+            lastStorageError: '',
+            historyEntryCount: 0
         };
 
         function getSaveStatus() {
@@ -122,6 +128,35 @@
                 ctx.saveStatus = { ...DEFAULT_SAVE_STATUS };
             }
             return ctx.saveStatus;
+        }
+
+        function isStorageQuotaError(error) {
+            const message = String(error?.message || error || '').toLowerCase();
+            return message.includes('quota') ||
+                message.includes('exceed') ||
+                message.includes('maximum') ||
+                message.includes('max_bytes');
+        }
+
+        function getStorageMetadataFromResponse(response = {}) {
+            return {
+                storageUsageBytes: Number(response.storageUsageBytes) || 0,
+                storageQuotaBytes: Number(response.storageQuotaBytes) || 0,
+                storageUsageRatio: Number(response.storageUsageRatio) || 0,
+                storageWarning: Boolean(response.storageWarning),
+                historyEntryCount: Number(response.historyEntryCount) || 0,
+                historyTrimmed: Boolean(response.historyTrimmed)
+            };
+        }
+
+        function getStorageMetadataFromResult(result = {}) {
+            const runtimeResult = result.runtimeResult || {};
+            const localResult = result.localResult || {};
+            return getStorageMetadataFromResponse(
+                runtimeResult.storageQuotaBytes || runtimeResult.storageUsageBytes
+                    ? runtimeResult
+                    : localResult
+            );
         }
 
         function setSaveStatus(nextStatus = {}) {
@@ -553,7 +588,12 @@
                     chromeApi.storage.local.set(payload, () => {
                         if (chromeApi.runtime?.lastError) {
                             console.warn('NotebookLM Source Management: Local storage write failed:', chromeApi.runtime.lastError);
-                            resolve({ ok: false, reason: 'local_storage_error' });
+                            resolve({
+                                ok: false,
+                                reason: isStorageQuotaError(chromeApi.runtime.lastError)
+                                    ? 'storage_quota_exceeded'
+                                    : 'local_storage_error'
+                            });
                             return;
                         }
                         resolve({ ok: true });
@@ -618,6 +658,7 @@
 
                         if (response && response.success === false) {
                             console.warn('NotebookLM Source Management: SAVE_STATE rejected by background:', response.errorCode || 'unknown_error');
+                            const storageMetadata = getStorageMetadataFromResponse(response);
                             if (response.errorCode === 'stale_revision') {
                                 const currentRevision = Number(response.currentRevision) || 0;
                                 if (currentRevision > ctx.lastKnownSaveRevision) {
@@ -627,15 +668,21 @@
                                     ok: false,
                                     reason: 'stale_revision',
                                     stale: true,
-                                    currentRevision
+                                    currentRevision,
+                                    ...storageMetadata
                                 });
                                 return;
                             }
-                            resolve({ ok: false, reason: response.errorCode || 'runtime_failure' });
+                            resolve({
+                                ok: false,
+                                reason: response.errorCode || 'runtime_failure',
+                                ...storageMetadata
+                            });
                             return;
                         }
 
                         const saveRevision = Number(response?.saveRevision) || 0;
+                        const storageMetadata = getStorageMetadataFromResponse(response);
                         if (saveRevision > ctx.lastKnownSaveRevision) {
                             ctx.lastKnownSaveRevision = saveRevision;
                         }
@@ -643,7 +690,8 @@
                             ok: true,
                             stale: Boolean(response?.stale),
                             saveRevision,
-                            savedAt: response?.savedAt || ''
+                            savedAt: response?.savedAt || '',
+                            ...storageMetadata
                         });
                     });
                 } catch (error) {
@@ -665,6 +713,14 @@
                         ok: false,
                         reason: 'stale_revision',
                         localResult: { skipped: true, reason: 'stale_revision' },
+                        runtimeResult
+                    };
+                }
+                if (runtimeResult.reason === 'storage_quota_exceeded') {
+                    return {
+                        ok: false,
+                        reason: 'storage_quota_exceeded',
+                        localResult: { skipped: true, reason: 'storage_quota_exceeded' },
                         runtimeResult
                     };
                 }
@@ -720,9 +776,12 @@
 
         function notifyCriticalSaveFailure(result) {
             if (result?.ok) return;
-            showToast(getMessage(result?.reason === 'stale_revision'
+            const messageKey = result?.reason === 'stale_revision'
                 ? 'ui_save_stale_failed'
-                : 'ui_save_failed'), { variant: 'error' });
+                : result?.reason === 'storage_quota_exceeded'
+                    ? 'ui_save_quota_failed'
+                    : 'ui_save_failed';
+            showToast(getMessage(messageKey), { variant: 'error' });
         }
 
         function enqueueStateSave(key, rawSnapshot, options = {}) {
@@ -749,6 +808,9 @@
                         clientSaveId
                     }))
                     .then((result) => {
+                        const storageMetadata = getStorageMetadataFromResult(result);
+                        const hasStorageMetadata = storageMetadata.storageQuotaBytes > 0 || storageMetadata.storageUsageBytes > 0;
+                        const currentStatus = getSaveStatus();
                         if (result.ok) {
                             const saveRevision = result.runtimeResult?.saveRevision
                                 || getSnapshotSaveRevision(result.localData)
@@ -764,17 +826,32 @@
                                 lastSaveRevision: saveRevision,
                                 currentRevision: saveRevision,
                                 lastError: '',
-                                clientSaveId
+                                clientSaveId,
+                                storageUsageBytes: hasStorageMetadata ? storageMetadata.storageUsageBytes : currentStatus.storageUsageBytes,
+                                storageQuotaBytes: hasStorageMetadata ? storageMetadata.storageQuotaBytes : currentStatus.storageQuotaBytes,
+                                storageUsageRatio: hasStorageMetadata ? storageMetadata.storageUsageRatio : currentStatus.storageUsageRatio,
+                                storageWarning: hasStorageMetadata ? storageMetadata.storageWarning : currentStatus.storageWarning,
+                                lastStorageError: '',
+                                historyEntryCount: hasStorageMetadata ? storageMetadata.historyEntryCount : currentStatus.historyEntryCount
                             });
                             if (options.critical) {
                                 clearRecoverySnapshot();
                             }
                         } else {
+                            const lastStorageError = result.reason === 'storage_quota_exceeded'
+                                ? 'storage_quota_exceeded'
+                                : getSaveStatus().lastStorageError || '';
                             setSaveStatus({
                                 state: result.reason === 'stale_revision' ? 'stale' : 'failed',
                                 lastError: result.reason || 'save_failed',
                                 currentRevision: result.runtimeResult?.currentRevision || ctx.lastKnownSaveRevision,
-                                clientSaveId
+                                clientSaveId,
+                                storageUsageBytes: hasStorageMetadata ? storageMetadata.storageUsageBytes : currentStatus.storageUsageBytes,
+                                storageQuotaBytes: hasStorageMetadata ? storageMetadata.storageQuotaBytes : currentStatus.storageQuotaBytes,
+                                storageUsageRatio: hasStorageMetadata ? storageMetadata.storageUsageRatio : currentStatus.storageUsageRatio,
+                                storageWarning: hasStorageMetadata ? storageMetadata.storageWarning : currentStatus.storageWarning,
+                                lastStorageError,
+                                historyEntryCount: hasStorageMetadata ? storageMetadata.historyEntryCount : currentStatus.historyEntryCount
                             });
                             if (options.critical) {
                                 writeRecoverySnapshot(saveSnapshot, {

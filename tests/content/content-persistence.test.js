@@ -215,6 +215,50 @@ describe('saveState', () => {
         mod._hideActiveToastForTest(false);
     });
 
+    it('surfaces storage quota failures without falling back to a local overwrite', async () => {
+        seedPersistedState();
+        mod._setShadowRootForTest({
+            host: { isConnected: true },
+            querySelector: jest.fn(() => null),
+            appendChild: jest.fn()
+        });
+        global.chrome.runtime.sendMessage.mockImplementationOnce((message, cb) => {
+            cb({
+                success: false,
+                errorCode: 'storage_quota_exceeded',
+                storageUsageBytes: 9800,
+                storageQuotaBytes: 10000,
+                storageUsageRatio: 0.98,
+                storageWarning: true,
+                historyEntryCount: 1,
+                historyTrimmed: true
+            });
+        });
+
+        const result = await mod.saveState({ immediate: true, critical: true });
+        const saveStatus = mod.getSaveStatus();
+
+        expect(result).toMatchObject({
+            ok: false,
+            reason: 'storage_quota_exceeded'
+        });
+        expect(global.chrome.storage.local.set).not.toHaveBeenCalled();
+        expect(saveStatus).toMatchObject({
+            state: 'failed',
+            lastError: 'storage_quota_exceeded',
+            storageUsageBytes: 9800,
+            storageQuotaBytes: 10000,
+            storageWarning: true,
+            lastStorageError: 'storage_quota_exceeded',
+            historyEntryCount: 1
+        });
+        expect(mod._getActiveToastItemForTest()).toMatchObject({
+            message: 'ui_save_quota_failed',
+            variant: 'error'
+        });
+        mod._hideActiveToastForTest(false);
+    });
+
     it('does not let a local fallback write overwrite a newer saved revision', async () => {
         const projectId = seedPersistedState();
         const newerState = {

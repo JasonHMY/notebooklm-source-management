@@ -6,6 +6,9 @@ const EXTENSION_ENABLED_KEY = 'extensionEnabled';
 const STATE_KEY_PREFIX = 'sourcesPlusState_';
 const STATE_HISTORY_KEY_PREFIX = 'sourcesPlusHistory_';
 const STATE_HISTORY_LIMIT = 5;
+const DEFAULT_STORAGE_QUOTA_BYTES = 10 * 1024 * 1024;
+const STORAGE_WARNING_RATIO = 0.8;
+const STORAGE_CRITICAL_RATIO = 0.95;
 const ERROR_CODES = {
     INVALID_STORAGE_KEY: 'invalid_storage_key',
     RUNTIME_FAILURE: 'runtime_failure',
@@ -14,9 +17,70 @@ const ERROR_CODES = {
     TAB_FOCUS_FAILED: 'tab_focus_failed',
     WINDOW_FOCUS_FAILED: 'window_focus_failed',
     TAB_CREATE_FAILED: 'tab_create_failed',
-    STALE_REVISION: 'stale_revision'
+    STALE_REVISION: 'stale_revision',
+    STORAGE_QUOTA_EXCEEDED: 'storage_quota_exceeded'
 };
 const stateSaveQueueByKey = new Map();
+
+function getStorageQuotaBytes() {
+    const quotaBytes = Number(globalThis.chrome?.storage?.local?.QUOTA_BYTES);
+    return Number.isFinite(quotaBytes) && quotaBytes > 0 ? quotaBytes : DEFAULT_STORAGE_QUOTA_BYTES;
+}
+
+function getSerializedByteLength(value) {
+    let serialized = '';
+    try {
+        serialized = JSON.stringify(value ?? null);
+    } catch (error) {
+        serialized = String(value ?? '');
+    }
+
+    if (typeof TextEncoder !== 'undefined') {
+        return new TextEncoder().encode(serialized).length;
+    }
+    return serialized.length;
+}
+
+function createStorageUsageInfo(payload, quotaBytes = getStorageQuotaBytes()) {
+    const storageUsageBytes = getSerializedByteLength(payload);
+    const storageQuotaBytes = Number.isFinite(quotaBytes) && quotaBytes > 0
+        ? quotaBytes
+        : DEFAULT_STORAGE_QUOTA_BYTES;
+    const storageUsageRatio = storageUsageBytes / storageQuotaBytes;
+    return {
+        storageUsageBytes,
+        storageQuotaBytes,
+        storageUsageRatio,
+        storageWarning: storageUsageRatio >= STORAGE_WARNING_RATIO
+    };
+}
+
+function isStorageCritical(usageInfo) {
+    return Boolean(
+        usageInfo &&
+        (
+            Number(usageInfo.storageUsageRatio) >= STORAGE_CRITICAL_RATIO ||
+            Number(usageInfo.storageUsageBytes) > Number(usageInfo.storageQuotaBytes)
+        )
+    );
+}
+
+function isStorageQuotaError(error) {
+    const message = String(error?.message || error || '').toLowerCase();
+    return message.includes('quota') ||
+        message.includes('exceed') ||
+        message.includes('maximum') ||
+        message.includes('max_bytes');
+}
+
+function createStorageResponseFields(usageInfo = {}, extra = {}) {
+    return Object.assign({
+        storageUsageBytes: Number(usageInfo.storageUsageBytes) || 0,
+        storageQuotaBytes: Number(usageInfo.storageQuotaBytes) || getStorageQuotaBytes(),
+        storageUsageRatio: Number(usageInfo.storageUsageRatio) || 0,
+        storageWarning: Boolean(usageInfo.storageWarning)
+    }, extra);
+}
 
 function isAuthorizedNotebookSender(sender) {
     return Boolean(
@@ -380,6 +444,59 @@ function createSavedStateSnapshot(data, currentRevision, baseRevision = null) {
     return snapshot;
 }
 
+function createStateStoragePayload({
+    key,
+    backupKey,
+    historyKey,
+    savedState,
+    existingHistory,
+    reason = 'save',
+    historyLimit = STATE_HISTORY_LIMIT
+}) {
+    const storagePayload = { [key]: savedState };
+    let history = [];
+    if (hasRestorableStateSnapshot(savedState)) {
+        storagePayload[backupKey] = savedState;
+        history = appendHistoryEntry(
+            existingHistory,
+            createHistoryEntryFromSnapshot(savedState, reason)
+        ).slice(0, historyLimit);
+        storagePayload[historyKey] = history;
+    }
+
+    return {
+        payload: storagePayload,
+        history,
+        usageInfo: createStorageUsageInfo(storagePayload)
+    };
+}
+
+function trimStateStorageHistory(payloadInfo, historyKey) {
+    if (!payloadInfo || !Array.isArray(payloadInfo.history) || payloadInfo.history.length <= 1) {
+        return payloadInfo;
+    }
+
+    const trimmedHistory = payloadInfo.history.slice(0, 1);
+    const payload = Object.assign({}, payloadInfo.payload, {
+        [historyKey]: trimmedHistory
+    });
+    return {
+        payload,
+        history: trimmedHistory,
+        usageInfo: createStorageUsageInfo(payload),
+        historyTrimmed: true
+    };
+}
+
+function prepareStateStoragePayloadForQuota(payloadInfo, historyKey) {
+    if (!isStorageCritical(payloadInfo?.usageInfo)) {
+        return payloadInfo;
+    }
+
+    const trimmedPayloadInfo = trimStateStorageHistory(payloadInfo, historyKey);
+    return trimmedPayloadInfo || payloadInfo;
+}
+
 function pickPreferredStoredState(primaryState, backupState) {
     if (
         hasRestorableStateSnapshot(primaryState) &&
@@ -440,27 +557,59 @@ function writeStateWithRevisionGuard(request, sendResponse) {
         }
 
         const savedState = createSavedStateSnapshot(data, currentRevision, baseRevision);
-        const storagePayload = { [key]: savedState };
-        if (hasRestorableStateSnapshot(savedState)) {
-            storagePayload[backupKey] = savedState;
-            storagePayload[historyKey] = appendHistoryEntry(
-                existingData && typeof existingData === 'object' ? existingData[historyKey] : [],
-                createHistoryEntryFromSnapshot(savedState, request.critical ? 'critical_save' : 'save')
-            );
+        const existingHistory = existingData && typeof existingData === 'object' ? existingData[historyKey] : [];
+        const initialPayloadInfo = createStateStoragePayload({
+            key,
+            backupKey,
+            historyKey,
+            savedState,
+            existingHistory,
+            reason: request.critical ? 'critical_save' : 'save'
+        });
+        const payloadInfo = prepareStateStoragePayloadForQuota(initialPayloadInfo, historyKey);
+        if (isStorageCritical(payloadInfo.usageInfo)) {
+            sendResponse(Object.assign({
+                success: false,
+                errorCode: ERROR_CODES.STORAGE_QUOTA_EXCEEDED
+            }, createStorageResponseFields(payloadInfo.usageInfo, {
+                historyEntryCount: payloadInfo.history.length,
+                historyTrimmed: Boolean(payloadInfo.historyTrimmed)
+            })));
+            return;
         }
 
-        chrome.storage.local.set(storagePayload, () => {
+        const writePayload = (nextPayloadInfo, didRetry = false) => chrome.storage.local.set(nextPayloadInfo.payload, () => {
             if (chrome.runtime.lastError) {
                 console.error('NotebookLM Source Management background save error:', chrome.runtime.lastError);
-                sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
+                if (!didRetry && isStorageQuotaError(chrome.runtime.lastError)) {
+                    const trimmedPayloadInfo = trimStateStorageHistory(nextPayloadInfo, historyKey);
+                    if (trimmedPayloadInfo !== nextPayloadInfo && !isStorageCritical(trimmedPayloadInfo.usageInfo)) {
+                        writePayload(trimmedPayloadInfo, true);
+                        return;
+                    }
+                }
+
+                const isQuotaError = isStorageQuotaError(chrome.runtime.lastError);
+                sendResponse(Object.assign({
+                    success: false,
+                    errorCode: isQuotaError ? ERROR_CODES.STORAGE_QUOTA_EXCEEDED : ERROR_CODES.RUNTIME_FAILURE
+                }, createStorageResponseFields(nextPayloadInfo.usageInfo, {
+                    historyEntryCount: nextPayloadInfo.history.length,
+                    historyTrimmed: Boolean(nextPayloadInfo.historyTrimmed)
+                })));
             } else {
-                sendResponse({
+                sendResponse(Object.assign({
                     success: true,
                     saveRevision: savedState._saveRevision,
                     savedAt: savedState._savedAt
-                });
+                }, createStorageResponseFields(nextPayloadInfo.usageInfo, {
+                    historyEntryCount: nextPayloadInfo.history.length,
+                    historyTrimmed: Boolean(nextPayloadInfo.historyTrimmed)
+                })));
             }
         });
+
+        writePayload(payloadInfo);
     });
 }
 
@@ -491,12 +640,48 @@ function appendStateHistoryNow(request, sendResponse) {
             data && typeof data === 'object' ? data[key] : [],
             request.entry
         );
-        chrome.storage.local.set({ [key]: history }, () => {
+        const initialPayload = { [key]: history };
+        let nextHistory = history;
+        let payload = initialPayload;
+        let usageInfo = createStorageUsageInfo(payload);
+        let historyTrimmed = false;
+        if (isStorageCritical(usageInfo) && history.length > 1) {
+            nextHistory = history.slice(0, 1);
+            payload = { [key]: nextHistory };
+            usageInfo = createStorageUsageInfo(payload);
+            historyTrimmed = true;
+        }
+        if (isStorageCritical(usageInfo)) {
+            sendResponse(Object.assign({
+                success: false,
+                errorCode: ERROR_CODES.STORAGE_QUOTA_EXCEEDED
+            }, createStorageResponseFields(usageInfo, {
+                historyEntryCount: nextHistory.length,
+                historyTrimmed
+            })));
+            return;
+        }
+
+        chrome.storage.local.set(payload, () => {
             if (chrome.runtime.lastError) {
-                sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
+                sendResponse(Object.assign({
+                    success: false,
+                    errorCode: isStorageQuotaError(chrome.runtime.lastError)
+                        ? ERROR_CODES.STORAGE_QUOTA_EXCEEDED
+                        : ERROR_CODES.RUNTIME_FAILURE
+                }, createStorageResponseFields(usageInfo, {
+                    historyEntryCount: nextHistory.length,
+                    historyTrimmed
+                })));
                 return;
             }
-            sendResponse({ success: true, history });
+            sendResponse(Object.assign({
+                success: true,
+                history: nextHistory
+            }, createStorageResponseFields(usageInfo, {
+                historyEntryCount: nextHistory.length,
+                historyTrimmed
+            })));
         });
     });
 }
@@ -651,8 +836,17 @@ if (typeof module !== 'undefined' && module.exports) {
         EXTENSION_ENABLED_KEY,
         STATE_HISTORY_KEY_PREFIX,
         STATE_HISTORY_LIMIT,
+        DEFAULT_STORAGE_QUOTA_BYTES,
+        STORAGE_WARNING_RATIO,
+        STORAGE_CRITICAL_RATIO,
         ERROR_CODES,
         CHROME_WEB_STORE_DETAIL_URL_PREFIX,
+        getStorageQuotaBytes,
+        getSerializedByteLength,
+        createStorageUsageInfo,
+        isStorageCritical,
+        isStorageQuotaError,
+        createStorageResponseFields,
         getStateBackupKey,
         getStateHistoryKey,
         getSnapshotSaveRevision,

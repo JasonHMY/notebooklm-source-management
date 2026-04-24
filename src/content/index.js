@@ -1296,6 +1296,14 @@
             savedAt: saveStatus.lastSavedAt || '',
             saveStatus: saveStatus.state || 'idle',
             lastSaveError: saveStatus.lastError || '',
+            storageUsageBytes: Number(saveStatus.storageUsageBytes) || 0,
+            storageQuotaBytes: Number(saveStatus.storageQuotaBytes) || 0,
+            storageUsageRatio: Number(saveStatus.storageUsageRatio) || 0,
+            storageWarning: Boolean(saveStatus.storageWarning),
+            lastStorageError: saveStatus.lastStorageError || '',
+            historyEntryCount: Array.isArray(stateHistoryEntries)
+                ? stateHistoryEntries.length
+                : Number(saveStatus.historyEntryCount) || 0,
             recoveryAvailable: Boolean(recovery),
             recoveryCreatedAt: recovery?.createdAt || '',
             recoveryBaseRevision: Number(recovery?.baseRevision) || 0,

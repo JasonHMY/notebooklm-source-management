@@ -560,6 +560,12 @@ describe('modal option motion', () => {
                 savedAt: '2026-04-22T00:00:00.000Z',
                 saveStatus: 'saved',
                 lastSaveError: '',
+                storageUsageBytes: 8 * 1024 * 1024,
+                storageQuotaBytes: 10 * 1024 * 1024,
+                storageUsageRatio: 0.8,
+                storageWarning: true,
+                lastStorageError: 'storage_quota_exceeded',
+                historyEntryCount: 3,
                 recoveryAvailable: true,
                 importBackupAvailable: true,
                 lastNativeActionFailure: { reason: 'menu_item_missing' },
@@ -628,6 +634,12 @@ describe('modal option motion', () => {
         expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('ui_diagnostics_notebook_id');
         expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('diagnostic-test');
         expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('ui_diagnostics_import_backup');
+        expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('ui_diagnostics_storage_usage');
+        expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('8.0 MB / 10 MB (80%)');
+        expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('ui_diagnostics_storage_warning');
+        expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('ui_diagnostics_last_storage_error');
+        expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('storage_quota_exceeded');
+        expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('ui_diagnostics_history_entries');
         expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('ui_diagnostics_native_failure_history');
         expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('menu_item_missing');
         expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('(+1)');

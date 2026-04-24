@@ -353,6 +353,18 @@
     "ui_diagnostics_last_save_error": {
         "message": "最近保存错误"
     },
+    "ui_diagnostics_storage_usage": {
+        "message": "存储使用量"
+    },
+    "ui_diagnostics_storage_warning": {
+        "message": "存储警告"
+    },
+    "ui_diagnostics_last_storage_error": {
+        "message": "最近存储错误"
+    },
+    "ui_diagnostics_history_entries": {
+        "message": "历史条目数"
+    },
     "ui_diagnostics_recovery": {
         "message": "恢复快照"
     },
@@ -482,6 +494,9 @@
     },
     "ui_save_stale_failed": {
         "message": "保存被阻止，因为另一个标签页有更新的修改。"
+    },
+    "ui_save_quota_failed": {
+        "message": "存储空间不足，无法保存。请导出配置或清理版本历史后重试。"
     },
     "ui_save_status_saving": {
         "message": "正在保存..."

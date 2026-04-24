@@ -537,6 +537,21 @@
             const nativeFailureSummary = failureCount > 1
                 ? `${latestNativeFailureReason} (+${failureCount - 1})`
                 : latestNativeFailureReason;
+            const formatBytes = (bytes) => {
+                const value = Number(bytes) || 0;
+                if (value <= 0) return '0 B';
+                const units = ['B', 'KB', 'MB'];
+                let unitIndex = 0;
+                let nextValue = value;
+                while (nextValue >= 1024 && unitIndex < units.length - 1) {
+                    nextValue /= 1024;
+                    unitIndex += 1;
+                }
+                return `${nextValue >= 10 || unitIndex === 0 ? Math.round(nextValue) : nextValue.toFixed(1)} ${units[unitIndex]}`;
+            };
+            const storageUsage = Number(diagnostics.storageQuotaBytes) > 0
+                ? `${formatBytes(diagnostics.storageUsageBytes)} / ${formatBytes(diagnostics.storageQuotaBytes)} (${Math.round((Number(diagnostics.storageUsageRatio) || 0) * 100)}%)`
+                : '-';
             return [
                 ['ui_diagnostics_notebook_id', diagnostics.notebookId || '-'],
                 ['ui_diagnostics_sources', String(diagnostics.sourceCount ?? 0)],
@@ -546,6 +561,10 @@
                 ['ui_diagnostics_saved_at', diagnostics.savedAt || '-'],
                 ['ui_diagnostics_save_status', diagnostics.saveStatus || 'idle'],
                 ['ui_diagnostics_last_save_error', diagnostics.lastSaveError || '-'],
+                ['ui_diagnostics_storage_usage', storageUsage],
+                ['ui_diagnostics_storage_warning', diagnostics.storageWarning ? getMessage('ui_yes') : getMessage('ui_no')],
+                ['ui_diagnostics_last_storage_error', diagnostics.lastStorageError || '-'],
+                ['ui_diagnostics_history_entries', String(diagnostics.historyEntryCount ?? 0)],
                 ['ui_diagnostics_recovery', diagnostics.recoveryAvailable ? getMessage('ui_yes') : getMessage('ui_no')],
                 ['ui_diagnostics_import_backup', diagnostics.importBackupAvailable ? getMessage('ui_yes') : getMessage('ui_no')],
                 ['ui_diagnostics_native_failure_history', nativeFailureSummary]

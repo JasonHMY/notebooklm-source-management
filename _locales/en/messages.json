@@ -353,6 +353,18 @@
     "ui_diagnostics_last_save_error": {
         "message": "Last save error"
     },
+    "ui_diagnostics_storage_usage": {
+        "message": "Storage usage"
+    },
+    "ui_diagnostics_storage_warning": {
+        "message": "Storage warning"
+    },
+    "ui_diagnostics_last_storage_error": {
+        "message": "Last storage error"
+    },
+    "ui_diagnostics_history_entries": {
+        "message": "History entries"
+    },
     "ui_diagnostics_recovery": {
         "message": "Recovery"
     },
@@ -482,6 +494,9 @@
     },
     "ui_save_stale_failed": {
         "message": "Save blocked because another tab has newer changes."
+    },
+    "ui_save_quota_failed": {
+        "message": "Not enough storage to save. Export your configuration or clear version history, then retry."
     },
     "ui_save_status_saving": {
         "message": "Saving..."

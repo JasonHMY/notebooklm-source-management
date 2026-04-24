@@ -124,11 +124,16 @@ describe('background.js message listener', () => {
             }),
             expect.any(Function)
         );
-        expect(mockSendResponse).toHaveBeenCalledWith({
+        expect(mockSendResponse).toHaveBeenCalledWith(expect.objectContaining({
             success: true,
             saveRevision: 1,
-            savedAt: expect.any(String)
-        });
+            savedAt: expect.any(String),
+            storageUsageBytes: expect.any(Number),
+            storageQuotaBytes: expect.any(Number),
+            storageUsageRatio: expect.any(Number),
+            storageWarning: false,
+            historyEntryCount: 1
+        }));
         expect(result).toBe(true); // Should return true to keep channel open
     });
 
@@ -232,11 +237,11 @@ describe('background.js message listener', () => {
             }),
             expect.any(Function)
         );
-        expect(mockSendResponse).toHaveBeenCalledWith({
+        expect(mockSendResponse).toHaveBeenCalledWith(expect.objectContaining({
             success: true,
             saveRevision: 6,
             savedAt: expect.any(String)
-        });
+        }));
     });
 
     it('should keep assigned revisions monotonic when explicit base is ahead of storage', () => {
@@ -273,11 +278,11 @@ describe('background.js message listener', () => {
             }),
             expect.any(Function)
         );
-        expect(mockSendResponse).toHaveBeenCalledWith({
+        expect(mockSendResponse).toHaveBeenCalledWith(expect.objectContaining({
             success: true,
             saveRevision: 6,
             savedAt: expect.any(String)
-        });
+        }));
     });
 
     it('should serialize SAVE_STATE writes for the same key before checking revisions', async () => {
@@ -326,11 +331,11 @@ describe('background.js message listener', () => {
         });
 
         pendingSets[0].cb();
-        expect(firstResponse).toHaveBeenCalledWith({
+        expect(firstResponse).toHaveBeenCalledWith(expect.objectContaining({
             success: true,
             saveRevision: 1,
             savedAt: expect.any(String)
-        });
+        }));
         await Promise.resolve();
         await Promise.resolve();
 
@@ -344,11 +349,11 @@ describe('background.js message listener', () => {
         });
 
         pendingSets[1].cb();
-        expect(secondResponse).toHaveBeenCalledWith({
+        expect(secondResponse).toHaveBeenCalledWith(expect.objectContaining({
             success: true,
             saveRevision: 2,
             savedAt: expect.any(String)
-        });
+        }));
     });
 
     it('should not overwrite the backup snapshot when SAVE_STATE receives an empty payload', () => {
@@ -445,11 +450,104 @@ describe('background.js message listener', () => {
             'NotebookLM Source Management background save error:',
             global.chrome.runtime.lastError
         );
-        expect(mockSendResponse).toHaveBeenCalledWith({
+        expect(mockSendResponse).toHaveBeenCalledWith(expect.objectContaining({
             success: false,
-            errorCode: 'runtime_failure'
-        });
+            errorCode: 'storage_quota_exceeded',
+            storageUsageBytes: expect.any(Number),
+            storageQuotaBytes: expect.any(Number),
+            storageUsageRatio: expect.any(Number)
+        }));
         expect(result).toBe(true);
+    });
+
+    it('returns storage warning metadata when projected save payload is near quota', () => {
+        const request = {
+            type: 'SAVE_STATE',
+            key: 'sourcesPlusState_123',
+            data: {
+                groups: ['large'],
+                groupsById: { large: { id: 'large', children: [] } },
+                sourceStateById: {
+                    source_1: { enabled: true, title: 'x'.repeat(1200) }
+                }
+            }
+        };
+        global.chrome.storage.local.QUOTA_BYTES = 5500;
+
+        listener(request, validSender, mockSendResponse);
+
+        expect(mockSendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: true,
+            storageWarning: true,
+            storageUsageBytes: expect.any(Number),
+            storageQuotaBytes: 5500,
+            storageUsageRatio: expect.any(Number)
+        }));
+    });
+
+    it('trims state history once when projected save payload is over the critical quota threshold', () => {
+        const existingHistory = [1, 2, 3, 4, 5].map((index) => ({
+            id: `history-${index}`,
+            createdAt: `2026-04-22T00:0${index}:00.000Z`,
+            reason: 'save',
+            snapshot: {
+                groups: [`old-${index}`],
+                groupsById: { [`old-${index}`]: { id: `old-${index}`, children: [] } },
+                sourceStateById: {
+                    [`source-${index}`]: { enabled: true, title: 'x'.repeat(900) }
+                }
+            }
+        }));
+        const request = {
+            type: 'SAVE_STATE',
+            key: 'sourcesPlusState_123',
+            data: {
+                groups: ['current'],
+                groupsById: { current: { id: 'current', children: [] } },
+                sourceStateById: {
+                    source_current: { enabled: true, title: 'Current' }
+                }
+            }
+        };
+        global.chrome.storage.local.QUOTA_BYTES = 5200;
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({ sourcesPlusHistory_123: existingHistory });
+        });
+
+        listener(request, validSender, mockSendResponse);
+
+        const savedPayload = global.chrome.storage.local.set.mock.calls[0][0];
+        expect(savedPayload.sourcesPlusHistory_123).toHaveLength(1);
+        expect(mockSendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: true,
+            historyEntryCount: 1,
+            historyTrimmed: true
+        }));
+    });
+
+    it('returns storage_quota_exceeded when trimming history cannot reduce the payload enough', () => {
+        const request = {
+            type: 'SAVE_STATE',
+            key: 'sourcesPlusState_123',
+            data: {
+                groups: ['oversized'],
+                groupsById: { oversized: { id: 'oversized', children: [] } },
+                sourceStateById: {
+                    source_1: { enabled: true, title: 'x'.repeat(4000) }
+                }
+            }
+        };
+        global.chrome.storage.local.QUOTA_BYTES = 2000;
+
+        listener(request, validSender, mockSendResponse);
+
+        expect(global.chrome.storage.local.set).not.toHaveBeenCalled();
+        expect(mockSendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: false,
+            errorCode: 'storage_quota_exceeded',
+            storageUsageBytes: expect.any(Number),
+            storageQuotaBytes: 2000
+        }));
     });
 
     it('should handle LOAD_STATE message successfully', () => {
@@ -664,10 +762,10 @@ describe('background.js message listener', () => {
             'entry-3',
             'entry-4'
         ]);
-        expect(mockSendResponse).toHaveBeenCalledWith({
+        expect(mockSendResponse).toHaveBeenCalledWith(expect.objectContaining({
             success: true,
             history: savedHistory
-        });
+        }));
     });
 
     it('serializes concurrent state history appends for the same key', async () => {
