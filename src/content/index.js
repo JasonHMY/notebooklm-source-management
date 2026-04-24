@@ -2100,6 +2100,16 @@
         resetUndoHistoryBaseline();
     }
 
+    function removeStaleManagerRoots(keepRoot = extensionHost) {
+        if (!document || typeof document.querySelectorAll !== 'function') return;
+        Array.from(document.querySelectorAll('#sources-plus-root')).forEach((root) => {
+            if (!root || root === keepRoot) return;
+            if (typeof root.remove === 'function') {
+                root.remove();
+            }
+        });
+    }
+
     function cleanupManagerResources() {
         clearScheduledPanelLifecycleSync();
         clearNativeRenameWatcher();
@@ -2364,6 +2374,20 @@
         if (getSourcePanelState(sourcePanel).state === 'detail') {
             managerStatusReason = 'source_detail_view';
             return;
+        }
+
+        removeStaleManagerRoots();
+        if (isManagerAttachedToPanel(sourcePanel)) {
+            attachScrollObserverToPanel(sourcePanel);
+            applySourcePanelSurfaceColor(extensionHost, sourcePanel);
+            completeInitialStateLoad();
+            managerStatusReason = 'ready';
+            return;
+        }
+
+        if (extensionHost || shadowRoot || scrollObserver) {
+            cleanupManagerResources();
+            removeStaleManagerRoots();
         }
 
         activeManagerInstanceToken += 1;

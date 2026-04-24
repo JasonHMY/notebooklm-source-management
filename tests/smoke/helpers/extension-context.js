@@ -84,6 +84,12 @@ function ensurePlaywrightArtifactDirs() {
     fs.mkdirSync(path.join(artifactsRoot, 'resources'), { recursive: true });
 }
 
+function shouldRunHeadless() {
+    if (process.env.PLAYWRIGHT_HEADLESS === 'true') return true;
+    if (process.env.PLAYWRIGHT_HEADLESS === 'false') return false;
+    return process.env.CI === 'true';
+}
+
 function readExtensionIdFromPreferences(userDataDir, repoRoot) {
     const preferencesPath = path.join(userDataDir, 'Default', 'Preferences');
     if (!fs.existsSync(preferencesPath)) {
@@ -149,15 +155,24 @@ async function waitForExtensionId(context, userDataDir, repoRoot, timeoutMs = 15
 async function launchExtensionContext(repoRoot) {
     const userDataDir = createUserDataDir();
     ensurePlaywrightArtifactDirs();
-    const context = await chromium.launchPersistentContext(userDataDir, {
-        executablePath: resolveChromiumExecutablePath(),
-        headless: process.env.PLAYWRIGHT_HEADLESS !== 'false',
+    const headless = shouldRunHeadless();
+    const executablePath = resolveChromiumExecutablePath();
+    const launchOptions = {
+        headless,
         ignoreDefaultArgs: ['--disable-extensions'],
         args: [
             `--disable-extensions-except=${repoRoot}`,
             `--load-extension=${repoRoot}`
         ]
-    });
+    };
+
+    if (headless && !process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH) {
+        launchOptions.channel = 'chromium';
+    } else if (executablePath) {
+        launchOptions.executablePath = executablePath;
+    }
+
+    const context = await chromium.launchPersistentContext(userDataDir, launchOptions);
 
     return {
         context,
