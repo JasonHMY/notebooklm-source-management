@@ -1903,6 +1903,13 @@
                 border-radius: 10px;
                 background: var(--sp-bg-secondary);
             }
+            .sp-history-item {
+                grid-template-columns: minmax(0, 1fr) max-content;
+                align-items: start;
+            }
+            .sp-history-copy {
+                min-width: 0;
+            }
             .sp-source-repair-title,
             .sp-history-title {
                 min-width: 0;
@@ -1913,11 +1920,22 @@
                 font-size: 12px;
                 font-weight: 700;
             }
+            .sp-history-title {
+                overflow: visible;
+                text-overflow: clip;
+                white-space: normal;
+                overflow-wrap: anywhere;
+                line-height: 1.35;
+            }
             .sp-source-repair-meta,
             .sp-history-meta {
                 margin-top: 2px;
                 color: var(--sp-text-secondary);
                 font-size: 11px;
+            }
+            .sp-history-restore-btn {
+                min-width: 72px;
+                justify-self: end;
             }
             .sp-source-repair-select {
                 min-width: 150px;
