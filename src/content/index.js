@@ -2585,7 +2585,8 @@
         });
 
         function doDrag(e) {
-            const newHeight = Math.max(150, startHeight + (e.clientY - startY));
+            const minHeight = container.classList?.contains('is-native-label-view') ? 48 : 150;
+            const newHeight = Math.max(minHeight, startHeight + (e.clientY - startY));
             container.style.height = `${newHeight}px`;
         }
 

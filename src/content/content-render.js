@@ -708,6 +708,7 @@
 
         function setContainerNativeLabelViewMode(container, enabled) {
             if (!container) return;
+            const wasEnabled = elementHasClass(container, 'is-native-label-view');
             const classes = String(container.className || '')
                 .split(/\s+/)
                 .filter((className) => className && className !== 'is-native-label-view');
@@ -715,12 +716,26 @@
                 classes.push('is-native-label-view');
             }
             container.className = classes.join(' ');
+            const dataset = container.dataset || null;
+            if (enabled && !wasEnabled) {
+                if (dataset && dataset.nativeLabelPreviousHeight == null) {
+                    dataset.nativeLabelPreviousHeight = String(container.style?.height || '');
+                }
+                if (container.style) {
+                    container.style.height = '';
+                }
+            } else if (!enabled && wasEnabled) {
+                if (container.style && dataset && Object.prototype.hasOwnProperty.call(dataset, 'nativeLabelPreviousHeight')) {
+                    container.style.height = dataset.nativeLabelPreviousHeight || '';
+                    delete dataset.nativeLabelPreviousHeight;
+                }
+            }
         }
 
         function elementHasClass(element, className) {
             if (!element) return false;
             if (element.classList && typeof element.classList.contains === 'function') {
-                return element.classList.contains(className);
+                if (element.classList.contains(className)) return true;
             }
             return String(element.className || '').split(/\s+/).includes(className);
         }

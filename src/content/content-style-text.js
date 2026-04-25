@@ -215,8 +215,7 @@
             }
             .sp-container.is-native-label-view .sp-toolbar-actions > button:not(.sp-toolbar-settings),
             .sp-container.is-native-label-view .sp-search-cluster,
-            .sp-container.is-native-label-view #sources-list,
-            .sp-container.is-native-label-view .sp-resizer {
+            .sp-container.is-native-label-view #sources-list {
                 display: none;
             }
             .sp-container.is-native-label-view .sp-view-state {
@@ -224,6 +223,9 @@
             }
             .sp-container.is-native-label-view .sp-view-banner {
                 background: var(--sp-panel-bg);
+            }
+            .sp-container.is-native-label-view .sp-resizer {
+                display: flex;
             }
             .sp-resizer {
                 height: 8px;

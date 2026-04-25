@@ -589,6 +589,8 @@ describe('manager shell structure', () => {
 
         expect(extractCssBlock(global.NSM_CONTENT_STYLE_TEXT, '.sp-container.is-native-label-view {')).toContain('min-height: 0;');
         expect(global.NSM_CONTENT_STYLE_TEXT).toContain('.sp-container.is-native-label-view #sources-list');
+        expect(global.NSM_CONTENT_STYLE_TEXT).toContain('.sp-container.is-native-label-view .sp-resizer');
+        expect(global.NSM_CONTENT_STYLE_TEXT).not.toContain('.sp-container.is-native-label-view .sp-resizer {\n                display: none;');
     });
 });
 
@@ -874,6 +876,55 @@ describe('batch count and source menu motion rendering', () => {
         expect(importButton.disabled).toBe(false);
         expect(importButton.attrs.disabled).toBeUndefined();
         expect(importButton.attrs.title).toBe('No groups available');
+    });
+
+    it('clears saved list height while rendering native label view and restores it after leaving', () => {
+        const listContainer = createRenderTestElement('div', { id: 'sources-list' });
+        const viewState = createRenderTestElement('div', { id: 'sp-view-state' });
+        const container = createRenderTestElement('div', { className: 'sp-container' });
+        container.style = { height: '820px' };
+        const actionLayer = createRenderTestElement('div', { id: 'sp-source-actions-layer' });
+        let viewKind = 'label';
+
+        const shadowRoot = {
+            querySelector: jest.fn((selector) => {
+                if (selector === '#sources-list') return listContainer;
+                if (selector === '.sp-container') return container;
+                return null;
+            }),
+            getElementById: jest.fn((id) => {
+                if (id === 'sources-list') return listContainer;
+                if (id === 'sp-view-state') return viewState;
+                if (id === 'sp-source-actions-layer') return actionLayer;
+                return null;
+            }),
+            appendChild: jest.fn()
+        };
+
+        const renderModule = createContentRender({
+            el: createRenderTestElement,
+            getDocument: () => ({
+                createDocumentFragment: createRenderTestFragment,
+                createElement: (tag) => createRenderTestElement(tag)
+            }),
+            getShadowRoot: () => shadowRoot,
+            getSourceViewInfo: () => ({ kind: viewKind, confidence: 0.78 }),
+            getNativeLabelImportPreview: () => ({ ok: false }),
+            getMessage: (key) => key
+        });
+
+        renderModule.render();
+
+        expect(container.className).toContain('is-native-label-view');
+        expect(container.style.height).toBe('');
+        expect(container.dataset.nativeLabelPreviousHeight).toBe('820px');
+
+        viewKind = 'list';
+        renderModule.render();
+
+        expect(container.className).not.toContain('is-native-label-view');
+        expect(container.style.height).toBe('820px');
+        expect(container.dataset.nativeLabelPreviousHeight).toBeUndefined();
     });
 
     it('auto-expands matching search ancestors without mutating collapsed state', () => {

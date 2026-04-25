@@ -126,6 +126,27 @@ test.describe.serial('extension smoke', () => {
         env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
         const bridgePage = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
 
+        const savedTallState = {
+            schemaVersion: 3,
+            groups: [],
+            groupsById: {},
+            ungrouped: [],
+            sourceStateById: {},
+            customHeight: 900,
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {}
+        };
+        await bridgePage.evaluate(async (state) => {
+            await new Promise((resolve) => {
+                chrome.storage.local.set({
+                    'sourcesPlusState_label-view': state,
+                    'sourcesPlusState_label-view__backup': state
+                }, resolve);
+            });
+        }, savedTallState);
+        await notebookPage.reload();
+
         await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
         await expect(notebookPage.locator('[data-testid="source-label-group"]').first()).toBeVisible();
 
@@ -135,14 +156,18 @@ test.describe.serial('extension smoke', () => {
             const list = root?.querySelector('#sources-list') || null;
             const searchCluster = root?.querySelector('.sp-search-cluster') || null;
             const newGroupButton = root?.querySelector('#sp-new-group-btn') || null;
+            const resizer = root?.querySelector('.sp-resizer') || null;
 
-            if (!root || !container || !list || !searchCluster || !newGroupButton) {
+            if (!root || !container || !list || !searchCluster || !newGroupButton || !resizer) {
                 return null;
             }
 
             return {
                 isNativeLabelView: container.classList.contains('is-native-label-view'),
+                containerHeight: Math.round(container.getBoundingClientRect().height),
+                inlineHeight: container.style.height,
                 managerSourceRows: root.querySelectorAll('#sources-list .source-item').length,
+                resizerDisplay: window.getComputedStyle(resizer).display,
                 sourceListDisplay: window.getComputedStyle(list).display,
                 searchDisplay: window.getComputedStyle(searchCluster).display,
                 newGroupDisplay: window.getComputedStyle(newGroupButton).display,
@@ -152,7 +177,10 @@ test.describe.serial('extension smoke', () => {
             };
         }), { timeout: 20_000 }).toEqual({
             isNativeLabelView: true,
+            containerHeight: expect.any(Number),
+            inlineHeight: '',
             managerSourceRows: 0,
+            resizerDisplay: 'flex',
             sourceListDisplay: 'none',
             searchDisplay: 'none',
             newGroupDisplay: 'none',
@@ -162,6 +190,11 @@ test.describe.serial('extension smoke', () => {
                 'Notebook label-view source B'
             ]
         });
+        await expect.poll(async () => notebookPage.evaluate(() => {
+            const root = document.querySelector('#sources-plus-root')?.shadowRoot || null;
+            const container = root?.querySelector('.sp-container') || null;
+            return Math.round(container?.getBoundingClientRect().height || 0);
+        }), { timeout: 20_000 }).toBeLessThan(180);
 
         const status = await bridgePage.evaluate(async () => {
             const tabs = await chrome.tabs.query({ url: 'https://notebooklm.google.com/*' });
