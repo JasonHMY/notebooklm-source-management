@@ -13,6 +13,18 @@
     const MAX_FALLBACK_ICON_CANDIDATES = 18;
     const MAX_QUERY_RESULTS_PER_SELECTOR = 12;
     const SOURCE_PROCESSING_SELECTOR = '[role="progressbar"], mat-spinner, svg animateTransform';
+    const SOURCE_PROCESSING_STATUS_SELECTORS = [
+        '[aria-busy="true"]',
+        '[role="status"]',
+        '[aria-live]',
+        '[data-state]',
+        '[data-status]',
+        '[data-testid*="loading" i]',
+        '[data-testid*="processing" i]',
+        '[data-testid*="upload" i]',
+        '[class*="loading" i]',
+        '[class*="processing" i]'
+    ];
     const SOURCE_FAILURE_SELECTOR = [
         '[aria-invalid="true"]',
         '[data-state="failed"]',
@@ -21,6 +33,7 @@
         '[data-testid*="error" i]'
     ].join(', ');
     const SOURCE_PROCESSING_TEXT_PATTERN = /\b(?:loading|analy[sz](?:ing|e)?|processing|parsing|uploading|importing|pending)\b|正在|载入|載入|加载|讀取|读取|分析|处理中|處理中|cargando|analizando|procesando|importando|subiendo/i;
+    const SOURCE_PROCESSING_STATUS_VALUE_PATTERN = /^(?:true|loading|loaded_pending|analy[sz](?:ing|e)?|processing|parsing|uploading|importing|pending|正在|载入|載入|加载|讀取|读取|分析|处理中|處理中|cargando|analizando|procesando|importando|subiendo)$/i;
     const SOURCE_FAILURE_TEXT_PATTERN = /\b(?:failed|failure|could(?:n['’]?t| not)|unable|unsupported|invalid)\b|\b(?:error (?:loading|processing|importing|analy[sz]ing)|(?:loading|processing|importing|analy[sz]ing) error)\b|失败|失敗|错误|錯誤|无法|無法|fall[oó]|no se pudo|no pudo|no compatible/i;
     const STABLE_SOURCE_TOKEN_ATTRIBUTES = [
         'data-source-id',
@@ -201,15 +214,143 @@
         return parts.join(' ');
     }
 
+    function getElementOwnSignalText(element) {
+        if (!element) return '';
+        const parts = [];
+        if (typeof element.textContent === 'string') parts.push(element.textContent);
+        if (typeof element.getAttribute === 'function') {
+            [
+                'aria-label',
+                'title',
+                'data-state',
+                'data-status',
+                'data-testid',
+                'class',
+                'aria-busy'
+            ].forEach((attributeKey) => {
+                const value = element.getAttribute(attributeKey);
+                if (value) parts.push(value);
+            });
+        }
+        return parts.join(' ');
+    }
+
+    function isElementVisibleForSignal(element) {
+        if (!element) return false;
+        let current = element;
+        while (current) {
+            if (current.hidden === true) return false;
+            if (typeof current.getAttribute === 'function') {
+                if (current.getAttribute('hidden') != null) return false;
+                if (current.getAttribute('aria-hidden') === 'true') return false;
+            }
+            const style = current.style || current.__computedStyle || null;
+            if (style?.display === 'none' || style?.visibility === 'hidden' || style?.visibility === 'collapse') {
+                return false;
+            }
+            const computedStyle = typeof window !== 'undefined' && typeof window.getComputedStyle === 'function'
+                ? window.getComputedStyle(current)
+                : null;
+            if (
+                computedStyle &&
+                (computedStyle.display === 'none' ||
+                    computedStyle.visibility === 'hidden' ||
+                    computedStyle.visibility === 'collapse')
+            ) {
+                return false;
+            }
+            current = current.parentElement || null;
+        }
+        return true;
+    }
+
+    function queryVisibleProcessingElements(sourceElement) {
+        if (!sourceElement || typeof sourceElement.querySelectorAll !== 'function') return [];
+        const seen = new Set();
+        const elements = [];
+        const selectors = [
+            SOURCE_PROCESSING_SELECTOR,
+            ...SOURCE_PROCESSING_STATUS_SELECTORS
+        ];
+        selectors.forEach((selector) => {
+            try {
+                Array.from(sourceElement.querySelectorAll(selector)).forEach((element) => {
+                    if (!element || seen.has(element) || !isElementVisibleForSignal(element)) return;
+                    seen.add(element);
+                    elements.push(element);
+                });
+            } catch (error) {
+                // Ignore selector support differences in NotebookLM's runtime DOM.
+            }
+            if (typeof sourceElement.querySelector === 'function') {
+                try {
+                    const element = sourceElement.querySelector(selector);
+                    if (element && !seen.has(element) && isElementVisibleForSignal(element)) {
+                        seen.add(element);
+                        elements.push(element);
+                    }
+                } catch (error) {
+                    // Ignore selector support differences in NotebookLM's runtime DOM.
+                }
+            }
+        });
+        return elements;
+    }
+
+    function hasReadySourceActionSignal(sourceElement) {
+        if (!sourceElement) return false;
+        const checkbox = findElement(DEPS.checkbox, sourceElement);
+        const nativeMoreButton = findElement(DEPS.moreBtn, sourceElement);
+        return Boolean(
+            nativeMoreButton ||
+            (checkbox && checkbox.disabled !== true)
+        );
+    }
+
+    function hasProcessingStatusAttribute(element) {
+        if (!element || typeof element.getAttribute !== 'function') return false;
+        if (element.getAttribute('aria-busy') === 'true') return true;
+        return ['data-state', 'data-status', 'data-testid', 'class'].some((attributeKey) => {
+            const value = element.getAttribute(attributeKey);
+            return SOURCE_PROCESSING_STATUS_VALUE_PATTERN.test(String(value || '').trim());
+        });
+    }
+
     function hasSourceProcessingSignal(sourceElement) {
         if (!sourceElement) return false;
-        if (
-            typeof sourceElement.querySelector === 'function' &&
-            sourceElement.querySelector(SOURCE_PROCESSING_SELECTOR)
-        ) {
+        if (typeof sourceElement.querySelector === 'function') {
+            try {
+                const processingIndicator = sourceElement.querySelector(SOURCE_PROCESSING_SELECTOR);
+                if (processingIndicator && isElementVisibleForSignal(processingIndicator)) {
+                    return true;
+                }
+            } catch (error) {
+                // Ignore selector support differences in NotebookLM's runtime DOM.
+            }
+        }
+        const visibleProcessingElements = queryVisibleProcessingElements(sourceElement);
+        if (visibleProcessingElements.some((element) => (
+            hasProcessingStatusAttribute(element) ||
+            SOURCE_PROCESSING_SELECTOR.split(',').some((selector) => {
+                try {
+                    return typeof element.matches === 'function' && element.matches(selector.trim());
+                } catch (error) {
+                    return false;
+                }
+            }) ||
+            SOURCE_PROCESSING_TEXT_PATTERN.test(getElementOwnSignalText(element))
+        ))) {
             return true;
         }
-        return SOURCE_PROCESSING_TEXT_PATTERN.test(getElementSignalText(sourceElement));
+
+        if (hasProcessingStatusAttribute(sourceElement)) {
+            return true;
+        }
+
+        if (!hasReadySourceActionSignal(sourceElement)) {
+            return SOURCE_PROCESSING_TEXT_PATTERN.test(getElementSignalText(sourceElement));
+        }
+        return false;
     }
 
     function hasSourceFailureSignal(sourceElement) {

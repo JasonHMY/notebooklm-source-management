@@ -426,6 +426,39 @@ describe('scanAndSyncSources', () => {
         });
     });
 
+    it('does not keep a ready source loading from title text or hidden stale progress nodes', () => {
+        const hiddenProgress = {
+            hidden: true,
+            textContent: '',
+            style: { display: 'none' },
+            getAttribute: jest.fn((attr) => (attr === 'role' ? 'progressbar' : null)),
+            matches: jest.fn((selector) => selector.includes('[role="progressbar"]'))
+        };
+        const mock = createMockSourceRow({
+            title: '加载完成后的分析报告',
+            stableToken: 'ready-doc',
+            checked: true
+        });
+        const originalQuerySelector = mock.row.querySelector;
+        const originalQuerySelectorAll = mock.row.querySelectorAll;
+        mock.row.querySelector = jest.fn((selector) => {
+            if (selector.includes('[role="progressbar"]')) return hiddenProgress;
+            return originalQuerySelector(selector);
+        });
+        mock.row.querySelectorAll = jest.fn((selector) => {
+            if (selector.includes('[role="progressbar"]')) return [hiddenProgress];
+            return originalQuerySelectorAll(selector);
+        });
+
+        const descriptor = mod.createSourceDescriptor(mock.row, new Map(), new Map());
+
+        expect(descriptor).toMatchObject({
+            title: '加载完成后的分析报告',
+            isLoading: false,
+            isDisabled: false
+        });
+    });
+
     it('does not treat failed source rows as source detail views', () => {
         const { panel } = createMockPanel({ visible: true, contentVisible: true });
         const mock = createMockSourceRow({
