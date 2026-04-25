@@ -753,6 +753,10 @@
             });
         }
 
+        function isControlInsideSourceEntry(control, sourceEntries = []) {
+            return sourceEntries.some((entry) => entry?.row && elementContains(entry.row, control));
+        }
+
         function createSourceViewInfo(kind, confidence, extra = {}) {
             return Object.assign({
                 kind,
@@ -839,12 +843,13 @@
             const baseLabelScanOptions = { ignoreManagerSuppression: true };
             const labelGroups = queryPanelElements(sourcePanel, LABEL_GROUP_SELECTORS)
                 .filter((group) => !isNodeHiddenForSourceScan(group, sourcePanel, baseLabelScanOptions));
-            const activeLabelControls = getActiveNativeLabelViewControls(sourcePanel, baseLabelScanOptions);
+            const listEntries = getListSourceEntries(sourcePanel);
+            const activeLabelControls = getActiveNativeLabelViewControls(sourcePanel, baseLabelScanOptions)
+                .filter((control) => !isControlInsideSourceEntry(control, listEntries));
             const labelScanOptions = Object.assign({}, baseLabelScanOptions, {
                 inferNativeLabelTitles: labelGroups.length > 0 || activeLabelControls.length > 0
             });
             const labelEntries = getLabelSourceEntries(sourcePanel, labelScanOptions);
-            const listEntries = getListSourceEntries(sourcePanel);
             const labelTextSignals = labelGroups.filter((group) => LABEL_VIEW_TEXT_PATTERN.test(getElementTextSignal(group)));
 
             if (labelEntries.length > 0) {

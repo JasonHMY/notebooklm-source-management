@@ -69,6 +69,26 @@ describe('scanAndSyncSources', () => {
         });
     });
 
+    it('keeps source row buttons in the traditional list source view', () => {
+        const source = createMockSourceRow({ title: 'List Source Button', stableToken: 'list-button-doc', checked: true });
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        panel.querySelectorAll = jest.fn((selector) => {
+            if (selector === '[role="button"]') return [source.row];
+            if (mod.DEPS.row.includes(selector)) return [source.row];
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        expect(mod.getSourceViewInfo(panel)).toMatchObject({
+            kind: 'list',
+            listRows: 1,
+            labelRows: 0,
+            activeLabelControls: 0
+        });
+    });
+
     it('detects active NotebookLM label view controls before stale list rows', () => {
         const stale = createMockSourceRow({ title: 'Stale List Source', stableToken: 'stale-doc', checked: true });
         const relabelControl = {

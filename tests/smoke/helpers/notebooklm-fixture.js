@@ -139,6 +139,7 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
                 wrapper.className = 'single-source-container';
                 wrapper.setAttribute('data-testid', 'source-item');
                 wrapper.setAttribute('data-source-id', source.token);
+                wrapper.setAttribute('role', 'button');
 
                 const row = document.createElement('div');
                 row.className = 'source-row-shell';
