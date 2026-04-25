@@ -177,6 +177,24 @@ test.describe.serial('extension smoke', () => {
         expect(status).toEqual({ ready: true, reason: 'ready' });
     });
 
+    test('shows feedback when native label import has no visible source rows', async () => {
+        const notebookPage = await env.context.newPage();
+
+        await notebookPage.goto('https://notebooklm.google.com/notebook/label-empty?fixture=label-empty');
+        env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
+
+        await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
+        await expect(notebookPage.locator('[data-testid="source-label-group"]').first()).toBeVisible();
+        await expect(notebookPage.locator('#sp-import-native-labels-btn')).toBeEnabled();
+
+        await notebookPage.locator('#sp-import-native-labels-btn').click();
+
+        await expect.poll(async () => notebookPage.evaluate(() => {
+            const root = document.querySelector('#sources-plus-root')?.shadowRoot || null;
+            return root?.querySelector('.sp-toast.show .sp-toast-message')?.textContent?.trim() || '';
+        }), { timeout: 5_000 }).toContain('NotebookLM');
+    });
+
     test('disables and re-enables the manager from the popup controls', async () => {
         const notebookPage = await env.context.newPage();
 

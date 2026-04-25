@@ -416,7 +416,7 @@
         }
     },
     "ui_import_native_labels_unavailable": {
-        "message": "没有可导入的 NotebookLM 分组。"
+        "message": "没有可导入的 NotebookLM 分组。请先展开 NotebookLM 分组，确保来源行已显示。"
     },
     "ui_undo_action": {
         "message": "撤销"

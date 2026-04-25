@@ -416,7 +416,7 @@
         }
     },
     "ui_import_native_labels_unavailable": {
-        "message": "No hay grupos de NotebookLM disponibles para importar."
+        "message": "No hay grupos de NotebookLM disponibles para importar. Expande primero los grupos de NotebookLM para que las fuentes sean visibles."
     },
     "ui_undo_action": {
         "message": "Deshacer"

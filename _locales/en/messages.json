@@ -416,7 +416,7 @@
         }
     },
     "ui_import_native_labels_unavailable": {
-        "message": "No NotebookLM groups are available to import."
+        "message": "No NotebookLM groups are available to import. Expand the NotebookLM groups first so the source rows are visible."
     },
     "ui_undo_action": {
         "message": "Undo"

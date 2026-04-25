@@ -672,7 +672,7 @@
                     el('button', {
                         className: 'sp-button sp-view-banner-btn',
                         id: 'sp-import-native-labels-btn',
-                        disabled: nativeLabelPreview.ok ? null : true
+                        title: nativeLabelPreview.ok ? null : getMessage('ui_import_native_labels_unavailable')
                     }, [getMessage('ui_import_native_labels')])
                 ]));
             }
@@ -697,6 +697,13 @@
 
             container.hidden = fragment.childNodes.length === 0;
             patchChildren(container, fragment);
+            const importNativeLabelsButton = container.querySelector?.('#sp-import-native-labels-btn');
+            if (importNativeLabelsButton && typeof handleInteraction === 'function') {
+                importNativeLabelsButton.onclick = (event) => {
+                    event.preventDefault?.();
+                    handleInteraction(event);
+                };
+            }
         }
 
         function setContainerNativeLabelViewMode(container, enabled) {

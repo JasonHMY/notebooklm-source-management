@@ -825,7 +825,55 @@ describe('batch count and source menu motion rendering', () => {
         expect(viewState.hidden).toBe(false);
         expect(viewState.textContent).toContain('NotebookLM label view is active');
         expect(viewState.textContent).toContain('Import NotebookLM groups');
+        expect(findRenderTestNodesByClass(viewState, 'sp-view-banner-btn')[0].disabled).toBe(false);
         expect(listContainer.childNodes).toHaveLength(0);
+    });
+
+    it('keeps native label import button clickable when preview is unavailable', () => {
+        const listContainer = createRenderTestElement('div', { id: 'sources-list' });
+        const viewState = createRenderTestElement('div', { id: 'sp-view-state' });
+        const container = createRenderTestElement('div', { className: 'sp-container' });
+        const actionLayer = createRenderTestElement('div', { id: 'sp-source-actions-layer' });
+
+        const shadowRoot = {
+            querySelector: jest.fn((selector) => {
+                if (selector === '#sources-list') return listContainer;
+                if (selector === '.sp-container') return container;
+                return null;
+            }),
+            getElementById: jest.fn((id) => {
+                if (id === 'sources-list') return listContainer;
+                if (id === 'sp-view-state') return viewState;
+                if (id === 'sp-source-actions-layer') return actionLayer;
+                return null;
+            }),
+            appendChild: jest.fn()
+        };
+
+        const renderModule = createContentRender({
+            el: createRenderTestElement,
+            getDocument: () => ({
+                createDocumentFragment: createRenderTestFragment,
+                createElement: (tag) => createRenderTestElement(tag)
+            }),
+            getShadowRoot: () => shadowRoot,
+            getSourceViewInfo: () => ({ kind: 'label', confidence: 0.78 }),
+            getNativeLabelImportPreview: () => ({ ok: false, reason: 'no_native_labels', labelCount: 0, sourceCount: 0 }),
+            getMessage: (key) => {
+                if (key === 'ui_native_label_view_active') return 'NotebookLM label view is active';
+                if (key === 'ui_import_native_labels') return 'Import NotebookLM groups';
+                if (key === 'ui_import_native_labels_unavailable') return 'No groups available';
+                return key;
+            }
+        });
+
+        renderModule.render();
+
+        const importButton = findRenderTestNodesByClass(viewState, 'sp-view-banner-btn')[0];
+        expect(importButton.textContent).toBe('Import NotebookLM groups');
+        expect(importButton.disabled).toBe(false);
+        expect(importButton.attrs.disabled).toBeUndefined();
+        expect(importButton.attrs.title).toBe('No groups available');
     });
 
     it('auto-expands matching search ancestors without mutating collapsed state', () => {

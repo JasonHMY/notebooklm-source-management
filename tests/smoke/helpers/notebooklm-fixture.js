@@ -37,7 +37,8 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
     const renderedSources = normalizeSources(notebookId, sources);
     const initialOptions = {
         stagedHydration: Boolean(options.stagedHydration),
-        labelView: Boolean(options.labelView)
+        labelView: Boolean(options.labelView),
+        labelViewWithoutRows: Boolean(options.labelViewWithoutRows)
     };
 
     return `<!doctype html>
@@ -232,10 +233,11 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
                 return group;
             }
 
-            function renderLabelView(sourcePanel, sources) {
+            function renderLabelView(sourcePanel, sources, options) {
                 sourcePanel.appendChild(createLabelViewControls());
-                sourcePanel.appendChild(createLabelGroup('Research papers', sources.slice(0, 1)));
-                sourcePanel.appendChild(createLabelGroup('Reference material', sources.slice(1)));
+                const shouldRenderRows = !options.labelViewWithoutRows;
+                sourcePanel.appendChild(createLabelGroup('Research papers', shouldRenderRows ? sources.slice(0, 1) : []));
+                sourcePanel.appendChild(createLabelGroup('Reference material', shouldRenderRows ? sources.slice(1) : []));
                 setHydrationPhase('full');
             }
 
@@ -284,7 +286,7 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
 
                 sourcePanel.appendChild(header);
                 if (options.labelView) {
-                    renderLabelView(sourcePanel, sources);
+                    renderLabelView(sourcePanel, sources, options);
                 } else {
                     sourcePanel.appendChild(scrollArea);
                 }
@@ -300,7 +302,11 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
                 const notebookId = nextNotebook && nextNotebook.notebookId ? String(nextNotebook.notebookId) : initialNotebookId;
                 const sources = nextNotebook && Array.isArray(nextNotebook.sources) ? nextNotebook.sources : initialSources;
                 const options = nextNotebook && typeof nextNotebook === 'object'
-                    ? { stagedHydration: Boolean(nextNotebook.stagedHydration) }
+                    ? {
+                        stagedHydration: Boolean(nextNotebook.stagedHydration),
+                        labelView: Boolean(nextNotebook.labelView),
+                        labelViewWithoutRows: Boolean(nextNotebook.labelViewWithoutRows)
+                    }
                     : initialOptions;
                 history.pushState({}, '', '/notebook/' + encodeURIComponent(notebookId));
                 renderNotebook(notebookId, sources, options);
@@ -412,7 +418,8 @@ async function installNotebookFixture(context) {
             contentType: 'text/html',
             body: renderNotebookHtml(notebookId, null, {
                 stagedHydration: url.searchParams.get('fixture') === 'staged',
-                labelView: url.searchParams.get('fixture') === 'label'
+                labelView: url.searchParams.get('fixture') === 'label' || url.searchParams.get('fixture') === 'label-empty',
+                labelViewWithoutRows: url.searchParams.get('fixture') === 'label-empty'
             })
         });
     });
