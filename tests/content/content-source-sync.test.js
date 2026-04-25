@@ -164,6 +164,38 @@ describe('scanAndSyncSources', () => {
         });
     });
 
+    it('does not treat the generic Sources panel toggle as a native label group', () => {
+        const source = createMockSourceRow({ title: 'List Source', stableToken: 'list-doc', checked: true });
+        const panelToggle = {
+            tagName: 'BUTTON',
+            textContent: 'Sources',
+            style: {},
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-expanded') return 'true';
+                if (attr === 'role') return 'button';
+                return null;
+            }),
+            matches: jest.fn(() => false),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        panel.querySelectorAll = jest.fn((selector) => {
+            if (selector === 'button' || selector === '[role="button"]') return [panelToggle];
+            if (mod.DEPS.row.includes(selector)) return [source.row];
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        expect(mod.getSourceViewInfo(panel)).toMatchObject({
+            kind: 'list',
+            listRows: 1,
+            activeLabelControls: 0
+        });
+    });
+
     it('detects NotebookLM label view and annotates sources with native labels', () => {
         const first = createMockSourceRow({ title: 'Paper One', stableToken: 'paper-1', checked: true });
         const second = createMockSourceRow({ title: 'Paper Two', stableToken: 'paper-2', checked: true });
@@ -195,6 +227,73 @@ describe('scanAndSyncSources', () => {
             'Clinical Papers',
             'Clinical Papers'
         ]);
+    });
+
+    it('infers NotebookLM label titles from expanded native label headers without test ids', () => {
+        const first = createMockSourceRow({ title: 'Chrono Trigger Notes', stableToken: 'chrono-notes', checked: true });
+        const second = createMockSourceRow({ title: 'Final Fantasy Remake', stableToken: 'ff-remake', checked: true });
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const group = {
+            textContent: '复古游戏重制 Chrono Trigger Notes Final Fantasy Remake',
+            style: {},
+            parentElement: panel,
+            parentNode: panel,
+            getAttribute: jest.fn(() => null),
+            matches: jest.fn(() => false),
+            querySelectorAll: jest.fn((selector) => (
+                selector.includes('aria-expanded') ? [header] : []
+            ))
+        };
+        const header = {
+            tagName: 'BUTTON',
+            textContent: 'keyboard_arrow_down 复古游戏重制',
+            style: {},
+            parentElement: group,
+            parentNode: group,
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-expanded') return 'true';
+                if (attr === 'role') return 'button';
+                return null;
+            }),
+            matches: jest.fn(() => false),
+            querySelector: jest.fn((selector) => (selector.includes('checkbox') ? { checked: true } : null)),
+            querySelectorAll: jest.fn(() => [])
+        };
+        first.row.parentElement = group;
+        first.row.parentNode = group;
+        second.row.parentElement = group;
+        second.row.parentNode = group;
+        first.row.style = {};
+        second.row.style = {};
+        group.querySelectorAll = jest.fn((selector) => (
+            selector.includes('aria-expanded') ? [header] : []
+        ));
+        panel.querySelectorAll = jest.fn((selector) => {
+            if (selector === 'button' || selector === '[role="button"]') return [header];
+            if (selector === '[role="listitem"]' || selector === 'mat-list-item' || selector === '.mat-mdc-list-item') {
+                return [first.row, second.row];
+            }
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        expect(mod.getSourceViewInfo(panel)).toMatchObject({
+            kind: 'label',
+            labelRows: 2
+        });
+
+        mod.scanAndSyncSources({}, true);
+        expect(Array.from(mod.sourcesByKey.values()).map((source) => source.nativeLabelTitle)).toEqual([
+            '复古游戏重制',
+            '复古游戏重制'
+        ]);
+        expect(mod.getNativeLabelImportPreview()).toMatchObject({
+            ok: true,
+            labelCount: 1,
+            sourceCount: 2
+        });
     });
 
     it('detects label view after the plugin has hidden the native list area', () => {

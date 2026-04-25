@@ -1136,7 +1136,11 @@
     }
 
     function applyNativeLabelImportFromUi() {
-        const preview = getNativeLabelImportPreview();
+        let preview = getNativeLabelImportPreview();
+        if (!preview.ok && (sourceViewInfo?.kind === 'label' || sourceViewKind === 'label')) {
+            scanAndSyncSources({}, false);
+            preview = getNativeLabelImportPreview();
+        }
         if (!preview.ok) {
             showToast(getMessage('ui_import_native_labels_unavailable'), { variant: 'info' });
             return false;
