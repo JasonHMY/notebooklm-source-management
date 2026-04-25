@@ -2409,6 +2409,7 @@
         }
 
         if (isManagerAttachedToPanel(sourcePanel)) {
+            const previousSourceViewKind = sourceViewKind || 'unknown';
             const currentSourceViewInfo = getSourceViewInfo(sourcePanel);
             setNativeSourceListHidden(currentSourceViewInfo.kind === 'list');
             attachScrollObserverToPanel(sourcePanel);
@@ -2418,6 +2419,9 @@
                 managerStatusReason = 'ready';
             } else {
                 managerStatusReason = 'manager_not_ready';
+            }
+            if (currentSourceViewInfo.kind !== previousSourceViewKind) {
+                render();
             }
             return;
         }

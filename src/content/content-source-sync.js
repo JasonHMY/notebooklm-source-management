@@ -307,6 +307,12 @@
             '[data-resource-id]'
         ];
         const LABEL_VIEW_TEXT_PATTERN = /\b(label|labels|categor(?:y|ies|ize)|group|groups)\b|标签|分类|分组/i;
+        const MANAGER_ACTIVE_CLASS = 'sources-plus-manager-active';
+        const NATIVE_SOURCE_LIST_CONTAINER_SELECTORS = [
+            '.scroll-area-desktop',
+            '.sources-list-container',
+            '[data-testid="scroll-area"]'
+        ];
 
         function getElementTextSignal(element) {
             if (!element) return '';
@@ -374,7 +380,9 @@
             const dataLabel = dataCandidates.find((value) => String(value || '').trim());
             if (dataLabel) return String(dataLabel).replace(/\s+/g, ' ').trim();
 
-            const titleElement = findElement(LABEL_TITLE_SELECTORS, element);
+            const titleElement = typeof element.querySelector === 'function'
+                ? findElement(LABEL_TITLE_SELECTORS, element)
+                : null;
             const title = String(titleElement?.textContent || getAttributeValue(titleElement, 'aria-label') || '').replace(/\s+/g, ' ').trim();
             if (title && title.length <= 120) return title;
 
@@ -399,7 +407,48 @@
             });
         }
 
-        function isNodeHiddenForSourceScan(element, boundary = null) {
+        function isManagerSuppressionActive() {
+            const root = getDocument()?.documentElement;
+            if (!root) return false;
+            if (typeof root.classList?.contains === 'function') {
+                return root.classList.contains(MANAGER_ACTIVE_CLASS);
+            }
+            return String(root.className || '').split(/\s+/).includes(MANAGER_ACTIVE_CLASS);
+        }
+
+        function isElementInsideManagerSuppressedNativeArea(element, boundary = null) {
+            if (!element || !isManagerSuppressionActive()) return false;
+
+            let cursor = element;
+            let depth = 0;
+            while (cursor && depth < 24) {
+                if (isManagerSuppressedNativeAreaElement(cursor)) {
+                    return true;
+                }
+                if (boundary && cursor === boundary) break;
+                cursor = getParentElement(cursor);
+                depth += 1;
+            }
+
+            return false;
+        }
+
+        function isManagerSuppressedNativeAreaElement(element) {
+            return Boolean(
+                element &&
+                isManagerSuppressionActive() &&
+                elementMatchesAny(element, NATIVE_SOURCE_LIST_CONTAINER_SELECTORS)
+            );
+        }
+
+        function shouldIgnoreHiddenStateFromManagerSuppression(element, boundary, options = {}) {
+            return Boolean(
+                options.ignoreManagerSuppression &&
+                isElementInsideManagerSuppressedNativeArea(element, boundary)
+            );
+        }
+
+        function isNodeHiddenForSourceScan(element, boundary = null, options = {}) {
             if (!element) return true;
             if ('isConnected' in element && element.isConnected === false) return true;
 
@@ -415,7 +464,9 @@
                     style.visibility === 'hidden' ||
                     style.visibility === 'collapse'
                 ) {
-                    return true;
+                    if (!(options.ignoreManagerSuppression && isManagerSuppressedNativeAreaElement(cursor))) {
+                        return true;
+                    }
                 }
                 try {
                     const computedStyle = typeof win?.getComputedStyle === 'function'
@@ -429,7 +480,9 @@
                             computedStyle.visibility === 'collapse'
                         )
                     ) {
-                        return true;
+                        if (!shouldIgnoreHiddenStateFromManagerSuppression(element, boundary, options)) {
+                            return true;
+                        }
                     }
                 } catch (error) {
                     // Some mocked or framework-owned nodes cannot be passed to getComputedStyle.
@@ -445,7 +498,7 @@
             return element?.parentElement || element?.parentNode || null;
         }
 
-        function findNativeLabelTitle(row, panel) {
+        function findNativeLabelTitle(row, panel, options = {}) {
             if (!row) return '';
             if (typeof row.__nativeLabelTitle === 'string' && row.__nativeLabelTitle.trim()) {
                 return row.__nativeLabelTitle.trim();
@@ -459,7 +512,7 @@
             let cursor = getParentElement(row);
             let depth = 0;
             while (cursor && cursor !== panel && depth < 8) {
-                if (!isNodeHiddenForSourceScan(cursor, panel) && elementMatchesAny(cursor, LABEL_GROUP_SELECTORS)) {
+                if (!isNodeHiddenForSourceScan(cursor, panel, options) && elementMatchesAny(cursor, LABEL_GROUP_SELECTORS)) {
                     const label = getElementOwnLabel(cursor);
                     if (label) return label;
                 }
@@ -507,17 +560,17 @@
                 }));
         }
 
-        function getLabelSourceEntries(parent = getDocument()) {
+        function getLabelSourceEntries(parent = getDocument(), options = {}) {
             const rows = queryPanelElements(parent, LABEL_SOURCE_ROW_SELECTORS);
             const seenRows = new Set();
             const entries = [];
 
             rows.forEach((row) => {
-                if (!row || seenRows.has(row) || isNodeHiddenForSourceScan(row, parent)) return;
+                if (!row || seenRows.has(row) || isNodeHiddenForSourceScan(row, parent, options)) return;
                 const identity = extractSourceIdentitySnapshot(row);
                 if (!isManageableSourceIdentity(identity)) return;
 
-                const nativeLabelTitle = findNativeLabelTitle(row, parent);
+                const nativeLabelTitle = findNativeLabelTitle(row, parent, options);
                 if (!nativeLabelTitle) return;
                 seenRows.add(row);
                 entries.push({
@@ -540,9 +593,10 @@
                 });
             }
 
-            const labelEntries = getLabelSourceEntries(sourcePanel);
+            const labelScanOptions = { ignoreManagerSuppression: true };
+            const labelEntries = getLabelSourceEntries(sourcePanel, labelScanOptions);
             const labelGroups = queryPanelElements(sourcePanel, LABEL_GROUP_SELECTORS)
-                .filter((group) => !isNodeHiddenForSourceScan(group, sourcePanel));
+                .filter((group) => !isNodeHiddenForSourceScan(group, sourcePanel, labelScanOptions));
             const listEntries = getListSourceEntries(sourcePanel);
             const labelTextSignals = labelGroups.filter((group) => LABEL_VIEW_TEXT_PATTERN.test(getElementTextSignal(group)));
 
@@ -580,7 +634,7 @@
         function getSourceEntries(parent = getDocument()) {
             const info = getSourceViewInfo(parent);
             if (info.kind === SOURCE_VIEW_KIND_LABEL) {
-                const labelEntries = getLabelSourceEntries(parent);
+                const labelEntries = getLabelSourceEntries(parent, { ignoreManagerSuppression: true });
                 if (labelEntries.length > 0) return labelEntries;
                 return getListSourceEntries(parent, { filterHidden: true });
             }

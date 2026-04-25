@@ -102,6 +102,50 @@ describe('scanAndSyncSources', () => {
         ]);
     });
 
+    it('detects label view after the plugin has hidden the native list area', () => {
+        global.document.documentElement.className = 'sources-plus-manager-active';
+        global.document.documentElement.classList.contains = jest.fn((className) => (
+            className === 'sources-plus-manager-active'
+        ));
+
+        const source = createMockSourceRow({ title: 'AI Label Source', stableToken: 'ai-label-doc', checked: true });
+        const { panel, content } = createMockPanel({ visible: true, contentVisible: true });
+        content.__computedStyle.visibility = 'hidden';
+        content.style.visibility = 'hidden';
+        content.matches = jest.fn((selector) => (
+            selector.includes('scroll-area') || selector.includes('data-testid="scroll-area"')
+        ));
+        source.row.__computedStyle = { visibility: 'hidden' };
+
+        const labelGroup = {
+            textContent: 'AI Generated Group',
+            parentElement: content,
+            parentNode: content,
+            style: {},
+            __computedStyle: { visibility: 'hidden' },
+            getAttribute: jest.fn((attr) => (attr === 'aria-label' ? 'AI Generated Group label' : null)),
+            matches: jest.fn((selector) => selector.includes('source-label') || selector.includes('label'))
+        };
+        source.row.parentElement = labelGroup;
+        source.row.parentNode = labelGroup;
+        content.parentElement = panel;
+        content.parentNode = panel;
+
+        panel.querySelectorAll = jest.fn((selector) => {
+            if (selector.includes('source-label') || selector.includes('label-group')) return [labelGroup];
+            if (selector.includes('source')) return [source.row];
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        expect(mod.getSourceViewInfo(panel)).toMatchObject({
+            kind: 'label',
+            labelRows: 1
+        });
+    });
+
     it('previews and imports NotebookLM labels as plugin folders without overwriting existing folders', () => {
         const first = createMockSourceRow({ title: 'Paper One', stableToken: 'paper-1', checked: true });
         const second = createMockSourceRow({ title: 'Paper Two', stableToken: 'paper-2', checked: true });
