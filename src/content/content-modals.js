@@ -83,6 +83,9 @@
         const applyImportConfig = typeof deps.applyImportConfig === 'function'
             ? deps.applyImportConfig
             : () => ({ ok: false, reason: 'unavailable' });
+        const applyNativeLabelImport = typeof deps.applyNativeLabelImport === 'function'
+            ? deps.applyNativeLabelImport
+            : () => false;
         const getSourceRepairReport = typeof deps.getSourceRepairReport === 'function'
             ? deps.getSourceRepairReport
             : () => ({ totalSources: 0, matchedSources: 0, unmatchedSources: 0, ambiguousSources: 0, matched: [], unmatched: [], ambiguous: [] });
@@ -387,6 +390,10 @@
 
         function closeSettingsModal(options = {}) {
             return closeManagedModal('sp-settings-modal', 'sp-settings-backdrop', options);
+        }
+
+        function closeNativeLabelImportModal(options = {}) {
+            return closeManagedModal('sp-native-label-import-modal', 'sp-native-label-import-backdrop', options);
         }
 
         function getImportPreviewMessage(preview) {
@@ -1071,6 +1078,148 @@
                 acc.push(key);
                 return acc;
             }, []);
+        }
+
+        function getNativeLabelImportActionKey(label) {
+            return label?.action === 'reuse'
+                ? 'ui_import_native_labels_preview_reuse'
+                : 'ui_import_native_labels_preview_create';
+        }
+
+        function createNativeLabelImportPreviewNodes(preview = {}) {
+            if (!preview.ok) {
+                return [
+                    el('div', { className: 'sp-native-label-import-empty' }, [
+                        getMessage('ui_import_native_labels_preview_empty')
+                    ])
+                ];
+            }
+
+            const labels = Array.isArray(preview.labels) ? preview.labels : [];
+            const nodes = [
+                el('p', { className: 'sp-native-label-import-summary' }, [
+                    getMessage('ui_import_native_labels_preview_summary', [
+                        String(preview.labelCount || labels.length || 0),
+                        String(preview.sourceCount || 0)
+                    ])
+                ])
+            ];
+
+            labels.forEach((label, index) => {
+                const sourceTitles = Array.isArray(label.sourceTitles) ? label.sourceTitles : [];
+                const visibleSourceTitles = sourceTitles.slice(0, 4);
+                const remainingCount = Math.max(0, sourceTitles.length - visibleSourceTitles.length);
+                nodes.push(el('div', {
+                    className: 'sp-native-label-import-item',
+                    style: createModalItemStaggerStyle(index)
+                }, [
+                    el('div', { className: 'sp-native-label-import-item-header' }, [
+                        el('span', { className: 'google-symbols' }, [
+                            label.action === 'reuse' ? 'folder_open' : 'create_new_folder'
+                        ]),
+                        el('span', { className: 'sp-native-label-import-title' }, [
+                            label.title || getMessage('ui_group_untitled')
+                        ]),
+                        el('span', { className: 'sp-native-label-import-count' }, [
+                            getMessage('ui_import_native_labels_preview_source_count', [
+                                String(label.sourceCount || sourceTitles.length || 0)
+                            ])
+                        ])
+                    ]),
+                    el('div', { className: 'sp-native-label-import-action' }, [
+                        getMessage(getNativeLabelImportActionKey(label))
+                    ]),
+                    visibleSourceTitles.length > 0
+                        ? el('ul', { className: 'sp-native-label-import-source-list' }, [
+                            ...visibleSourceTitles.map((title) => el('li', {}, [
+                                title || getMessage('ui_source_untitled')
+                            ])),
+                            ...(remainingCount > 0
+                                ? [el('li', { className: 'sp-native-label-import-more' }, [
+                                    getMessage('ui_import_native_labels_preview_more', [String(remainingCount)])
+                                ])]
+                                : [])
+                        ])
+                        : el('div', { className: 'sp-native-label-import-source-list sp-native-label-import-source-list-empty' }, [
+                            getMessage('ui_import_native_labels_preview_no_sources')
+                        ])
+                ]));
+            });
+
+            return nodes;
+        }
+
+        function renderNativeLabelImportModal(preview = {}) {
+            const shadowRoot = getShadowRoot();
+            if (!shadowRoot || !el) return false;
+
+            const normalizedPreview = preview && typeof preview === 'object'
+                ? preview
+                : { ok: false, reason: 'unavailable', labelCount: 0, sourceCount: 0, labels: [] };
+
+            prepareModalOpen('sp-native-label-import-modal', 'sp-native-label-import-backdrop');
+
+            const backdrop = el('div', { className: 'sp-overlay-backdrop', id: 'sp-native-label-import-backdrop' });
+            const modal = el('div', {
+                className: 'sp-folder-modal sp-native-label-import-modal',
+                id: 'sp-native-label-import-modal',
+                role: 'dialog',
+                'aria-modal': 'true',
+                'aria-labelledby': 'sp-native-label-import-modal-title',
+                tabindex: '-1'
+            });
+            const header = el('div', { className: 'sp-folder-modal-header' }, [
+                el('h3', {
+                    className: 'sp-folder-modal-title',
+                    id: 'sp-native-label-import-modal-title'
+                }, [getMessage('ui_import_native_labels_preview_title')])
+            ]);
+            const content = el('div', { className: 'sp-folder-modal-content sp-native-label-import-content' }, [
+                ...createNativeLabelImportPreviewNodes(normalizedPreview)
+            ]);
+            const footer = el('div', { className: 'sp-folder-modal-footer' }, [
+                el('button', { type: 'button', className: 'sp-modal-cancel' }, [getMessage('ui_cancel')]),
+                el('button', {
+                    type: 'button',
+                    className: 'sp-button sp-native-label-import-confirm-btn sp-glare-hover',
+                    disabled: !normalizedPreview.ok
+                }, [getMessage('ui_import_native_labels_apply')])
+            ]);
+
+            modal.appendChild(header);
+            modal.appendChild(content);
+            modal.appendChild(footer);
+            shadowRoot.appendChild(backdrop);
+            shadowRoot.appendChild(modal);
+
+            footer.querySelector('.sp-modal-cancel')?.addEventListener('click', closeNativeLabelImportModal);
+            footer.querySelector('.sp-native-label-import-confirm-btn')?.addEventListener('click', () => {
+                if (!normalizedPreview.ok) return;
+                const applied = applyNativeLabelImport(normalizedPreview);
+                if (applied) {
+                    closeNativeLabelImportModal({ immediate: true });
+                }
+            });
+            backdrop.addEventListener('click', (event) => {
+                if (event.target === backdrop) closeNativeLabelImportModal();
+            });
+
+            const modalKeyboard = bindModalKeyboardNavigation(modal, {
+                closeModal: closeNativeLabelImportModal,
+                initialFocusTarget: () => {
+                    const confirmButton = modal.querySelector('.sp-native-label-import-confirm-btn');
+                    return confirmButton && !confirmButton.disabled
+                        ? confirmButton
+                        : modal.querySelector('.sp-modal-cancel');
+                }
+            });
+            requestAnimationFrame(() => {
+                backdrop.classList.add('visible');
+                modal.classList.add('visible');
+                modalKeyboard.focusInitial();
+            });
+
+            return true;
         }
 
         function collectMoveFolderOptions(groupIds, level = 0, visitedGroupIds = new Set()) {
@@ -1855,9 +2004,12 @@
         return {
             renderMoveToFolderModal,
             closeMoveToFolderModal,
+            closeNativeLabelImportModal,
+            renderNativeLabelImportModal,
             closeSettingsModal,
             renderSettingsModal,
             getImportPreviewMessage,
+            createNativeLabelImportPreviewNodes,
             createImportPreviewDetailNodes,
             copySettingsTextToClipboard,
             downloadSettingsExportText,

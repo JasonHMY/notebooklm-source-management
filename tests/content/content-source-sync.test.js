@@ -1612,6 +1612,22 @@ describe('mutation-driven persistence', () => {
         })).toEqual({ relevant: true, critical: true });
     });
 
+    it('classifies native label view toggle mutations as relevant non-critical sync changes', () => {
+        const toggle = {
+            nodeType: 1,
+            textContent: '复古游戏重制',
+            getAttribute: jest.fn((attr) => (attr === 'aria-expanded' ? 'true' : null)),
+            matches: jest.fn(() => false),
+            closest: jest.fn(() => null)
+        };
+
+        expect(mod._getMutationRelevanceForTest({
+            type: 'attributes',
+            attributeName: 'aria-expanded',
+            target: toggle
+        })).toEqual({ relevant: true, critical: false });
+    });
+
     it('critically saves source title changes detected by mutation-driven sync', () => {
         const { panel } = createMockPanel({ visible: true, contentVisible: true });
         const sourceRow = createMockSourceRow({ title: 'Original Source', stableToken: 'doc-1', checked: true });

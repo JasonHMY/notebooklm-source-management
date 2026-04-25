@@ -132,6 +132,10 @@
     let sourceViewConfidence = 0;
     let sourceViewInfo = null;
     let lastSourceViewChangedAt = '';
+    let lastSourceViewTransition = null;
+    let lastNativeSourceListHidden = false;
+    let lastNativeSourceListHiddenAt = '';
+    let lastNativeLabelImportSummary = null;
     const NATIVE_ACTION_FAILURE_HISTORY_LIMIT = 5;
     let nativeActionFailureHistory = [];
     const MANAGER_ACTIVE_CLASS = 'sources-plus-manager-active';
@@ -211,6 +215,7 @@
     bindRuntimeProperty('sourceViewConfidence', () => sourceViewConfidence, (value) => { sourceViewConfidence = Number(value) || 0; });
     bindRuntimeProperty('sourceViewInfo', () => sourceViewInfo, (value) => { sourceViewInfo = value && typeof value === 'object' ? value : null; });
     bindRuntimeProperty('lastSourceViewChangedAt', () => lastSourceViewChangedAt, (value) => { lastSourceViewChangedAt = String(value || ''); });
+    bindRuntimeProperty('lastSourceViewTransition', () => lastSourceViewTransition, (value) => { lastSourceViewTransition = value && typeof value === 'object' ? value : null; });
     bindRuntimeProperty('debouncedPanelLifecycleSync', () => debouncedPanelLifecycleSync);
     bindRuntimeProperty('syncManagerWithPanelLifecycle', () => syncManagerWithPanelLifecycle);
 
@@ -483,6 +488,7 @@
         applySourceRepairRemaps: (...args) => applySourceRepairRemaps(...args),
         getStateHistoryEntries: (...args) => getStateHistoryEntries(...args),
         restoreStateHistoryEntry: (...args) => restoreStateHistoryEntryFromUi(...args),
+        applyNativeLabelImport: (...args) => applyNativeLabelImport(...args),
         getDiagnosticsInfo: (...args) => getDiagnosticsInfo(...args),
         getDiagnosticsText: (...args) => getDiagnosticsText(...args),
         renderSaveStatus: (...args) => renderSaveStatus(...args),
@@ -515,6 +521,7 @@
         closeSettingsModal,
         renderSettingsModal,
         getImportPreviewMessage,
+        renderNativeLabelImportModal,
         renderTagModal
     } = modalsModule;
 
@@ -665,7 +672,8 @@
         closeSourceActionMenu,
         setActiveSourceActionSubmenuAction,
         getSourceViewInfo: () => getSourceViewInfo(findSourcePanel()),
-        getNativeLabelImportPreview: (...args) => getNativeLabelImportPreview(...args)
+        getNativeLabelImportPreview: (...args) => getNativeLabelImportPreview(...args),
+        getLastNativeLabelImportSummary: () => lastNativeLabelImportSummary
     });
     const {
         createBatchCountMessageChildren,
@@ -1045,10 +1053,13 @@
             if (!labelsByTitle.has(normalizedTitle)) {
                 labelsByTitle.set(normalizedTitle, {
                     title,
-                    sourceKeys: []
+                    sourceKeys: [],
+                    sourceTitles: []
                 });
             }
-            labelsByTitle.get(normalizedTitle).sourceKeys.push(sourceKey);
+            const label = labelsByTitle.get(normalizedTitle);
+            label.sourceKeys.push(sourceKey);
+            label.sourceTitles.push(source?.title || source?.normalizedTitle || sourceKey);
         });
 
         const labels = Array.from(labelsByTitle.values())
@@ -1091,15 +1102,19 @@
         return candidate;
     }
 
-    function applyNativeLabelImport() {
-        const preview = getNativeLabelImportPreview();
+    function applyNativeLabelImport(previewOverride = null) {
+        const preview = previewOverride && typeof previewOverride === 'object'
+            ? previewOverride
+            : getNativeLabelImportPreview();
         if (!preview.ok) {
             showToast(getMessage('ui_import_native_labels_unavailable'), { variant: 'info' });
             return false;
         }
 
         const usedGroupIds = new Set(groupsById.keys());
-        preview.labels.forEach((label) => {
+        const previewLabels = Array.isArray(preview.labels) ? preview.labels : [];
+        previewLabels.forEach((label) => {
+            const sourceKeys = Array.isArray(label?.sourceKeys) ? label.sourceKeys : [];
             let group = label.existingGroupId ? groupsById.get(label.existingGroupId) : null;
             if (!group) {
                 group = {
@@ -1116,7 +1131,7 @@
                 }
             }
 
-            label.sourceKeys.forEach((sourceKey) => {
+            sourceKeys.forEach((sourceKey) => {
                 if (!sourcesByKey.has(sourceKey)) return;
                 removeSourceFromTree(sourceKey);
                 if (!group.children.some((child) => child?.type === 'source' && child.key === sourceKey)) {
@@ -1126,33 +1141,32 @@
         });
 
         buildParentMap();
+        lastNativeLabelImportSummary = {
+            labelCount: Number(preview.labelCount) || previewLabels.length,
+            sourceCount: Number(preview.sourceCount) || previewLabels.reduce((total, label) => total + (Number(label.sourceCount) || 0), 0),
+            importedAt: new Date().toISOString(),
+            labels: previewLabels.map((label) => ({
+                title: label.title || '',
+                sourceCount: Number(label.sourceCount) || 0,
+                action: label.action || (label.existingGroupId ? 'reuse' : 'create')
+            }))
+        };
         render();
         saveState({ immediate: true, critical: true });
         showUndoableToast(getMessage('ui_import_native_labels_applied', [
-            String(preview.labelCount),
-            String(preview.sourceCount)
+            String(lastNativeLabelImportSummary.labelCount),
+            String(lastNativeLabelImportSummary.sourceCount)
         ]), { variant: 'success' });
         return true;
     }
 
     function applyNativeLabelImportFromUi() {
-        let preview = getNativeLabelImportPreview();
-        if (!preview.ok && (sourceViewInfo?.kind === 'label' || sourceViewKind === 'label')) {
+        if (sourceViewInfo?.kind === 'label' || sourceViewKind === 'label') {
             scanAndSyncSources({}, false);
-            preview = getNativeLabelImportPreview();
         }
-        if (!preview.ok) {
-            showToast(getMessage('ui_import_native_labels_unavailable'), { variant: 'info' });
-            return false;
-        }
-
-        const confirmMessage = getMessage('ui_import_native_labels_confirm', [
-            String(preview.labelCount),
-            String(preview.sourceCount)
-        ]);
-        const confirmed = window.confirm(confirmMessage);
-        if (!confirmed) return false;
-        return applyNativeLabelImport();
+        const preview = getNativeLabelImportPreview();
+        renderNativeLabelImportModal(preview);
+        return preview.ok;
     }
 
     function getProjectId() {
@@ -1458,6 +1472,16 @@
             sourceViewKind: sourceViewKind || 'unknown',
             sourceViewConfidence: Number(sourceViewConfidence) || 0,
             lastSourceViewChangedAt: lastSourceViewChangedAt || '',
+            lastSourceViewTransition: lastSourceViewTransition ? Object.assign({}, lastSourceViewTransition) : null,
+            nativeSourceListHidden: Boolean(lastNativeSourceListHidden),
+            lastNativeSourceListHiddenAt: lastNativeSourceListHiddenAt || '',
+            lastNativeLabelImportSummary: lastNativeLabelImportSummary
+                ? Object.assign({}, lastNativeLabelImportSummary, {
+                    labels: Array.isArray(lastNativeLabelImportSummary.labels)
+                        ? lastNativeLabelImportSummary.labels.map((label) => Object.assign({}, label))
+                        : []
+                })
+                : null,
             saveRevision: saveStatus.lastSaveRevision || getSnapshotSaveRevision(buildPersistableState()),
             savedAt: saveStatus.lastSavedAt || '',
             saveStatus: saveStatus.state || 'idle',
@@ -1542,7 +1566,11 @@
                     'data-drive-id',
                     'data-resource-id',
                     'data-testid',
-                    'href'
+                    'href',
+                    'aria-expanded',
+                    'class',
+                    'hidden',
+                    'style'
                 ]
             });
             observedNativeScrollArea = nextObservedArea;
@@ -2208,6 +2236,8 @@
         const root = document.documentElement;
         if (!root || !root.classList) return;
 
+        lastNativeSourceListHidden = Boolean(hidden);
+        lastNativeSourceListHiddenAt = new Date().toISOString();
         if (hidden) {
             root.classList.add(MANAGER_ACTIVE_CLASS);
             return;
@@ -2249,6 +2279,10 @@
         sourceViewConfidence = 0;
         sourceViewInfo = null;
         lastSourceViewChangedAt = '';
+        lastSourceViewTransition = null;
+        lastNativeSourceListHidden = false;
+        lastNativeSourceListHiddenAt = '';
+        lastNativeLabelImportSummary = null;
         resetUndoHistoryBaseline();
     }
 
@@ -2425,6 +2459,9 @@
                 managerStatusReason = 'manager_not_ready';
             }
             if (currentSourceViewInfo.kind !== previousSourceViewKind) {
+                if (!isAwaitingInitialStateLoad && panelState.state === 'ready') {
+                    scanAndSyncSources({}, false);
+                }
                 render();
             }
             return;
@@ -2789,7 +2826,7 @@
         childList: true,
         subtree: true,
         attributes: true,
-        attributeFilter: ['class', 'style', 'hidden', 'aria-hidden']
+        attributeFilter: ['class', 'style', 'hidden', 'aria-hidden', 'aria-expanded', 'data-testid']
     });
 
     function destroyContentInstance() {
@@ -3147,6 +3184,8 @@
                 sourceViewConfidence = 0;
                 sourceViewInfo = null;
                 lastSourceViewChangedAt = '';
+                lastSourceViewTransition = null;
+                lastNativeLabelImportSummary = null;
                 isExtensionEnabled = true;
                 setNativeSourceListHidden(false);
                 if (panelResizeObserver) {

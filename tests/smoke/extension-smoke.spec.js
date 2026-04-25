@@ -210,7 +210,7 @@ test.describe.serial('extension smoke', () => {
         expect(status).toEqual({ ready: true, reason: 'ready' });
     });
 
-    test('shows feedback when native label import has no visible source rows', async () => {
+    test('shows an import preview message when native label import has no visible source rows', async () => {
         const notebookPage = await env.context.newPage();
 
         await notebookPage.goto('https://notebooklm.google.com/notebook/label-empty?fixture=label-empty');
@@ -222,10 +222,59 @@ test.describe.serial('extension smoke', () => {
 
         await notebookPage.locator('#sp-import-native-labels-btn').click();
 
+        await expect(notebookPage.locator('#sp-native-label-import-modal')).toBeVisible({ timeout: 5_000 });
+        await expect(notebookPage.locator('#sp-native-label-import-modal-title')).toBeVisible();
+        await expect(notebookPage.locator('.sp-native-label-import-empty')).toBeVisible();
+        await expect(notebookPage.locator('.sp-native-label-import-confirm-btn')).toBeDisabled();
+    });
+
+    test('previews native label import and shows imported plugin folders after switching back to list view', async () => {
+        const notebookPage = await env.context.newPage();
+
+        await notebookPage.goto('https://notebooklm.google.com/notebook/label-import?fixture=label');
+        env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
+
+        await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
+        await expect(notebookPage.locator('#sp-import-native-labels-btn')).toBeVisible({ timeout: 20_000 });
+        await notebookPage.locator('#sp-import-native-labels-btn').click();
+
+        await expect(notebookPage.locator('#sp-native-label-import-modal')).toBeVisible({ timeout: 5_000 });
+        await expect(notebookPage.locator('#sp-native-label-import-modal')).toContainText('Research papers');
+        await expect(notebookPage.locator('#sp-native-label-import-modal')).toContainText('Reference material');
+
+        await notebookPage.locator('.sp-native-label-import-confirm-btn').click();
+
         await expect.poll(async () => notebookPage.evaluate(() => {
             const root = document.querySelector('#sources-plus-root')?.shadowRoot || null;
-            return root?.querySelector('.sp-toast.show .sp-toast-message')?.textContent?.trim() || '';
-        }), { timeout: 5_000 }).toContain('NotebookLM');
+            return root?.querySelector('.sp-view-banner-meta')?.textContent?.trim() || '';
+        }), { timeout: 5_000 }).toContain('2');
+
+        await notebookPage.evaluate(() => {
+            window.__swapNotebook({
+                notebookId: 'label-import',
+                labelView: false
+            });
+        });
+
+        await expect.poll(async () => notebookPage.evaluate(() => {
+            const root = document.querySelector('#sources-plus-root')?.shadowRoot || null;
+            const container = root?.querySelector('.sp-container') || null;
+            const list = root?.querySelector('#sources-list') || null;
+            const nativeScroll = document.querySelector('[data-testid="scroll-area"]');
+            return {
+                isNativeLabelView: Boolean(container?.classList.contains('is-native-label-view')),
+                listText: list?.textContent || '',
+                nativeScrollVisibility: nativeScroll ? window.getComputedStyle(nativeScroll).visibility : ''
+            };
+        }), { timeout: 20_000 }).toMatchObject({
+            isNativeLabelView: false,
+            listText: expect.stringContaining('Research papers'),
+            nativeScrollVisibility: 'hidden'
+        });
+        await expect.poll(async () => notebookPage.evaluate(() => {
+            const root = document.querySelector('#sources-plus-root')?.shadowRoot || null;
+            return root?.querySelector('#sources-list')?.textContent || '';
+        }), { timeout: 5_000 }).toContain('Reference material');
     });
 
     test('disables and re-enables the manager from the popup controls', async () => {

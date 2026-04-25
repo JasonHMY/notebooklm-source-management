@@ -116,6 +116,9 @@
         const getNativeLabelImportPreview = typeof deps.getNativeLabelImportPreview === 'function'
             ? deps.getNativeLabelImportPreview
             : () => ({ ok: false, labelCount: 0, sourceCount: 0 });
+        const getLastNativeLabelImportSummary = typeof deps.getLastNativeLabelImportSummary === 'function'
+            ? deps.getLastNativeLabelImportSummary
+            : () => null;
 
         const BATCH_COUNT_MARKER = '__COUNT__';
         const COUNT_UP_DURATION_MS = 320;
@@ -663,11 +666,20 @@
             const activeTag = state.activeTagId ? getTagsById().get(state.activeTagId) : null;
             const sourceViewInfo = getSourceViewInfo() || {};
             const nativeLabelPreview = getNativeLabelImportPreview() || {};
+            const nativeLabelImportSummary = getLastNativeLabelImportSummary() || null;
 
             if (sourceViewInfo.kind === 'label') {
                 fragment.appendChild(el('div', { className: 'sp-view-banner sp-native-label-view-banner' }, [
                     el('div', { className: 'sp-view-banner-copy' }, [
-                        el('span', { className: 'sp-view-banner-label' }, [getMessage('ui_native_label_view_active')])
+                        el('span', { className: 'sp-view-banner-label' }, [getMessage('ui_native_label_view_active')]),
+                        nativeLabelImportSummary
+                            ? el('span', { className: 'sp-view-banner-meta' }, [
+                                getMessage('ui_import_native_labels_imported_status', [
+                                    String(nativeLabelImportSummary.labelCount || 0),
+                                    String(nativeLabelImportSummary.sourceCount || 0)
+                                ])
+                            ])
+                            : null
                     ]),
                     el('button', {
                         className: 'sp-button sp-view-banner-btn',

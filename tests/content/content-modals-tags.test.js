@@ -200,6 +200,7 @@ const createModalMotionTestRuntime = ({
     applySourceRepairRemaps = jest.fn(() => Promise.resolve(true)),
     getStateHistoryEntries = jest.fn(() => []),
     restoreStateHistoryEntry = jest.fn(() => Promise.resolve(true)),
+    applyNativeLabelImport = jest.fn(() => true),
     getDiagnosticsInfo = jest.fn(() => ({
         notebookId: 'notebook-test',
         sourceCount: 2,
@@ -243,6 +244,7 @@ const createModalMotionTestRuntime = ({
         applySourceRepairRemaps,
         getStateHistoryEntries,
         restoreStateHistoryEntry,
+        applyNativeLabelImport,
         getDiagnosticsInfo,
         getDiagnosticsText,
         renderSaveStatus,
@@ -495,6 +497,71 @@ describe('modal option motion', () => {
         const { modals } = createModalMotionTestRuntime();
 
         expect(modals.createModalItemStaggerStyle(12, 'padding-left:48px;')).toBe('padding-left:48px;--sp-modal-item-index:10;');
+    });
+
+    it('renders NotebookLM native label import preview details before applying', () => {
+        const preview = {
+            ok: true,
+            labelCount: 2,
+            sourceCount: 3,
+            labels: [
+                {
+                    title: 'Research papers',
+                    sourceCount: 2,
+                    sourceTitles: ['Paper One', 'Paper Two'],
+                    action: 'create',
+                    existingGroupId: null
+                },
+                {
+                    title: 'Reference material',
+                    sourceCount: 1,
+                    sourceTitles: ['Reference One'],
+                    action: 'reuse',
+                    existingGroupId: 'existing-reference'
+                }
+            ]
+        };
+        const applyNativeLabelImport = jest.fn(() => true);
+        const { modals, shadowRoot } = createModalMotionTestRuntime({ applyNativeLabelImport });
+
+        expect(modals.renderNativeLabelImportModal(preview)).toBe(true);
+
+        const modal = shadowRoot.getElementById('sp-native-label-import-modal');
+        expect(modal).toBeTruthy();
+        expect(modal.textContent).toContain('ui_import_native_labels_preview_summary:2,3');
+        expect(modal.textContent).toContain('Research papers');
+        expect(modal.textContent).toContain('Paper One');
+        expect(modal.textContent).toContain('ui_import_native_labels_preview_create');
+        expect(modal.textContent).toContain('Reference material');
+        expect(modal.textContent).toContain('ui_import_native_labels_preview_reuse');
+
+        shadowRoot.querySelector('.sp-native-label-import-confirm-btn').dispatchEvent({ type: 'click' });
+
+        expect(applyNativeLabelImport).toHaveBeenCalledWith(preview);
+        expect(shadowRoot.getElementById('sp-native-label-import-modal')).toBeNull();
+    });
+
+    it('renders an empty NotebookLM native label import preview without applying', () => {
+        const preview = {
+            ok: false,
+            reason: 'no_native_labels',
+            labelCount: 0,
+            sourceCount: 0,
+            labels: []
+        };
+        const applyNativeLabelImport = jest.fn(() => true);
+        const { modals, shadowRoot } = createModalMotionTestRuntime({ applyNativeLabelImport });
+
+        expect(modals.renderNativeLabelImportModal(preview)).toBe(true);
+
+        const modal = shadowRoot.getElementById('sp-native-label-import-modal');
+        expect(modal).toBeTruthy();
+        expect(modal.textContent).toContain('ui_import_native_labels_preview_empty');
+        expect(shadowRoot.querySelector('.sp-native-label-import-confirm-btn').disabled).toBe(true);
+
+        shadowRoot.querySelector('.sp-native-label-import-confirm-btn').dispatchEvent({ type: 'click' });
+
+        expect(applyNativeLabelImport).not.toHaveBeenCalled();
     });
 
     it('rejects oversized import files before reading them', () => {

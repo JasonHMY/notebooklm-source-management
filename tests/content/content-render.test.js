@@ -878,6 +878,49 @@ describe('batch count and source menu motion rendering', () => {
         expect(importButton.attrs.title).toBe('No groups available');
     });
 
+    it('shows the latest native label import summary in label view', () => {
+        const listContainer = createRenderTestElement('div', { id: 'sources-list' });
+        const viewState = createRenderTestElement('div', { id: 'sp-view-state' });
+        const container = createRenderTestElement('div', { className: 'sp-container' });
+        const actionLayer = createRenderTestElement('div', { id: 'sp-source-actions-layer' });
+        const shadowRoot = {
+            querySelector: jest.fn((selector) => {
+                if (selector === '#sources-list') return listContainer;
+                if (selector === '.sp-container') return container;
+                return null;
+            }),
+            getElementById: jest.fn((id) => {
+                if (id === 'sources-list') return listContainer;
+                if (id === 'sp-view-state') return viewState;
+                if (id === 'sp-source-actions-layer') return actionLayer;
+                return null;
+            }),
+            appendChild: jest.fn()
+        };
+
+        const renderModule = createContentRender({
+            el: createRenderTestElement,
+            getDocument: () => ({
+                createDocumentFragment: createRenderTestFragment,
+                createElement: (tag) => createRenderTestElement(tag)
+            }),
+            getShadowRoot: () => shadowRoot,
+            getSourceViewInfo: () => ({ kind: 'label', confidence: 0.78 }),
+            getNativeLabelImportPreview: () => ({ ok: true, labelCount: 1, sourceCount: 2 }),
+            getLastNativeLabelImportSummary: () => ({ labelCount: 1, sourceCount: 2 }),
+            getMessage: (key, substitutions = []) => {
+                if (key === 'ui_native_label_view_active') return 'NotebookLM label view is active';
+                if (key === 'ui_import_native_labels') return 'Import NotebookLM groups';
+                if (key === 'ui_import_native_labels_imported_status') return `Imported ${substitutions.join('/')}`;
+                return key;
+            }
+        });
+
+        renderModule.render();
+
+        expect(viewState.textContent).toContain('Imported 1/2');
+    });
+
     it('clears saved list height while rendering native label view and restores it after leaving', () => {
         const listContainer = createRenderTestElement('div', { id: 'sources-list' });
         const viewState = createRenderTestElement('div', { id: 'sp-view-state' });
@@ -925,6 +968,77 @@ describe('batch count and source menu motion rendering', () => {
         expect(container.className).not.toContain('is-native-label-view');
         expect(container.style.height).toBe('820px');
         expect(container.dataset.nativeLabelPreviousHeight).toBeUndefined();
+    });
+
+    it('renders plugin folders again after switching from native label view back to list view', () => {
+        const listContainer = createRenderTestElement('div', { id: 'sources-list' });
+        const viewState = createRenderTestElement('div', { id: 'sp-view-state' });
+        const container = createRenderTestElement('div', { className: 'sp-container is-native-label-view' });
+        container.style = { height: '' };
+        container.dataset.nativeLabelPreviousHeight = '360px';
+        const actionLayer = createRenderTestElement('div', { id: 'sp-source-actions-layer' });
+        const state = {
+            groups: ['imported'],
+            ungrouped: [],
+            filterQuery: '',
+            isBatchMode: false,
+            activeTagId: null
+        };
+        const groupsById = new Map([
+            ['imported', {
+                id: 'imported',
+                title: '复古游戏重制',
+                enabled: true,
+                collapsed: false,
+                children: [{ type: 'source', key: 'source-1' }]
+            }]
+        ]);
+        const sourcesByKey = new Map([
+            ['source-1', {
+                key: 'source-1',
+                title: 'Chrono Trigger Notes',
+                lowercaseTitle: 'chrono trigger notes',
+                enabled: true,
+                hasNativeCheckbox: true
+            }]
+        ]);
+        const shadowRoot = {
+            querySelector: jest.fn((selector) => {
+                if (selector === '#sources-list') return listContainer;
+                if (selector === '.sp-container') return container;
+                return null;
+            }),
+            getElementById: jest.fn((id) => {
+                if (id === 'sources-list') return listContainer;
+                if (id === 'sp-view-state') return viewState;
+                if (id === 'sp-source-actions-layer') return actionLayer;
+                return null;
+            }),
+            appendChild: jest.fn()
+        };
+
+        const renderModule = createContentRender({
+            el: createRenderTestElement,
+            getDocument: () => ({
+                createDocumentFragment: createRenderTestFragment,
+                createElement: (tag) => createRenderTestElement(tag)
+            }),
+            getShadowRoot: () => shadowRoot,
+            getSourceViewInfo: () => ({ kind: 'list', confidence: 0.9 }),
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getSourcesByKey: () => sourcesByKey,
+            sourceMatchesCurrentFilters: () => true,
+            shouldRenderGroup: () => true,
+            getMessage: (key) => key
+        });
+
+        renderModule.render();
+
+        expect(container.className).not.toContain('is-native-label-view');
+        expect(container.style.height).toBe('360px');
+        expect(listContainer.textContent).toContain('复古游戏重制');
+        expect(listContainer.textContent).toContain('Chrono Trigger Notes');
     });
 
     it('auto-expands matching search ancestors without mutating collapsed state', () => {

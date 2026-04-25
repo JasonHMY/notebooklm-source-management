@@ -473,6 +473,10 @@
                 align-items: center;
                 gap: 8px;
             }
+            .sp-native-label-view-banner .sp-view-banner-copy {
+                align-items: flex-start;
+                flex-direction: column;
+            }
             .sp-view-banner-label {
                 font-size: 12px;
                 font-weight: 600;
@@ -480,6 +484,11 @@
                 white-space: nowrap;
                 overflow: hidden;
                 text-overflow: ellipsis;
+            }
+            .sp-view-banner-meta {
+                font-size: 11px;
+                line-height: 1.35;
+                color: var(--sp-text-secondary);
             }
             .sp-view-banner-btn {
                 flex-shrink: 0;
@@ -1522,6 +1531,74 @@
                 text-align: center;
                 color: var(--sp-text-tertiary);
                 font-size: 14px;
+            }
+            .sp-native-label-import-modal {
+                width: min(420px, calc(100vw - 32px));
+            }
+            .sp-native-label-import-content {
+                gap: 10px;
+                padding: 12px;
+            }
+            .sp-native-label-import-summary {
+                margin: 0;
+                padding: 8px 10px;
+                color: var(--sp-text-secondary);
+                font-size: 13px;
+                line-height: 1.4;
+            }
+            .sp-native-label-import-empty {
+                padding: 24px 14px;
+                color: var(--sp-text-secondary);
+                font-size: 14px;
+                line-height: 1.45;
+                text-align: center;
+            }
+            .sp-native-label-import-item {
+                padding: 10px;
+                border: 1px solid var(--sp-border-light);
+                border-radius: 8px;
+                background: var(--sp-bg-secondary);
+                animation: sp-modal-item-enter var(--sp-motion-medium) var(--sp-ease-emphasized) backwards;
+                animation-delay: calc(var(--sp-modal-item-index, 0) * 24ms);
+            }
+            .sp-native-label-import-item-header {
+                display: grid;
+                grid-template-columns: auto minmax(0, 1fr) auto;
+                align-items: center;
+                gap: 8px;
+            }
+            .sp-native-label-import-item-header .google-symbols {
+                color: var(--sp-accent);
+                font-size: 20px;
+            }
+            .sp-native-label-import-title {
+                color: var(--sp-text-primary);
+                font-size: 14px;
+                font-weight: 600;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+            .sp-native-label-import-count,
+            .sp-native-label-import-action {
+                color: var(--sp-text-tertiary);
+                font-size: 12px;
+            }
+            .sp-native-label-import-action {
+                margin-top: 6px;
+            }
+            .sp-native-label-import-source-list {
+                margin: 8px 0 0;
+                padding-left: 20px;
+                color: var(--sp-text-secondary);
+                font-size: 12px;
+                line-height: 1.45;
+            }
+            .sp-native-label-import-source-list-empty {
+                padding-left: 0;
+            }
+            .sp-native-label-import-more {
+                color: var(--sp-text-tertiary);
             }
             .sp-folder-modal-footer {
                 padding: 12px 16px;

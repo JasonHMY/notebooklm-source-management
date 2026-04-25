@@ -401,6 +401,43 @@
     "ui_import_native_labels": {
         "message": "Importar grupos de NotebookLM"
     },
+    "ui_import_native_labels_preview_title": {
+        "message": "Vista previa de importación"
+    },
+    "ui_import_native_labels_preview_summary": {
+        "message": "Importar $1 grupo(s) de NotebookLM con $2 fuente(s).",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" }
+        }
+    },
+    "ui_import_native_labels_preview_source_count": {
+        "message": "$1 fuente(s)",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_import_native_labels_preview_create": {
+        "message": "Crear una nueva carpeta del plugin"
+    },
+    "ui_import_native_labels_preview_reuse": {
+        "message": "Reutilizar una carpeta existente del plugin"
+    },
+    "ui_import_native_labels_preview_more": {
+        "message": "$1 fuente(s) más",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_import_native_labels_preview_no_sources": {
+        "message": "No hay títulos de fuentes disponibles para mostrar."
+    },
+    "ui_import_native_labels_preview_empty": {
+        "message": "No hay grupos de NotebookLM disponibles para importar. Expande primero los grupos de NotebookLM para que las filas de fuentes sean visibles."
+    },
+    "ui_import_native_labels_apply": {
+        "message": "Importar"
+    },
     "ui_import_native_labels_confirm": {
         "message": "¿Importar $1 grupo(s) de NotebookLM con $2 fuente(s) como carpetas del plugin?",
         "placeholders": {
@@ -410,6 +447,13 @@
     },
     "ui_import_native_labels_applied": {
         "message": "Se importaron $1 grupo(s) de NotebookLM con $2 fuente(s)",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" }
+        }
+    },
+    "ui_import_native_labels_imported_status": {
+        "message": "Se importaron $1 grupo(s) / $2 fuente(s). Vuelve a la vista de lista para verlos como carpetas del plugin.",
         "placeholders": {
             "1": { "content": "$1" },
             "2": { "content": "$2" }

@@ -764,11 +764,23 @@
         function updateRuntimeSourceViewInfo(info) {
             const nextInfo = info || createSourceViewInfo(SOURCE_VIEW_KIND_UNKNOWN, 0);
             const previousKind = runtime.sourceViewKind || SOURCE_VIEW_KIND_UNKNOWN;
+            const previousInfo = runtime.sourceViewInfo || {};
             runtime.sourceViewKind = nextInfo.kind || SOURCE_VIEW_KIND_UNKNOWN;
             runtime.sourceViewConfidence = Number(nextInfo.confidence) || 0;
             runtime.sourceViewInfo = nextInfo;
             if (previousKind !== runtime.sourceViewKind || !runtime.lastSourceViewChangedAt) {
                 runtime.lastSourceViewChangedAt = nextInfo.detectedAt || new Date().toISOString();
+                runtime.lastSourceViewTransition = {
+                    from: previousKind,
+                    to: runtime.sourceViewKind,
+                    changedAt: runtime.lastSourceViewChangedAt,
+                    previousListRows: Number(previousInfo.listRows) || 0,
+                    previousLabelRows: Number(previousInfo.labelRows) || 0,
+                    nextListRows: Number(nextInfo.listRows) || 0,
+                    nextLabelRows: Number(nextInfo.labelRows) || 0,
+                    nextLabelGroups: Number(nextInfo.labelGroups) || 0,
+                    nextActiveLabelControls: Number(nextInfo.activeLabelControls) || 0
+                };
             }
             return nextInfo;
         }
@@ -1490,6 +1502,12 @@
 
             if (mutation?.type === 'attributes') {
                 const attributeName = String(mutation.attributeName || '');
+                if (['aria-expanded', 'class', 'data-testid', 'hidden', 'style'].includes(attributeName)) {
+                    return {
+                        relevant: true,
+                        critical: false
+                    };
+                }
                 return {
                     relevant: SOURCE_RENAME_ATTRIBUTE_NAMES.has(attributeName) && isElementWithinSourceRow(targetElement),
                     critical: true

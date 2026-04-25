@@ -401,6 +401,43 @@
     "ui_import_native_labels": {
         "message": "Import NotebookLM groups"
     },
+    "ui_import_native_labels_preview_title": {
+        "message": "Import preview"
+    },
+    "ui_import_native_labels_preview_summary": {
+        "message": "Import $1 NotebookLM group(s) containing $2 source(s).",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" }
+        }
+    },
+    "ui_import_native_labels_preview_source_count": {
+        "message": "$1 source(s)",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_import_native_labels_preview_create": {
+        "message": "Create a new plugin folder"
+    },
+    "ui_import_native_labels_preview_reuse": {
+        "message": "Reuse an existing plugin folder"
+    },
+    "ui_import_native_labels_preview_more": {
+        "message": "$1 more source(s)",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_import_native_labels_preview_no_sources": {
+        "message": "No source titles are available to show."
+    },
+    "ui_import_native_labels_preview_empty": {
+        "message": "No NotebookLM groups are available to import. Expand the NotebookLM groups first so the source rows are visible."
+    },
+    "ui_import_native_labels_apply": {
+        "message": "Import"
+    },
     "ui_import_native_labels_confirm": {
         "message": "Import $1 NotebookLM group(s) containing $2 source(s) as plugin folders?",
         "placeholders": {
@@ -410,6 +447,13 @@
     },
     "ui_import_native_labels_applied": {
         "message": "Imported $1 NotebookLM group(s) with $2 source(s)",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" }
+        }
+    },
+    "ui_import_native_labels_imported_status": {
+        "message": "Imported $1 group(s) / $2 source(s). Switch back to list view to see them as plugin folders.",
         "placeholders": {
             "1": { "content": "$1" },
             "2": { "content": "$2" }

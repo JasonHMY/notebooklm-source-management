@@ -401,6 +401,43 @@
     "ui_import_native_labels": {
         "message": "导入 NotebookLM 分组"
     },
+    "ui_import_native_labels_preview_title": {
+        "message": "导入预览"
+    },
+    "ui_import_native_labels_preview_summary": {
+        "message": "将导入 $1 个 NotebookLM 分组，共 $2 个来源。",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" }
+        }
+    },
+    "ui_import_native_labels_preview_source_count": {
+        "message": "$1 个来源",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_import_native_labels_preview_create": {
+        "message": "将创建新的插件文件夹"
+    },
+    "ui_import_native_labels_preview_reuse": {
+        "message": "将复用已有插件文件夹"
+    },
+    "ui_import_native_labels_preview_more": {
+        "message": "还有 $1 个来源",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_import_native_labels_preview_no_sources": {
+        "message": "没有可显示的来源标题"
+    },
+    "ui_import_native_labels_preview_empty": {
+        "message": "没有可导入的 NotebookLM 分组。请先展开 NotebookLM 分组，确保来源行已显示。"
+    },
+    "ui_import_native_labels_apply": {
+        "message": "确认导入"
+    },
     "ui_import_native_labels_confirm": {
         "message": "将 $1 个 NotebookLM 分组中的 $2 个来源导入为插件文件夹？",
         "placeholders": {
@@ -410,6 +447,13 @@
     },
     "ui_import_native_labels_applied": {
         "message": "已导入 $1 个 NotebookLM 分组，包含 $2 个来源",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" }
+        }
+    },
+    "ui_import_native_labels_imported_status": {
+        "message": "已导入 $1 个分组 / $2 个来源。切回列表视图后可在插件文件夹中查看。",
         "placeholders": {
             "1": { "content": "$1" },
             "2": { "content": "$2" }
