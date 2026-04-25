@@ -128,6 +128,10 @@
     let panelLifecycleObserver = null;
     let nativeRenameWatcherTimeout = null;
     let stateHistoryEntries = [];
+    let sourceViewKind = 'unknown';
+    let sourceViewConfidence = 0;
+    let sourceViewInfo = null;
+    let lastSourceViewChangedAt = '';
     const NATIVE_ACTION_FAILURE_HISTORY_LIMIT = 5;
     let nativeActionFailureHistory = [];
     const MANAGER_ACTIVE_CLASS = 'sources-plus-manager-active';
@@ -203,6 +207,10 @@
     bindRuntimeProperty('panelLifecycleTimeout', () => panelLifecycleTimeout, (value) => { panelLifecycleTimeout = value; });
     bindRuntimeProperty('panelLifecycleObserver', () => panelLifecycleObserver, (value) => { panelLifecycleObserver = value; });
     bindRuntimeProperty('stateHistoryEntries', () => stateHistoryEntries, (value) => { stateHistoryEntries = Array.isArray(value) ? value : []; });
+    bindRuntimeProperty('sourceViewKind', () => sourceViewKind, (value) => { sourceViewKind = String(value || 'unknown'); });
+    bindRuntimeProperty('sourceViewConfidence', () => sourceViewConfidence, (value) => { sourceViewConfidence = Number(value) || 0; });
+    bindRuntimeProperty('sourceViewInfo', () => sourceViewInfo, (value) => { sourceViewInfo = value && typeof value === 'object' ? value : null; });
+    bindRuntimeProperty('lastSourceViewChangedAt', () => lastSourceViewChangedAt, (value) => { lastSourceViewChangedAt = String(value || ''); });
     bindRuntimeProperty('debouncedPanelLifecycleSync', () => debouncedPanelLifecycleSync);
     bindRuntimeProperty('syncManagerWithPanelLifecycle', () => syncManagerWithPanelLifecycle);
 
@@ -301,6 +309,7 @@
         render: (...args) => render(...args),
         sourceMatchesCurrentFilters: (...args) => sourceMatchesCurrentFilters(...args),
         resolveFreshRowEntry: (...args) => resolveFreshRowEntry(...args),
+        getSourceElements: () => getSourceElements(findSourcePanel() || document),
         renderTagModal: (...args) => renderTagModal(...args),
         renderMoveToFolderModal: (...args) => renderMoveToFolderModal(...args),
         canMoveSourceToUngrouped: (...args) => canMoveSourceToUngrouped(...args),
@@ -546,6 +555,9 @@
         isFreshRowCacheEntryMatch,
         resolveFreshRowEntry,
         findFreshCheckbox,
+        getSourceViewInfo,
+        detectSourceView,
+        getSourceEntries,
         getSourceElements,
         getManageableSourceElements,
         hasRenderableSourceRows,
@@ -651,7 +663,9 @@
         getSourceActionMenuPositionState,
         setSourceActionMenuPosition,
         closeSourceActionMenu,
-        setActiveSourceActionSubmenuAction
+        setActiveSourceActionSubmenuAction,
+        getSourceViewInfo: () => getSourceViewInfo(findSourcePanel()),
+        getNativeLabelImportPreview: (...args) => getNativeLabelImportPreview(...args)
     });
     const {
         createBatchCountMessageChildren,
@@ -969,6 +983,7 @@
         renderBatchTagModal: (...args) => renderBatchTagModal(...args),
         getSourceActionInvokers,
         handleSourceActionSelection,
+        applyNativeLabelImportFromUi: (...args) => applyNativeLabelImportFromUi(...args),
         toggleSourceActionMenu,
         closeSourceActionMenu,
         findFreshCheckbox,
@@ -1009,6 +1024,132 @@
         getGroupTreePosition,
         isNoopTreeMove
     } = treeInteractionsModule;
+
+    function getNativeLabelImportPreview() {
+        const viewInfo = sourceViewInfo || { kind: sourceViewKind, confidence: sourceViewConfidence };
+        if (viewInfo.kind !== 'label') {
+            return {
+                ok: false,
+                reason: 'not_label_view',
+                labelCount: 0,
+                sourceCount: 0,
+                labels: []
+            };
+        }
+
+        const labelsByTitle = new Map();
+        sourcesByKey.forEach((source, sourceKey) => {
+            const title = String(source?.nativeLabelTitle || '').replace(/\s+/g, ' ').trim();
+            if (!title || !sourceKey) return;
+            const normalizedTitle = normalizeSourceText(title).toLowerCase();
+            if (!labelsByTitle.has(normalizedTitle)) {
+                labelsByTitle.set(normalizedTitle, {
+                    title,
+                    sourceKeys: []
+                });
+            }
+            labelsByTitle.get(normalizedTitle).sourceKeys.push(sourceKey);
+        });
+
+        const labels = Array.from(labelsByTitle.values())
+            .map((label) => {
+                const existingGroup = Array.from(groupsById.values()).find((group) => (
+                    normalizeSourceText(group?.title || '').toLowerCase() === normalizeSourceText(label.title).toLowerCase()
+                ));
+                return Object.assign({}, label, {
+                    sourceCount: label.sourceKeys.length,
+                    existingGroupId: existingGroup?.id || null,
+                    action: existingGroup ? 'reuse' : 'create'
+                });
+            })
+            .filter((label) => label.sourceCount > 0)
+            .sort((left, right) => left.title.localeCompare(right.title));
+
+        const sourceCount = labels.reduce((total, label) => total + label.sourceCount, 0);
+        return {
+            ok: labels.length > 0,
+            reason: labels.length > 0 ? 'ready' : 'no_native_labels',
+            labelCount: labels.length,
+            sourceCount,
+            labels
+        };
+    }
+
+    function createImportedNativeLabelGroupId(labelTitle, usedIds = new Set(groupsById.keys())) {
+        const slug = normalizeSourceText(labelTitle)
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '_')
+            .replace(/^_+|_+$/g, '')
+            .slice(0, 40) || 'label';
+        let candidate = `native_label_${slug}`;
+        let index = 2;
+        while (usedIds.has(candidate)) {
+            candidate = `native_label_${slug}_${index}`;
+            index += 1;
+        }
+        usedIds.add(candidate);
+        return candidate;
+    }
+
+    function applyNativeLabelImport() {
+        const preview = getNativeLabelImportPreview();
+        if (!preview.ok) {
+            showToast(getMessage('ui_import_native_labels_unavailable'), { variant: 'info' });
+            return false;
+        }
+
+        const usedGroupIds = new Set(groupsById.keys());
+        preview.labels.forEach((label) => {
+            let group = label.existingGroupId ? groupsById.get(label.existingGroupId) : null;
+            if (!group) {
+                group = {
+                    id: createImportedNativeLabelGroupId(label.title, usedGroupIds),
+                    title: label.title,
+                    children: [],
+                    enabled: true,
+                    collapsed: false,
+                    isNewlyCreated: true
+                };
+                groupsById.set(group.id, group);
+                if (!state.groups.includes(group.id)) {
+                    state.groups.push(group.id);
+                }
+            }
+
+            label.sourceKeys.forEach((sourceKey) => {
+                if (!sourcesByKey.has(sourceKey)) return;
+                removeSourceFromTree(sourceKey);
+                if (!group.children.some((child) => child?.type === 'source' && child.key === sourceKey)) {
+                    group.children.push({ type: 'source', key: sourceKey });
+                }
+            });
+        });
+
+        buildParentMap();
+        render();
+        saveState({ immediate: true, critical: true });
+        showUndoableToast(getMessage('ui_import_native_labels_applied', [
+            String(preview.labelCount),
+            String(preview.sourceCount)
+        ]), { variant: 'success' });
+        return true;
+    }
+
+    function applyNativeLabelImportFromUi() {
+        const preview = getNativeLabelImportPreview();
+        if (!preview.ok) {
+            showToast(getMessage('ui_import_native_labels_unavailable'), { variant: 'info' });
+            return false;
+        }
+
+        const confirmMessage = getMessage('ui_import_native_labels_confirm', [
+            String(preview.labelCount),
+            String(preview.sourceCount)
+        ]);
+        const confirmed = window.confirm(confirmMessage);
+        if (!confirmed) return false;
+        return applyNativeLabelImport();
+    }
 
     function getProjectId() {
         const pathSegments = window.location.pathname.split('/');
@@ -1310,6 +1451,9 @@
             sourceCount: sourcesByKey.size,
             groupCount: groupsById.size,
             tagCount: tagsById.size,
+            sourceViewKind: sourceViewKind || 'unknown',
+            sourceViewConfidence: Number(sourceViewConfidence) || 0,
+            lastSourceViewChangedAt: lastSourceViewChangedAt || '',
             saveRevision: saveStatus.lastSaveRevision || getSnapshotSaveRevision(buildPersistableState()),
             savedAt: saveStatus.lastSavedAt || '',
             saveStatus: saveStatus.state || 'idle',
@@ -2097,6 +2241,10 @@
         attachedSourcePanel = null;
         observedNativeScrollArea = null;
         managerStatusReason = 'manager_not_ready';
+        sourceViewKind = 'unknown';
+        sourceViewConfidence = 0;
+        sourceViewInfo = null;
+        lastSourceViewChangedAt = '';
         resetUndoHistoryBaseline();
     }
 
@@ -2261,6 +2409,8 @@
         }
 
         if (isManagerAttachedToPanel(sourcePanel)) {
+            const currentSourceViewInfo = getSourceViewInfo(sourcePanel);
+            setNativeSourceListHidden(currentSourceViewInfo.kind === 'list');
             attachScrollObserverToPanel(sourcePanel);
             applySourcePanelSurfaceColor(extensionHost, sourcePanel);
             if (panelState.state === 'ready') {
@@ -2399,6 +2549,7 @@
         const extensionRoot = document.createElement('div');
         extensionRoot.id = 'sources-plus-root';
         applySourcePanelSurfaceColor(extensionRoot, sourcePanel);
+        const initialSourceViewInfo = getSourceViewInfo(sourcePanel);
         extensionHost = extensionRoot;
         shadowRoot = extensionRoot.attachShadow({ mode: 'open' });
         managerStatusReason = 'manager_not_ready';
@@ -2510,7 +2661,7 @@
         const panelHeader = sourcePanel.querySelector('.panel-header') || sourcePanel.firstElementChild || sourcePanel;
         if (panelHeader) {
             panelHeader.insertAdjacentElement('afterend', extensionRoot);
-            setNativeSourceListHidden(true);
+            setNativeSourceListHidden(initialSourceViewInfo.kind === 'list');
             attachedSourcePanel = sourcePanel;
             managerStatusReason = 'ready';
             document.addEventListener('change', handleOriginalCheckboxChange, true);
@@ -2788,6 +2939,12 @@
             resolveSourcePanelSurfaceColor,
             schedulePanelLifecycleSync,
             syncManagerWithPanelLifecycle,
+            getSourceViewInfo,
+            detectSourceView,
+            getSourceEntries,
+            getNativeLabelImportPreview,
+            applyNativeLabelImport,
+            applyNativeLabelImportFromUi,
             toggleSourceActionMenu,
             closeSourceActionMenu,
             handleSourceActionSelection,
@@ -2977,6 +3134,10 @@
                 attachedPanelHeader = null;
                 observedNativeScrollArea = null;
                 managerStatusReason = 'manager_not_ready';
+                sourceViewKind = 'unknown';
+                sourceViewConfidence = 0;
+                sourceViewInfo = null;
+                lastSourceViewChangedAt = '';
                 isExtensionEnabled = true;
                 setNativeSourceListHidden(false);
                 if (panelResizeObserver) {

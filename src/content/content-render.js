@@ -110,6 +110,12 @@
         const setActiveSourceActionSubmenuAction = typeof deps.setActiveSourceActionSubmenuAction === 'function'
             ? deps.setActiveSourceActionSubmenuAction
             : () => {};
+        const getSourceViewInfo = typeof deps.getSourceViewInfo === 'function'
+            ? deps.getSourceViewInfo
+            : () => ({ kind: 'unknown', confidence: 0 });
+        const getNativeLabelImportPreview = typeof deps.getNativeLabelImportPreview === 'function'
+            ? deps.getNativeLabelImportPreview
+            : () => ({ ok: false, labelCount: 0, sourceCount: 0 });
 
         const BATCH_COUNT_MARKER = '__COUNT__';
         const COUNT_UP_DURATION_MS = 320;
@@ -655,6 +661,21 @@
             const state = getState() || {};
             const isolatedGroup = getActiveIsolationGroupId() ? groupsById.get(getActiveIsolationGroupId()) : null;
             const activeTag = state.activeTagId ? getTagsById().get(state.activeTagId) : null;
+            const sourceViewInfo = getSourceViewInfo() || {};
+            const nativeLabelPreview = getNativeLabelImportPreview() || {};
+
+            if (sourceViewInfo.kind === 'label') {
+                fragment.appendChild(el('div', { className: 'sp-view-banner sp-native-label-view-banner' }, [
+                    el('div', { className: 'sp-view-banner-copy' }, [
+                        el('span', { className: 'sp-view-banner-label' }, [getMessage('ui_native_label_view_active')])
+                    ]),
+                    el('button', {
+                        className: 'sp-button sp-view-banner-btn',
+                        id: 'sp-import-native-labels-btn',
+                        disabled: nativeLabelPreview.ok ? null : true
+                    }, [getMessage('ui_import_native_labels')])
+                ]));
+            }
 
             if (isolatedGroup) {
                 fragment.appendChild(el('div', { className: 'sp-view-banner' }, [
@@ -1158,7 +1179,7 @@
                                 className: 'sp-batch-checkbox sp-checkbox',
                                 dataset: { sourceKey: source.key },
                                 checked: pendingBatchKeys.has(source.key),
-                                disabled: isFailed || isLoading
+                                disabled: isFailed || isLoading || source.hasNativeCheckbox === false
                             })
                             : el('input', {
                                 type: 'checkbox',

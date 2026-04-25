@@ -36,6 +36,9 @@
         const resolveFreshRowEntry = typeof deps.resolveFreshRowEntry === 'function'
             ? deps.resolveFreshRowEntry
             : () => null;
+        const getSourceElements = typeof deps.getSourceElements === 'function'
+            ? deps.getSourceElements
+            : null;
         const renderTagModal = typeof deps.renderTagModal === 'function'
             ? deps.renderTagModal
             : () => false;
@@ -465,11 +468,11 @@
             const source = getSourcesByKey().get(sourceKey);
             if (!source) return null;
 
-            let nativeMoreBtn = source.element ? findNativeMoreButtonInRow(source.element) : null;
             const doc = getDocument();
-            if (!nativeMoreBtn || !doc?.body?.contains?.(nativeMoreBtn)) {
-                const freshEntry = resolveFreshRowEntry(sourceKey);
-                nativeMoreBtn = freshEntry?.row ? findNativeMoreButtonInRow(freshEntry.row) : null;
+            const freshEntry = resolveFreshRowEntry(sourceKey);
+            let nativeMoreBtn = freshEntry?.row ? findNativeMoreButtonInRow(freshEntry.row) : null;
+            if (!nativeMoreBtn && source.element && doc?.body?.contains?.(source.element)) {
+                nativeMoreBtn = findNativeMoreButtonInRow(source.element);
             }
 
             return nativeMoreBtn || null;
@@ -874,16 +877,36 @@
         function resolveFreshSourceRow(sourceKey) {
             const source = getSourcesByKey().get(sourceKey);
             const doc = getDocument();
+            const freshRow = resolveFreshRowEntry(sourceKey)?.row || null;
+            if (freshRow) {
+                return freshRow;
+            }
+
             if (source?.element && doc?.body?.contains?.(source.element)) {
                 return source.element;
             }
 
-            return resolveFreshRowEntry(sourceKey)?.row || null;
+            return null;
         }
 
         function queryNativeSourceRows() {
             const doc = getDocument();
             if (!doc || typeof doc.querySelectorAll !== 'function') return [];
+
+            if (typeof getSourceElements === 'function') {
+                try {
+                    const seenAdapterRows = new Set();
+                    const adapterRows = Array.from(getSourceElements() || [])
+                        .filter((row) => {
+                            if (!row || seenAdapterRows.has(row)) return false;
+                            seenAdapterRows.add(row);
+                            return true;
+                        });
+                    if (adapterRows.length > 0) return adapterRows;
+                } catch (error) {
+                    // Fall back to legacy selectors if the source adapter is unavailable during teardown.
+                }
+            }
 
             const selectors = Array.isArray(getDEPS().row)
                 ? getDEPS().row

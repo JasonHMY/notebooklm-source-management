@@ -52,6 +52,122 @@ describe('scanAndSyncSources', () => {
         expect(Array.from(mod.sourcesByKey.values()).map((source) => source.title)).toEqual(['Current Source']);
     });
 
+    it('detects the traditional list source view from source rows', () => {
+        const source = createMockSourceRow({ title: 'List Source', stableToken: 'list-doc', checked: true });
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        panel.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [source.row] : []
+        ));
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        expect(mod.getSourceViewInfo(panel)).toMatchObject({
+            kind: 'list',
+            listRows: 1,
+            labelRows: 0
+        });
+    });
+
+    it('detects NotebookLM label view and annotates sources with native labels', () => {
+        const first = createMockSourceRow({ title: 'Paper One', stableToken: 'paper-1', checked: true });
+        const second = createMockSourceRow({ title: 'Paper Two', stableToken: 'paper-2', checked: true });
+        first.row.__nativeLabelTitle = 'Clinical Papers';
+        second.row.__nativeLabelTitle = 'Clinical Papers';
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const labelGroup = {
+            textContent: 'Clinical Papers',
+            style: {},
+            getAttribute: jest.fn((attr) => (attr === 'aria-label' ? 'Clinical Papers label' : null)),
+            matches: jest.fn((selector) => selector.includes('source-label') || selector.includes('label'))
+        };
+        panel.querySelectorAll = jest.fn((selector) => {
+            if (selector.includes('source-label') || selector.includes('label-group')) return [labelGroup];
+            if (selector.includes('source')) return [first.row, second.row];
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        expect(mod.getSourceViewInfo(panel)).toMatchObject({
+            kind: 'label',
+            labelRows: 2
+        });
+
+        mod.scanAndSyncSources({}, true);
+        expect(Array.from(mod.sourcesByKey.values()).map((source) => source.nativeLabelTitle)).toEqual([
+            'Clinical Papers',
+            'Clinical Papers'
+        ]);
+    });
+
+    it('previews and imports NotebookLM labels as plugin folders without overwriting existing folders', () => {
+        const first = createMockSourceRow({ title: 'Paper One', stableToken: 'paper-1', checked: true });
+        const second = createMockSourceRow({ title: 'Paper Two', stableToken: 'paper-2', checked: true });
+        first.row.__nativeLabelTitle = 'Clinical Papers';
+        second.row.__nativeLabelTitle = 'Policy Notes';
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        panel.querySelectorAll = jest.fn((selector) => {
+            if (selector.includes('source-label') || selector.includes('label-group')) return [];
+            if (selector.includes('source')) return [first.row, second.row];
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        mod.groupsById.set('existing-clinical', {
+            id: 'existing-clinical',
+            title: 'Clinical Papers',
+            children: [],
+            enabled: true,
+            collapsed: false
+        });
+        mod.state.groups = ['existing-clinical'];
+        mod.scanAndSyncSources({}, false);
+
+        expect(mod.getNativeLabelImportPreview()).toMatchObject({
+            ok: true,
+            labelCount: 2,
+            sourceCount: 2
+        });
+
+        expect(mod.applyNativeLabelImport()).toBe(true);
+        expect(mod.groupsById.get('existing-clinical').children).toHaveLength(1);
+        expect(Array.from(mod.groupsById.values()).map((group) => group.title).sort()).toEqual([
+            'Clinical Papers',
+            'Policy Notes'
+        ]);
+        expect(mod.state.ungrouped).toEqual([]);
+    });
+
+    it('keeps saved sources when a label view exposes no source rows during loading', () => {
+        const existing = createMockSourceRow({ title: 'Existing Source', stableToken: 'existing-doc', checked: true });
+        const descriptor = mod.createSourceDescriptor(existing.row, new Map(), new Map());
+        mod.sourcesByKey.set(descriptor.key, { ...descriptor, enabled: true });
+        mod.state.ungrouped = [descriptor.key];
+
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const labelGroup = {
+            textContent: 'Loading Labels',
+            style: {},
+            getAttribute: jest.fn((attr) => (attr === 'aria-label' ? 'Source label loading' : null)),
+            matches: jest.fn((selector) => selector.includes('source-label') || selector.includes('label'))
+        };
+        panel.querySelectorAll = jest.fn((selector) => (
+            selector.includes('source-label') || selector.includes('label-group') ? [labelGroup] : []
+        ));
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        mod.scanAndSyncSources({}, false);
+
+        expect(Array.from(mod.sourcesByKey.keys())).toEqual([descriptor.key]);
+        expect(mod.state.ungrouped).toEqual([descriptor.key]);
+    });
+
     it('preserves current notebook state when the current panel virtualizes to a partial row set', () => {
         const { panel } = createMockPanel({ visible: true, contentVisible: true });
         const firstRow = createMockSourceRow({ title: 'Virtual Source A', stableToken: 'virtual-a', checked: true });

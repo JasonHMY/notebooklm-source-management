@@ -341,6 +341,15 @@
     "ui_diagnostics_tags": {
         "message": "Etiquetas"
     },
+    "ui_diagnostics_source_view": {
+        "message": "Vista de fuentes"
+    },
+    "ui_diagnostics_source_view_confidence": {
+        "message": "Confianza de la vista de fuentes"
+    },
+    "ui_diagnostics_source_view_changed_at": {
+        "message": "Vista de fuentes cambiada a las"
+    },
     "ui_diagnostics_save_revision": {
         "message": "Revisión guardada"
     },
@@ -385,6 +394,29 @@
     },
     "ui_diagnostics_native_failure_history": {
         "message": "Historial de fallos nativos"
+    },
+    "ui_native_label_view_active": {
+        "message": "La vista de etiquetas de NotebookLM está activa. Los grupos nativos de fuentes permanecen visibles."
+    },
+    "ui_import_native_labels": {
+        "message": "Importar grupos de NotebookLM"
+    },
+    "ui_import_native_labels_confirm": {
+        "message": "¿Importar $1 grupo(s) de NotebookLM con $2 fuente(s) como carpetas del plugin?",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" }
+        }
+    },
+    "ui_import_native_labels_applied": {
+        "message": "Se importaron $1 grupo(s) de NotebookLM con $2 fuente(s)",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" }
+        }
+    },
+    "ui_import_native_labels_unavailable": {
+        "message": "No hay grupos de NotebookLM disponibles para importar."
     },
     "ui_undo_action": {
         "message": "Deshacer"

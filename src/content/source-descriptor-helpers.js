@@ -597,6 +597,19 @@
         return duplicateIndex === 0 ? baseKey : `${baseKey}_${duplicateIndex}`;
     }
 
+    function extractSourceTextFallback(sourceElement) {
+        const rawText = String(sourceElement?.textContent || '')
+            .replace(/\s+/g, ' ')
+            .trim();
+        if (!rawText) return '';
+
+        const statusPattern = /\b(parsing|loading|analyzing|importing|failed|error|处理中|加载中|正在分析|导入失败|出错)\b/gi;
+        return rawText
+            .replace(statusPattern, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
     function extractSourceIdentitySnapshot(sourceElement) {
         if (!sourceElement) return null;
 
@@ -609,7 +622,8 @@
             ? (sourceElement.getAttribute('aria-label') || '')
             : '';
         const ariaLabel = checkboxAriaLabel || rowAriaLabel;
-        const explicitTitle = titleEl?.textContent.trim() || ariaLabel;
+        const textFallback = extractSourceTextFallback(sourceElement);
+        const explicitTitle = titleEl?.textContent.trim() || ariaLabel || textFallback;
         const title = explicitTitle || getMessage('ui_source_untitled');
         const nativeMoreButton = findElement(DEPS.moreBtn, sourceElement);
         const nativeIconContext = {

@@ -341,6 +341,15 @@
     "ui_diagnostics_tags": {
         "message": "Tags"
     },
+    "ui_diagnostics_source_view": {
+        "message": "Source view"
+    },
+    "ui_diagnostics_source_view_confidence": {
+        "message": "Source view confidence"
+    },
+    "ui_diagnostics_source_view_changed_at": {
+        "message": "Source view changed at"
+    },
     "ui_diagnostics_save_revision": {
         "message": "Save revision"
     },
@@ -385,6 +394,29 @@
     },
     "ui_diagnostics_native_failure_history": {
         "message": "Native failure history"
+    },
+    "ui_native_label_view_active": {
+        "message": "NotebookLM label view is active. Native source groups are kept visible."
+    },
+    "ui_import_native_labels": {
+        "message": "Import NotebookLM groups"
+    },
+    "ui_import_native_labels_confirm": {
+        "message": "Import $1 NotebookLM group(s) containing $2 source(s) as plugin folders?",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" }
+        }
+    },
+    "ui_import_native_labels_applied": {
+        "message": "Imported $1 NotebookLM group(s) with $2 source(s)",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" }
+        }
+    },
+    "ui_import_native_labels_unavailable": {
+        "message": "No NotebookLM groups are available to import."
     },
     "ui_undo_action": {
         "message": "Undo"

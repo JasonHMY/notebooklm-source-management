@@ -88,6 +88,9 @@
         const handleSourceActionSelection = typeof deps.handleSourceActionSelection === 'function'
             ? deps.handleSourceActionSelection
             : (typeof runtime.handleSourceActionSelection === 'function' ? runtime.handleSourceActionSelection : () => {});
+        const applyNativeLabelImportFromUi = typeof deps.applyNativeLabelImportFromUi === 'function'
+            ? deps.applyNativeLabelImportFromUi
+            : (typeof runtime.applyNativeLabelImportFromUi === 'function' ? runtime.applyNativeLabelImportFromUi : () => false);
         const toggleSourceActionMenu = typeof deps.toggleSourceActionMenu === 'function'
             ? deps.toggleSourceActionMenu
             : (typeof runtime.toggleSourceActionMenu === 'function' ? runtime.toggleSourceActionMenu : () => {});
@@ -456,6 +459,11 @@
             if (target.closest('#sp-clear-tag-filter-btn')) {
                 state.activeTagId = null;
                 render();
+                return;
+            }
+
+            if (target.closest('#sp-import-native-labels-btn')) {
+                applyNativeLabelImportFromUi();
                 return;
             }
 
