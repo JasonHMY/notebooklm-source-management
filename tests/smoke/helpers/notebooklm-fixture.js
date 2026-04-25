@@ -36,7 +36,8 @@ function normalizeSources(notebookId, sources) {
 function renderNotebookHtml(notebookId, sources, options = {}) {
     const renderedSources = normalizeSources(notebookId, sources);
     const initialOptions = {
-        stagedHydration: Boolean(options.stagedHydration)
+        stagedHydration: Boolean(options.stagedHydration),
+        labelView: Boolean(options.labelView)
     };
 
     return `<!doctype html>
@@ -182,6 +183,62 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
                 });
             }
 
+            function createLabelViewControls() {
+                const controls = document.createElement('div');
+                controls.className = 'source-label-controls';
+                controls.setAttribute('aria-label', 'NotebookLM source label controls');
+
+                const relabelButton = document.createElement('button');
+                relabelButton.type = 'button';
+                relabelButton.setAttribute('aria-label', 'Undo or relabel sources');
+                relabelButton.textContent = 'label_auto';
+
+                const selectAllLabel = document.createElement('label');
+                selectAllLabel.textContent = 'Select all';
+                const selectAll = document.createElement('input');
+                selectAll.type = 'checkbox';
+                selectAll.setAttribute('aria-label', 'Select all sources');
+                selectAllLabel.appendChild(selectAll);
+
+                controls.appendChild(relabelButton);
+                controls.appendChild(selectAllLabel);
+                return controls;
+            }
+
+            function createLabelGroup(labelTitle, sources) {
+                const group = document.createElement('section');
+                group.className = 'source-label-group';
+                group.setAttribute('data-testid', 'source-label-group');
+                group.setAttribute('aria-label', labelTitle + ' label');
+                group.setAttribute('data-label-title', labelTitle);
+
+                const header = document.createElement('button');
+                header.type = 'button';
+                header.className = 'source-label-title';
+                header.setAttribute('aria-label', labelTitle);
+                header.textContent = labelTitle;
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.setAttribute('aria-label', labelTitle);
+                header.appendChild(checkbox);
+                group.appendChild(header);
+
+                sources.forEach((source) => {
+                    const item = createSourceItem(source, 'full');
+                    item.setAttribute('data-source-label', labelTitle);
+                    group.appendChild(item);
+                });
+
+                return group;
+            }
+
+            function renderLabelView(sourcePanel, sources) {
+                sourcePanel.appendChild(createLabelViewControls());
+                sourcePanel.appendChild(createLabelGroup('Research papers', sources.slice(0, 1)));
+                sourcePanel.appendChild(createLabelGroup('Reference material', sources.slice(1)));
+                setHydrationPhase('full');
+            }
+
             function hydrateSources(scrollArea, sources, options) {
                 clearHydrationTimers();
                 if (!options || !options.stagedHydration) {
@@ -226,11 +283,17 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
                 scrollArea.setAttribute('data-testid', 'scroll-area');
 
                 sourcePanel.appendChild(header);
-                sourcePanel.appendChild(scrollArea);
+                if (options.labelView) {
+                    renderLabelView(sourcePanel, sources);
+                } else {
+                    sourcePanel.appendChild(scrollArea);
+                }
                 appShell.appendChild(sourcePanel);
                 document.body.appendChild(appShell);
 
-                hydrateSources(scrollArea, sources, options);
+                if (!options.labelView) {
+                    hydrateSources(scrollArea, sources, options);
+                }
             }
 
             window.__swapNotebook = function swapNotebook(nextNotebook) {
@@ -348,7 +411,8 @@ async function installNotebookFixture(context) {
             status: 200,
             contentType: 'text/html',
             body: renderNotebookHtml(notebookId, null, {
-                stagedHydration: url.searchParams.get('fixture') === 'staged'
+                stagedHydration: url.searchParams.get('fixture') === 'staged',
+                labelView: url.searchParams.get('fixture') === 'label'
             })
         });
     });

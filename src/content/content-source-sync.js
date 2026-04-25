@@ -307,6 +307,9 @@
             '[data-resource-id]'
         ];
         const LABEL_VIEW_TEXT_PATTERN = /\b(label|labels|categor(?:y|ies|ize)|group|groups)\b|标签|分类|分组/i;
+        const ACTIVE_LABEL_VIEW_CONTROL_PATTERN = /\b(relabel|re-label|undo\s+labels?|redo\s+labels?|recategor(?:y|ies|ize))\b|撤销.*标签|重新.*标签|撤销.*分类|重新.*分类/i;
+        const SELECT_ALL_TEXT_PATTERN = /\bselect\s+all\b|全选/i;
+        const NATIVE_SOURCE_CONTROL_TEXT_PATTERN = /\b(add\s+source|web|fast\s+research|submit)\b|添加来源|提交/i;
         const MANAGER_ACTIVE_CLASS = 'sources-plus-manager-active';
         const NATIVE_SOURCE_LIST_CONTAINER_SELECTORS = [
             '.scroll-area-desktop',
@@ -523,6 +526,36 @@
             return '';
         }
 
+        function isActiveNativeLabelViewControl(element, panel, options = {}) {
+            if (!element || isNodeHiddenForSourceScan(element, panel, options)) return false;
+            const text = getElementTextSignal(element);
+            if (ACTIVE_LABEL_VIEW_CONTROL_PATTERN.test(text)) {
+                return true;
+            }
+
+            if (
+                typeof element.querySelector === 'function' &&
+                element.querySelector('input[type="checkbox"]') &&
+                text &&
+                !SELECT_ALL_TEXT_PATTERN.test(text) &&
+                !NATIVE_SOURCE_CONTROL_TEXT_PATTERN.test(text)
+            ) {
+                return text.length <= 120;
+            }
+
+            return false;
+        }
+
+        function getActiveNativeLabelViewControls(panel, options = {}) {
+            const controls = queryPanelElements(panel, ['button', '[role="button"]']);
+            const seen = new Set();
+            return controls.filter((control) => {
+                if (!control || seen.has(control)) return false;
+                seen.add(control);
+                return isActiveNativeLabelViewControl(control, panel, options);
+            });
+        }
+
         function createSourceViewInfo(kind, confidence, extra = {}) {
             return Object.assign({
                 kind,
@@ -597,6 +630,7 @@
             const labelEntries = getLabelSourceEntries(sourcePanel, labelScanOptions);
             const labelGroups = queryPanelElements(sourcePanel, LABEL_GROUP_SELECTORS)
                 .filter((group) => !isNodeHiddenForSourceScan(group, sourcePanel, labelScanOptions));
+            const activeLabelControls = getActiveNativeLabelViewControls(sourcePanel, labelScanOptions);
             const listEntries = getListSourceEntries(sourcePanel);
             const labelTextSignals = labelGroups.filter((group) => LABEL_VIEW_TEXT_PATTERN.test(getElementTextSignal(group)));
 
@@ -604,7 +638,17 @@
                 return createSourceViewInfo(SOURCE_VIEW_KIND_LABEL, labelTextSignals.length > 0 ? 0.92 : 0.82, {
                     listRows: listEntries.length,
                     labelRows: labelEntries.length,
-                    labelGroups: labelGroups.length
+                    labelGroups: labelGroups.length,
+                    activeLabelControls: activeLabelControls.length
+                });
+            }
+
+            if (activeLabelControls.length > 0) {
+                return createSourceViewInfo(SOURCE_VIEW_KIND_LABEL, 0.78, {
+                    listRows: listEntries.length,
+                    labelRows: 0,
+                    labelGroups: labelGroups.length,
+                    activeLabelControls: activeLabelControls.length
                 });
             }
 
@@ -612,7 +656,8 @@
                 return createSourceViewInfo(SOURCE_VIEW_KIND_LIST, 0.9, {
                     listRows: listEntries.length,
                     labelRows: 0,
-                    labelGroups: labelGroups.length
+                    labelGroups: labelGroups.length,
+                    activeLabelControls: 0
                 });
             }
 
@@ -620,14 +665,16 @@
                 return createSourceViewInfo(SOURCE_VIEW_KIND_LABEL, 0.45, {
                     listRows: 0,
                     labelRows: 0,
-                    labelGroups: labelGroups.length
+                    labelGroups: labelGroups.length,
+                    activeLabelControls: activeLabelControls.length
                 });
             }
 
             return createSourceViewInfo(SOURCE_VIEW_KIND_UNKNOWN, 0, {
                 listRows: 0,
                 labelRows: 0,
-                labelGroups: 0
+                labelGroups: 0,
+                activeLabelControls: 0
             });
         }
 

@@ -699,6 +699,17 @@
             patchChildren(container, fragment);
         }
 
+        function setContainerNativeLabelViewMode(container, enabled) {
+            if (!container) return;
+            const classes = String(container.className || '')
+                .split(/\s+/)
+                .filter((className) => className && className !== 'is-native-label-view');
+            if (enabled) {
+                classes.push('is-native-label-view');
+            }
+            container.className = classes.join(' ');
+        }
+
         function elementHasClass(element, className) {
             if (!element) return false;
             if (element.classList && typeof element.classList.contains === 'function') {
@@ -1075,16 +1086,27 @@
             if (!shadowRoot) return;
             const listContainer = shadowRoot.querySelector('#sources-list');
             if (!listContainer) return;
+            const container = shadowRoot.querySelector('.sp-container');
 
             bindSourceIconFallbackDelegation(listContainer);
             bindSpotlightPointerTracking(listContainer);
             syncActiveSourceActionMenuState();
             syncSearchUi();
-            renderViewStateBar();
 
             const doc = getDocument();
             if (!doc) return;
             const fragment = doc.createDocumentFragment();
+            const sourceViewInfo = getSourceViewInfo() || {};
+            const isNativeLabelView = sourceViewInfo.kind === 'label';
+            setContainerNativeLabelViewMode(container, isNativeLabelView);
+            renderViewStateBar();
+            if (isNativeLabelView) {
+                patchChildren(listContainer, fragment);
+                updateSearchResultCount('', 0);
+                renderSourceActionMenuLayer();
+                return;
+            }
+
             const state = getState() || {};
             const activeFilters = hasActiveRenderFilters();
             const groupsById = getGroupsById();

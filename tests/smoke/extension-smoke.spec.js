@@ -119,6 +119,64 @@ test.describe.serial('extension smoke', () => {
         expect(pageErrors).toEqual([]);
     });
 
+    test('keeps NotebookLM label view visible in compact compatibility mode', async () => {
+        const notebookPage = await env.context.newPage();
+
+        await notebookPage.goto('https://notebooklm.google.com/notebook/label-view?fixture=label');
+        env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
+        const bridgePage = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
+
+        await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
+        await expect(notebookPage.locator('[data-testid="source-label-group"]').first()).toBeVisible();
+
+        await expect.poll(async () => notebookPage.evaluate(() => {
+            const root = document.querySelector('#sources-plus-root')?.shadowRoot || null;
+            const container = root?.querySelector('.sp-container') || null;
+            const list = root?.querySelector('#sources-list') || null;
+            const searchCluster = root?.querySelector('.sp-search-cluster') || null;
+            const newGroupButton = root?.querySelector('#sp-new-group-btn') || null;
+
+            if (!root || !container || !list || !searchCluster || !newGroupButton) {
+                return null;
+            }
+
+            return {
+                isNativeLabelView: container.classList.contains('is-native-label-view'),
+                managerSourceRows: root.querySelectorAll('#sources-list .source-item').length,
+                sourceListDisplay: window.getComputedStyle(list).display,
+                searchDisplay: window.getComputedStyle(searchCluster).display,
+                newGroupDisplay: window.getComputedStyle(newGroupButton).display,
+                nativeLabelGroups: document.querySelectorAll('[data-testid="source-label-group"]').length,
+                nativeSourceTitles: Array.from(document.querySelectorAll('[data-testid="source-label-group"] [data-testid="source-title"]'))
+                    .map((node) => node.textContent.trim())
+            };
+        }), { timeout: 20_000 }).toEqual({
+            isNativeLabelView: true,
+            managerSourceRows: 0,
+            sourceListDisplay: 'none',
+            searchDisplay: 'none',
+            newGroupDisplay: 'none',
+            nativeLabelGroups: 2,
+            nativeSourceTitles: [
+                'Notebook label-view source A',
+                'Notebook label-view source B'
+            ]
+        });
+
+        const status = await bridgePage.evaluate(async () => {
+            const tabs = await chrome.tabs.query({ url: 'https://notebooklm.google.com/*' });
+            const targetTab = tabs.find((tab) => tab.url && tab.url.includes('/notebook/label-view'));
+
+            if (!targetTab || typeof targetTab.id !== 'number') {
+                throw new Error('Label view notebook tab was not found.');
+            }
+
+            return chrome.tabs.sendMessage(targetTab.id, { type: 'GET_MANAGER_STATUS' });
+        });
+
+        expect(status).toEqual({ ready: true, reason: 'ready' });
+    });
+
     test('disables and re-enables the manager from the popup controls', async () => {
         const notebookPage = await env.context.newPage();
 

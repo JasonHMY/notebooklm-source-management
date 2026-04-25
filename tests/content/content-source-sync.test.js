@@ -69,6 +69,101 @@ describe('scanAndSyncSources', () => {
         });
     });
 
+    it('detects active NotebookLM label view controls before stale list rows', () => {
+        const stale = createMockSourceRow({ title: 'Stale List Source', stableToken: 'stale-doc', checked: true });
+        const relabelControl = {
+            textContent: 'label_auto',
+            style: {},
+            getAttribute: jest.fn((attr) => (attr === 'aria-label' ? '撤销或重新为来源加标签' : null)),
+            matches: jest.fn(() => false)
+        };
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        panel.querySelectorAll = jest.fn((selector) => {
+            if (selector === 'button' || selector === '[role="button"]') return [relabelControl];
+            if (mod.DEPS.row.includes(selector)) return [stale.row];
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        expect(mod.getSourceViewInfo(panel)).toMatchObject({
+            kind: 'label',
+            listRows: 1,
+            labelRows: 0,
+            activeLabelControls: 1
+        });
+    });
+
+    it('detects active NotebookLM label controls left under stale manager suppression', () => {
+        global.document.documentElement.className = 'sources-plus-manager-active';
+        global.document.documentElement.classList.contains = jest.fn((className) => (
+            className === 'sources-plus-manager-active'
+        ));
+
+        const stale = createMockSourceRow({ title: 'Stale List Source', stableToken: 'stale-doc', checked: true });
+        const { panel, content } = createMockPanel({ visible: true, contentVisible: true });
+        content.style.visibility = 'hidden';
+        content.__computedStyle.visibility = 'hidden';
+        content.matches = jest.fn((selector) => (
+            selector === '.scroll-area' ||
+            selector === '.scroll-area-desktop' ||
+            selector === '.sources-list-container' ||
+            selector === '[data-testid="scroll-area"]'
+        ));
+        content.parentElement = panel;
+        content.parentNode = panel;
+
+        const relabelControl = {
+            textContent: 'label_auto',
+            style: {},
+            __computedStyle: { visibility: 'hidden' },
+            parentElement: content,
+            parentNode: content,
+            getAttribute: jest.fn((attr) => (attr === 'aria-label' ? '撤销或重新为来源加标签' : null)),
+            matches: jest.fn(() => false)
+        };
+        panel.querySelectorAll = jest.fn((selector) => {
+            if (selector === 'button' || selector === '[role="button"]') return [relabelControl];
+            if (mod.DEPS.row.includes(selector)) return [stale.row];
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        expect(mod.getSourceViewInfo(panel)).toMatchObject({
+            kind: 'label',
+            listRows: 1,
+            activeLabelControls: 1
+        });
+    });
+
+    it('keeps the pre-labeling entry point in the traditional list source view', () => {
+        const source = createMockSourceRow({ title: 'List Source', stableToken: 'list-doc', checked: true });
+        const labelEntryPoint = {
+            textContent: 'label_auto',
+            style: {},
+            getAttribute: jest.fn((attr) => (attr === 'aria-label' ? '按主题自动为来源加标签' : null)),
+            matches: jest.fn(() => false)
+        };
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        panel.querySelectorAll = jest.fn((selector) => {
+            if (selector === 'button' || selector === '[role="button"]') return [labelEntryPoint];
+            if (mod.DEPS.row.includes(selector)) return [source.row];
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        expect(mod.getSourceViewInfo(panel)).toMatchObject({
+            kind: 'list',
+            listRows: 1,
+            activeLabelControls: 0
+        });
+    });
+
     it('detects NotebookLM label view and annotates sources with native labels', () => {
         const first = createMockSourceRow({ title: 'Paper One', stableToken: 'paper-1', checked: true });
         const second = createMockSourceRow({ title: 'Paper Two', stableToken: 'paper-2', checked: true });

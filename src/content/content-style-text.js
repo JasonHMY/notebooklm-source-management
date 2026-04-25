@@ -205,6 +205,26 @@
                 box-shadow: var(--sp-focus-ring-strong);
                 transform: translateY(-2px);
             }
+            .sp-container.is-native-label-view {
+                min-height: 0;
+                max-height: none;
+                background: transparent;
+            }
+            .sp-container.is-native-label-view .sp-controls {
+                padding-bottom: 4px;
+            }
+            .sp-container.is-native-label-view .sp-toolbar-actions > button:not(.sp-toolbar-settings),
+            .sp-container.is-native-label-view .sp-search-cluster,
+            .sp-container.is-native-label-view #sources-list,
+            .sp-container.is-native-label-view .sp-resizer {
+                display: none;
+            }
+            .sp-container.is-native-label-view .sp-view-state {
+                padding: 4px 0 8px;
+            }
+            .sp-container.is-native-label-view .sp-view-banner {
+                background: var(--sp-panel-bg);
+            }
             .sp-resizer {
                 height: 8px;
                 width: 100%;

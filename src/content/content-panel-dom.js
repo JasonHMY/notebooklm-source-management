@@ -21,6 +21,14 @@
             SCROLL_AREA_SELECTOR,
             ...(Array.isArray(DEPS.scroll) ? DEPS.scroll : [])
         ].filter(Boolean)));
+        const SOURCE_PANEL_INLINE_CONTENT_TEXT_PATTERN = /add\s+source|select\s+all|label_auto|label|labels|categor(?:y|ies|ize)|group|groups|添加来源|全选|标签|分类|分组/i;
+        const SOURCE_PANEL_INLINE_CONTENT_SELECTORS = [
+            'button',
+            '[role="button"]',
+            'input[type="checkbox"]',
+            'textarea',
+            'input'
+        ];
 
         function findElement(selectors, parent = documentObj) {
             for (const sel of selectors) {
@@ -206,11 +214,53 @@
             return hasRenderableBox(target);
         }
 
+        function getElementTextSignal(target) {
+            if (!target) return '';
+            const parts = [];
+            ['aria-label', 'title', 'placeholder'].forEach((attr) => {
+                const value = typeof target.getAttribute === 'function' ? target.getAttribute(attr) : '';
+                if (value) parts.push(value);
+            });
+            if (typeof target.textContent === 'string') {
+                parts.push(target.textContent);
+            }
+            return parts.join(' ').replace(/\s+/g, ' ').trim();
+        }
+
+        function isElementInsideHeader(target, header) {
+            if (!target || !header) return false;
+            if (target === header) return true;
+            return typeof header.contains === 'function' && header.contains(target);
+        }
+
+        function hasInlineSourcePanelContent(panel) {
+            if (!panel || typeof panel.querySelectorAll !== 'function') return false;
+            const header = getSourcePanelHeader(panel);
+            const candidates = [];
+            SOURCE_PANEL_INLINE_CONTENT_SELECTORS.forEach((selector) => {
+                try {
+                    candidates.push(...Array.from(panel.querySelectorAll(selector)));
+                } catch (error) {
+                    // Ignore selector support differences in NotebookLM's runtime DOM.
+                }
+            });
+
+            return candidates.some((candidate) => (
+                candidate &&
+                !isElementInsideHeader(candidate, header) &&
+                isElementRenderable(candidate) &&
+                SOURCE_PANEL_INLINE_CONTENT_TEXT_PATTERN.test(getElementTextSignal(candidate))
+            ));
+        }
+
         function isSourcePanelCollapsed(panel) {
             const sourcePanel = panel || findSourcePanel();
             if (!sourcePanel || !isElementRenderable(sourcePanel)) return true;
             const panelContent = findSourcePanelContent(sourcePanel);
-            return !panelContent || !isElementRenderable(panelContent);
+            if (panelContent) {
+                return !isElementRenderable(panelContent);
+            }
+            return !hasInlineSourcePanelContent(sourcePanel);
         }
 
         function isSourcePanelRenderable(panel) {

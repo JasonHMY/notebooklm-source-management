@@ -582,6 +582,14 @@ describe('manager shell structure', () => {
         expect(extractCssBlock(global.NSM_CONTENT_STYLE_TEXT, '.sp-modal-cancel:hover {')).toContain('transform: scale(1.02);');
         expect(global.NSM_CONTENT_STYLE_TEXT).not.toContain('translateY(-1px)');
     });
+
+    it('includes compact native label view styles', () => {
+        jest.resetModules();
+        require('../../src/content/content-style-text.js');
+
+        expect(extractCssBlock(global.NSM_CONTENT_STYLE_TEXT, '.sp-container.is-native-label-view {')).toContain('min-height: 0;');
+        expect(global.NSM_CONTENT_STYLE_TEXT).toContain('.sp-container.is-native-label-view #sources-list');
+    });
 });
 
 describe('batch count and source menu motion rendering', () => {
@@ -770,6 +778,54 @@ describe('batch count and source menu motion rendering', () => {
             countId: 'batch-ungroup',
             countValue: '2'
         });
+    });
+
+    it('renders a compact compatibility panel in NotebookLM native label view', () => {
+        const container = createRenderTestElement('div', { className: 'sp-container' });
+        const viewState = createRenderTestElement('div', { id: 'sp-view-state' });
+        viewState.hidden = true;
+        const staleGroup = createRenderTestElement('div', { className: 'group-container' }, ['Old plugin folder']);
+        const listContainer = createRenderTestElement('div', { id: 'sources-list' }, [staleGroup]);
+        const actionLayer = createRenderTestElement('div', { id: 'sp-source-actions-layer' });
+
+        const shadowRoot = {
+            querySelector: jest.fn((selector) => {
+                if (selector === '#sources-list') return listContainer;
+                if (selector === '.sp-container') return container;
+                return null;
+            }),
+            getElementById: jest.fn((id) => {
+                if (id === 'sources-list') return listContainer;
+                if (id === 'sp-view-state') return viewState;
+                if (id === 'sp-source-actions-layer') return actionLayer;
+                return null;
+            }),
+            appendChild: jest.fn()
+        };
+
+        const renderModule = createContentRender({
+            el: createRenderTestElement,
+            getDocument: () => ({
+                createDocumentFragment: createRenderTestFragment,
+                createElement: (tag) => createRenderTestElement(tag)
+            }),
+            getShadowRoot: () => shadowRoot,
+            getSourceViewInfo: () => ({ kind: 'label', confidence: 0.78 }),
+            getNativeLabelImportPreview: () => ({ ok: true, labelCount: 2, sourceCount: 4 }),
+            getMessage: (key) => {
+                if (key === 'ui_native_label_view_active') return 'NotebookLM label view is active';
+                if (key === 'ui_import_native_labels') return 'Import NotebookLM groups';
+                return key;
+            }
+        });
+
+        renderModule.render();
+
+        expect(container.className).toContain('is-native-label-view');
+        expect(viewState.hidden).toBe(false);
+        expect(viewState.textContent).toContain('NotebookLM label view is active');
+        expect(viewState.textContent).toContain('Import NotebookLM groups');
+        expect(listContainer.childNodes).toHaveLength(0);
     });
 
     it('auto-expands matching search ancestors without mutating collapsed state', () => {

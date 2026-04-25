@@ -194,6 +194,35 @@ describe('manager launcher messaging', () => {
         expect(mod.isSourcePanelRenderable(panel)).toBe(true);
     });
 
+    it('treats the native label view panel as renderable even without the legacy scroll area', () => {
+        const { panel, header } = createMockPanel({ visible: true, contentVisible: true });
+        const labelControl = {
+            isConnected: true,
+            hidden: false,
+            textContent: 'label_auto 按主题自动为来源加标签',
+            style: {
+                display: 'block',
+                visibility: 'visible'
+            },
+            __computedStyle: {
+                display: 'block',
+                visibility: 'visible'
+            },
+            getBoundingClientRect: jest.fn(() => ({ width: 240, height: 40 })),
+            getAttribute: jest.fn((attr) => (attr === 'aria-label' ? '撤销或重新为来源加标签' : null)),
+            matches: jest.fn(() => false)
+        };
+
+        panel.querySelector = jest.fn((selector) => (selector === '.panel-header' ? header : null));
+        panel.querySelectorAll = jest.fn((selector) => (
+            selector === 'button' || selector === '[role="button"]' ? [labelControl] : []
+        ));
+
+        expect(mod.findSourcePanelContent(panel)).toBe(null);
+        expect(mod.isSourcePanelCollapsed(panel)).toBe(false);
+        expect(mod.isSourcePanelRenderable(panel)).toBe(true);
+    });
+
     it('soft-tears down the manager when the native source panel becomes non-renderable', () => {
         const { panel } = createMockPanel({ visible: false });
         const mockHost = {
