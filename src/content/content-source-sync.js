@@ -336,7 +336,7 @@
         const SOURCE_VIEW_SWITCH_ID_PATTERN = /(?:source[-_\s]*view|view[-_\s]*(?:list|label)|list[-_\s]*view|label[-_\s]*view)/i;
         const SOURCE_VIEW_SWITCH_ICON_PATTERN = /\b(?:label_auto|view_list|format_list_bulleted)\b/i;
         const SELECT_ALL_TEXT_PATTERN = /\bselect\s+all\b|全选/i;
-        const NATIVE_SOURCE_CONTROL_TEXT_PATTERN = /\b(add\s+source|web|fast\s+research|submit)\b|添加来源|提交/i;
+        const NATIVE_SOURCE_CONTROL_TEXT_PATTERN = /\b(add\s+source|web|fast\s+research|submit)\b|language\s*web|languageWeb|fastResearch|添加来源|提交/i;
         const NATIVE_LABEL_TITLE_BLOCKED_TEXT_PATTERN = /\b(more\s+options?|source\s+guide|source\s+details?|loading|analyzing|failed|error)\b|来源指南|来源详情|加载中|正在分析|失败|出错/i;
         const NATIVE_LABEL_TITLE_RESERVED_TEXT_PATTERN = /^(?:sources?|source|来源)$|\bsources?\s+for\b/i;
         const GENERIC_NATIVE_CONTROL_TITLE_PATTERN = /^(?:more|more options?|options?|menu|overflow|ellipsis|kebab|actions?|更多|更多选项|更多操作|选项|選項|菜单|菜單|操作)$/i;
@@ -425,7 +425,7 @@
                 .replace(/^\s*(?:expand|collapse|open|close)\s+(?:source\s+)?(?:label|group|category|folder)\s*/i, ' ')
                 .replace(/^\s*(?:展开|折叠|打开|关闭)\s*/i, ' ')
                 .replace(/\s*(?:expanded|collapsed|已展开|已折叠)\s*$/i, ' ')
-                .replace(/\b(?:keyboard_arrow_(?:right|down)|arrow_drop_down|expand_(?:more|less)|chevron_(?:right|left)|label_auto)\b/gi, ' ')
+                .replace(/(?:keyboard_arrow_(?:right|down)|arrow_drop_down|expand_(?:more|less)|chevron_(?:right|left)|label_auto)/gi, ' ')
                 .replace(/\b\d+\s*(?:sources?|items?)\b/gi, ' ')
                 .replace(/\b\d+\s*(?:个)?(?:来源|项目)\b/gi, ' ')
                 .replace(/\s+/g, ' ')
@@ -535,6 +535,25 @@
             return false;
         }
 
+        function compareElementsInDocumentOrder(left, right) {
+            if (!left || !right || left === right || typeof left.compareDocumentPosition !== 'function') return 0;
+            try {
+                const position = left.compareDocumentPosition(right);
+                if (position & 4) return -1;
+                if (position & 2) return 1;
+            } catch (error) {
+                return 0;
+            }
+            return 0;
+        }
+
+        function sortElementsInDocumentOrder(entries) {
+            return entries.slice().sort((left, right) => {
+                const relation = compareElementsInDocumentOrder(left.element, right.element);
+                return relation || 0;
+            });
+        }
+
         function isLikelySourceRowElement(element) {
             if (!element) return false;
             return elementMatchesAny(element, LABEL_SOURCE_ROW_SELECTORS);
@@ -617,6 +636,37 @@
             }
 
             return '';
+        }
+
+        function getNativeLabelHeaderEntries(panel, options = {}, rowIdentity = null) {
+            const sourcePanel = panel || findSourcePanel();
+            if (!sourcePanel) return [];
+            const candidates = queryPanelElements(sourcePanel, LABEL_HEADER_TITLE_SELECTORS);
+            const seen = new Set();
+            const entries = [];
+            candidates.forEach((candidate) => {
+                if (!candidate || seen.has(candidate)) return;
+                seen.add(candidate);
+                if (!isNativeLabelHeaderElement(candidate)) return;
+                const title = getNativeLabelTitleFromCandidate(candidate, null, sourcePanel, options, rowIdentity);
+                if (!title) return;
+                entries.push({ element: candidate, title });
+            });
+            return sortElementsInDocumentOrder(entries);
+        }
+
+        function findNearestPrecedingNativeLabelHeaderTitle(row, panel, options = {}, rowIdentity = null) {
+            if (!row || !panel || typeof row.compareDocumentPosition !== 'function') return '';
+            const headerEntries = getNativeLabelHeaderEntries(panel, options, rowIdentity);
+            let best = null;
+            headerEntries.forEach((entry) => {
+                if (!entry?.element || entry.element === row || elementContains(row, entry.element)) return;
+                if (elementContains(entry.element, row)) return;
+                if (compareElementsInDocumentOrder(entry.element, row) < 0) {
+                    best = entry;
+                }
+            });
+            return best?.title || '';
         }
 
         function getNativeLabelTitleFromContainer(container, row, panel, options = {}, rowIdentity = null) {
@@ -778,10 +828,22 @@
                         const label = getElementOwnLabel(cursor);
                         if (label) return label;
                     }
-                    if (options.inferNativeLabelTitles) {
-                        const inferredLabel = getNativeLabelTitleFromContainer(cursor, row, panel, options, rowIdentity);
-                        if (inferredLabel) return inferredLabel;
-                    }
+                }
+                cursor = getParentElement(cursor);
+                depth += 1;
+            }
+
+            if (options.inferNativeLabelTitles) {
+                const nearestHeaderTitle = findNearestPrecedingNativeLabelHeaderTitle(row, panel, options, rowIdentity);
+                if (nearestHeaderTitle) return nearestHeaderTitle;
+            }
+
+            cursor = getParentElement(row);
+            depth = 0;
+            while (cursor && cursor !== panel && depth < 8) {
+                if (!isNodeHiddenForSourceScan(cursor, panel, options) && options.inferNativeLabelTitles) {
+                    const inferredLabel = getNativeLabelTitleFromContainer(cursor, row, panel, options, rowIdentity);
+                    if (inferredLabel) return inferredLabel;
                 }
                 cursor = getParentElement(cursor);
                 depth += 1;

@@ -507,6 +507,94 @@ describe('scanAndSyncSources', () => {
         ]);
     });
 
+    it('uses nearest real NotebookLM label headers instead of toolbar icon text', () => {
+        const game = createMockSourceRow({ title: 'Retro Game Source', stableToken: 'retro-game', checked: true });
+        const remake = createMockSourceRow({ title: 'Remake Source', stableToken: 'remake-source', checked: true });
+        const ethics = createMockSourceRow({ title: 'Ethics Source', stableToken: 'ethics-source', checked: true });
+        const rows = [game.row, remake.row, ethics.row];
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+
+        const toolbarControl = {
+            tagName: 'BUTTON',
+            textContent: 'languageWebkeyboard_arrow_down',
+            style: {},
+            parentElement: panel,
+            parentNode: panel,
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-expanded') return 'true';
+                if (attr === 'role') return 'button';
+                if (attr === 'aria-label') return 'languageWebkeyboard_arrow_down';
+                return null;
+            }),
+            matches: jest.fn(() => false),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const createHeader = (title) => ({
+            tagName: 'BUTTON',
+            textContent: `keyboard_arrow_down ${title}`,
+            style: {},
+            parentElement: panel,
+            parentNode: panel,
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-expanded') return 'true';
+                if (attr === 'role') return 'button';
+                if (attr === 'aria-label') return title;
+                return null;
+            }),
+            matches: jest.fn(() => false),
+            querySelector: jest.fn((selector) => (selector.includes('checkbox') ? { checked: true } : null)),
+            querySelectorAll: jest.fn(() => [])
+        });
+        const gameHeader = createHeader('复古游戏重制');
+        const ethicsHeader = createHeader('工程与伦理规范');
+        const ordered = [toolbarControl, gameHeader, game.row, remake.row, ethicsHeader, ethics.row];
+        const orderByElement = new Map(ordered.map((element, index) => [element, index]));
+        ordered.forEach((element) => {
+            element.compareDocumentPosition = jest.fn((other) => {
+                const left = orderByElement.get(element);
+                const right = orderByElement.get(other);
+                if (left == null || right == null || left === right) return 0;
+                return left < right ? 4 : 2;
+            });
+        });
+        rows.forEach((row) => {
+            row.parentElement = panel;
+            row.parentNode = panel;
+            row.style = {};
+            row.matches = jest.fn((selector) => selector === '[role="listitem"]');
+        });
+
+        panel.querySelectorAll = jest.fn((selector) => {
+            if (selector === 'button' || selector === '[role="button"]' || String(selector).includes('aria-expanded')) {
+                return [toolbarControl, gameHeader, ethicsHeader];
+            }
+            if (selector === '[role="listitem"]') return rows;
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        mod.scanAndSyncSources({}, true);
+
+        expect(Array.from(mod.sourcesByKey.values()).map((source) => source.nativeLabelTitle)).toEqual([
+            '复古游戏重制',
+            '复古游戏重制',
+            '工程与伦理规范'
+        ]);
+        const preview = mod.getNativeLabelImportPreview();
+        expect(preview).toMatchObject({
+            ok: true,
+            labelCount: 2,
+            sourceCount: 3
+        });
+        expect(preview.labels.map((label) => label.title)).toEqual([
+            '复古游戏重制',
+            '工程与伦理规范'
+        ]);
+    });
+
     it('expands collapsed NotebookLM label groups before import preview scans', () => {
         const source = createMockSourceRow({ title: 'Paper One', stableToken: 'paper-1', checked: true });
         const { panel } = createMockPanel({ visible: true, contentVisible: true });
