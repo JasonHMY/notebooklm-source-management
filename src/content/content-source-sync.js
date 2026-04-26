@@ -332,6 +332,9 @@
         ];
         const LABEL_VIEW_TEXT_PATTERN = /\b(label|labels|categor(?:y|ies|ize)|group|groups)\b|标签|分类|分组/i;
         const ACTIVE_LABEL_VIEW_CONTROL_PATTERN = /\b(relabel|re-label|undo\s+labels?|redo\s+labels?|recategor(?:y|ies|ize))\b|撤销.*标签|重新.*标签|撤销.*分类|重新.*分类/i;
+        const SOURCE_VIEW_SWITCH_TEXT_PATTERN = /\b(?:list\s*view|view\s*list|view_list|format_list_bulleted|label\s*view|labels?\s*view|view\s*by\s*label)\b|列表视图|标签视图/i;
+        const SOURCE_VIEW_SWITCH_ID_PATTERN = /(?:source[-_\s]*view|view[-_\s]*(?:list|label)|list[-_\s]*view|label[-_\s]*view)/i;
+        const SOURCE_VIEW_SWITCH_ICON_PATTERN = /\b(?:label_auto|view_list|format_list_bulleted)\b/i;
         const SELECT_ALL_TEXT_PATTERN = /\bselect\s+all\b|全选/i;
         const NATIVE_SOURCE_CONTROL_TEXT_PATTERN = /\b(add\s+source|web|fast\s+research|submit)\b|添加来源|提交/i;
         const NATIVE_LABEL_TITLE_BLOCKED_TEXT_PATTERN = /\b(more\s+options?|source\s+guide|source\s+details?|loading|analyzing|failed|error)\b|来源指南|来源详情|加载中|正在分析|失败|出错/i;
@@ -445,6 +448,26 @@
             return /[A-Za-z0-9\u3400-\u9FFF]/.test(title);
         }
 
+        function isNativeSourceViewSwitchControl(element) {
+            if (!element) return false;
+            const tagName = String(element.tagName || '').toLowerCase();
+            const role = getAttributeValue(element, 'role').toLowerCase();
+            const ariaPressed = getAttributeValue(element, 'aria-pressed');
+            const text = getElementTextSignal(element);
+            const identityText = [
+                getAttributeValue(element, 'data-testid'),
+                getAttributeValue(element, 'class'),
+                String(element.className || '')
+            ].filter(Boolean).join(' ');
+            const isInteractive = tagName === 'button' || role === 'button' || Boolean(ariaPressed);
+            if (!isInteractive) return false;
+            return (
+                SOURCE_VIEW_SWITCH_TEXT_PATTERN.test(text) ||
+                SOURCE_VIEW_SWITCH_ID_PATTERN.test(identityText) ||
+                (Boolean(ariaPressed) && SOURCE_VIEW_SWITCH_ICON_PATTERN.test(text))
+            );
+        }
+
         function getElementOwnLabel(element) {
             if (!element) return '';
             const dataCandidates = [
@@ -511,6 +534,7 @@
 
         function isNativeLabelHeaderElement(element) {
             if (!element) return false;
+            if (isNativeSourceViewSwitchControl(element)) return false;
             const tagName = String(element.tagName || '').toLowerCase();
             const role = getAttributeValue(element, 'role').toLowerCase();
             const ariaExpanded = getAttributeValue(element, 'aria-expanded');
@@ -525,6 +549,7 @@
 
         function getNativeLabelTitleFromCandidate(element, row, panel, options = {}, rowIdentity = null) {
             if (!element || element === row || elementContains(element, row)) return '';
+            if (isNativeSourceViewSwitchControl(element)) return '';
             if (isNodeHiddenForSourceScan(element, panel, options)) return '';
 
             const candidates = [
@@ -548,6 +573,7 @@
 
         function getNativeLabelTitleFromContainer(container, row, panel, options = {}, rowIdentity = null) {
             if (!container || container === panel || isNodeHiddenForSourceScan(container, panel, options)) return '';
+            if (isNativeSourceViewSwitchControl(container)) return '';
 
             if (elementMatchesAny(container, LABEL_GROUP_SELECTORS)) {
                 const ownLabel = getElementOwnLabel(container);
@@ -842,9 +868,13 @@
 
             const baseLabelScanOptions = { ignoreManagerSuppression: true };
             const labelGroups = queryPanelElements(sourcePanel, LABEL_GROUP_SELECTORS)
-                .filter((group) => !isNodeHiddenForSourceScan(group, sourcePanel, baseLabelScanOptions));
+                .filter((group) => (
+                    !isNativeSourceViewSwitchControl(group) &&
+                    !isNodeHiddenForSourceScan(group, sourcePanel, baseLabelScanOptions)
+                ));
             const listEntries = getListSourceEntries(sourcePanel);
             const activeLabelControls = getActiveNativeLabelViewControls(sourcePanel, baseLabelScanOptions)
+                .filter((control) => !isNativeSourceViewSwitchControl(control))
                 .filter((control) => !isControlInsideSourceEntry(control, listEntries));
             const labelScanOptions = Object.assign({}, baseLabelScanOptions, {
                 inferNativeLabelTitles: labelGroups.length > 0 || activeLabelControls.length > 0

@@ -184,6 +184,53 @@ describe('scanAndSyncSources', () => {
         });
     });
 
+    it('keeps list view when the native source view switcher exposes a label view button', () => {
+        const source = createMockSourceRow({ title: 'Current List Source', stableToken: 'list-doc', checked: true });
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const labelViewButton = {
+            tagName: 'BUTTON',
+            textContent: 'label_auto 标签视图',
+            style: {},
+            parentElement: null,
+            parentNode: null,
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return '标签视图';
+                if (attr === 'aria-pressed') return 'false';
+                if (attr === 'data-testid') return 'source-view-label-button';
+                return null;
+            }),
+            matches: jest.fn((selector) => (
+                selector.includes('aria-label') ||
+                selector.includes('data-testid') ||
+                selector.includes('label')
+            )),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        labelViewButton.parentElement = panel;
+        labelViewButton.parentNode = panel;
+        source.row.parentElement = panel;
+        source.row.parentNode = panel;
+        source.row.previousElementSibling = labelViewButton;
+        source.row.previousSibling = labelViewButton;
+        panel.querySelectorAll = jest.fn((selector) => {
+            if (selector === 'button' || selector === '[role="button"]') return [labelViewButton];
+            if (selector.includes('source-label') || selector.includes('label-group') || selector.includes('aria-label') || selector.includes('category')) return [labelViewButton];
+            if (selector === '[data-testid="source-item"]' || selector.includes('source-item') || mod.DEPS.row.includes(selector)) return [source.row];
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        expect(mod.getSourceViewInfo(panel)).toMatchObject({
+            kind: 'list',
+            listRows: 1,
+            labelRows: 0,
+            activeLabelControls: 0
+        });
+    });
+
     it('does not treat the generic Sources panel toggle as a native label group', () => {
         const source = createMockSourceRow({ title: 'List Source', stableToken: 'list-doc', checked: true });
         const panelToggle = {
