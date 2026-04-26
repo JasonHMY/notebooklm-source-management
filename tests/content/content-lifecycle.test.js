@@ -62,7 +62,7 @@ describe('manager launcher messaging', () => {
         mod._setAttachedSourcePanelForTest(panel);
         global.document.querySelector = jest.fn(() => panel);
 
-        expect(mod.getManagerStatus()).toEqual({
+        expect(mod.getManagerStatus()).toMatchObject({
             ready: true,
             reason: 'ready'
         });
@@ -142,11 +142,144 @@ describe('manager launcher messaging', () => {
         mod.handleManagerMessage({ type: 'SWITCH_SOURCE_VIEW', viewKind: 'label' }, {}, sendResponse);
 
         expect(labelButton.click).toHaveBeenCalledTimes(1);
-        expect(sendResponse).toHaveBeenCalledWith({
+        expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({
             success: true,
             viewKind: 'label',
             clicked: true
+        }));
+    });
+
+    it('keeps the popup ready when the manager host is inside the current panel but the stored panel reference is stale', () => {
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const stalePanel = createMockPanel({ visible: true, contentVisible: true }).panel;
+        const mockContainer = {
+            classList: {
+                add: jest.fn(),
+                remove: jest.fn()
+            },
+            offsetWidth: 120
+        };
+        const mockHost = {
+            isConnected: true,
+            scrollIntoView: jest.fn()
+        };
+        const mockShadowRoot = {
+            host: mockHost,
+            querySelector: jest.fn((selector) => selector === '.sp-container' ? mockContainer : null)
+        };
+        panel.contains = jest.fn((element) => element === mockHost);
+
+        mod._setProjectId('test-project');
+        mod._setShadowRootForTest(mockShadowRoot);
+        mod._setAttachedSourcePanelForTest(stalePanel);
+        global.document.querySelector = jest.fn(() => panel);
+
+        expect(mod.getManagerStatus()).toMatchObject({
+            ready: true,
+            reason: 'ready'
         });
+        expect(mod._getAttachedSourcePanelForTest()).toBe(panel);
+    });
+
+    it('keeps the popup controls available when the mounted label-view manager is preserving sources during native loading', () => {
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const labelControl = {
+            isConnected: true,
+            hidden: false,
+            textContent: 'label_auto 重新为来源加标签',
+            style: {
+                display: 'block',
+                visibility: 'visible'
+            },
+            __computedStyle: {
+                display: 'block',
+                visibility: 'visible'
+            },
+            getBoundingClientRect: jest.fn(() => ({ width: 220, height: 40 })),
+            getAttribute: jest.fn((attr) => (attr === 'aria-label' ? '重新为来源加标签' : null)),
+            matches: jest.fn(() => false),
+            closest: jest.fn(() => null),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const mockContainer = {
+            classList: {
+                add: jest.fn(),
+                remove: jest.fn()
+            },
+            offsetWidth: 120
+        };
+        const mockHost = {
+            isConnected: true,
+            scrollIntoView: jest.fn()
+        };
+        const mockShadowRoot = {
+            host: mockHost,
+            querySelector: jest.fn((selector) => selector === '.sp-container' ? mockContainer : null)
+        };
+
+        panel.contains = jest.fn((element) => element === mockHost);
+        panel.querySelectorAll = jest.fn((selector) => {
+            if (selector === 'button' || selector === '[role="button"]') return [labelControl];
+            return [];
+        });
+
+        mod._setProjectId('test-project');
+        mod._setShadowRootForTest(mockShadowRoot);
+        mod._setAttachedSourcePanelForTest(panel);
+        mod.state.ungrouped = ['saved-source'];
+        mod.sourcesByKey.set('saved-source', {
+            key: 'saved-source',
+            title: 'Saved Source',
+            normalizedTitle: 'saved source',
+            enabled: true
+        });
+        mod._setManagerStatusReason('manager_not_ready');
+        global.document.querySelector = jest.fn(() => panel);
+
+        expect(mod.getSourcePanelState(panel)).toMatchObject({
+            state: 'loading',
+            totalRows: 0
+        });
+        expect(mod.getManagerStatus()).toMatchObject({
+            ready: true,
+            reason: 'ready',
+            sourceViewKind: 'list',
+            detectedSourceViewKind: 'label'
+        });
+    });
+
+    it('forces plugin list mode from the popup even when NotebookLM is still exposing label-view controls', () => {
+        const sendResponse = jest.fn();
+        const stale = createMockSourceRow({ title: 'Stale Source', stableToken: 'stale-doc', checked: true });
+        const relabelControl = {
+            textContent: 'label_auto',
+            disabled: false,
+            style: {},
+            getAttribute: jest.fn((attr) => (attr === 'aria-label' ? '撤销或重新为来源加标签' : null)),
+            matches: jest.fn(() => false),
+            closest: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        panel.querySelectorAll = jest.fn((selector) => {
+            if (selector === 'button' || selector === '[role="button"]') return [relabelControl];
+            if (mod.DEPS.row.includes(selector)) return [stale.row];
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        mod.handleManagerMessage({ type: 'SWITCH_SOURCE_VIEW', viewKind: 'list' }, {}, sendResponse);
+
+        expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: true,
+            viewKind: 'list',
+            nativeClicked: false,
+            nativeSwitchReason: 'source_view_switch_control_missing'
+        }));
+        expect(global.document.documentElement.classList.add).toHaveBeenCalledWith('sources-plus-manager-active');
     });
 
     it('cleans up the previous content instance when the script is injected twice', () => {
@@ -807,7 +940,7 @@ describe('manager launcher messaging', () => {
         expect(runtimeMessages.some((message) => (
             message.type === 'SAVE_STATE' && message.key === 'sourcesPlusState_test-project'
         ))).toBe(true);
-        expect(mod.getManagerStatus()).toEqual({
+        expect(mod.getManagerStatus()).toMatchObject({
             ready: true,
             reason: 'ready'
         });
@@ -966,7 +1099,7 @@ describe('manager launcher messaging', () => {
         expect(runtimeMessages.some((message) => (
             message.type === 'SAVE_STATE' && message.key === 'sourcesPlusState_test-project'
         ))).toBe(true);
-        expect(mod.getManagerStatus()).toEqual({
+        expect(mod.getManagerStatus()).toMatchObject({
             ready: true,
             reason: 'ready'
         });

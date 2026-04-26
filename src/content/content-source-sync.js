@@ -453,18 +453,24 @@
             const tagName = String(element.tagName || '').toLowerCase();
             const role = getAttributeValue(element, 'role').toLowerCase();
             const ariaPressed = getAttributeValue(element, 'aria-pressed');
+            const ariaSelected = getAttributeValue(element, 'aria-selected');
+            const ariaChecked = getAttributeValue(element, 'aria-checked');
             const text = getElementTextSignal(element);
             const identityText = [
                 getAttributeValue(element, 'data-testid'),
                 getAttributeValue(element, 'class'),
                 String(element.className || '')
             ].filter(Boolean).join(' ');
-            const isInteractive = tagName === 'button' || role === 'button' || Boolean(ariaPressed);
+            const isInteractive = (
+                tagName === 'button' ||
+                ['button', 'tab', 'radio', 'switch', 'menuitemradio'].includes(role) ||
+                Boolean(ariaPressed || ariaSelected || ariaChecked)
+            );
             if (!isInteractive) return false;
             return (
                 SOURCE_VIEW_SWITCH_TEXT_PATTERN.test(text) ||
                 SOURCE_VIEW_SWITCH_ID_PATTERN.test(identityText) ||
-                (Boolean(ariaPressed) && SOURCE_VIEW_SWITCH_ICON_PATTERN.test(text))
+                (Boolean(ariaPressed || ariaSelected || ariaChecked) && SOURCE_VIEW_SWITCH_ICON_PATTERN.test(text))
             );
         }
 

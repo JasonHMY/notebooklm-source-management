@@ -131,6 +131,7 @@
     let sourceViewKind = 'unknown';
     let sourceViewConfidence = 0;
     let sourceViewInfo = null;
+    let sourceViewDisplayKind = 'list';
     let lastSourceViewChangedAt = '';
     let lastSourceViewTransition = null;
     let lastNativeSourceListHidden = false;
@@ -236,6 +237,7 @@
     bindRuntimeProperty('sourceViewKind', () => sourceViewKind, (value) => { sourceViewKind = String(value || 'unknown'); });
     bindRuntimeProperty('sourceViewConfidence', () => sourceViewConfidence, (value) => { sourceViewConfidence = Number(value) || 0; });
     bindRuntimeProperty('sourceViewInfo', () => sourceViewInfo, (value) => { sourceViewInfo = value && typeof value === 'object' ? value : null; });
+    bindRuntimeProperty('sourceViewDisplayKind', () => sourceViewDisplayKind, (value) => { sourceViewDisplayKind = value === SOURCE_VIEW_LABEL ? SOURCE_VIEW_LABEL : SOURCE_VIEW_LIST; });
     bindRuntimeProperty('lastSourceViewChangedAt', () => lastSourceViewChangedAt, (value) => { lastSourceViewChangedAt = String(value || ''); });
     bindRuntimeProperty('lastSourceViewTransition', () => lastSourceViewTransition, (value) => { lastSourceViewTransition = value && typeof value === 'object' ? value : null; });
     bindRuntimeProperty('debouncedPanelLifecycleSync', () => debouncedPanelLifecycleSync);
@@ -693,7 +695,7 @@
         setSourceActionMenuPosition,
         closeSourceActionMenu,
         setActiveSourceActionSubmenuAction,
-        getSourceViewInfo: () => getSourceViewInfo(findSourcePanel()),
+        getSourceViewInfo: () => getSourceDisplayViewInfo(findSourcePanel()),
         getNativeLabelImportPreview: (...args) => getNativeLabelImportPreview(...args),
         getLastNativeLabelImportSummary: () => lastNativeLabelImportSummary
     });
@@ -1492,6 +1494,7 @@
             groupCount: groupsById.size,
             tagCount: tagsById.size,
             sourceViewKind: sourceViewKind || 'unknown',
+            sourceViewDisplayKind: sourceViewDisplayKind || SOURCE_VIEW_LIST,
             sourceViewConfidence: Number(sourceViewConfidence) || 0,
             lastSourceViewChangedAt: lastSourceViewChangedAt || '',
             lastSourceViewTransition: lastSourceViewTransition ? Object.assign({}, lastSourceViewTransition) : null,
@@ -1613,19 +1616,25 @@
 
         const sourcePanel = findSourcePanel();
         const panelState = getSourcePanelState(sourcePanel);
-        const isReady = Boolean(
+        const isManagerUiMounted = Boolean(
             shadowRoot &&
             shadowRoot.host &&
             shadowRoot.host.isConnected &&
             shadowRoot.querySelector('.sp-container') &&
             sourcePanel &&
-            panelState.state === 'ready' &&
             isManagerAttachedToPanel(sourcePanel)
         );
+        const isManagerUiOperable = Boolean(
+            isManagerUiMounted &&
+            panelState.state !== 'collapsed' &&
+            panelState.state !== 'missing' &&
+            panelState.state !== 'detail'
+        );
 
-        if (isReady) {
+        if (isManagerUiOperable) {
+            attachedSourcePanel = sourcePanel;
             managerStatusReason = 'ready';
-            return { ready: true, reason: 'ready' };
+            return Object.assign({ ready: true, reason: 'ready' }, getSourceViewStatusFields(sourcePanel));
         }
 
         if (!projectId) {
@@ -1715,6 +1724,36 @@
         return viewKind === SOURCE_VIEW_LABEL ? SOURCE_VIEW_LABEL : SOURCE_VIEW_LIST;
     }
 
+    function getSourceDisplayViewInfo(panel = findSourcePanel(), detectedInfo = null) {
+        const nativeInfo = detectedInfo || getSourceViewInfo(panel) || {};
+        const displayKind = normalizeSourceViewSwitchTarget(sourceViewDisplayKind);
+        return Object.assign({}, nativeInfo, {
+            kind: displayKind,
+            displayKind,
+            detectedKind: nativeInfo.kind || 'unknown',
+            detectedConfidence: Number(nativeInfo.confidence) || 0,
+            displayOverride: displayKind !== (nativeInfo.kind || 'unknown')
+        });
+    }
+
+    function applySourceViewDisplayMode(viewKind, panel = findSourcePanel(), detectedInfo = null) {
+        sourceViewDisplayKind = normalizeSourceViewSwitchTarget(viewKind);
+        const displayInfo = getSourceDisplayViewInfo(panel, detectedInfo);
+        setNativeSourceListHidden(displayInfo.kind === SOURCE_VIEW_LIST);
+        return displayInfo;
+    }
+
+    function getSourceViewStatusFields(sourcePanel) {
+        const nativeInfo = sourcePanel ? getSourceViewInfo(sourcePanel) : (sourceViewInfo || {});
+        const displayInfo = getSourceDisplayViewInfo(sourcePanel, nativeInfo);
+        return {
+            sourceViewKind: displayInfo.kind,
+            sourceViewDisplayKind: displayInfo.displayKind,
+            detectedSourceViewKind: displayInfo.detectedKind,
+            sourceViewConfidence: Number(nativeInfo?.confidence) || 0
+        };
+    }
+
     function getNativeViewSwitchText(element) {
         if (!element) return '';
         const values = [
@@ -1760,6 +1799,7 @@
 
     function scoreNativeViewSwitchCandidate(element, targetViewKind) {
         if (!isNativeViewSwitchCandidateVisible(element) || isInsideNativeSourceRow(element)) return 0;
+        if (typeof element.closest === 'function' && element.closest('#sources-plus-root')) return 0;
         const text = getNativeViewSwitchText(element);
         if (!text) return 0;
         const targetPatterns = SOURCE_VIEW_SWITCH_PATTERNS[targetViewKind] || [];
@@ -1771,17 +1811,44 @@
         return (targetMatches * 10) - (otherMatches * 3);
     }
 
+    function getNativeSourceViewSwitchSearchRoots(sourcePanel) {
+        const roots = [];
+        const seen = new Set();
+        const addRoot = (root) => {
+            if (!root || seen.has(root) || typeof root.querySelectorAll !== 'function') return;
+            seen.add(root);
+            roots.push(root);
+        };
+        addRoot(sourcePanel);
+        addRoot(sourcePanel?.parentElement);
+        addRoot(sourcePanel?.parentElement?.parentElement);
+        return roots;
+    }
+
     function findNativeSourceViewSwitchButton(targetViewKind) {
         const sourcePanel = findSourcePanel();
         if (!sourcePanel || typeof sourcePanel.querySelectorAll !== 'function') return null;
         const selectors = [
             'button',
             '[role="button"]',
+            '[role="tab"]',
+            '[role="radio"]',
+            '[role="switch"]',
+            '[role="menuitemradio"]',
+            '[aria-selected]',
+            '[aria-checked]',
             '[aria-label]',
             '[title]',
             '[data-testid]'
         ];
-        const candidates = Array.from(sourcePanel.querySelectorAll(selectors.join(',')));
+        const seen = new Set();
+        const candidates = getNativeSourceViewSwitchSearchRoots(sourcePanel)
+            .flatMap((root) => Array.from(root.querySelectorAll(selectors.join(','))))
+            .filter((element) => {
+                if (!element || seen.has(element)) return false;
+                seen.add(element);
+                return true;
+            });
         return candidates
             .map((element) => ({
                 element,
@@ -1824,23 +1891,24 @@
         }
 
         const currentInfo = getSourceViewInfo(sourcePanel);
-        if (currentInfo?.kind === nextViewKind) {
-            return {
-                success: true,
-                viewKind: nextViewKind,
-                alreadyActive: true
-            };
+        const nativeAlreadyActive = currentInfo?.kind === nextViewKind;
+        let nativeClicked = false;
+        let nativeSwitchReason = nativeAlreadyActive ? 'already_active' : '';
+        if (!nativeAlreadyActive) {
+            const switchButton = findNativeSourceViewSwitchButton(nextViewKind);
+            if (switchButton) {
+                nativeClicked = clickNativeSourceViewSwitchButton(switchButton);
+                nativeSwitchReason = nativeClicked ? 'clicked' : 'source_view_switch_click_failed';
+            } else {
+                nativeSwitchReason = 'source_view_switch_control_missing';
+            }
         }
 
-        const switchButton = findNativeSourceViewSwitchButton(nextViewKind);
-        if (!switchButton || !clickNativeSourceViewSwitchButton(switchButton)) {
-            return {
-                success: false,
-                reason: 'source_view_switch_control_missing',
-                errorCode: 'source_view_switch_failed',
-                errorMessageKey: 'popup_source_view_switch_failed'
-            };
+        const displayInfo = applySourceViewDisplayMode(nextViewKind, sourcePanel, currentInfo);
+        if (!isAwaitingInitialStateLoad && getSourcePanelState(sourcePanel).state === 'ready') {
+            scanAndSyncSources({}, false);
         }
+        render();
 
         setTimeout(() => {
             try {
@@ -1853,7 +1921,12 @@
         return {
             success: true,
             viewKind: nextViewKind,
-            clicked: true
+            clicked: nativeClicked,
+            nativeClicked,
+            nativeSwitchReason,
+            alreadyActive: nativeAlreadyActive,
+            detectedSourceViewKind: currentInfo?.kind || 'unknown',
+            sourceViewDisplayKind: displayInfo.displayKind
         };
     }
 
@@ -2531,6 +2604,7 @@
             routeRecoveryTimeout = null;
         }
         cleanupManagerResources();
+        sourceViewDisplayKind = SOURCE_VIEW_LIST;
         pendingPanelReattachState = null;
     }
 
@@ -2620,17 +2694,17 @@
         }
 
         if (isManagerAttachedToPanel(sourcePanel)) {
+            attachedSourcePanel = sourcePanel;
             const previousSourceViewKind = sourceViewKind || 'unknown';
             const currentSourceViewInfo = getSourceViewInfo(sourcePanel);
-            setNativeSourceListHidden(currentSourceViewInfo.kind === 'list');
+            const currentDisplayViewInfo = getSourceDisplayViewInfo(sourcePanel, currentSourceViewInfo);
+            setNativeSourceListHidden(currentDisplayViewInfo.kind === 'list');
             attachScrollObserverToPanel(sourcePanel);
             applySourcePanelSurfaceColor(extensionHost, sourcePanel);
             if (panelState.state === 'ready') {
                 completeInitialStateLoad();
-                managerStatusReason = 'ready';
-            } else {
-                managerStatusReason = 'manager_not_ready';
             }
+            managerStatusReason = 'ready';
             if (currentSourceViewInfo.kind !== previousSourceViewKind) {
                 if (!isAwaitingInitialStateLoad && panelState.state === 'ready') {
                     scanAndSyncSources({}, false);
@@ -2768,6 +2842,7 @@
         extensionRoot.id = 'sources-plus-root';
         applySourcePanelSurfaceColor(extensionRoot, sourcePanel);
         const initialSourceViewInfo = getSourceViewInfo(sourcePanel);
+        const initialDisplayViewInfo = getSourceDisplayViewInfo(sourcePanel, initialSourceViewInfo);
         extensionHost = extensionRoot;
         shadowRoot = extensionRoot.attachShadow({ mode: 'open' });
         managerStatusReason = 'manager_not_ready';
@@ -2880,7 +2955,7 @@
         const panelHeader = sourcePanel.querySelector('.panel-header') || sourcePanel.firstElementChild || sourcePanel;
         if (panelHeader) {
             panelHeader.insertAdjacentElement('afterend', extensionRoot);
-            setNativeSourceListHidden(initialSourceViewInfo.kind === 'list');
+            setNativeSourceListHidden(initialDisplayViewInfo.kind === 'list');
             attachedSourcePanel = sourcePanel;
             managerStatusReason = 'ready';
             document.addEventListener('change', handleOriginalCheckboxChange, true);
@@ -3356,6 +3431,7 @@
                 sourceViewKind = 'unknown';
                 sourceViewConfidence = 0;
                 sourceViewInfo = null;
+                sourceViewDisplayKind = SOURCE_VIEW_LIST;
                 lastSourceViewChangedAt = '';
                 lastSourceViewTransition = null;
                 lastNativeLabelImportSummary = null;

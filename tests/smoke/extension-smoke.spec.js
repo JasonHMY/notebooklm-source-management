@@ -40,6 +40,24 @@ test.describe.serial('extension smoke', () => {
         await bootstrapPage.close();
     }
 
+    async function sendNotebookMessage(urlFragment, message) {
+        const bridgePage = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
+        try {
+            return await bridgePage.evaluate(async ({ targetUrlFragment, request }) => {
+                const tabs = await chrome.tabs.query({ url: 'https://notebooklm.google.com/*' });
+                const targetTab = tabs.find((tab) => tab.url && tab.url.includes(targetUrlFragment));
+
+                if (!targetTab || typeof targetTab.id !== 'number') {
+                    throw new Error(`Notebook tab was not found for ${targetUrlFragment}.`);
+                }
+
+                return chrome.tabs.sendMessage(targetTab.id, request);
+            }, { targetUrlFragment: urlFragment, request: message });
+        } finally {
+            await bridgePage.close();
+        }
+    }
+
     test.beforeEach(async () => {
         env = await launchExtensionContext(repoRoot);
         await installNotebookFixture(env.context);
@@ -99,7 +117,7 @@ test.describe.serial('extension smoke', () => {
             return chrome.tabs.sendMessage(targetTab.id, { type: 'GET_MANAGER_STATUS' });
         });
 
-        expect(status).toEqual({ ready: true, reason: 'ready' });
+        expect(status).toMatchObject({ ready: true, reason: 'ready' });
 
         const focusResult = await bridgePage.evaluate(async () => {
             const tabs = await chrome.tabs.query({ url: 'https://notebooklm.google.com/*' });
@@ -193,6 +211,16 @@ test.describe.serial('extension smoke', () => {
         await notebookPage.reload();
 
         await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
+        await bridgePage.evaluate(async () => {
+            const tabs = await chrome.tabs.query({ url: 'https://notebooklm.google.com/*' });
+            const targetTab = tabs.find((tab) => tab.url && tab.url.includes('/notebook/label-view'));
+
+            if (!targetTab || typeof targetTab.id !== 'number') {
+                throw new Error('Label view notebook tab was not found.');
+            }
+
+            return chrome.tabs.sendMessage(targetTab.id, { type: 'SWITCH_SOURCE_VIEW', viewKind: 'label' });
+        });
         await expect(notebookPage.locator('[data-testid="source-label-group"]').first()).toBeVisible();
 
         await expect.poll(async () => notebookPage.evaluate(() => {
@@ -252,7 +280,7 @@ test.describe.serial('extension smoke', () => {
             return chrome.tabs.sendMessage(targetTab.id, { type: 'GET_MANAGER_STATUS' });
         });
 
-        expect(status).toEqual({ ready: true, reason: 'ready' });
+        expect(status).toMatchObject({ ready: true, reason: 'ready' });
     });
 
     test('shows an import preview message when native label import has no visible source rows', async () => {
@@ -262,6 +290,7 @@ test.describe.serial('extension smoke', () => {
         env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
 
         await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
+        await sendNotebookMessage('/notebook/label-empty', { type: 'SWITCH_SOURCE_VIEW', viewKind: 'label' });
         await expect(notebookPage.locator('[data-testid="source-label-group"]').first()).toBeVisible();
         await expect(notebookPage.locator('#sp-import-native-labels-btn')).toBeEnabled();
 
@@ -280,6 +309,7 @@ test.describe.serial('extension smoke', () => {
         env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
 
         await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
+        await sendNotebookMessage('/notebook/label-import', { type: 'SWITCH_SOURCE_VIEW', viewKind: 'label' });
         await expect(notebookPage.locator('#sp-import-native-labels-btn')).toBeVisible({ timeout: 20_000 });
         await notebookPage.locator('#sp-import-native-labels-btn').click();
 
@@ -300,6 +330,7 @@ test.describe.serial('extension smoke', () => {
                 labelView: false
             });
         });
+        await sendNotebookMessage('/notebook/label-import', { type: 'SWITCH_SOURCE_VIEW', viewKind: 'list' });
 
         await expect.poll(async () => notebookPage.evaluate(() => {
             const root = document.querySelector('#sources-plus-root')?.shadowRoot || null;
@@ -375,7 +406,7 @@ test.describe.serial('extension smoke', () => {
             return chrome.tabs.sendMessage(tabId, { type: 'GET_MANAGER_STATUS' });
         }, notebookTabId);
 
-        expect(enabledStatus).toEqual({ ready: true, reason: 'ready' });
+        expect(enabledStatus).toMatchObject({ ready: true, reason: 'ready' });
     });
 
     test('reattaches after a same-tab notebook route switch', async () => {
@@ -413,7 +444,7 @@ test.describe.serial('extension smoke', () => {
 
         const navigationCountAfter = await notebookPage.evaluate(() => performance.getEntriesByType('navigation').length);
 
-        expect(status).toEqual({ ready: true, reason: 'ready' });
+        expect(status).toMatchObject({ ready: true, reason: 'ready' });
         expect(navigationCountAfter).toBe(navigationCountBefore);
     });
 
@@ -459,7 +490,7 @@ test.describe.serial('extension smoke', () => {
 
         const navigationCountAfter = await notebookPage.evaluate(() => performance.getEntriesByType('navigation').length);
 
-        expect(status).toEqual({ ready: true, reason: 'ready' });
+        expect(status).toMatchObject({ ready: true, reason: 'ready' });
         expect(navigationCountAfter).toBe(navigationCountBefore);
     });
 

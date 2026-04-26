@@ -269,11 +269,18 @@
         }
 
         function isManagerAttachedToPanel(panel) {
-            return Boolean(
+            const host = runtime.extensionHost;
+            const isAttachedToCurrentPanel = Boolean(
                 panel &&
-                runtime.attachedSourcePanel === panel &&
-                runtime.extensionHost &&
-                (!('isConnected' in runtime.extensionHost) || runtime.extensionHost.isConnected !== false) &&
+                (
+                    runtime.attachedSourcePanel === panel ||
+                    (typeof panel.contains === 'function' && host && panel.contains(host))
+                )
+            );
+            return Boolean(
+                isAttachedToCurrentPanel &&
+                host &&
+                (!('isConnected' in host) || host.isConnected !== false) &&
                 runtime.shadowRoot &&
                 runtime.shadowRoot.host &&
                 (!('isConnected' in runtime.shadowRoot.host) || runtime.shadowRoot.host.isConnected !== false)
