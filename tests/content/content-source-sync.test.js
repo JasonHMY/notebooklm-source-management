@@ -411,6 +411,102 @@ describe('scanAndSyncSources', () => {
         });
     });
 
+    it('does not use source row more buttons as NotebookLM label titles', () => {
+        const first = createMockSourceRow({ title: 'Paper One', stableToken: 'paper-1', checked: true });
+        const second = createMockSourceRow({ title: 'Paper Two', stableToken: 'paper-2', checked: true });
+        const third = createMockSourceRow({ title: 'Reference One', stableToken: 'reference-1', checked: true });
+        const fourth = createMockSourceRow({ title: 'Reference Two', stableToken: 'reference-2', checked: true });
+        const rows = [first.row, second.row, third.row, fourth.row];
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+
+        const createHeader = (title) => ({
+            tagName: 'BUTTON',
+            textContent: `keyboard_arrow_down ${title}`,
+            style: {},
+            parentElement: panel,
+            parentNode: panel,
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-expanded') return 'true';
+                if (attr === 'role') return 'button';
+                if (attr === 'aria-label') return title;
+                return null;
+            }),
+            matches: jest.fn(() => false),
+            querySelector: jest.fn((selector) => (selector.includes('checkbox') ? { checked: true } : null)),
+            querySelectorAll: jest.fn(() => [])
+        });
+        const clinicalHeader = createHeader('Clinical Papers');
+        const referenceHeader = createHeader('Reference Material');
+        const moreButtons = rows.map((row) => ({
+            tagName: 'BUTTON',
+            textContent: 'more_vert',
+            parentElement: row,
+            parentNode: row,
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return '更多';
+                if (attr === 'aria-expanded') return 'false';
+                if (attr === 'role') return 'button';
+                if (attr === 'class') return 'source-row-more-button';
+                return null;
+            }),
+            matches: jest.fn(() => false),
+            querySelectorAll: jest.fn(() => [])
+        }));
+
+        rows.forEach((row, index) => {
+            row.parentElement = panel;
+            row.parentNode = panel;
+            row.style = {};
+            row.matches = jest.fn((selector) => selector === '[role="listitem"]');
+            const originalQuerySelectorAll = row.querySelectorAll;
+            row.querySelectorAll = jest.fn((selector) => {
+                if (String(selector).includes('aria-expanded')) return [moreButtons[index]];
+                return originalQuerySelectorAll(selector);
+            });
+        });
+        clinicalHeader.previousElementSibling = null;
+        clinicalHeader.previousSibling = null;
+        first.row.previousElementSibling = clinicalHeader;
+        first.row.previousSibling = clinicalHeader;
+        second.row.previousElementSibling = first.row;
+        second.row.previousSibling = first.row;
+        referenceHeader.previousElementSibling = second.row;
+        referenceHeader.previousSibling = second.row;
+        third.row.previousElementSibling = referenceHeader;
+        third.row.previousSibling = referenceHeader;
+        fourth.row.previousElementSibling = third.row;
+        fourth.row.previousSibling = third.row;
+
+        panel.querySelectorAll = jest.fn((selector) => {
+            if (selector === 'button' || selector === '[role="button"]') {
+                return [clinicalHeader, referenceHeader, ...moreButtons];
+            }
+            if (selector === '[role="listitem"]') return rows;
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        mod.scanAndSyncSources({}, true);
+
+        expect(Array.from(mod.sourcesByKey.values()).map((source) => source.nativeLabelTitle)).toEqual([
+            'Clinical Papers',
+            'Clinical Papers',
+            'Reference Material',
+            'Reference Material'
+        ]);
+        expect(mod.getNativeLabelImportPreview()).toMatchObject({
+            ok: true,
+            labelCount: 2,
+            sourceCount: 4
+        });
+        expect(mod.getNativeLabelImportPreview().labels.map((label) => label.title)).toEqual([
+            'Clinical Papers',
+            'Reference Material'
+        ]);
+    });
+
     it('detects label view after the plugin has hidden the native list area', () => {
         global.document.documentElement.className = 'sources-plus-manager-active';
         global.document.documentElement.classList.contains = jest.fn((className) => (

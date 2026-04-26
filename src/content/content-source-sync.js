@@ -339,6 +339,7 @@
         const NATIVE_SOURCE_CONTROL_TEXT_PATTERN = /\b(add\s+source|web|fast\s+research|submit)\b|添加来源|提交/i;
         const NATIVE_LABEL_TITLE_BLOCKED_TEXT_PATTERN = /\b(more\s+options?|source\s+guide|source\s+details?|loading|analyzing|failed|error)\b|来源指南|来源详情|加载中|正在分析|失败|出错/i;
         const NATIVE_LABEL_TITLE_RESERVED_TEXT_PATTERN = /^(?:sources?|source|来源)$|\bsources?\s+for\b/i;
+        const GENERIC_NATIVE_CONTROL_TITLE_PATTERN = /^(?:more|more options?|options?|menu|overflow|ellipsis|kebab|actions?|更多|更多选项|更多操作|选项|選項|菜单|菜單|操作)$/i;
         const MANAGER_ACTIVE_CLASS = 'sources-plus-manager-active';
         const NATIVE_SOURCE_LIST_CONTAINER_SELECTORS = [
             '.scroll-area-desktop',
@@ -534,12 +535,51 @@
             return false;
         }
 
+        function isLikelySourceRowElement(element) {
+            if (!element) return false;
+            return elementMatchesAny(element, LABEL_SOURCE_ROW_SELECTORS);
+        }
+
+        function isInsideNativeSourceRowElement(element, boundary = null) {
+            if (!element) return false;
+            let cursor = element;
+            let depth = 0;
+            while (cursor && depth < 24) {
+                if (cursor !== boundary && isLikelySourceRowElement(cursor)) return true;
+                if (boundary && cursor === boundary) break;
+                cursor = getParentElement(cursor);
+                depth += 1;
+            }
+            return false;
+        }
+
+        function isGenericNativeControlTitleElement(element, title) {
+            if (!GENERIC_NATIVE_CONTROL_TITLE_PATTERN.test(String(title || '').trim())) return false;
+            const tagName = String(element?.tagName || '').toLowerCase();
+            const role = getAttributeValue(element, 'role').toLowerCase();
+            const identityText = [
+                getAttributeValue(element, 'aria-label'),
+                getAttributeValue(element, 'title'),
+                getAttributeValue(element, 'data-testid'),
+                getAttributeValue(element, 'class'),
+                String(element?.className || '')
+            ].filter(Boolean).join(' ');
+            return (
+                tagName === 'button' ||
+                ['button', 'menuitem', 'menuitemradio', 'menuitemcheckbox'].includes(role) ||
+                Boolean(getAttributeValue(element, 'aria-haspopup')) ||
+                Boolean(getAttributeValue(element, 'aria-expanded')) ||
+                /\b(more|options?|menu|overflow|ellipsis|kebab|actions?)\b|更多|选项|選項|菜单|菜單|操作/i.test(identityText)
+            );
+        }
+
         function getPreviousSibling(element) {
             return element?.previousElementSibling || element?.previousSibling || null;
         }
 
         function isNativeLabelHeaderElement(element) {
             if (!element) return false;
+            if (isInsideNativeSourceRowElement(element)) return false;
             if (isNativeSourceViewSwitchControl(element)) return false;
             const tagName = String(element.tagName || '').toLowerCase();
             const role = getAttributeValue(element, 'role').toLowerCase();
@@ -555,6 +595,7 @@
 
         function getNativeLabelTitleFromCandidate(element, row, panel, options = {}, rowIdentity = null) {
             if (!element || element === row || elementContains(element, row)) return '';
+            if (isInsideNativeSourceRowElement(element, panel)) return '';
             if (isNativeSourceViewSwitchControl(element)) return '';
             if (isNodeHiddenForSourceScan(element, panel, options)) return '';
 
@@ -571,6 +612,7 @@
 
             for (const candidate of candidates) {
                 const title = cleanNativeLabelTitleCandidate(candidate);
+                if (isGenericNativeControlTitleElement(element, title)) continue;
                 if (isLikelyNativeLabelTitle(title, rowIdentity)) return title;
             }
 
@@ -579,6 +621,7 @@
 
         function getNativeLabelTitleFromContainer(container, row, panel, options = {}, rowIdentity = null) {
             if (!container || container === panel || isNodeHiddenForSourceScan(container, panel, options)) return '';
+            if (isLikelySourceRowElement(container)) return '';
             if (isNativeSourceViewSwitchControl(container)) return '';
 
             if (elementMatchesAny(container, LABEL_GROUP_SELECTORS)) {
@@ -590,6 +633,7 @@
 
             const titleCandidates = queryDescendantElements(container, LABEL_HEADER_TITLE_SELECTORS);
             for (const candidate of titleCandidates) {
+                if (isInsideNativeSourceRowElement(candidate, container)) continue;
                 if (!isNativeLabelHeaderElement(candidate)) continue;
                 const title = getNativeLabelTitleFromCandidate(candidate, row, panel, options, rowIdentity);
                 if (title) return title;
@@ -750,7 +794,9 @@
 
         function isActiveNativeLabelViewControl(element, panel, options = {}) {
             if (!element || isNodeHiddenForSourceScan(element, panel, options)) return false;
+            if (isInsideNativeSourceRowElement(element, panel)) return false;
             const text = getElementTextSignal(element);
+            if (isGenericNativeControlTitleElement(element, cleanNativeLabelTitleCandidate(text))) return false;
             if (ACTIVE_LABEL_VIEW_CONTROL_PATTERN.test(text)) {
                 return true;
             }
