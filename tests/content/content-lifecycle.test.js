@@ -149,6 +149,45 @@ describe('manager launcher messaging', () => {
         }));
     });
 
+    it('clicks NotebookLM icon-only label view controls from popup requests', () => {
+        const sendResponse = jest.fn();
+        const labelIcon = {
+            textContent: '',
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'data-mat-icon-name') return 'label_auto';
+                if (attr === 'class') return 'mat-icon material-symbols-rounded';
+                return null;
+            })
+        };
+        const labelButton = {
+            textContent: '',
+            disabled: false,
+            style: {},
+            click: jest.fn(),
+            getAttribute: jest.fn((attr) => (attr === 'aria-label' ? '整理来源' : null)),
+            matches: jest.fn(() => false),
+            closest: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [labelIcon])
+        };
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        panel.querySelectorAll = jest.fn((selector) => {
+            if (selector.includes('button') || selector.includes('[role="button"]')) return [labelButton];
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        mod.handleManagerMessage({ type: 'SWITCH_SOURCE_VIEW', viewKind: 'label' }, {}, sendResponse);
+
+        expect(labelButton.click).toHaveBeenCalledTimes(1);
+        expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: true,
+            viewKind: 'label',
+            nativeClicked: true
+        }));
+    });
+
     it('clicks the hidden native label-view entry point before showing plugin label mode', () => {
         const sendResponse = jest.fn();
         const labelButton = {

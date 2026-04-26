@@ -261,10 +261,14 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
 
                 const labelButton = document.createElement('button');
                 labelButton.type = 'button';
-                labelButton.setAttribute('aria-label', 'Label view');
+                labelButton.setAttribute('aria-label', '整理来源');
                 labelButton.setAttribute('data-testid', 'source-view-label-button');
                 labelButton.setAttribute('aria-pressed', options.labelView ? 'true' : 'false');
-                labelButton.textContent = 'label_auto';
+                const labelIcon = document.createElement('mat-icon');
+                labelIcon.setAttribute('data-mat-icon-name', 'label_auto');
+                labelIcon.setAttribute('fonticon', 'label_auto');
+                labelIcon.textContent = '';
+                labelButton.appendChild(labelIcon);
                 labelButton.addEventListener('click', () => {
                     renderNotebook(notebookId, sources, Object.assign({}, options, {
                         labelView: true,

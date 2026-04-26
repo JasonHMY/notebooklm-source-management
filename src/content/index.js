@@ -149,6 +149,8 @@
             /\blist\s*view\b/i,
             /\bview\s*as\s*list\b/i,
             /\bsources?\s*list\b/i,
+            /\bsource[_-]?view[_-]?list\b/i,
+            /\bview[_-]?list\b/i,
             /\bview_list\b/i,
             /\bformat_list_bulleted\b/i,
             /列表视图|列表|清单/
@@ -156,12 +158,17 @@
         [SOURCE_VIEW_LABEL]: [
             /\blabel\s*view\b/i,
             /\blabels?\s*view\b/i,
+            /\bsource[_-]?view[_-]?label\b/i,
+            /\bview[_-]?label\b/i,
+            /\blabel[_-]?view\b/i,
             /\blabel\s*&\s*categorize\b/i,
             /\bcategor(?:y|ies|ize)\b/i,
+            /\borgan(?:ize|ise)\b/i,
+            /\b(?:topic|theme|cluster)\b/i,
             /\bgroup\s*view\b/i,
             /\bview\s*by\s*label\b/i,
             /\blabel_auto\b/i,
-            /标签视图|标签|分类|分组/
+            /标签视图|标签|分类|分组|整理|组织|归类|按主题|主题/
         ]
     };
 
@@ -1775,19 +1782,72 @@
 
     function getNativeViewSwitchText(element) {
         if (!element) return '';
-        const values = [
-            element.textContent,
-            element.getAttribute?.('aria-label'),
-            element.getAttribute?.('title'),
-            element.getAttribute?.('data-testid'),
-            element.getAttribute?.('data-tooltip'),
-            element.getAttribute?.('aria-description')
+        const values = [];
+        const attrs = [
+            'aria-label',
+            'title',
+            'data-testid',
+            'data-tooltip',
+            'aria-description',
+            'alt',
+            'data-mat-icon-name',
+            'data-icon-name',
+            'data-icon',
+            'fonticon',
+            'fontIcon',
+            'font-icon',
+            'svgicon',
+            'svgIcon',
+            'ng-reflect-font-icon',
+            'ng-reflect-svg-icon',
+            'icon',
+            'name',
+            'class'
         ];
-        return values
+        const collect = (node) => {
+            if (!node) return;
+            if (typeof node.textContent === 'string') values.push(node.textContent);
+            attrs.forEach((attr) => {
+                const value = node.getAttribute?.(attr);
+                if (value) values.push(value);
+            });
+        };
+        collect(element);
+        if (typeof element.querySelectorAll === 'function') {
+            try {
+                Array.from(element.querySelectorAll([
+                    'mat-icon',
+                    '.mat-icon',
+                    '.material-icons',
+                    '.material-symbols-outlined',
+                    '.material-symbols-rounded',
+                    '[aria-label]',
+                    '[title]',
+                    '[data-testid]',
+                    '[data-mat-icon-name]',
+                    '[data-icon-name]',
+                    '[data-icon]',
+                    '[fonticon]',
+                    '[fontIcon]',
+                    '[font-icon]',
+                    '[svgicon]',
+                    '[svgIcon]',
+                    '[ng-reflect-font-icon]',
+                    '[ng-reflect-svg-icon]',
+                    '[icon]',
+                    '[name]'
+                ].join(','))).slice(0, 12).forEach(collect);
+            } catch (error) {
+                // Ignore selector differences in NotebookLM's runtime DOM.
+            }
+        }
+        const text = values
             .filter(Boolean)
             .join(' ')
             .replace(/\s+/g, ' ')
             .trim();
+        const normalizedIconText = text.replace(/[-\s]+/g, '_');
+        return `${text} ${normalizedIconText}`.replace(/\s+/g, ' ').trim();
     }
 
     function isNativeViewSwitchCandidateVisible(element, options = {}) {
