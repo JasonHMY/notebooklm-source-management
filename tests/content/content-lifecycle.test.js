@@ -149,6 +149,65 @@ describe('manager launcher messaging', () => {
         }));
     });
 
+    it('clicks the hidden native label-view entry point before showing plugin label mode', () => {
+        const sendResponse = jest.fn();
+        const labelButton = {
+            textContent: 'label_auto 标签视图',
+            disabled: false,
+            style: {
+                visibility: 'hidden'
+            },
+            __computedStyle: {
+                visibility: 'hidden'
+            },
+            click: jest.fn(),
+            getAttribute: jest.fn((attr) => (attr === 'aria-label' ? '按主题自动为来源加标签' : null)),
+            matches: jest.fn(() => false),
+            closest: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        panel.querySelectorAll = jest.fn((selector) => {
+            if (selector.includes('button') || selector.includes('[role="button"]')) return [labelButton];
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        mod.handleManagerMessage({ type: 'SWITCH_SOURCE_VIEW', viewKind: 'label' }, {}, sendResponse);
+
+        expect(labelButton.click).toHaveBeenCalledTimes(1);
+        expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: true,
+            viewKind: 'label',
+            nativeClicked: true,
+            nativeSwitchReason: 'clicked_hidden'
+        }));
+        expect(global.document.documentElement.classList.remove).toHaveBeenCalledWith('sources-plus-manager-active');
+    });
+
+    it('does not show plugin label mode when the native label-view control is unavailable', () => {
+        const sendResponse = jest.fn();
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        panel.querySelectorAll = jest.fn(() => []);
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+        global.document.documentElement.classList.remove.mockClear();
+
+        mod.handleManagerMessage({ type: 'SWITCH_SOURCE_VIEW', viewKind: 'label' }, {}, sendResponse);
+
+        expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: false,
+            viewKind: 'label',
+            nativeClicked: false,
+            nativeSwitchReason: 'source_view_switch_control_missing',
+            sourceViewDisplayKind: 'list'
+        }));
+        expect(global.document.documentElement.classList.remove).not.toHaveBeenCalledWith('sources-plus-manager-active');
+    });
+
     it('keeps the popup ready when the manager host is inside the current panel but the stored panel reference is stale', () => {
         const { panel } = createMockPanel({ visible: true, contentVisible: true });
         const stalePanel = createMockPanel({ visible: true, contentVisible: true }).panel;

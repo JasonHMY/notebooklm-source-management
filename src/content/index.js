@@ -1135,11 +1135,28 @@
             return false;
         }
 
+        buildParentMap();
         const usedGroupIds = new Set(groupsById.keys());
         const previewLabels = Array.isArray(preview.labels) ? preview.labels : [];
+        const importedLabels = [];
+        let importedSourceCount = 0;
+        let skippedExistingAssignmentCount = 0;
         previewLabels.forEach((label) => {
             const sourceKeys = Array.isArray(label?.sourceKeys) ? label.sourceKeys : [];
             let group = label.existingGroupId ? groupsById.get(label.existingGroupId) : null;
+            const targetGroupId = group?.id || null;
+            const importableSourceKeys = sourceKeys.filter((sourceKey) => {
+                if (!sourcesByKey.has(sourceKey)) return false;
+                const currentParentId = parentMap.get(sourceKey);
+                if (currentParentId && currentParentId !== targetGroupId) {
+                    skippedExistingAssignmentCount += 1;
+                    return false;
+                }
+                return true;
+            });
+            if (importableSourceKeys.length === 0) return;
+
+            const labelAction = group ? 'reuse' : 'create';
             if (!group) {
                 group = {
                     id: createImportedNativeLabelGroupId(label.title, usedGroupIds),
@@ -1155,25 +1172,27 @@
                 }
             }
 
-            sourceKeys.forEach((sourceKey) => {
-                if (!sourcesByKey.has(sourceKey)) return;
+            importableSourceKeys.forEach((sourceKey) => {
                 removeSourceFromTree(sourceKey);
                 if (!group.children.some((child) => child?.type === 'source' && child.key === sourceKey)) {
                     group.children.push({ type: 'source', key: sourceKey });
                 }
             });
+            importedSourceCount += importableSourceKeys.length;
+            importedLabels.push({
+                title: label.title || '',
+                sourceCount: importableSourceKeys.length,
+                action: labelAction
+            });
         });
 
         buildParentMap();
         lastNativeLabelImportSummary = {
-            labelCount: Number(preview.labelCount) || previewLabels.length,
-            sourceCount: Number(preview.sourceCount) || previewLabels.reduce((total, label) => total + (Number(label.sourceCount) || 0), 0),
+            labelCount: importedLabels.length,
+            sourceCount: importedSourceCount,
+            skippedExistingAssignmentCount,
             importedAt: new Date().toISOString(),
-            labels: previewLabels.map((label) => ({
-                title: label.title || '',
-                sourceCount: Number(label.sourceCount) || 0,
-                action: label.action || (label.existingGroupId ? 'reuse' : 'create')
-            }))
+            labels: importedLabels
         };
         render();
         saveState({ immediate: true, critical: true });
@@ -1771,8 +1790,9 @@
             .trim();
     }
 
-    function isNativeViewSwitchCandidateVisible(element) {
+    function isNativeViewSwitchCandidateVisible(element, options = {}) {
         if (!element || element.disabled || element.getAttribute?.('aria-disabled') === 'true') return false;
+        if (options.includeHidden) return true;
         const style = typeof window !== 'undefined' && typeof window.getComputedStyle === 'function'
             ? window.getComputedStyle(element)
             : null;
@@ -1797,8 +1817,8 @@
         ].join(',')));
     }
 
-    function scoreNativeViewSwitchCandidate(element, targetViewKind) {
-        if (!isNativeViewSwitchCandidateVisible(element) || isInsideNativeSourceRow(element)) return 0;
+    function scoreNativeViewSwitchCandidate(element, targetViewKind, options = {}) {
+        if (!isNativeViewSwitchCandidateVisible(element, options) || isInsideNativeSourceRow(element)) return 0;
         if (typeof element.closest === 'function' && element.closest('#sources-plus-root')) return 0;
         const text = getNativeViewSwitchText(element);
         if (!text) return 0;
@@ -1825,7 +1845,7 @@
         return roots;
     }
 
-    function findNativeSourceViewSwitchButton(targetViewKind) {
+    function findNativeSourceViewSwitchButton(targetViewKind, options = {}) {
         const sourcePanel = findSourcePanel();
         if (!sourcePanel || typeof sourcePanel.querySelectorAll !== 'function') return null;
         const selectors = [
@@ -1852,7 +1872,7 @@
         return candidates
             .map((element) => ({
                 element,
-                score: scoreNativeViewSwitchCandidate(element, targetViewKind)
+                score: scoreNativeViewSwitchCandidate(element, targetViewKind, options)
             }))
             .filter((entry) => entry.score > 0)
             .sort((left, right) => right.score - left.score)[0]?.element || null;
@@ -1895,13 +1915,35 @@
         let nativeClicked = false;
         let nativeSwitchReason = nativeAlreadyActive ? 'already_active' : '';
         if (!nativeAlreadyActive) {
-            const switchButton = findNativeSourceViewSwitchButton(nextViewKind);
+            let switchButton = findNativeSourceViewSwitchButton(nextViewKind);
+            let usedHiddenSwitchFallback = false;
+            if (!switchButton) {
+                switchButton = findNativeSourceViewSwitchButton(nextViewKind, { includeHidden: true });
+                usedHiddenSwitchFallback = Boolean(switchButton);
+            }
             if (switchButton) {
                 nativeClicked = clickNativeSourceViewSwitchButton(switchButton);
-                nativeSwitchReason = nativeClicked ? 'clicked' : 'source_view_switch_click_failed';
+                nativeSwitchReason = nativeClicked
+                    ? (usedHiddenSwitchFallback ? 'clicked_hidden' : 'clicked')
+                    : 'source_view_switch_click_failed';
             } else {
                 nativeSwitchReason = 'source_view_switch_control_missing';
             }
+        }
+
+        if (nextViewKind === SOURCE_VIEW_LABEL && !nativeAlreadyActive && !nativeClicked) {
+            return {
+                success: false,
+                viewKind: nextViewKind,
+                clicked: false,
+                nativeClicked: false,
+                nativeSwitchReason,
+                alreadyActive: false,
+                detectedSourceViewKind: currentInfo?.kind || 'unknown',
+                sourceViewDisplayKind: normalizeSourceViewSwitchTarget(sourceViewDisplayKind),
+                reason: nativeSwitchReason,
+                errorMessageKey: 'popup_source_view_switch_failed'
+            };
         }
 
         const displayInfo = applySourceViewDisplayMode(nextViewKind, sourcePanel, currentInfo);

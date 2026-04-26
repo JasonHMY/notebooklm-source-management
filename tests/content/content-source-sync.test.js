@@ -495,6 +495,48 @@ describe('scanAndSyncSources', () => {
         expect(mod.state.ungrouped).toEqual([]);
     });
 
+    it('does not move sources out of existing user folders when importing native labels', () => {
+        const grouped = createMockSourceRow({ title: 'Saved Paper', stableToken: 'saved-paper', checked: true });
+        const ungrouped = createMockSourceRow({ title: 'New Paper', stableToken: 'new-paper', checked: true });
+        grouped.row.__nativeLabelTitle = 'NotebookLM Label';
+        ungrouped.row.__nativeLabelTitle = 'NotebookLM Label';
+        const groupedDescriptor = mod.createSourceDescriptor(grouped.row, new Map(), new Map());
+        const ungroupedDescriptor = mod.createSourceDescriptor(ungrouped.row, new Map(), new Map());
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        panel.querySelectorAll = jest.fn((selector) => {
+            if (selector.includes('source-label') || selector.includes('label-group')) return [];
+            if (selector.includes('source')) return [grouped.row, ungrouped.row];
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        mod.groupsById.set('user-folder', {
+            id: 'user-folder',
+            title: 'User Folder',
+            children: [{ type: 'source', key: groupedDescriptor.key }],
+            enabled: true,
+            collapsed: false
+        });
+        mod.state.groups = ['user-folder'];
+        mod.state.ungrouped = [ungroupedDescriptor.key];
+        mod.sourcesByKey.set(groupedDescriptor.key, groupedDescriptor);
+        mod.sourcesByKey.set(ungroupedDescriptor.key, ungroupedDescriptor);
+        mod.scanAndSyncSources({}, false);
+
+        expect(mod.applyNativeLabelImport()).toBe(true);
+
+        expect(mod.groupsById.get('user-folder').children).toEqual([
+            { type: 'source', key: groupedDescriptor.key }
+        ]);
+        const importedGroup = Array.from(mod.groupsById.values()).find((group) => group.title === 'NotebookLM Label');
+        expect(importedGroup.children).toEqual([
+            { type: 'source', key: ungroupedDescriptor.key }
+        ]);
+        expect(mod.state.ungrouped).toEqual([]);
+    });
+
     it('keeps saved sources when a label view exposes no source rows during loading', () => {
         const existing = createMockSourceRow({ title: 'Existing Source', stableToken: 'existing-doc', checked: true });
         const descriptor = mod.createSourceDescriptor(existing.row, new Map(), new Map());

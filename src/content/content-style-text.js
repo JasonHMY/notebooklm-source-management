@@ -458,9 +458,9 @@
                 display: none;
             }
             .sp-view-banner {
-                display: flex;
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) auto;
                 align-items: center;
-                justify-content: space-between;
                 gap: 12px;
                 padding: 10px 12px;
                 border-radius: 14px;
@@ -473,9 +473,19 @@
                 align-items: center;
                 gap: 8px;
             }
+            .sp-native-label-view-banner {
+                grid-template-columns: minmax(0, 1fr);
+                align-items: start;
+            }
             .sp-native-label-view-banner .sp-view-banner-copy {
                 align-items: flex-start;
                 flex-direction: column;
+            }
+            .sp-native-label-view-banner .sp-view-banner-label {
+                white-space: normal;
+                overflow: visible;
+                text-overflow: clip;
+                line-height: 1.4;
             }
             .sp-view-banner-label {
                 font-size: 12px;
@@ -491,6 +501,7 @@
                 color: var(--sp-text-secondary);
             }
             .sp-view-banner-btn {
+                justify-self: end;
                 flex-shrink: 0;
                 padding: 5px 10px;
             }
@@ -816,6 +827,9 @@
                 box-shadow: none;
             }
             .source-item {
+                display: grid;
+                grid-template-columns: 18px 24px minmax(0, 1fr) auto;
+                column-gap: 8px;
                 padding-left: 12px;
                 border: 1px solid transparent;
                 border-radius: 8px;
@@ -902,7 +916,6 @@
             }
             .icon-container {
                 flex-shrink: 0;
-                margin-right: 12px;
                 display: flex;
                 align-items: center;
                 justify-content: center;
@@ -949,7 +962,6 @@
             .sp-source-actions-anchor {
                 position: relative;
                 flex-shrink: 0;
-                margin-right: 8px;
                 display: flex;
                 align-items: center;
             }
@@ -970,6 +982,11 @@
             .source-title-text {
                 width: 100%;
                 line-height: 1.35;
+                display: block;
+                overflow: visible;
+                white-space: normal;
+                overflow-wrap: anywhere;
+                word-break: break-word;
             }
             .source-tag-list {
                 display: flex;
@@ -1003,8 +1020,9 @@
             }
             .checkbox-container {
                 flex-shrink: 0;
-                margin-left: auto;
-                padding-left: 8px;
+                justify-self: end;
+                margin-left: 0;
+                padding-left: 0;
                 display: flex;
                 align-items: center;
             }
@@ -2461,7 +2479,7 @@
                 padding-top: 0;
             }
 
-            .source-title-text, .group-title {
+            .group-title {
                 white-space: normal;
                 display: -webkit-box;
                 -webkit-line-clamp: 2;
