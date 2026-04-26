@@ -108,6 +108,47 @@ describe('manager launcher messaging', () => {
         });
     });
 
+    it('routes popup source view switch requests to NotebookLM native controls', () => {
+        const sendResponse = jest.fn();
+        const labelButton = {
+            textContent: 'Label view',
+            disabled: false,
+            style: {},
+            click: jest.fn(),
+            getAttribute: jest.fn((attr) => (attr === 'aria-label' ? 'Label view' : null)),
+            matches: jest.fn(() => false),
+            closest: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const listButton = {
+            textContent: 'List view',
+            disabled: false,
+            style: {},
+            click: jest.fn(),
+            getAttribute: jest.fn((attr) => (attr === 'aria-label' ? 'List view' : null)),
+            matches: jest.fn(() => false),
+            closest: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        panel.querySelectorAll = jest.fn((selector) => {
+            if (selector.includes('button') || selector.includes('[role="button"]')) return [labelButton, listButton];
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        mod.handleManagerMessage({ type: 'SWITCH_SOURCE_VIEW', viewKind: 'label' }, {}, sendResponse);
+
+        expect(labelButton.click).toHaveBeenCalledTimes(1);
+        expect(sendResponse).toHaveBeenCalledWith({
+            success: true,
+            viewKind: 'label',
+            clicked: true
+        });
+    });
+
     it('cleans up the previous content instance when the script is injected twice', () => {
         const firstMessageHandler = mod.handleManagerMessage;
         const firstPatchedPushState = global.history.pushState;

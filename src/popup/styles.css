@@ -203,6 +203,91 @@ body {
     line-height: 1.45;
 }
 
+.popup-source-view {
+    display: grid;
+    gap: 9px;
+    padding: 12px;
+    border: 1px solid var(--popup-border-light);
+    border-radius: var(--popup-radius-surface);
+    background: var(--popup-surface-bg);
+    box-shadow: var(--popup-shadow-control);
+}
+
+.popup-source-view[hidden] {
+    display: none;
+}
+
+.popup-source-view-label,
+.popup-source-view-status {
+    margin: 0;
+}
+
+.popup-source-view-label {
+    color: var(--popup-text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.25;
+}
+
+.popup-source-view-status {
+    color: var(--popup-text-tertiary);
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.popup-source-view-segment {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--popup-border-light);
+    border-radius: 8px;
+    background: var(--popup-subtle-bg);
+}
+
+.popup-source-view-button {
+    min-height: 32px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 7px 8px;
+    background: transparent;
+    color: var(--popup-text-secondary);
+    cursor: pointer;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 650;
+    line-height: 1.25;
+    transition:
+        background-color var(--popup-motion-base) var(--popup-ease-standard),
+        border-color var(--popup-motion-base) var(--popup-ease-standard),
+        color var(--popup-motion-base) var(--popup-ease-standard),
+        opacity var(--popup-motion-base) var(--popup-ease-standard);
+}
+
+.popup-source-view-button[aria-pressed="true"] {
+    border-color: var(--popup-accent-border);
+    background: var(--popup-accent-soft);
+    color: var(--popup-accent);
+}
+
+.popup-source-view-button:hover:not(:disabled) {
+    background: var(--popup-surface-hover);
+}
+
+.popup-source-view-button[aria-pressed="true"]:hover:not(:disabled) {
+    background: var(--popup-accent-soft);
+}
+
+.popup-source-view-button:focus-visible {
+    outline: none;
+    box-shadow: var(--popup-focus-ring);
+}
+
+.popup-source-view-button:disabled {
+    cursor: wait;
+    opacity: 0.58;
+}
+
 .popup-switch {
     position: relative;
     display: inline-flex;

@@ -242,6 +242,41 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
                 setHydrationPhase('full');
             }
 
+            function createSourceViewToggle(notebookId, sources, options) {
+                const controls = document.createElement('div');
+                controls.className = 'source-view-toggle';
+
+                const listButton = document.createElement('button');
+                listButton.type = 'button';
+                listButton.setAttribute('aria-label', 'List view');
+                listButton.setAttribute('data-testid', 'source-view-list-button');
+                listButton.setAttribute('aria-pressed', options.labelView ? 'false' : 'true');
+                listButton.textContent = 'view_list';
+                listButton.addEventListener('click', () => {
+                    renderNotebook(notebookId, sources, Object.assign({}, options, {
+                        labelView: false,
+                        labelViewWithoutRows: false
+                    }));
+                });
+
+                const labelButton = document.createElement('button');
+                labelButton.type = 'button';
+                labelButton.setAttribute('aria-label', 'Label view');
+                labelButton.setAttribute('data-testid', 'source-view-label-button');
+                labelButton.setAttribute('aria-pressed', options.labelView ? 'true' : 'false');
+                labelButton.textContent = 'label_auto';
+                labelButton.addEventListener('click', () => {
+                    renderNotebook(notebookId, sources, Object.assign({}, options, {
+                        labelView: true,
+                        labelViewWithoutRows: false
+                    }));
+                });
+
+                controls.appendChild(listButton);
+                controls.appendChild(labelButton);
+                return controls;
+            }
+
             function hydrateSources(scrollArea, sources, options) {
                 clearHydrationTimers();
                 if (!options || !options.stagedHydration) {
@@ -279,7 +314,10 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
 
                 const header = document.createElement('header');
                 header.className = 'panel-header';
-                header.textContent = 'Sources for ' + title;
+                const headerTitle = document.createElement('span');
+                headerTitle.textContent = 'Sources for ' + title;
+                header.appendChild(headerTitle);
+                header.appendChild(createSourceViewToggle(nextNotebookId, sources, options));
 
                 const scrollArea = document.createElement('div');
                 scrollArea.className = 'scroll-area';

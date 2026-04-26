@@ -119,6 +119,51 @@ test.describe.serial('extension smoke', () => {
         expect(pageErrors).toEqual([]);
     });
 
+    test('switches NotebookLM source views from the popup controls', async () => {
+        const notebookPage = await env.context.newPage();
+
+        await notebookPage.goto('https://notebooklm.google.com/notebook/popup-view-switch');
+        env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
+        await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
+
+        const popupPage = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
+        await popupPage.evaluate(async () => {
+            const tabs = await chrome.tabs.query({ url: 'https://notebooklm.google.com/*' });
+            const targetTab = tabs.find((tab) => tab.url && tab.url.includes('/notebook/popup-view-switch'));
+
+            if (!targetTab || typeof targetTab.id !== 'number') {
+                throw new Error('Popup view switch notebook tab was not found.');
+            }
+
+            await chrome.tabs.update(targetTab.id, { active: true });
+        });
+        await popupPage.reload();
+        await popupPage.waitForLoadState('domcontentloaded');
+
+        await expect(popupPage.locator('#popup-source-view-section')).toBeVisible({ timeout: 10_000 });
+        await expect(popupPage.locator('#popup-source-view-list-btn')).toHaveAttribute('aria-pressed', 'true');
+
+        await popupPage.locator('#popup-source-view-label-btn').click();
+
+        await expect.poll(async () => notebookPage.evaluate(() => Boolean(
+            document.querySelector('[data-testid="source-label-group"]')
+        )), { timeout: 10_000 }).toBeTruthy();
+        await expect.poll(async () => notebookPage.evaluate(() => Boolean(
+            document.querySelector('#sources-plus-root')?.shadowRoot?.querySelector('.sp-container.is-native-label-view')
+        )), { timeout: 10_000 }).toBeTruthy();
+        await expect(popupPage.locator('#popup-source-view-label-btn')).toHaveAttribute('aria-pressed', 'true');
+
+        await popupPage.locator('#popup-source-view-list-btn').click();
+
+        await expect.poll(async () => notebookPage.evaluate(() => Boolean(
+            document.querySelector('[data-testid="scroll-area"] [data-testid="source-item"]')
+        )), { timeout: 10_000 }).toBeTruthy();
+        await expect.poll(async () => notebookPage.evaluate(() => Boolean(
+            document.querySelector('#sources-plus-root')?.shadowRoot?.querySelector('.sp-container:not(.is-native-label-view)')
+        )), { timeout: 10_000 }).toBeTruthy();
+        await expect(popupPage.locator('#popup-source-view-list-btn')).toHaveAttribute('aria-pressed', 'true');
+    });
+
     test('keeps NotebookLM label view visible in compact compatibility mode', async () => {
         const notebookPage = await env.context.newPage();
 

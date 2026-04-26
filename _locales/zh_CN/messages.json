@@ -35,6 +35,27 @@
     "popup_toggle_help": {
         "message": "关闭页面内管理器时不会丢失已保存的分组或标签。"
     },
+    "popup_source_view_label": {
+        "message": "来源视图"
+    },
+    "popup_source_view_list": {
+        "message": "列表视图"
+    },
+    "popup_source_view_label_view": {
+        "message": "标签视图"
+    },
+    "popup_source_view_status_list": {
+        "message": "默认使用列表视图。"
+    },
+    "popup_source_view_switched_list": {
+        "message": "已切换到列表视图。"
+    },
+    "popup_source_view_switched_label": {
+        "message": "已切换到标签视图。"
+    },
+    "popup_source_view_switch_failed": {
+        "message": "没有找到 NotebookLM 的来源视图切换按钮。请先在页面中展开来源面板。"
+    },
     "popup_title_ready": {
         "message": "当前笔记本中的来源管理器已就绪"
     },

@@ -35,6 +35,27 @@
     "popup_toggle_help": {
         "message": "Desactiva el gestor integrado sin perder los grupos o etiquetas guardados."
     },
+    "popup_source_view_label": {
+        "message": "Vista de fuentes"
+    },
+    "popup_source_view_list": {
+        "message": "Vista de lista"
+    },
+    "popup_source_view_label_view": {
+        "message": "Vista de etiquetas"
+    },
+    "popup_source_view_status_list": {
+        "message": "La vista predeterminada es la lista."
+    },
+    "popup_source_view_switched_list": {
+        "message": "Cambiado a la vista de lista."
+    },
+    "popup_source_view_switched_label": {
+        "message": "Cambiado a la vista de etiquetas."
+    },
+    "popup_source_view_switch_failed": {
+        "message": "No se encontró el selector de vista de fuentes de NotebookLM. Expande primero el panel de fuentes."
+    },
     "popup_title_ready": {
         "message": "El gestor de fuentes está listo en este cuaderno"
     },

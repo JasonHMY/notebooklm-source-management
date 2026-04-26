@@ -30,6 +30,11 @@ const createPopupDocument = () => {
         'popup-toggle-state': { textContent: '', hidden: false },
         'popup-toggle-help': { textContent: '', hidden: false },
         'popup-toggle-input': { checked: false, disabled: false, onchange: null },
+        'popup-source-view-section': { hidden: false },
+        'popup-source-view-label': { textContent: '', hidden: false },
+        'popup-source-view-list-btn': { textContent: '', disabled: false, onclick: null, setAttribute: jest.fn() },
+        'popup-source-view-label-btn': { textContent: '', disabled: false, onclick: null, setAttribute: jest.fn() },
+        'popup-source-view-status': { textContent: '', hidden: false },
         'popup-badge': { textContent: '', hidden: false },
         'popup-title': { textContent: '', hidden: false },
         'popup-body': { textContent: '', hidden: false },
@@ -172,6 +177,9 @@ describe('popup launcher', () => {
         expect(popupHtml).toContain('id="popup-toggle-state"');
         expect(popupHtml).toContain('id="popup-toggle-help"');
         expect(popupHtml).toContain('id="popup-toggle-input"');
+        expect(popupHtml).toContain('id="popup-source-view-section"');
+        expect(popupHtml).toContain('id="popup-source-view-list-btn"');
+        expect(popupHtml).toContain('id="popup-source-view-label-btn"');
         expect(popupHtml).toContain('id="popup-primary-btn"');
     });
 
@@ -263,6 +271,39 @@ describe('popup launcher', () => {
         expect(global.window.close).toHaveBeenCalled();
     });
 
+    it('renders source view switcher and sends view switch messages to the notebook tab', async () => {
+        await popup.initializePopup(popupDocument);
+
+        expect(popupDocument.elements['popup-source-view-section'].hidden).toBe(false);
+        expect(popupDocument.elements['popup-source-view-label'].textContent).toBe('popup_source_view_label');
+        expect(popupDocument.elements['popup-source-view-list-btn'].textContent).toBe('popup_source_view_list');
+        expect(popupDocument.elements['popup-source-view-label-btn'].textContent).toBe('popup_source_view_label_view');
+        expect(popupDocument.elements['popup-source-view-list-btn'].setAttribute).toHaveBeenCalledWith('aria-pressed', 'true');
+        expect(popupDocument.elements['popup-source-view-label-btn'].setAttribute).toHaveBeenCalledWith('aria-pressed', 'false');
+
+        global.chrome.tabs.sendMessage.mockClear();
+        await popupDocument.elements['popup-source-view-label-btn'].onclick();
+
+        expect(global.chrome.tabs.sendMessage).toHaveBeenCalledWith(
+            7,
+            { type: 'SWITCH_SOURCE_VIEW', viewKind: 'label' },
+            expect.any(Function)
+        );
+        expect(popupDocument.elements['popup-source-view-status'].textContent).toBe('popup_source_view_switched_label');
+        expect(popupDocument.elements['popup-source-view-label-btn'].setAttribute).toHaveBeenLastCalledWith('aria-pressed', 'true');
+
+        global.chrome.tabs.sendMessage.mockClear();
+        await popupDocument.elements['popup-source-view-list-btn'].onclick();
+
+        expect(global.chrome.tabs.sendMessage).toHaveBeenCalledWith(
+            7,
+            { type: 'SWITCH_SOURCE_VIEW', viewKind: 'list' },
+            expect.any(Function)
+        );
+        expect(popupDocument.elements['popup-source-view-status'].textContent).toBe('popup_source_view_switched_list');
+        expect(popupDocument.elements['popup-source-view-list-btn'].setAttribute).toHaveBeenLastCalledWith('aria-pressed', 'true');
+    });
+
     it('renders a disabled state without inspecting the notebook manager', async () => {
         let isEnabled = false;
         global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
@@ -286,6 +327,7 @@ describe('popup launcher', () => {
         expect(global.chrome.tabs.sendMessage).not.toHaveBeenCalled();
         expect(popupDocument.elements['popup-toggle-input'].checked).toBe(false);
         expect(popupDocument.elements['popup-toggle-state'].textContent).toBe('popup_toggle_state_disabled');
+        expect(popupDocument.elements['popup-source-view-section'].hidden).toBe(true);
         expect(popupDocument.elements['popup-title'].textContent).toBe('popup_title_disabled');
         expect(popupDocument.elements['popup-body'].textContent).toBe('popup_body_disabled');
         expect(popupDocument.elements['popup-detail'].hidden).toBe(false);

@@ -35,6 +35,27 @@
     "popup_toggle_help": {
         "message": "Turn off the in-page manager without losing saved groups or tags."
     },
+    "popup_source_view_label": {
+        "message": "Source view"
+    },
+    "popup_source_view_list": {
+        "message": "List view"
+    },
+    "popup_source_view_label_view": {
+        "message": "Label view"
+    },
+    "popup_source_view_status_list": {
+        "message": "Defaults to list view."
+    },
+    "popup_source_view_switched_list": {
+        "message": "Switched to list view."
+    },
+    "popup_source_view_switched_label": {
+        "message": "Switched to label view."
+    },
+    "popup_source_view_switch_failed": {
+        "message": "NotebookLM's source view switch was not found. Expand the source panel first."
+    },
     "popup_title_ready": {
         "message": "Source manager is ready in this notebook"
     },

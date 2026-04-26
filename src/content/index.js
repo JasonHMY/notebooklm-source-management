@@ -141,6 +141,28 @@
     const MANAGER_ACTIVE_CLASS = 'sources-plus-manager-active';
     const NATIVE_RENAME_WATCHER_INTERVAL_MS = 250;
     const NATIVE_RENAME_WATCHER_DURATION_MS = 5000;
+    const SOURCE_VIEW_LIST = 'list';
+    const SOURCE_VIEW_LABEL = 'label';
+    const SOURCE_VIEW_SWITCH_PATTERNS = {
+        [SOURCE_VIEW_LIST]: [
+            /\blist\s*view\b/i,
+            /\bview\s*as\s*list\b/i,
+            /\bsources?\s*list\b/i,
+            /\bview_list\b/i,
+            /\bformat_list_bulleted\b/i,
+            /列表视图|列表|清单/
+        ],
+        [SOURCE_VIEW_LABEL]: [
+            /\blabel\s*view\b/i,
+            /\blabels?\s*view\b/i,
+            /\blabel\s*&\s*categorize\b/i,
+            /\bcategor(?:y|ies|ize)\b/i,
+            /\bgroup\s*view\b/i,
+            /\bview\s*by\s*label\b/i,
+            /\blabel_auto\b/i,
+            /标签视图|标签|分类|分组/
+        ]
+    };
 
     // --- Helper Functions ---
 
@@ -1689,6 +1711,152 @@
         return { success: true };
     }
 
+    function normalizeSourceViewSwitchTarget(viewKind) {
+        return viewKind === SOURCE_VIEW_LABEL ? SOURCE_VIEW_LABEL : SOURCE_VIEW_LIST;
+    }
+
+    function getNativeViewSwitchText(element) {
+        if (!element) return '';
+        const values = [
+            element.textContent,
+            element.getAttribute?.('aria-label'),
+            element.getAttribute?.('title'),
+            element.getAttribute?.('data-testid'),
+            element.getAttribute?.('data-tooltip'),
+            element.getAttribute?.('aria-description')
+        ];
+        return values
+            .filter(Boolean)
+            .join(' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    function isNativeViewSwitchCandidateVisible(element) {
+        if (!element || element.disabled || element.getAttribute?.('aria-disabled') === 'true') return false;
+        const style = typeof window !== 'undefined' && typeof window.getComputedStyle === 'function'
+            ? window.getComputedStyle(element)
+            : null;
+        return !style || (
+            style.display !== 'none' &&
+            style.visibility !== 'hidden' &&
+            style.opacity !== '0'
+        );
+    }
+
+    function isInsideNativeSourceRow(element) {
+        if (!element || typeof element.closest !== 'function') return false;
+        return Boolean(element.closest([
+            '[data-testid="source-item"]',
+            '.single-source-container',
+            '[data-source-id]',
+            '[data-document-id]',
+            '[data-doc-id]',
+            '[data-file-id]',
+            '[data-drive-id]',
+            '[data-resource-id]'
+        ].join(',')));
+    }
+
+    function scoreNativeViewSwitchCandidate(element, targetViewKind) {
+        if (!isNativeViewSwitchCandidateVisible(element) || isInsideNativeSourceRow(element)) return 0;
+        const text = getNativeViewSwitchText(element);
+        if (!text) return 0;
+        const targetPatterns = SOURCE_VIEW_SWITCH_PATTERNS[targetViewKind] || [];
+        const otherKind = targetViewKind === SOURCE_VIEW_LABEL ? SOURCE_VIEW_LIST : SOURCE_VIEW_LABEL;
+        const otherPatterns = SOURCE_VIEW_SWITCH_PATTERNS[otherKind] || [];
+        const targetMatches = targetPatterns.filter((pattern) => pattern.test(text)).length;
+        if (targetMatches === 0) return 0;
+        const otherMatches = otherPatterns.filter((pattern) => pattern.test(text)).length;
+        return (targetMatches * 10) - (otherMatches * 3);
+    }
+
+    function findNativeSourceViewSwitchButton(targetViewKind) {
+        const sourcePanel = findSourcePanel();
+        if (!sourcePanel || typeof sourcePanel.querySelectorAll !== 'function') return null;
+        const selectors = [
+            'button',
+            '[role="button"]',
+            '[aria-label]',
+            '[title]',
+            '[data-testid]'
+        ];
+        const candidates = Array.from(sourcePanel.querySelectorAll(selectors.join(',')));
+        return candidates
+            .map((element) => ({
+                element,
+                score: scoreNativeViewSwitchCandidate(element, targetViewKind)
+            }))
+            .filter((entry) => entry.score > 0)
+            .sort((left, right) => right.score - left.score)[0]?.element || null;
+    }
+
+    function clickNativeSourceViewSwitchButton(button) {
+        if (!button) return false;
+        if (typeof button.click === 'function') {
+            button.click();
+            return true;
+        }
+        if (typeof button.dispatchEvent === 'function' && typeof MouseEvent === 'function') {
+            button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+            return true;
+        }
+        return false;
+    }
+
+    function switchNativeSourceView(targetViewKind) {
+        const nextViewKind = normalizeSourceViewSwitchTarget(targetViewKind);
+        if (!isExtensionEnabled) {
+            return {
+                success: false,
+                reason: 'extension_disabled',
+                errorMessageKey: 'popup_reason_extension_disabled'
+            };
+        }
+
+        const sourcePanel = findSourcePanel();
+        if (!sourcePanel) {
+            return {
+                success: false,
+                reason: 'source_panel_missing',
+                errorMessageKey: 'popup_reason_source_panel_missing'
+            };
+        }
+
+        const currentInfo = getSourceViewInfo(sourcePanel);
+        if (currentInfo?.kind === nextViewKind) {
+            return {
+                success: true,
+                viewKind: nextViewKind,
+                alreadyActive: true
+            };
+        }
+
+        const switchButton = findNativeSourceViewSwitchButton(nextViewKind);
+        if (!switchButton || !clickNativeSourceViewSwitchButton(switchButton)) {
+            return {
+                success: false,
+                reason: 'source_view_switch_control_missing',
+                errorCode: 'source_view_switch_failed',
+                errorMessageKey: 'popup_source_view_switch_failed'
+            };
+        }
+
+        setTimeout(() => {
+            try {
+                syncManagerWithPanelLifecycle();
+            } catch (error) {
+                console.warn('NotebookLM Source Management: Failed to sync after source view switch.', error);
+            }
+        }, 120);
+
+        return {
+            success: true,
+            viewKind: nextViewKind,
+            clicked: true
+        };
+    }
+
     function handleManagerMessage(request, sender, sendResponse) {
         if (!request || typeof request.type !== 'string') return;
 
@@ -1699,6 +1867,11 @@
 
         if (request.type === 'FOCUS_MANAGER') {
             sendResponse(focusManagerPanel());
+            return;
+        }
+
+        if (request.type === 'SWITCH_SOURCE_VIEW') {
+            sendResponse(switchNativeSourceView(request.viewKind));
             return;
         }
 

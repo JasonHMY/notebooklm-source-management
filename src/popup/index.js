@@ -3,11 +3,14 @@
 
     const NOTEBOOKLM_HOME_URL = 'https://notebooklm.google.com/';
     const NOTEBOOKLM_NOTEBOOK_PREFIX = 'https://notebooklm.google.com/notebook/';
+    const SOURCE_VIEW_LIST = 'list';
+    const SOURCE_VIEW_LABEL = 'label';
     const ERROR_MESSAGE_KEYS = {
         invalid_storage_key: 'popup_error_invalid_storage_key',
         runtime_failure: 'popup_reason_generic',
         tabs_query_failed: 'popup_reason_tabs_query_failed',
-        extension_disabled: 'popup_reason_extension_disabled'
+        extension_disabled: 'popup_reason_extension_disabled',
+        source_view_switch_failed: 'popup_source_view_switch_failed'
     };
 
     function getUiLanguage() {
@@ -81,7 +84,9 @@
                     bodyKey: 'popup_body_ready',
                     buttonKey: 'popup_cta_open_manager',
                     detailKey: null,
-                    action: 'focus-manager'
+                    action: 'focus-manager',
+                    sourceViewControls: true,
+                    sourceViewKind: managerStatus.sourceViewKind || SOURCE_VIEW_LIST
                 };
             }
 
@@ -91,7 +96,9 @@
                 bodyKey: 'popup_body_refresh_needed',
                 buttonKey: 'popup_cta_refresh_notebook',
                 detailKey: getReasonMessageKey(managerStatus && managerStatus.reason),
-                action: 'refresh-tab'
+                action: 'refresh-tab',
+                sourceViewControls: false,
+                sourceViewKind: SOURCE_VIEW_LIST
             };
         }
 
@@ -103,7 +110,9 @@
                     bodyKey: 'popup_body_switch_notebook',
                     buttonKey: 'popup_cta_go_to_open_notebook',
                     detailKey: null,
-                    action: 'open-notebooklm'
+                    action: 'open-notebooklm',
+                    sourceViewControls: false,
+                    sourceViewKind: SOURCE_VIEW_LIST
                 };
             }
 
@@ -113,7 +122,9 @@
                 bodyKey: 'popup_body_notebook_home_new_tab',
                 buttonKey: 'popup_cta_open_notebooklm_new_tab',
                 detailKey: null,
-                action: 'open-notebooklm'
+                action: 'open-notebooklm',
+                sourceViewControls: false,
+                sourceViewKind: SOURCE_VIEW_LIST
             };
         }
 
@@ -124,7 +135,9 @@
                 bodyKey: 'popup_body_switch_notebook',
                 buttonKey: 'popup_cta_go_to_open_notebook',
                 detailKey: null,
-                action: 'open-notebooklm'
+                action: 'open-notebooklm',
+                sourceViewControls: false,
+                sourceViewKind: SOURCE_VIEW_LIST
             };
         }
 
@@ -134,7 +147,9 @@
             bodyKey: 'popup_body_external_page',
             buttonKey: 'popup_cta_go_to_notebooklm',
             detailKey: null,
-            action: 'open-notebooklm'
+            action: 'open-notebooklm',
+            sourceViewControls: false,
+            sourceViewKind: SOURCE_VIEW_LIST
         };
     }
 
@@ -145,7 +160,9 @@
             bodyKey: 'popup_body_disabled',
             buttonKey: 'popup_cta_enable_extension',
             detailKey: 'popup_reason_extension_disabled',
-            action: 'enable-extension'
+            action: 'enable-extension',
+            sourceViewControls: false,
+            sourceViewKind: SOURCE_VIEW_LIST
         };
     }
 
@@ -340,12 +357,21 @@
         }
     }
 
+    function normalizeSourceViewKind(viewKind) {
+        return viewKind === SOURCE_VIEW_LABEL ? SOURCE_VIEW_LABEL : SOURCE_VIEW_LIST;
+    }
+
     function getElements(doc) {
         return {
             toggleLabel: doc.getElementById('popup-toggle-label'),
             toggleState: doc.getElementById('popup-toggle-state'),
             toggleHelp: doc.getElementById('popup-toggle-help'),
             toggleInput: doc.getElementById('popup-toggle-input'),
+            sourceViewSection: doc.getElementById('popup-source-view-section'),
+            sourceViewLabel: doc.getElementById('popup-source-view-label'),
+            sourceViewListButton: doc.getElementById('popup-source-view-list-btn'),
+            sourceViewLabelButton: doc.getElementById('popup-source-view-label-btn'),
+            sourceViewStatus: doc.getElementById('popup-source-view-status'),
             badge: doc.getElementById('popup-badge'),
             title: doc.getElementById('popup-title'),
             body: doc.getElementById('popup-body'),
@@ -353,6 +379,36 @@
             detail: doc.getElementById('popup-detail'),
             primaryButton: doc.getElementById('popup-primary-btn')
         };
+    }
+
+    function setSourceViewSelection(elements, viewKind) {
+        const normalizedViewKind = normalizeSourceViewKind(viewKind);
+        if (!elements.sourceViewListButton || !elements.sourceViewLabelButton) return;
+        elements.sourceViewListButton.setAttribute('aria-pressed', normalizedViewKind === SOURCE_VIEW_LIST ? 'true' : 'false');
+        elements.sourceViewLabelButton.setAttribute('aria-pressed', normalizedViewKind === SOURCE_VIEW_LABEL ? 'true' : 'false');
+    }
+
+    function setSourceViewButtonsDisabled(elements, disabled) {
+        if (elements.sourceViewListButton) elements.sourceViewListButton.disabled = Boolean(disabled);
+        if (elements.sourceViewLabelButton) elements.sourceViewLabelButton.disabled = Boolean(disabled);
+    }
+
+    function getSourceViewSwitchedMessageKey(viewKind) {
+        return normalizeSourceViewKind(viewKind) === SOURCE_VIEW_LABEL
+            ? 'popup_source_view_switched_label'
+            : 'popup_source_view_switched_list';
+    }
+
+    function renderSourceViewControls(elements, state, extensionEnabled) {
+        if (!elements.sourceViewSection) return;
+        const isVisible = extensionEnabled !== false && Boolean(state.sourceViewControls);
+        elements.sourceViewSection.hidden = !isVisible;
+        if (elements.sourceViewLabel) elements.sourceViewLabel.textContent = getMessage('popup_source_view_label');
+        if (elements.sourceViewListButton) elements.sourceViewListButton.textContent = getMessage('popup_source_view_list');
+        if (elements.sourceViewLabelButton) elements.sourceViewLabelButton.textContent = getMessage('popup_source_view_label_view');
+        if (elements.sourceViewStatus) elements.sourceViewStatus.textContent = getMessage('popup_source_view_status_list');
+        setSourceViewButtonsDisabled(elements, !isVisible);
+        setSourceViewSelection(elements, state.sourceViewKind || SOURCE_VIEW_LIST);
     }
 
     function renderPopup(doc, state, extensionEnabled) {
@@ -364,6 +420,7 @@
         elements.toggleHelp.textContent = getMessage('popup_toggle_help');
         elements.toggleInput.checked = isEnabled;
         elements.toggleInput.disabled = false;
+        renderSourceViewControls(elements, state, isEnabled);
         elements.badge.textContent = getMessage(state.badgeKey);
         elements.title.textContent = getMessage(state.titleKey);
         elements.body.textContent = getMessage(state.bodyKey);
@@ -447,8 +504,58 @@
         });
     }
 
+    function switchSourceView(tab, viewKind) {
+        if (!tab || typeof tab.id !== 'number') {
+            return Promise.resolve({
+                success: false,
+                errorMessageKey: 'popup_reason_notebook_missing'
+            });
+        }
+
+        return sendMessageToTab(tab.id, {
+            type: 'SWITCH_SOURCE_VIEW',
+            viewKind: normalizeSourceViewKind(viewKind)
+        });
+    }
+
     function bindPopupInteractions(doc, activeTab, state, launchContext) {
         const elements = getElements(doc);
+        const handleSourceViewClick = async (viewKind) => {
+            setSourceViewButtonsDisabled(elements, true);
+            elements.primaryButton.disabled = true;
+
+            try {
+                const result = await switchSourceView(activeTab, viewKind);
+                if (result && result.success === false) {
+                    elements.detail.hidden = false;
+                    elements.detail.textContent = resolveErrorMessage(result);
+                    setSourceViewButtonsDisabled(elements, false);
+                    elements.primaryButton.disabled = false;
+                    return;
+                }
+
+                setSourceViewSelection(elements, viewKind);
+                if (elements.sourceViewStatus) {
+                    elements.sourceViewStatus.textContent = getMessage(getSourceViewSwitchedMessageKey(viewKind));
+                }
+                setSourceViewButtonsDisabled(elements, false);
+                elements.primaryButton.disabled = false;
+            } catch (error) {
+                elements.detail.hidden = false;
+                elements.detail.textContent = resolveErrorMessage({
+                    errorCode: error && error.errorCode ? error.errorCode : 'runtime_failure'
+                });
+                setSourceViewButtonsDisabled(elements, false);
+                elements.primaryButton.disabled = false;
+            }
+        };
+
+        if (elements.sourceViewListButton) {
+            elements.sourceViewListButton.onclick = () => handleSourceViewClick(SOURCE_VIEW_LIST);
+        }
+        if (elements.sourceViewLabelButton) {
+            elements.sourceViewLabelButton.onclick = () => handleSourceViewClick(SOURCE_VIEW_LABEL);
+        }
 
         elements.toggleInput.onchange = async () => {
             const nextEnabled = Boolean(elements.toggleInput.checked);
