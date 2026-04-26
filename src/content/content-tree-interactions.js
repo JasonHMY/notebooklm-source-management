@@ -463,7 +463,9 @@
             }
 
             if (target.closest('#sp-import-native-labels-btn')) {
-                applyNativeLabelImportFromUi();
+                Promise.resolve(applyNativeLabelImportFromUi()).catch((error) => {
+                    console.error('NotebookLM Source Management: Failed to prepare native label import preview.', error);
+                });
                 return;
             }
 

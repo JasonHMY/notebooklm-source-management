@@ -831,6 +831,60 @@
             });
         }
 
+        function getCollapsedNativeLabelViewControls(panel = findSourcePanel(), options = {}) {
+            const sourcePanel = panel || findSourcePanel();
+            if (!sourcePanel) return [];
+            const scanOptions = Object.assign({ ignoreManagerSuppression: true }, options || {});
+            const controls = queryPanelElements(sourcePanel, [
+                'button[aria-expanded]',
+                '[role="button"][aria-expanded]',
+                '[aria-expanded]'
+            ]);
+            const seen = new Set();
+            return controls.filter((control) => {
+                if (!control || seen.has(control)) return false;
+                seen.add(control);
+                if (String(getAttributeValue(control, 'aria-expanded')).toLowerCase() !== 'false') return false;
+                if (isInsideNativeSourceRowElement(control, sourcePanel)) return false;
+                if (isNativeSourceViewSwitchControl(control)) return false;
+                if (isGenericNativeControlTitleElement(control, cleanNativeLabelTitleCandidate(getElementTextSignal(control)))) return false;
+                return isActiveNativeLabelViewControl(control, sourcePanel, scanOptions);
+            });
+        }
+
+        function clickNativeLabelExpansionControl(control) {
+            if (!control) return false;
+            if (typeof control.click === 'function') {
+                control.click();
+                return true;
+            }
+            const win = getWindow();
+            const MouseEventCtor = win?.MouseEvent || globalThis.MouseEvent;
+            if (typeof control.dispatchEvent === 'function' && typeof MouseEventCtor === 'function') {
+                control.dispatchEvent(new MouseEventCtor('click', { bubbles: true, cancelable: true }));
+                return true;
+            }
+            return false;
+        }
+
+        function expandCollapsedNativeLabelGroups(panel = findSourcePanel(), options = {}) {
+            const sourcePanel = panel || findSourcePanel();
+            if (!sourcePanel) {
+                return { clickedCount: 0, titles: [] };
+            }
+            const controls = getCollapsedNativeLabelViewControls(sourcePanel, options);
+            const titles = [];
+            let clickedCount = 0;
+            controls.forEach((control) => {
+                const title = cleanNativeLabelTitleCandidate(getElementTextSignal(control));
+                if (clickNativeLabelExpansionControl(control)) {
+                    clickedCount += 1;
+                    if (title) titles.push(title);
+                }
+            });
+            return { clickedCount, titles };
+        }
+
         function isControlInsideSourceEntry(control, sourceEntries = []) {
             return sourceEntries.some((entry) => entry?.row && elementContains(entry.row, control));
         }
@@ -1633,6 +1687,8 @@
             getSourceViewInfo,
             detectSourceView,
             getSourceEntries,
+            getCollapsedNativeLabelViewControls,
+            expandCollapsedNativeLabelGroups,
             getSourceElements,
             getManageableSourceElements,
             hasRenderableSourceRows,

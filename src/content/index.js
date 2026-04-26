@@ -596,6 +596,7 @@
         getSourceViewInfo,
         detectSourceView,
         getSourceEntries,
+        expandCollapsedNativeLabelGroups,
         getSourceElements,
         getManageableSourceElements,
         hasRenderableSourceRows,
@@ -1210,8 +1211,18 @@
         return true;
     }
 
-    function applyNativeLabelImportFromUi() {
+    function waitForNativeLabelExpansionForImport(delayMs = 350) {
+        return new Promise((resolve) => {
+            window.setTimeout(resolve, delayMs);
+        });
+    }
+
+    async function applyNativeLabelImportFromUi() {
         if (sourceViewInfo?.kind === 'label' || sourceViewKind === 'label') {
+            const expansionResult = expandCollapsedNativeLabelGroups();
+            if (expansionResult?.clickedCount > 0) {
+                await waitForNativeLabelExpansionForImport();
+            }
             scanAndSyncSources({}, false);
         }
         const preview = getNativeLabelImportPreview();
@@ -3338,6 +3349,7 @@
             getSourceViewInfo,
             detectSourceView,
             getSourceEntries,
+            expandCollapsedNativeLabelGroups,
             getNativeLabelImportPreview,
             applyNativeLabelImport,
             applyNativeLabelImportFromUi,

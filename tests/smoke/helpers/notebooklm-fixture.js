@@ -38,7 +38,8 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
     const initialOptions = {
         stagedHydration: Boolean(options.stagedHydration),
         labelView: Boolean(options.labelView),
-        labelViewWithoutRows: Boolean(options.labelViewWithoutRows)
+        labelViewWithoutRows: Boolean(options.labelViewWithoutRows),
+        labelViewCollapsedGroups: Boolean(options.labelViewCollapsedGroups)
     };
 
     return `<!doctype html>
@@ -207,7 +208,7 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
                 return controls;
             }
 
-            function createLabelGroup(labelTitle, sources) {
+            function createLabelGroup(labelTitle, sources, collapsed) {
                 const group = document.createElement('section');
                 group.className = 'source-label-group';
                 group.setAttribute('data-testid', 'source-label-group');
@@ -218,6 +219,7 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
                 header.type = 'button';
                 header.className = 'source-label-title';
                 header.setAttribute('aria-label', labelTitle);
+                header.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
                 header.textContent = labelTitle;
                 const checkbox = document.createElement('input');
                 checkbox.type = 'checkbox';
@@ -225,10 +227,21 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
                 header.appendChild(checkbox);
                 group.appendChild(header);
 
-                sources.forEach((source) => {
-                    const item = createSourceItem(source, 'full');
-                    item.setAttribute('data-source-label', labelTitle);
-                    group.appendChild(item);
+                let rowsRendered = false;
+                const renderGroupRows = () => {
+                    if (rowsRendered) return;
+                    rowsRendered = true;
+                    sources.forEach((source) => {
+                        const item = createSourceItem(source, 'full');
+                        item.setAttribute('data-source-label', labelTitle);
+                        group.appendChild(item);
+                    });
+                };
+                if (!collapsed) renderGroupRows();
+                header.addEventListener('click', (event) => {
+                    if (event.target === checkbox) return;
+                    header.setAttribute('aria-expanded', 'true');
+                    renderGroupRows();
                 });
 
                 return group;
@@ -237,8 +250,8 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
             function renderLabelView(sourcePanel, sources, options) {
                 sourcePanel.appendChild(createLabelViewControls());
                 const shouldRenderRows = !options.labelViewWithoutRows;
-                sourcePanel.appendChild(createLabelGroup('Research papers', shouldRenderRows ? sources.slice(0, 1) : []));
-                sourcePanel.appendChild(createLabelGroup('Reference material', shouldRenderRows ? sources.slice(1) : []));
+                sourcePanel.appendChild(createLabelGroup('Research papers', shouldRenderRows ? sources.slice(0, 1) : [], Boolean(options.labelViewCollapsedGroups)));
+                sourcePanel.appendChild(createLabelGroup('Reference material', shouldRenderRows ? sources.slice(1) : [], Boolean(options.labelViewCollapsedGroups)));
                 setHydrationPhase('full');
             }
 
@@ -461,8 +474,9 @@ async function installNotebookFixture(context) {
             contentType: 'text/html',
             body: renderNotebookHtml(notebookId, null, {
                 stagedHydration: url.searchParams.get('fixture') === 'staged',
-                labelView: url.searchParams.get('fixture') === 'label' || url.searchParams.get('fixture') === 'label-empty',
-                labelViewWithoutRows: url.searchParams.get('fixture') === 'label-empty'
+                labelView: ['label', 'label-empty', 'label-collapsed'].includes(url.searchParams.get('fixture')),
+                labelViewWithoutRows: url.searchParams.get('fixture') === 'label-empty',
+                labelViewCollapsedGroups: url.searchParams.get('fixture') === 'label-collapsed'
             })
         });
     });

@@ -507,6 +507,76 @@ describe('scanAndSyncSources', () => {
         ]);
     });
 
+    it('expands collapsed NotebookLM label groups before import preview scans', () => {
+        const source = createMockSourceRow({ title: 'Paper One', stableToken: 'paper-1', checked: true });
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        source.row.parentElement = panel;
+        source.row.parentNode = panel;
+        source.row.matches = jest.fn((selector) => selector === '[role="listitem"]');
+
+        const expandedHeader = {
+            tagName: 'BUTTON',
+            textContent: 'keyboard_arrow_down Expanded Group',
+            style: {},
+            parentElement: panel,
+            parentNode: panel,
+            click: jest.fn(),
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-expanded') return 'true';
+                if (attr === 'role') return 'button';
+                if (attr === 'aria-label') return 'Expanded Group';
+                return null;
+            }),
+            matches: jest.fn(() => false),
+            querySelector: jest.fn((selector) => (selector.includes('checkbox') ? { checked: true } : null)),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const collapsedHeader = {
+            tagName: 'BUTTON',
+            textContent: 'keyboard_arrow_right Collapsed Group',
+            style: {},
+            parentElement: panel,
+            parentNode: panel,
+            click: jest.fn(),
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-expanded') return 'false';
+                if (attr === 'role') return 'button';
+                if (attr === 'aria-label') return 'Collapsed Group';
+                return null;
+            }),
+            matches: jest.fn(() => false),
+            querySelector: jest.fn((selector) => (selector.includes('checkbox') ? { checked: true } : null)),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const rowMoreButton = {
+            tagName: 'BUTTON',
+            textContent: 'more_vert',
+            parentElement: source.row,
+            parentNode: source.row,
+            click: jest.fn(),
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-expanded') return 'false';
+                if (attr === 'role') return 'button';
+                if (attr === 'aria-label') return '更多';
+                return null;
+            }),
+            matches: jest.fn(() => false),
+            querySelectorAll: jest.fn(() => [])
+        };
+
+        panel.querySelectorAll = jest.fn((selector) => (
+            String(selector).includes('aria-expanded') ? [expandedHeader, collapsedHeader, rowMoreButton] : []
+        ));
+
+        expect(mod.expandCollapsedNativeLabelGroups(panel)).toEqual({
+            clickedCount: 1,
+            titles: ['Collapsed Group']
+        });
+        expect(collapsedHeader.click).toHaveBeenCalledTimes(1);
+        expect(expandedHeader.click).not.toHaveBeenCalled();
+        expect(rowMoreButton.click).not.toHaveBeenCalled();
+    });
+
     it('detects label view after the plugin has hidden the native list area', () => {
         global.document.documentElement.className = 'sources-plus-manager-active';
         global.document.documentElement.classList.contains = jest.fn((className) => (

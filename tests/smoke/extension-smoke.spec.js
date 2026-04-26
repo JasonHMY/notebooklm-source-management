@@ -305,7 +305,7 @@ test.describe.serial('extension smoke', () => {
     test('previews native label import and shows imported plugin folders after switching back to list view', async () => {
         const notebookPage = await env.context.newPage();
 
-        await notebookPage.goto('https://notebooklm.google.com/notebook/label-import?fixture=label');
+        await notebookPage.goto('https://notebooklm.google.com/notebook/label-import?fixture=label-collapsed');
         env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
 
         await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
