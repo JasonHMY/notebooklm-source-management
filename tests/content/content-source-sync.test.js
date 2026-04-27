@@ -507,7 +507,7 @@ describe('scanAndSyncSources', () => {
         ]);
     });
 
-    it('uses nearest real NotebookLM label headers instead of toolbar icon text', () => {
+    it('uses nearest real NotebookLM label headers instead of toolbar and panel icon text', () => {
         const game = createMockSourceRow({ title: 'Retro Game Source', stableToken: 'retro-game', checked: true });
         const remake = createMockSourceRow({ title: 'Remake Source', stableToken: 'remake-source', checked: true });
         const ethics = createMockSourceRow({ title: 'Ethics Source', stableToken: 'ethics-source', checked: true });
@@ -524,6 +524,22 @@ describe('scanAndSyncSources', () => {
                 if (attr === 'aria-expanded') return 'true';
                 if (attr === 'role') return 'button';
                 if (attr === 'aria-label') return 'languageWebkeyboard_arrow_down';
+                return null;
+            }),
+            matches: jest.fn(() => false),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const sourcePanelHeader = {
+            tagName: 'BUTTON',
+            textContent: '来源dock_to_right',
+            style: {},
+            parentElement: panel,
+            parentNode: panel,
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-expanded') return 'true';
+                if (attr === 'role') return 'button';
+                if (attr === 'aria-label') return '来源';
                 return null;
             }),
             matches: jest.fn(() => false),
@@ -548,7 +564,7 @@ describe('scanAndSyncSources', () => {
         });
         const gameHeader = createHeader('复古游戏重制');
         const ethicsHeader = createHeader('工程与伦理规范');
-        const ordered = [toolbarControl, gameHeader, game.row, remake.row, ethicsHeader, ethics.row];
+        const ordered = [sourcePanelHeader, toolbarControl, gameHeader, game.row, remake.row, ethicsHeader, ethics.row];
         const orderByElement = new Map(ordered.map((element, index) => [element, index]));
         ordered.forEach((element) => {
             element.compareDocumentPosition = jest.fn((other) => {
@@ -567,7 +583,7 @@ describe('scanAndSyncSources', () => {
 
         panel.querySelectorAll = jest.fn((selector) => {
             if (selector === 'button' || selector === '[role="button"]' || String(selector).includes('aria-expanded')) {
-                return [toolbarControl, gameHeader, ethicsHeader];
+                return [sourcePanelHeader, toolbarControl, gameHeader, ethicsHeader];
             }
             if (selector === '[role="listitem"]') return rows;
             return [];

@@ -337,7 +337,7 @@
         const SOURCE_VIEW_SWITCH_ICON_PATTERN = /\b(?:label_auto|view_list|format_list_bulleted)\b/i;
         const SELECT_ALL_TEXT_PATTERN = /\bselect\s+all\b|全选/i;
         const NATIVE_SOURCE_CONTROL_TEXT_PATTERN = /\b(add\s+source|web|fast\s+research|submit)\b|language\s*web|languageWeb|fastResearch|添加来源|提交/i;
-        const NATIVE_LABEL_TITLE_BLOCKED_TEXT_PATTERN = /\b(more\s+options?|source\s+guide|source\s+details?|loading|analyzing|failed|error)\b|来源指南|来源详情|加载中|正在分析|失败|出错/i;
+        const NATIVE_LABEL_TITLE_BLOCKED_TEXT_PATTERN = /\b(more\s+options?|source\s+guide|source\s+details?|loading|analyzing|failed|error|dock_to_(?:right|left|top|bottom)|left_panel_open|left_panel_close)\b|来源指南|来源详情|加载中|正在分析|失败|出错/i;
         const NATIVE_LABEL_TITLE_RESERVED_TEXT_PATTERN = /^(?:sources?|source|来源)$|\bsources?\s+for\b/i;
         const GENERIC_NATIVE_CONTROL_TITLE_PATTERN = /^(?:more|more options?|options?|menu|overflow|ellipsis|kebab|actions?|更多|更多选项|更多操作|选项|選項|菜单|菜單|操作)$/i;
         const MANAGER_ACTIVE_CLASS = 'sources-plus-manager-active';
@@ -425,7 +425,7 @@
                 .replace(/^\s*(?:expand|collapse|open|close)\s+(?:source\s+)?(?:label|group|category|folder)\s*/i, ' ')
                 .replace(/^\s*(?:展开|折叠|打开|关闭)\s*/i, ' ')
                 .replace(/\s*(?:expanded|collapsed|已展开|已折叠)\s*$/i, ' ')
-                .replace(/(?:keyboard_arrow_(?:right|down)|arrow_drop_down|expand_(?:more|less)|chevron_(?:right|left)|label_auto)/gi, ' ')
+                .replace(/(?:keyboard_arrow_(?:right|down)|arrow_drop_down|expand_(?:more|less)|chevron_(?:right|left)|label_auto|dock_to_(?:right|left|top|bottom)|left_panel_(?:open|close))/gi, ' ')
                 .replace(/\b\d+\s*(?:sources?|items?)\b/gi, ' ')
                 .replace(/\b\d+\s*(?:个)?(?:来源|项目)\b/gi, ' ')
                 .replace(/\s+/g, ' ')
