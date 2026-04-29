@@ -7,9 +7,23 @@
 .sources-plus-manager-active .source-panel .scroll-area-desktop,
 .sources-plus-manager-active .source-panel .sources-list-container,
 .sources-plus-manager-active .source-panel [data-testid="scroll-area"],
+.sources-plus-manager-active .source-panel .source-label-controls,
+.sources-plus-manager-active .source-panel .source-label-group,
+.sources-plus-manager-active .source-panel [data-testid*="source-label" i],
+.sources-plus-manager-active .source-panel [data-testid*="label-group" i],
+.sources-plus-manager-active .source-panel [data-testid*="source-group" i],
+.sources-plus-manager-active .source-panel [data-testid*="category" i],
+.sources-plus-manager-active .source-panel #sources-plus-root ~ *,
 .sources-plus-manager-active [data-testid="source-panel"] .scroll-area-desktop,
 .sources-plus-manager-active [data-testid="source-panel"] .sources-list-container,
-.sources-plus-manager-active [data-testid="source-panel"] [data-testid="scroll-area"] {
+.sources-plus-manager-active [data-testid="source-panel"] [data-testid="scroll-area"],
+.sources-plus-manager-active [data-testid="source-panel"] .source-label-controls,
+.sources-plus-manager-active [data-testid="source-panel"] .source-label-group,
+.sources-plus-manager-active [data-testid="source-panel"] [data-testid*="source-label" i],
+.sources-plus-manager-active [data-testid="source-panel"] [data-testid*="label-group" i],
+.sources-plus-manager-active [data-testid="source-panel"] [data-testid*="source-group" i],
+.sources-plus-manager-active [data-testid="source-panel"] [data-testid*="category" i],
+.sources-plus-manager-active [data-testid="source-panel"] #sources-plus-root ~ * {
   position: fixed !important;
   top: 0 !important;
   left: 0 !important;

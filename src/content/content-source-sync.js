@@ -344,7 +344,14 @@
         const NATIVE_SOURCE_LIST_CONTAINER_SELECTORS = [
             '.scroll-area-desktop',
             '.sources-list-container',
-            '[data-testid="scroll-area"]'
+            '[data-testid="scroll-area"]',
+            '.source-label-controls',
+            '.source-label-group',
+            '[data-testid*="source-label" i]',
+            '[data-testid*="label-group" i]',
+            '[data-testid*="source-group" i]',
+            '[data-testid*="category" i]',
+            '#sources-plus-root ~ *'
         ];
 
         function getElementTextSignal(element) {

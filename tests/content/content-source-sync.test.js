@@ -159,6 +159,50 @@ describe('scanAndSyncSources', () => {
         });
     });
 
+    it('detects hidden native label groups when list-mode suppression is active', () => {
+        global.document.documentElement.className = 'sources-plus-manager-active';
+        global.document.documentElement.classList.contains = jest.fn((className) => (
+            className === 'sources-plus-manager-active'
+        ));
+
+        const source = createMockSourceRow({ title: 'Hidden Label Source', stableToken: 'hidden-label-doc', checked: true });
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const labelGroup = {
+            textContent: 'Suppressed NotebookLM Group',
+            parentElement: panel,
+            parentNode: panel,
+            style: { visibility: 'hidden' },
+            __computedStyle: { visibility: 'hidden' },
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return 'Suppressed NotebookLM Group label';
+                if (attr === 'data-testid') return 'source-label-group';
+                return null;
+            }),
+            matches: jest.fn((selector) => (
+                selector.includes('source-label') ||
+                selector.includes('label-group') ||
+                selector.includes('data-testid*="source-label"')
+            ))
+        };
+        source.row.parentElement = labelGroup;
+        source.row.parentNode = labelGroup;
+        source.row.__computedStyle = { visibility: 'hidden' };
+
+        panel.querySelectorAll = jest.fn((selector) => {
+            if (selector.includes('source-label') || selector.includes('label-group')) return [labelGroup];
+            if (selector.includes('source')) return [source.row];
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        expect(mod.getSourceViewInfo(panel)).toMatchObject({
+            kind: 'label',
+            labelRows: 1
+        });
+    });
+
     it('keeps the pre-labeling entry point in the traditional list source view', () => {
         const source = createMockSourceRow({ title: 'List Source', stableToken: 'list-doc', checked: true });
         const labelEntryPoint = {
