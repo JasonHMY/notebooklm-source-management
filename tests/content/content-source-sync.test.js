@@ -203,6 +203,59 @@ describe('scanAndSyncSources', () => {
         });
     });
 
+    it('adopts native label view checkbox changes instead of reselecting stale plugin state', () => {
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const listSource = createMockSourceRow({ title: 'Notebook Source', stableToken: 'doc-1', checked: true });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+        panel.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [listSource.row] : []
+        ));
+
+        mod.scanAndSyncSources({}, true);
+        const sourceKey = Array.from(mod.sourcesByKey.keys())[0];
+        expect(mod.sourcesByKey.get(sourceKey).enabled).toBe(true);
+
+        const labelSource = createMockSourceRow({ title: 'Notebook Source', stableToken: 'doc-1', checked: false });
+        labelSource.row.__nativeLabelTitle = 'AI Group';
+        const labelGroup = {
+            textContent: 'AI Group',
+            parentElement: panel,
+            parentNode: panel,
+            style: {},
+            __computedStyle: {},
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return 'AI Group label';
+                if (attr === 'data-testid') return 'source-label-group';
+                return null;
+            }),
+            matches: jest.fn((selector) => selector.includes('source-label') || selector.includes('label-group'))
+        };
+        labelSource.row.parentElement = labelGroup;
+        labelSource.row.parentNode = labelGroup;
+        panel.querySelectorAll = jest.fn((selector) => {
+            const value = String(selector);
+            if (value.includes('source-label') || value.includes('label-group')) return [labelGroup];
+            if (
+                mod.DEPS.row.includes(selector) ||
+                value === '[data-testid="source-item"]' ||
+                value === '.single-source-container' ||
+                value.includes('source-row') ||
+                value.includes('source-item') ||
+                value.includes('data-source-id')
+            ) {
+                return [labelSource.row];
+            }
+            return [];
+        });
+
+        mod.scanAndSyncSources({}, false);
+
+        expect(mod.sourcesByKey.get(sourceKey).enabled).toBe(false);
+        expect(labelSource.checkbox.click).not.toHaveBeenCalled();
+    });
+
     it('keeps the pre-labeling entry point in the traditional list source view', () => {
         const source = createMockSourceRow({ title: 'List Source', stableToken: 'list-doc', checked: true });
         const labelEntryPoint = {

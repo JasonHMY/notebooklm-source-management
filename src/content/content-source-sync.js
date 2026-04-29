@@ -1548,14 +1548,17 @@
 
             currentSources.forEach((source) => {
                 let enabled;
+                const nativeCheckboxState = source.hasNativeCheckbox ? Boolean(source.checkbox?.checked) : true;
                 if (isFirstLoad) {
                     enabled = resolvedSourceStateById.has(source.key)
                         ? Boolean(resolvedSourceStateById.get(source.key).enabled)
-                        : (source.hasNativeCheckbox ? Boolean(source.checkbox?.checked) : true);
+                        : nativeCheckboxState;
+                } else if (source.sourceViewKind === SOURCE_VIEW_KIND_LABEL && source.hasNativeCheckbox) {
+                    enabled = nativeCheckboxState;
                 } else {
                     enabled = oldSourcesMap.has(source.key)
                         ? Boolean(oldSourcesMap.get(source.key).enabled)
-                        : (source.hasNativeCheckbox ? Boolean(source.checkbox?.checked) : true);
+                        : nativeCheckboxState;
                 }
 
                 const hydratedSource = {
