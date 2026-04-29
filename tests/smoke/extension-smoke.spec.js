@@ -179,6 +179,15 @@ test.describe.serial('extension smoke', () => {
         await expect.poll(async () => notebookPage.evaluate(() => Boolean(
             document.querySelector('#sources-plus-root')?.shadowRoot?.querySelector('.sp-container:not(.is-native-label-view)')
         )), { timeout: 10_000 }).toBeTruthy();
+        await expect.poll(async () => notebookPage.evaluate(() => {
+            const utilityControls = document.querySelector('[data-testid="native-source-utility-controls"]');
+            if (!utilityControls) return false;
+            const style = window.getComputedStyle(utilityControls);
+            return style.visibility !== 'hidden' &&
+                style.display !== 'none' &&
+                style.opacity !== '0' &&
+                style.pointerEvents !== 'none';
+        }), { timeout: 10_000 }).toBeTruthy();
         await expect(popupPage.locator('#popup-source-view-list-btn')).toHaveAttribute('aria-pressed', 'true');
     });
 

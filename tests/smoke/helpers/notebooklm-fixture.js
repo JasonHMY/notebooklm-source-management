@@ -91,6 +91,28 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
             padding: 12px 16px 20px;
         }
 
+        [data-testid="native-source-utility-controls"] {
+            display: block;
+            padding: 12px 16px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        [data-testid="native-add-source-button"],
+        [data-testid="native-source-search"] {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-height: 36px;
+            width: 100%;
+            margin-bottom: 10px;
+            padding: 8px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 10px;
+            background: #ffffff;
+            color: #374151;
+            box-sizing: border-box;
+        }
+
         [data-testid="source-item"] {
             display: block;
             margin-bottom: 10px;
@@ -184,6 +206,38 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
                 sources.forEach((source) => {
                     scrollArea.appendChild(createSourceItem(source, phase));
                 });
+            }
+
+            function createNativeSourceUtilityControls() {
+                const controls = document.createElement('div');
+                controls.className = 'native-source-utility-controls';
+                controls.setAttribute('data-testid', 'native-source-utility-controls');
+
+                const addButton = document.createElement('button');
+                addButton.type = 'button';
+                addButton.setAttribute('data-testid', 'native-add-source-button');
+                addButton.setAttribute('aria-label', 'Add source');
+                addButton.textContent = '+ Add source';
+
+                const searchBox = document.createElement('label');
+                searchBox.setAttribute('data-testid', 'native-source-search');
+                const searchIcon = document.createElement('span');
+                searchIcon.textContent = 'search';
+                const searchInput = document.createElement('input');
+                searchInput.type = 'search';
+                searchInput.setAttribute('aria-label', 'Search new sources on the web');
+                searchInput.placeholder = 'Search new sources on the web';
+                const searchButton = document.createElement('button');
+                searchButton.type = 'button';
+                searchButton.setAttribute('aria-label', 'Submit source search');
+                searchButton.textContent = 'arrow_forward';
+                searchBox.appendChild(searchIcon);
+                searchBox.appendChild(searchInput);
+                searchBox.appendChild(searchButton);
+
+                controls.appendChild(addButton);
+                controls.appendChild(searchBox);
+                return controls;
             }
 
             function createLabelViewControls() {
@@ -341,6 +395,7 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
                 scrollArea.setAttribute('data-testid', 'scroll-area');
 
                 sourcePanel.appendChild(header);
+                sourcePanel.appendChild(createNativeSourceUtilityControls());
                 if (options.labelView) {
                     renderLabelView(sourcePanel, sources, options);
                 } else {

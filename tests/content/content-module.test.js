@@ -54,9 +54,10 @@ describe('content stylesheet native source list visibility', () => {
 
         expect(firstRule).toContain('.sources-plus-manager-active .source-panel .scroll-area-desktop');
         expect(firstRule).toContain('.sources-plus-manager-active .source-panel .source-label-group');
-        expect(firstRule).toContain('.sources-plus-manager-active .source-panel .source-label-controls');
         expect(firstRule).not.toContain('\n.source-panel .scroll-area-desktop');
         expect(firstRule).not.toContain('\n.source-panel .source-label-group');
+        expect(firstRule).not.toContain('.source-label-controls');
+        expect(firstRule).not.toContain('#sources-plus-root ~ *');
     });
 
     it('keeps native NotebookLM menu motion explicit and reduced-motion aware', () => {

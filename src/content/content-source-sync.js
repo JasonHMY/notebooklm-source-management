@@ -345,13 +345,12 @@
             '.scroll-area-desktop',
             '.sources-list-container',
             '[data-testid="scroll-area"]',
-            '.source-label-controls',
             '.source-label-group',
-            '[data-testid*="source-label" i]',
+            '[data-testid="source-label-group"]',
             '[data-testid*="label-group" i]',
             '[data-testid*="source-group" i]',
-            '[data-testid*="category" i]',
-            '#sources-plus-root ~ *'
+            '[data-testid*="category-group" i]',
+            '[data-testid*="source-category" i]'
         ];
 
         function getElementTextSignal(element) {
