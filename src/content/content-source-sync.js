@@ -273,10 +273,14 @@
             '[aria-label*="category" i]',
             '[aria-label*="标签"]',
             '[aria-label*="分类"]',
+            'mat-accordion',
+            'mat-expansion-panel',
             '.source-label',
             '.source-label-group',
             '.source-group',
-            '.label-group'
+            '.label-group',
+            '.mat-accordion',
+            '.mat-expansion-panel'
         ];
         const LABEL_TITLE_SELECTORS = [
             '[data-testid*="label-title" i]',
@@ -346,6 +350,10 @@
             '.sources-list-container',
             '[data-testid="scroll-area"]',
             '.source-label-group',
+            'mat-accordion',
+            'mat-expansion-panel',
+            '.mat-accordion',
+            '.mat-expansion-panel',
             '[data-testid="source-label-group"]',
             '[data-testid*="label-group" i]',
             '[data-testid*="source-group" i]',

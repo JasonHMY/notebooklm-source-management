@@ -39,7 +39,9 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
         stagedHydration: Boolean(options.stagedHydration),
         labelView: Boolean(options.labelView),
         labelViewWithoutRows: Boolean(options.labelViewWithoutRows),
-        labelViewCollapsedGroups: Boolean(options.labelViewCollapsedGroups)
+        labelViewCollapsedGroups: Boolean(options.labelViewCollapsedGroups),
+        labelViewMaterialGroups: Boolean(options.labelViewMaterialGroups),
+        labelViewListSwitchNoop: Boolean(options.labelViewListSwitchNoop)
     };
 
     return `<!doctype html>
@@ -111,6 +113,32 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
             background: #ffffff;
             color: #374151;
             box-sizing: border-box;
+        }
+
+        mat-accordion {
+            display: block;
+            padding: 12px 16px;
+        }
+
+        mat-expansion-panel {
+            display: block;
+            margin-bottom: 10px;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            background: #fbfdff;
+        }
+
+        .mat-expansion-panel-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+            min-height: 44px;
+            padding: 8px 12px;
+            border: 0;
+            background: transparent;
+            color: inherit;
+            text-align: left;
         }
 
         [data-testid="source-item"] {
@@ -301,11 +329,54 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
                 return group;
             }
 
+            function createMaterialLabelGroup(labelTitle, sources, collapsed) {
+                const panel = document.createElement('mat-expansion-panel');
+                panel.className = 'mat-expansion-panel';
+                panel.setAttribute('aria-label', labelTitle + ' label');
+
+                const header = document.createElement('button');
+                header.type = 'button';
+                header.className = 'mat-expansion-panel-header';
+                header.setAttribute('aria-label', labelTitle);
+                header.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+                header.textContent = labelTitle;
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.setAttribute('aria-label', labelTitle);
+                header.appendChild(checkbox);
+                panel.appendChild(header);
+
+                let rowsRendered = false;
+                const renderGroupRows = () => {
+                    if (rowsRendered) return;
+                    rowsRendered = true;
+                    sources.forEach((source) => {
+                        const item = createSourceItem(source, 'full');
+                        item.setAttribute('data-source-label', labelTitle);
+                        panel.appendChild(item);
+                    });
+                };
+                if (!collapsed) renderGroupRows();
+                header.addEventListener('click', (event) => {
+                    if (event.target === checkbox) return;
+                    header.setAttribute('aria-expanded', 'true');
+                    renderGroupRows();
+                });
+
+                return panel;
+            }
+
             function renderLabelView(sourcePanel, sources, options) {
                 sourcePanel.appendChild(createLabelViewControls());
                 const shouldRenderRows = !options.labelViewWithoutRows;
-                sourcePanel.appendChild(createLabelGroup('Research papers', shouldRenderRows ? sources.slice(0, 1) : [], Boolean(options.labelViewCollapsedGroups)));
-                sourcePanel.appendChild(createLabelGroup('Reference material', shouldRenderRows ? sources.slice(1) : [], Boolean(options.labelViewCollapsedGroups)));
+                const groupFactory = options.labelViewMaterialGroups ? createMaterialLabelGroup : createLabelGroup;
+                const groupContainer = options.labelViewMaterialGroups ? document.createElement('mat-accordion') : sourcePanel;
+                if (options.labelViewMaterialGroups) {
+                    groupContainer.className = 'mat-accordion';
+                    sourcePanel.appendChild(groupContainer);
+                }
+                groupContainer.appendChild(groupFactory('Research papers', shouldRenderRows ? sources.slice(0, 1) : [], Boolean(options.labelViewCollapsedGroups)));
+                groupContainer.appendChild(groupFactory('Reference material', shouldRenderRows ? sources.slice(1) : [], Boolean(options.labelViewCollapsedGroups)));
                 setHydrationPhase('full');
             }
 
@@ -320,6 +391,10 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
                 listButton.setAttribute('aria-pressed', options.labelView ? 'false' : 'true');
                 listButton.textContent = 'view_list';
                 listButton.addEventListener('click', () => {
+                    if (options.labelView && options.labelViewListSwitchNoop) {
+                        listButton.setAttribute('aria-pressed', 'true');
+                        return;
+                    }
                     renderNotebook(notebookId, sources, Object.assign({}, options, {
                         labelView: false,
                         labelViewWithoutRows: false
@@ -416,7 +491,9 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
                     ? {
                         stagedHydration: Boolean(nextNotebook.stagedHydration),
                         labelView: Boolean(nextNotebook.labelView),
-                        labelViewWithoutRows: Boolean(nextNotebook.labelViewWithoutRows)
+                        labelViewWithoutRows: Boolean(nextNotebook.labelViewWithoutRows),
+                        labelViewMaterialGroups: Boolean(nextNotebook.labelViewMaterialGroups),
+                        labelViewListSwitchNoop: Boolean(nextNotebook.labelViewListSwitchNoop)
                     }
                     : initialOptions;
                 history.pushState({}, '', '/notebook/' + encodeURIComponent(notebookId));
@@ -531,7 +608,9 @@ async function installNotebookFixture(context) {
                 stagedHydration: url.searchParams.get('fixture') === 'staged',
                 labelView: ['label', 'label-empty', 'label-collapsed'].includes(url.searchParams.get('fixture')),
                 labelViewWithoutRows: url.searchParams.get('fixture') === 'label-empty',
-                labelViewCollapsedGroups: url.searchParams.get('fixture') === 'label-collapsed'
+                labelViewCollapsedGroups: url.searchParams.get('fixture') === 'label-collapsed',
+                labelViewMaterialGroups: ['material-labels', 'material-labels-noop'].includes(url.searchParams.get('fixture')),
+                labelViewListSwitchNoop: url.searchParams.get('fixture') === 'material-labels-noop'
             })
         });
     });

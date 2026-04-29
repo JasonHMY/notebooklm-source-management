@@ -140,7 +140,7 @@ test.describe.serial('extension smoke', () => {
     test('switches NotebookLM source views from the popup controls', async () => {
         const notebookPage = await env.context.newPage();
 
-        await notebookPage.goto('https://notebooklm.google.com/notebook/popup-view-switch');
+        await notebookPage.goto('https://notebooklm.google.com/notebook/popup-view-switch?fixture=material-labels-noop');
         env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
         await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
 
@@ -164,7 +164,7 @@ test.describe.serial('extension smoke', () => {
         await popupPage.locator('#popup-source-view-label-btn').click();
 
         await expect.poll(async () => notebookPage.evaluate(() => Boolean(
-            document.querySelector('[data-testid="source-label-group"]')
+            document.querySelector('mat-expansion-panel')
         )), { timeout: 10_000 }).toBeTruthy();
         await expect.poll(async () => notebookPage.evaluate(() => Boolean(
             document.querySelector('#sources-plus-root')?.shadowRoot?.querySelector('.sp-container.is-native-label-view')
@@ -173,9 +173,6 @@ test.describe.serial('extension smoke', () => {
 
         await popupPage.locator('#popup-source-view-list-btn').click();
 
-        await expect.poll(async () => notebookPage.evaluate(() => Boolean(
-            document.querySelector('[data-testid="scroll-area"] [data-testid="source-item"]')
-        )), { timeout: 10_000 }).toBeTruthy();
         await expect.poll(async () => notebookPage.evaluate(() => Boolean(
             document.querySelector('#sources-plus-root')?.shadowRoot?.querySelector('.sp-container:not(.is-native-label-view)')
         )), { timeout: 10_000 }).toBeTruthy();
@@ -187,6 +184,17 @@ test.describe.serial('extension smoke', () => {
                 style.display !== 'none' &&
                 style.opacity !== '0' &&
                 style.pointerEvents !== 'none';
+        }), { timeout: 10_000 }).toBeTruthy();
+        await expect.poll(async () => notebookPage.evaluate(() => {
+            const panels = Array.from(document.querySelectorAll('mat-expansion-panel'));
+            if (panels.length === 0) return true;
+            return panels.every((panel) => {
+                const style = window.getComputedStyle(panel);
+                return style.visibility === 'hidden' ||
+                    style.display === 'none' ||
+                    style.opacity === '0' ||
+                    style.pointerEvents === 'none';
+            });
         }), { timeout: 10_000 }).toBeTruthy();
         await expect(popupPage.locator('#popup-source-view-list-btn')).toHaveAttribute('aria-pressed', 'true');
     });

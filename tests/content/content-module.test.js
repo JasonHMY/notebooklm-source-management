@@ -54,6 +54,8 @@ describe('content stylesheet native source list visibility', () => {
 
         expect(firstRule).toContain('.sources-plus-manager-active .source-panel .scroll-area-desktop');
         expect(firstRule).toContain('.sources-plus-manager-active .source-panel .source-label-group');
+        expect(firstRule).toContain('.sources-plus-manager-active .source-panel mat-expansion-panel');
+        expect(firstRule).toContain('.sources-plus-manager-active .source-panel mat-accordion');
         expect(firstRule).not.toContain('\n.source-panel .scroll-area-desktop');
         expect(firstRule).not.toContain('\n.source-panel .source-label-group');
         expect(firstRule).not.toContain('.source-label-controls');
