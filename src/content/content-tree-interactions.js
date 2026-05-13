@@ -3,6 +3,7 @@
 
     function createContentTreeInteractions(deps = {}) {
         const runtime = deps.runtime || deps;
+        const NATIVE_SELECTION_SYNC_RETRY_LIMIT = 6;
 
         const getState = typeof deps.getState === 'function'
             ? deps.getState
@@ -151,6 +152,34 @@
         const getIsDeletingSources = typeof deps.getIsDeletingSources === 'function'
             ? deps.getIsDeletingSources
             : () => Boolean(deps.isDeletingSources ?? runtime.isDeletingSources);
+        const getCurrentSourceViewKind = typeof deps.getCurrentSourceViewKind === 'function'
+            ? deps.getCurrentSourceViewKind
+            : () => (deps.sourceViewKind || runtime.sourceViewKind || null);
+        const recordNativeSelectionSyncFailure = typeof deps.recordNativeSelectionSyncFailure === 'function'
+            ? deps.recordNativeSelectionSyncFailure
+            : () => {};
+
+        function getNativeControlAttribute(element, attr) {
+            if (!element || typeof element.getAttribute !== 'function') return '';
+            return String(element.getAttribute(attr) || '').trim();
+        }
+
+        function getNativeCheckboxState(checkbox) {
+            if (!checkbox) return null;
+            if (checkbox.indeterminate === true) return null;
+            const ariaChecked = getNativeControlAttribute(checkbox, 'aria-checked').toLowerCase();
+            if (ariaChecked === 'mixed') return null;
+            if (ariaChecked === 'true') return true;
+            if (ariaChecked === 'false') return false;
+            if (typeof checkbox.checked === 'boolean') return Boolean(checkbox.checked);
+            return null;
+        }
+
+        function shouldToggleNativeCheckbox(checkbox, desiredState) {
+            const currentState = getNativeCheckboxState(checkbox);
+            if (currentState === null) return true;
+            return currentState !== Boolean(desiredState);
+        }
 
         function resolveDetachedRowEntry(source) {
             if (!source) return null;
@@ -170,11 +199,29 @@
             };
         }
 
+        function createUniqueGroupId(groupsById) {
+            const baseId = `group_${Date.now()}`;
+            if (!groupsById.has(baseId)) return baseId;
+
+            let suffix = 1;
+            let candidate = `${baseId}_${suffix}`;
+            while (groupsById.has(candidate)) {
+                suffix += 1;
+                candidate = `${baseId}_${suffix}`;
+            }
+            return candidate;
+        }
+
         function handleAddNewGroup(parentGroupId = null) {
             const state = getState();
             const groupsById = getGroupsById();
+            const parent = parentGroupId ? groupsById.get(parentGroupId) : null;
+            if (parentGroupId && !parent) {
+                return false;
+            }
+
             const newGroup = {
-                id: `group_${Date.now()}`,
+                id: createUniqueGroupId(groupsById),
                 title: parentGroupId ? getMessage('ui_new_subgroup') : getMessage('ui_new_group'),
                 children: [],
                 enabled: true,
@@ -184,8 +231,7 @@
 
             groupsById.set(newGroup.id, newGroup);
             if (parentGroupId) {
-                const parent = groupsById.get(parentGroupId);
-                if (parent) parent.children.push({ type: 'group', id: newGroup.id });
+                parent.children.push({ type: 'group', id: newGroup.id });
             } else {
                 state.groups = Array.isArray(state.groups) ? state.groups : [];
                 state.groups.push(newGroup.id);
@@ -194,29 +240,67 @@
             buildParentMap();
             render();
             saveState({ immediate: true, critical: true });
+            return true;
         }
 
-        function syncSourceToPage(source, desiredState) {
-            if (!source || !source.element) return;
+        function syncSourceToPage(source, desiredState, options = {}) {
+            if (!source) return false;
 
             const documentObj = getDocument();
-            let checkbox = source.element.querySelector?.(getSourceCheckboxSelector());
+            const currentSourceViewKind = options.currentSourceViewKind || getCurrentSourceViewKind();
+            if (currentSourceViewKind === 'label') {
+                recordNativeSelectionSyncFailure({
+                    sourceKey: source.key || '',
+                    reason: 'not_list_view',
+                    detectedSourceViewKind: currentSourceViewKind
+                });
+                return false;
+            }
 
-            if (!checkbox || !documentObj?.body?.contains?.(checkbox)) {
+            let checkbox = null;
+            if (options.preferStoredCheckbox && source.checkbox && documentObj?.body?.contains?.(source.checkbox)) {
+                checkbox = source.checkbox;
+            } else if (options.preferStoredCheckbox) {
+                checkbox = source.element?.querySelector?.(getSourceCheckboxSelector()) || null;
+            } else {
                 const resolvedEntry = resolveDetachedRowEntry(source);
-                if (resolvedEntry) {
+                if (resolvedEntry?.checkbox) {
                     checkbox = resolvedEntry.checkbox;
                     source.element = resolvedEntry.row || source.element;
+                    source.checkbox = resolvedEntry.checkbox;
                 } else {
-                    return;
+                    checkbox = source.element?.querySelector?.(getSourceCheckboxSelector()) || null;
                 }
             }
 
-            if (checkbox && checkbox.checked !== desiredState) {
+            if (!checkbox || !documentObj?.body?.contains?.(checkbox)) {
+                if (options.retryOnMissingCheckbox === true && currentSourceViewKind !== 'label') {
+                    getClickQueue().push({
+                        checkbox: null,
+                        desiredState,
+                        sourceKey: source.key,
+                        retryOnMissing: true,
+                        attempts: 0
+                    });
+                    if (!getIsProcessingQueue()) processClickQueue();
+                    return true;
+                }
+
+                recordNativeSelectionSyncFailure({
+                    sourceKey: source.key || '',
+                    reason: 'native_checkbox_missing',
+                    detectedSourceViewKind: currentSourceViewKind || 'unknown'
+                });
+                return false;
+            }
+
+            if (shouldToggleNativeCheckbox(checkbox, desiredState)) {
                 getClickQueue().push({ checkbox, desiredState, sourceKey: source.key });
             }
 
+            recordNativeSelectionSyncFailure(null);
             if (!getIsProcessingQueue()) processClickQueue();
+            return true;
         }
 
         function processClickQueue() {
@@ -238,16 +322,27 @@
                 const item = clickQueue.shift();
                 let checkbox = item.checkbox;
 
-                if (!documentObj?.body?.contains?.(checkbox)) {
+                if (!checkbox || !documentObj?.body?.contains?.(checkbox)) {
                     const freshCheckbox = findFreshCheckbox(item.sourceKey);
                     if (freshCheckbox) {
                         checkbox = freshCheckbox;
+                    } else if (item.retryOnMissing && Number(item.attempts) < NATIVE_SELECTION_SYNC_RETRY_LIMIT) {
+                        clickQueue.push(Object.assign({}, item, {
+                            attempts: Number(item.attempts) + 1
+                        }));
+                        continue;
                     } else {
+                        recordNativeSelectionSyncFailure({
+                            sourceKey: item.sourceKey || '',
+                            reason: 'native_checkbox_missing_during_queue',
+                            detectedSourceViewKind: getCurrentSourceViewKind() || 'unknown'
+                        });
                         continue;
                     }
                 }
 
-                if (checkbox.checked !== item.desiredState) {
+                if (shouldToggleNativeCheckbox(checkbox, item.desiredState)) {
+                    recordNativeSelectionSyncFailure(null);
                     checkbox.click();
                 }
             }
@@ -268,7 +363,8 @@
             const state = getState();
             const parentGroup = findParentGroupOfSource(key);
             if (parentGroup) {
-                parentGroup.children = parentGroup.children.filter((c) => c.type === 'group' || c.key !== key);
+                parentGroup.children = (Array.isArray(parentGroup.children) ? parentGroup.children : [])
+                    .filter((c) => c.type === 'group' || c.key !== key);
             } else {
                 state.ungrouped = (Array.isArray(state.ungrouped) ? state.ungrouped : []).filter((k) => k !== key);
             }
@@ -375,7 +471,7 @@
             const groupsById = getGroupsById();
             state.groups = (Array.isArray(state.groups) ? state.groups : []).filter((gid) => gid !== id);
             groupsById.forEach((group) => {
-                group.children = group.children.filter((c) => c.id !== id);
+                group.children = (Array.isArray(group.children) ? group.children : []).filter((c) => c.id !== id);
             });
         }
 
@@ -534,7 +630,9 @@
                     const source = sourcesByKey.get(checkboxSourceKey);
                     if (source && !source.isDisabled) {
                         source.enabled = target.checked;
-                        syncSourceToPage(source, isSourceEffectivelyEnabled(source));
+                        syncSourceToPage(source, isSourceEffectivelyEnabled(source), {
+                            retryOnMissingCheckbox: true
+                        });
                         saveState({ immediate: true, critical: true });
                         render();
                     }
@@ -550,12 +648,12 @@
             if (sourceRow && !target.closest('.sp-source-actions-anchor, .sp-source-actions-menu, .sp-tag-pill, input, .sp-batch-checkbox')) {
                 const source = sourcesByKey.get(sourceKey);
 
-                if (source && source.isDisabled) {
+                if (!source || source.isDisabled) {
                     return;
                 }
 
                 if (state.isBatchMode) {
-                    if (!source || source.isDisabled || source.isLoading) {
+                    if (source.isLoading) {
                         return;
                     }
 
@@ -580,7 +678,9 @@
 
                     if (source) {
                         source.enabled = checkbox.checked;
-                        syncSourceToPage(source, isSourceEffectivelyEnabled(source));
+                        syncSourceToPage(source, isSourceEffectivelyEnabled(source), {
+                            retryOnMissingCheckbox: true
+                        });
                         saveState({ immediate: true, critical: true });
                         render();
                     }
@@ -630,8 +730,9 @@
             if (deleteButton) {
                 const group = groupsById.get(groupId);
                 if (!group) return;
+                const groupChildren = Array.isArray(group.children) ? group.children : [];
 
-                if (group.children.length === 0) {
+                if (groupChildren.length === 0) {
                     removeGroupFromTree(groupId);
                     groupsById.delete(groupId);
                 } else {
@@ -642,10 +743,12 @@
 
                     if (deleteContents) {
                         const extractChildren = (g) => {
-                            g.children.forEach((c) => {
+                            (Array.isArray(g.children) ? g.children : []).forEach((c) => {
                                 if (c.type === 'source') {
+                                    state.ungrouped = Array.isArray(state.ungrouped) ? state.ungrouped : [];
                                     state.ungrouped.push(c.key);
                                 } else {
+                                    state.groups = Array.isArray(state.groups) ? state.groups : [];
                                     state.groups.push(c.id);
                                 }
                             });

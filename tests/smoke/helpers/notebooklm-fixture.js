@@ -26,7 +26,8 @@ function normalizeSources(notebookId, sources) {
         return sources.map((source, index) => ({
             id: source.id || `${notebookId}-source-${index + 1}`,
             title: source.title || `Notebook ${notebookId} source ${index + 1}`,
-            token: source.token || source.id || `${notebookId}-source-${index + 1}`
+            token: source.token || source.id || `${notebookId}-source-${index + 1}`,
+            iconUrl: source.iconUrl || ''
         }));
     }
 
@@ -198,6 +199,13 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
                 const icon = document.createElement('mat-icon');
                 icon.className = 'source-icon description-icon-color';
                 icon.textContent = 'description';
+                if (source.iconUrl) {
+                    const imageIcon = document.createElement('img');
+                    imageIcon.className = 'source-native-icon-image';
+                    imageIcon.src = source.iconUrl;
+                    imageIcon.alt = '';
+                    row.appendChild(imageIcon);
+                }
 
                 const title = document.createElement('span');
                 title.className = 'source-title';
@@ -601,16 +609,33 @@ async function installNotebookFixture(context) {
             ? parts[notebookIndex + 1]
             : 'a';
 
+        const fixtureName = url.searchParams.get('fixture');
+        const sources = fixtureName === 'malicious-icons'
+            ? [
+                {
+                    id: `${notebookId}-source-a`,
+                    title: '<img src=x onerror="window.__sourceTitleXss=1">',
+                    token: `${notebookId}-source-a`,
+                    iconUrl: 'https://evil.example/icon.png'
+                },
+                {
+                    id: `${notebookId}-source-b`,
+                    title: `Notebook ${notebookId} source B`,
+                    token: `${notebookId}-source-b`
+                }
+            ]
+            : null;
+
         await route.fulfill({
             status: 200,
             contentType: 'text/html',
-            body: renderNotebookHtml(notebookId, null, {
-                stagedHydration: url.searchParams.get('fixture') === 'staged',
-                labelView: ['label', 'label-empty', 'label-collapsed'].includes(url.searchParams.get('fixture')),
-                labelViewWithoutRows: url.searchParams.get('fixture') === 'label-empty',
-                labelViewCollapsedGroups: url.searchParams.get('fixture') === 'label-collapsed',
-                labelViewMaterialGroups: ['material-labels', 'material-labels-noop'].includes(url.searchParams.get('fixture')),
-                labelViewListSwitchNoop: url.searchParams.get('fixture') === 'material-labels-noop'
+            body: renderNotebookHtml(notebookId, sources, {
+                stagedHydration: fixtureName === 'staged',
+                labelView: ['label', 'label-empty', 'label-collapsed'].includes(fixtureName),
+                labelViewWithoutRows: fixtureName === 'label-empty',
+                labelViewCollapsedGroups: fixtureName === 'label-collapsed',
+                labelViewMaterialGroups: ['material-labels', 'material-labels-noop'].includes(fixtureName),
+                labelViewListSwitchNoop: fixtureName === 'material-labels-noop'
             })
         });
     });

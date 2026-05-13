@@ -115,7 +115,8 @@
 
         function getSortedTagIds(tagIds = []) {
             const orderIndex = new Map();
-            runtime.state.tagOrder.forEach((tagId, index) => orderIndex.set(tagId, index));
+            const tagOrder = Array.isArray(runtime.state?.tagOrder) ? runtime.state.tagOrder : [];
+            tagOrder.forEach((tagId, index) => orderIndex.set(tagId, index));
             return Array.from(new Set(tagIds))
                 .filter((tagId) => runtime.tagsById.has(tagId))
                 .sort((left, right) => (orderIndex.get(left) ?? Number.MAX_SAFE_INTEGER) - (orderIndex.get(right) ?? Number.MAX_SAFE_INTEGER));
@@ -168,6 +169,7 @@
                 label: normalizedLabel,
                 color: normalizeTagColor(normalizedOptions && normalizedOptions.color)
             });
+            runtime.state.tagOrder = Array.isArray(runtime.state.tagOrder) ? runtime.state.tagOrder : [];
             runtime.state.tagOrder.push(tagId);
             return tagId;
         }
@@ -189,7 +191,9 @@
             }
 
             tag.label = normalizedLabel;
-            tag.color = normalizeTagColor(updates.color);
+            if (Object.prototype.hasOwnProperty.call(updates, 'color')) {
+                tag.color = normalizeTagColor(updates.color);
+            }
             return tagId;
         }
 

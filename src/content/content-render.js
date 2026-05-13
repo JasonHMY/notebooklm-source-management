@@ -567,7 +567,7 @@
             const descendantKeys = [];
             const getKeys = (g) => {
                 if (!g) return;
-                g.children.forEach((child) => {
+                (Array.isArray(g.children) ? g.children : []).forEach((child) => {
                     if (child.type === 'source') descendantKeys.push(child.key);
                     else getKeys(groupsById.get(child.id));
                 });
@@ -1260,8 +1260,9 @@
                 const motionStyle = getNextListMotionStyle();
                 const isSearchExpanded = searchExpandedGroupIds.has(group.id);
                 const isCollapsed = group.collapsed && !isSearchExpanded;
+                const groupChildren = Array.isArray(group.children) ? group.children : [];
 
-                group.children.forEach((child) => {
+                groupChildren.forEach((child) => {
                     if (child.type === 'source') {
                         const sourceElement = renderSourceItem(sourcesByKey.get(child.key));
                         if (sourceElement) childrenElements.push(sourceElement);

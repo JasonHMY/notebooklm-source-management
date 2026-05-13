@@ -137,6 +137,12 @@
     let lastNativeSourceListHidden = false;
     let lastNativeSourceListHiddenAt = '';
     let lastNativeLabelImportSummary = null;
+    let lastNativeSelectionSyncFailure = null;
+    let lastViewSwitchAttempt = null;
+    let viewSwitchInProgress = false;
+    let lastSkippedStructuralSourceSync = null;
+    let pendingStructuralStateRepair = null;
+    let lastStructuralStateRepair = null;
     const NATIVE_ACTION_FAILURE_HISTORY_LIMIT = 5;
     let nativeActionFailureHistory = [];
     const MANAGER_ACTIVE_CLASS = 'sources-plus-manager-active';
@@ -144,6 +150,8 @@
     const NATIVE_RENAME_WATCHER_DURATION_MS = 5000;
     const SOURCE_VIEW_LIST = 'list';
     const SOURCE_VIEW_LABEL = 'label';
+    const SOURCE_VIEW_SWITCH_CONFIRM_TIMEOUT_MS = 1600;
+    const SOURCE_VIEW_SWITCH_CONFIRM_INTERVAL_MS = 80;
     const SOURCE_VIEW_SWITCH_PATTERNS = {
         [SOURCE_VIEW_LIST]: [
             /\blist\s*view\b/i,
@@ -247,6 +255,12 @@
     bindRuntimeProperty('sourceViewDisplayKind', () => sourceViewDisplayKind, (value) => { sourceViewDisplayKind = value === SOURCE_VIEW_LABEL ? SOURCE_VIEW_LABEL : SOURCE_VIEW_LIST; });
     bindRuntimeProperty('lastSourceViewChangedAt', () => lastSourceViewChangedAt, (value) => { lastSourceViewChangedAt = String(value || ''); });
     bindRuntimeProperty('lastSourceViewTransition', () => lastSourceViewTransition, (value) => { lastSourceViewTransition = value && typeof value === 'object' ? value : null; });
+    bindRuntimeProperty('lastNativeSelectionSyncFailure', () => lastNativeSelectionSyncFailure, (value) => { lastNativeSelectionSyncFailure = value && typeof value === 'object' ? value : null; });
+    bindRuntimeProperty('lastViewSwitchAttempt', () => lastViewSwitchAttempt, (value) => { lastViewSwitchAttempt = value && typeof value === 'object' ? value : null; });
+    bindRuntimeProperty('viewSwitchInProgress', () => viewSwitchInProgress, (value) => { viewSwitchInProgress = Boolean(value); });
+    bindRuntimeProperty('lastSkippedStructuralSourceSync', () => lastSkippedStructuralSourceSync, (value) => { lastSkippedStructuralSourceSync = value && typeof value === 'object' ? value : null; });
+    bindRuntimeProperty('pendingStructuralStateRepair', () => pendingStructuralStateRepair, (value) => { pendingStructuralStateRepair = value && typeof value === 'object' ? value : null; });
+    bindRuntimeProperty('lastStructuralStateRepair', () => lastStructuralStateRepair, (value) => { lastStructuralStateRepair = value && typeof value === 'object' ? value : null; });
     bindRuntimeProperty('debouncedPanelLifecycleSync', () => debouncedPanelLifecycleSync);
     bindRuntimeProperty('syncManagerWithPanelLifecycle', () => syncManagerWithPanelLifecycle);
 
@@ -345,6 +359,7 @@
         render: (...args) => render(...args),
         sourceMatchesCurrentFilters: (...args) => sourceMatchesCurrentFilters(...args),
         resolveFreshRowEntry: (...args) => resolveFreshRowEntry(...args),
+        extractSourceIdentitySnapshot,
         getSourceElements: () => getSourceElements(findSourcePanel() || document),
         renderTagModal: (...args) => renderTagModal(...args),
         renderMoveToFolderModal: (...args) => renderMoveToFolderModal(...args),
@@ -1037,7 +1052,28 @@
         setIsSyncingState: (value) => { isSyncingState = Boolean(value); },
         getActiveIsolationGroupId: () => activeIsolationGroupId,
         setActiveIsolationGroupId: (value) => { activeIsolationGroupId = value; },
-        getIsDeletingSources: () => isDeletingSources
+        getIsDeletingSources: () => isDeletingSources,
+        getCurrentSourceViewKind: () => {
+            const panel = findSourcePanel();
+            const info = getSourceViewInfo(panel);
+            if (
+                sourceViewDisplayKind === SOURCE_VIEW_LIST &&
+                info?.kind === SOURCE_VIEW_LABEL &&
+                lastNativeSourceListHidden
+            ) {
+                return SOURCE_VIEW_LIST;
+            }
+            return info?.kind || sourceViewKind || 'unknown';
+        },
+        recordNativeSelectionSyncFailure: (details) => {
+            if (!details) {
+                lastNativeSelectionSyncFailure = null;
+                return;
+            }
+            lastNativeSelectionSyncFailure = Object.assign({
+                occurredAt: new Date().toISOString()
+            }, details || {});
+        }
     });
     const {
         handleAddNewGroup,
@@ -1537,6 +1573,18 @@
             lastSourceViewTransition: lastSourceViewTransition ? Object.assign({}, lastSourceViewTransition) : null,
             nativeSourceListHidden: Boolean(lastNativeSourceListHidden),
             lastNativeSourceListHiddenAt: lastNativeSourceListHiddenAt || '',
+            lastNativeSelectionSyncFailure: lastNativeSelectionSyncFailure
+                ? Object.assign({}, lastNativeSelectionSyncFailure)
+                : null,
+            lastSkippedStructuralSourceSync: lastSkippedStructuralSourceSync
+                ? Object.assign({}, lastSkippedStructuralSourceSync)
+                : null,
+            lastStructuralStateRepair: lastStructuralStateRepair
+                ? Object.assign({}, lastStructuralStateRepair)
+                : null,
+            lastViewSwitchAttempt: lastViewSwitchAttempt
+                ? Object.assign({}, lastViewSwitchAttempt)
+                : null,
             lastNativeLabelImportSummary: lastNativeLabelImportSummary
                 ? Object.assign({}, lastNativeLabelImportSummary, {
                     labels: Array.isArray(lastNativeLabelImportSummary.labels)
@@ -1630,6 +1678,8 @@
                     'data-testid',
                     'href',
                     'aria-expanded',
+                    'aria-checked',
+                    'checked',
                     'class',
                     'hidden',
                     'style'
@@ -1763,7 +1813,10 @@
 
     function getSourceDisplayViewInfo(panel = findSourcePanel(), detectedInfo = null) {
         const nativeInfo = detectedInfo || getSourceViewInfo(panel) || {};
-        const displayKind = normalizeSourceViewSwitchTarget(sourceViewDisplayKind);
+        const preferredDisplayKind = normalizeSourceViewSwitchTarget(sourceViewDisplayKind);
+        const displayKind = isConcreteSourceViewKind(preferredDisplayKind)
+            ? preferredDisplayKind
+            : (isConcreteSourceViewKind(nativeInfo.kind) ? nativeInfo.kind : SOURCE_VIEW_LIST);
         return Object.assign({}, nativeInfo, {
             kind: displayKind,
             displayKind,
@@ -1888,6 +1941,77 @@
         ].join(',')));
     }
 
+    function isElementInsideExtensionRoot(element) {
+        if (!element) return false;
+        if (element.id === 'sources-plus-root') return true;
+        return Boolean(element.closest?.('#sources-plus-root'));
+    }
+
+    function isElementWithinNativeSourcePanel(element, sourcePanel) {
+        if (!element || !sourcePanel) return false;
+        if (element === sourcePanel) return true;
+        if (typeof sourcePanel.contains === 'function') {
+            try {
+                return Boolean(sourcePanel.contains(element));
+            } catch (error) {
+                // Fall back to parent traversal for framework-owned or mocked nodes.
+            }
+        }
+
+        let cursor = element.parentElement || element.parentNode || null;
+        let depth = 0;
+        while (cursor && depth < 32) {
+            if (cursor === sourcePanel) return true;
+            cursor = cursor.parentElement || cursor.parentNode || null;
+            depth += 1;
+        }
+        return false;
+    }
+
+    function isCheckboxLikeNativeControl(element) {
+        if (!element) return false;
+        const tagName = String(element.tagName || '').toLowerCase();
+        const type = String(element.type || element.getAttribute?.('type') || '').toLowerCase();
+        const role = String(element.getAttribute?.('role') || '').toLowerCase();
+        if ((tagName === 'input' && type === 'checkbox') || role === 'checkbox') return true;
+        if (tagName === 'mat-checkbox') return true;
+        try {
+            return Boolean(element.matches?.('input[type="checkbox"], [role="checkbox"], mat-checkbox, .mat-checkbox, .mat-mdc-checkbox, .mdc-checkbox'));
+        } catch (error) {
+            return false;
+        }
+    }
+
+    function isNativeLabelCheckboxChangeTarget(element, sourcePanel) {
+        if (!sourcePanel || !element) return false;
+        if (isElementInsideExtensionRoot(element)) return false;
+        if (!isCheckboxLikeNativeControl(element)) return false;
+        if (isInsideNativeSourceRow(element)) return false;
+        if (!isElementWithinNativeSourcePanel(element, sourcePanel)) return false;
+        return getSourceViewInfo(sourcePanel)?.kind === SOURCE_VIEW_LABEL;
+    }
+
+    function handleNativeCheckboxChange(event) {
+        handleOriginalCheckboxChange(event);
+
+        const sourcePanel = findSourcePanel();
+        if (
+            isAwaitingInitialStateLoad ||
+            !isNativeLabelCheckboxChangeTarget(event?.target, sourcePanel)
+        ) {
+            return;
+        }
+
+        const previousPersistableSignature = getPersistableStateSignature();
+        scanAndSyncSources({}, false);
+        render();
+
+        const nextPersistableSignature = getPersistableStateSignature();
+        if (shouldSaveAfterMutationSync(previousPersistableSignature, nextPersistableSignature)) {
+            saveState({ immediate: true, critical: true });
+        }
+    }
+
     function scoreNativeViewSwitchCandidate(element, targetViewKind, options = {}) {
         if (!isNativeViewSwitchCandidateVisible(element, options) || isInsideNativeSourceRow(element)) return 0;
         if (typeof element.closest === 'function' && element.closest('#sources-plus-root')) return 0;
@@ -1962,7 +2086,172 @@
         return false;
     }
 
+    function isConcreteSourceViewKind(value) {
+        return value === SOURCE_VIEW_LIST || value === SOURCE_VIEW_LABEL;
+    }
+
+    function getFallbackSourceViewDisplayKind(info) {
+        if (isConcreteSourceViewKind(info?.kind)) return info.kind;
+        return normalizeSourceViewSwitchTarget(sourceViewDisplayKind);
+    }
+
+    function updateLastViewSwitchAttempt(details) {
+        lastViewSwitchAttempt = Object.assign({
+            attemptedAt: new Date().toISOString()
+        }, details || {});
+        return lastViewSwitchAttempt;
+    }
+
+    function finishViewSwitchAttempt(result, startedAtMs) {
+        viewSwitchInProgress = false;
+        lastViewSwitchAttempt = Object.assign({}, lastViewSwitchAttempt || {}, {
+            success: Boolean(result?.success),
+            reason: result?.reason || '',
+            targetViewKind: result?.viewKind || '',
+            detectedSourceViewKind: result?.detectedSourceViewKind || result?.confirmedSourceViewKind || 'unknown',
+            sourceViewDisplayKind: result?.sourceViewDisplayKind || normalizeSourceViewSwitchTarget(sourceViewDisplayKind),
+            displayOverride: Boolean(result?.displayOverride),
+            completedAt: new Date().toISOString(),
+            durationMs: Math.max(0, Date.now() - startedAtMs)
+        });
+        return Object.assign({
+            viewSwitchDurationMs: lastViewSwitchAttempt.durationMs
+        }, result || {});
+    }
+
+    function finalizeSourceViewSwitchSuccess(nextViewKind, sourcePanel, confirmedInfo, meta = {}) {
+        const displayInfo = applySourceViewDisplayMode(nextViewKind, sourcePanel, confirmedInfo);
+        if (!isAwaitingInitialStateLoad && getSourcePanelState(sourcePanel).state === 'ready') {
+            scanAndSyncSources({}, false);
+        }
+        render();
+
+        setTimeout(() => {
+            try {
+                syncManagerWithPanelLifecycle();
+            } catch (error) {
+                console.warn('NotebookLM Source Management: Failed to sync after source view switch.', error);
+            }
+        }, 120);
+
+        return finishViewSwitchAttempt({
+            success: true,
+            viewKind: nextViewKind,
+            clicked: Boolean(meta.nativeClicked),
+            nativeClicked: Boolean(meta.nativeClicked),
+            nativeSwitchReason: meta.nativeSwitchReason || '',
+            alreadyActive: Boolean(meta.nativeAlreadyActive),
+            detectedSourceViewKind: confirmedInfo?.kind || 'unknown',
+            confirmedSourceViewKind: confirmedInfo?.kind || 'unknown',
+            sourceViewDisplayKind: displayInfo.displayKind
+        }, meta.startedAtMs || Date.now());
+    }
+
+    function finalizeSourceViewSwitchFailure(nextViewKind, sourcePanel, detectedInfo, meta = {}) {
+        const fallbackDisplayKind = getFallbackSourceViewDisplayKind(detectedInfo || meta.currentInfo);
+        const displayInfo = applySourceViewDisplayMode(fallbackDisplayKind, sourcePanel, detectedInfo || meta.currentInfo);
+        render();
+        const reason = meta.reason || (meta.nativeClicked ? 'native_view_switch_not_confirmed' : meta.nativeSwitchReason);
+        return finishViewSwitchAttempt({
+            success: false,
+            viewKind: nextViewKind,
+            clicked: Boolean(meta.nativeClicked),
+            nativeClicked: Boolean(meta.nativeClicked),
+            nativeSwitchReason: meta.nativeClicked ? 'native_view_switch_not_confirmed' : meta.nativeSwitchReason,
+            nativeSwitchAttemptReason: meta.nativeSwitchReason,
+            alreadyActive: Boolean(meta.nativeAlreadyActive),
+            detectedSourceViewKind: detectedInfo?.kind || meta.currentInfo?.kind || 'unknown',
+            sourceViewDisplayKind: displayInfo.displayKind,
+            reason,
+            errorMessageKey: meta.errorMessageKey || 'popup_source_view_switch_failed'
+        }, meta.startedAtMs || Date.now());
+    }
+
+    function finalizeSourceViewSwitchDisplayOverride(nextViewKind, sourcePanel, detectedInfo, meta = {}) {
+        let expansionResult = null;
+        if (
+            nextViewKind === SOURCE_VIEW_LIST &&
+            (detectedInfo?.kind || meta.currentInfo?.kind) === SOURCE_VIEW_LABEL
+        ) {
+            expansionResult = expandCollapsedNativeLabelGroups(sourcePanel, {
+                ignoreManagerSuppression: true
+            });
+        }
+        const displayInfo = applySourceViewDisplayMode(nextViewKind, sourcePanel, detectedInfo || meta.currentInfo);
+        render();
+        if (expansionResult?.clickedCount > 0) {
+            setTimeout(() => {
+                try {
+                    freshRowCache = null;
+                    if (!isAwaitingInitialStateLoad && getSourcePanelState(sourcePanel).state === 'ready') {
+                        scanAndSyncSources({}, false);
+                    }
+                    render();
+                } catch (error) {
+                    console.warn('NotebookLM Source Management: Failed to refresh sources after hidden label expansion.', error);
+                }
+            }, 350);
+        }
+        return finishViewSwitchAttempt({
+            success: true,
+            viewKind: nextViewKind,
+            clicked: Boolean(meta.nativeClicked),
+            nativeClicked: Boolean(meta.nativeClicked),
+            nativeSwitchReason: meta.nativeSwitchReason || 'display_override',
+            nativeSwitchAttemptReason: meta.nativeSwitchReason || '',
+            alreadyActive: Boolean(meta.nativeAlreadyActive),
+            detectedSourceViewKind: detectedInfo?.kind || meta.currentInfo?.kind || 'unknown',
+            confirmedSourceViewKind: displayInfo.displayKind,
+            sourceViewDisplayKind: displayInfo.displayKind,
+            displayOverride: true,
+            expandedNativeLabelGroups: Number(expansionResult?.clickedCount) || 0
+        }, meta.startedAtMs || Date.now());
+    }
+
+    function waitForConfirmedSourceView(nextViewKind, sourcePanel, currentInfo, meta = {}) {
+        const startedAtMs = meta.startedAtMs || Date.now();
+        const maxAttempts = Math.max(1, Math.ceil(SOURCE_VIEW_SWITCH_CONFIRM_TIMEOUT_MS / SOURCE_VIEW_SWITCH_CONFIRM_INTERVAL_MS));
+        let attempts = 0;
+
+        return new Promise((resolve) => {
+            const check = () => {
+                attempts += 1;
+                const refreshedSourcePanel = findSourcePanel() || sourcePanel;
+                const refreshedInfo = getSourceViewInfo(refreshedSourcePanel);
+                if (refreshedInfo?.kind === nextViewKind) {
+                    resolve(finalizeSourceViewSwitchSuccess(nextViewKind, refreshedSourcePanel, refreshedInfo, Object.assign({}, meta, {
+                        startedAtMs,
+                        currentInfo
+                    })));
+                    return;
+                }
+
+                if (attempts >= maxAttempts) {
+                    if (nextViewKind === SOURCE_VIEW_LIST && currentInfo?.kind === SOURCE_VIEW_LABEL) {
+                        resolve(finalizeSourceViewSwitchDisplayOverride(nextViewKind, refreshedSourcePanel, refreshedInfo, Object.assign({}, meta, {
+                            startedAtMs,
+                            currentInfo,
+                            nativeSwitchReason: 'native_view_switch_not_confirmed'
+                        })));
+                        return;
+                    }
+                    resolve(finalizeSourceViewSwitchFailure(nextViewKind, refreshedSourcePanel, refreshedInfo, Object.assign({}, meta, {
+                        startedAtMs,
+                        currentInfo,
+                        reason: 'native_view_switch_not_confirmed'
+                    })));
+                    return;
+                }
+
+                setTimeout(check, SOURCE_VIEW_SWITCH_CONFIRM_INTERVAL_MS);
+            };
+
+            setTimeout(check, SOURCE_VIEW_SWITCH_CONFIRM_INTERVAL_MS);
+        });
+    }
+
     function switchNativeSourceView(targetViewKind) {
+        const startedAtMs = Date.now();
         const nextViewKind = normalizeSourceViewSwitchTarget(targetViewKind);
         if (!isExtensionEnabled) {
             return {
@@ -1982,6 +2271,23 @@
         }
 
         const currentInfo = getSourceViewInfo(sourcePanel);
+        updateLastViewSwitchAttempt({
+            targetViewKind: nextViewKind,
+            detectedSourceViewKind: currentInfo?.kind || 'unknown',
+            sourceViewDisplayKind: normalizeSourceViewSwitchTarget(sourceViewDisplayKind)
+        });
+        if (
+            nextViewKind === SOURCE_VIEW_LIST &&
+            currentInfo?.kind === SOURCE_VIEW_LABEL &&
+            !isAwaitingInitialStateLoad
+        ) {
+            const previousPersistableSignature = getPersistableStateSignature();
+            scanAndSyncSources({}, false);
+            const nextPersistableSignature = getPersistableStateSignature();
+            if (shouldSaveAfterMutationSync(previousPersistableSignature, nextPersistableSignature)) {
+                saveState();
+            }
+        }
         const nativeAlreadyActive = currentInfo?.kind === nextViewKind;
         let nativeClicked = false;
         let nativeSwitchReason = nativeAlreadyActive ? 'already_active' : '';
@@ -2002,45 +2308,55 @@
             }
         }
 
-        if (nextViewKind === SOURCE_VIEW_LABEL && !nativeAlreadyActive && !nativeClicked) {
-            return {
-                success: false,
-                viewKind: nextViewKind,
-                clicked: false,
+        if (!nativeAlreadyActive && !nativeClicked) {
+            if (nextViewKind === SOURCE_VIEW_LIST && currentInfo?.kind === SOURCE_VIEW_LABEL) {
+                return finalizeSourceViewSwitchDisplayOverride(nextViewKind, sourcePanel, currentInfo, {
+                    startedAtMs,
+                    currentInfo,
+                    nativeClicked: false,
+                    nativeSwitchReason,
+                    nativeAlreadyActive: false
+                });
+            }
+            return finalizeSourceViewSwitchFailure(nextViewKind, sourcePanel, currentInfo, {
+                startedAtMs,
+                currentInfo,
                 nativeClicked: false,
                 nativeSwitchReason,
-                alreadyActive: false,
-                detectedSourceViewKind: currentInfo?.kind || 'unknown',
-                sourceViewDisplayKind: normalizeSourceViewSwitchTarget(sourceViewDisplayKind),
-                reason: nativeSwitchReason,
-                errorMessageKey: 'popup_source_view_switch_failed'
-            };
+                nativeAlreadyActive: false,
+                reason: nativeSwitchReason
+            });
         }
 
-        const displayInfo = applySourceViewDisplayMode(nextViewKind, sourcePanel, currentInfo);
-        if (!isAwaitingInitialStateLoad && getSourcePanelState(sourcePanel).state === 'ready') {
-            scanAndSyncSources({}, false);
-        }
-        render();
-
-        setTimeout(() => {
-            try {
-                syncManagerWithPanelLifecycle();
-            } catch (error) {
-                console.warn('NotebookLM Source Management: Failed to sync after source view switch.', error);
+        viewSwitchInProgress = !nativeAlreadyActive;
+        const refreshedSourcePanel = findSourcePanel() || sourcePanel;
+        const refreshedInfo = getSourceViewInfo(refreshedSourcePanel);
+        const confirmedSourceViewKind = refreshedInfo?.kind || 'unknown';
+        if (confirmedSourceViewKind !== nextViewKind) {
+            if (nativeClicked) {
+                return waitForConfirmedSourceView(nextViewKind, refreshedSourcePanel, currentInfo, {
+                    startedAtMs,
+                    nativeClicked,
+                    nativeSwitchReason,
+                    nativeAlreadyActive
+                });
             }
-        }, 120);
 
-        return {
-            success: true,
-            viewKind: nextViewKind,
-            clicked: nativeClicked,
+            return finalizeSourceViewSwitchFailure(nextViewKind, refreshedSourcePanel, refreshedInfo, {
+                startedAtMs,
+                currentInfo,
+                nativeClicked,
+                nativeSwitchReason,
+                nativeAlreadyActive,
+                reason: 'native_view_switch_not_confirmed'
+            });
+        }
+        return finalizeSourceViewSwitchSuccess(nextViewKind, refreshedSourcePanel, refreshedInfo, {
+            startedAtMs,
             nativeClicked,
             nativeSwitchReason,
-            alreadyActive: nativeAlreadyActive,
-            detectedSourceViewKind: currentInfo?.kind || 'unknown',
-            sourceViewDisplayKind: displayInfo.displayKind
-        };
+            nativeAlreadyActive
+        });
     }
 
     function handleManagerMessage(request, sender, sendResponse) {
@@ -2057,7 +2373,22 @@
         }
 
         if (request.type === 'SWITCH_SOURCE_VIEW') {
-            sendResponse(switchNativeSourceView(request.viewKind));
+            const result = switchNativeSourceView(request.viewKind);
+            if (result && typeof result.then === 'function') {
+                result
+                    .then((response) => sendResponse(response))
+                    .catch((error) => {
+                        console.warn('NotebookLM Source Management: Failed to switch source view.', error);
+                        viewSwitchInProgress = false;
+                        sendResponse({
+                            success: false,
+                            reason: 'source_view_switch_failed',
+                            errorMessageKey: 'popup_source_view_switch_failed'
+                        });
+                    });
+                return true;
+            }
+            sendResponse(result);
             return;
         }
 
@@ -2080,7 +2411,7 @@
     function buildParentMap() {
         parentMap.clear();
         groupsById.forEach(group => {
-            group.children.forEach(child => {
+            (Array.isArray(group.children) ? group.children : []).forEach(child => {
                 parentMap.set(child.id || child.key, group.id);
             });
         });
@@ -2642,6 +2973,9 @@
         lastNativeSourceListHidden = false;
         lastNativeSourceListHiddenAt = '';
         lastNativeLabelImportSummary = null;
+        lastNativeSelectionSyncFailure = null;
+        lastViewSwitchAttempt = null;
+        viewSwitchInProgress = false;
         resetUndoHistoryBaseline();
     }
 
@@ -2668,7 +3002,7 @@
             scrollObserver = null;
         }
         observedNativeScrollArea = null;
-        document.removeEventListener('change', handleOriginalCheckboxChange, true);
+        document.removeEventListener('change', handleNativeCheckboxChange, true);
         document.removeEventListener('keydown', handleUndoKeydown, true);
         document.removeEventListener('click', handleDocumentOutsideClick, true);
         if (shadowRoot && typeof shadowRoot.removeEventListener === 'function') {
@@ -2808,8 +3142,19 @@
 
         if (isManagerAttachedToPanel(sourcePanel)) {
             attachedSourcePanel = sourcePanel;
+            if (viewSwitchInProgress) {
+                managerStatusReason = 'ready';
+                return;
+            }
             const previousSourceViewKind = sourceViewKind || 'unknown';
             const currentSourceViewInfo = getSourceViewInfo(sourcePanel);
+            const nativeSourceViewChanged = currentSourceViewInfo.kind !== previousSourceViewKind;
+            if (
+                nativeSourceViewChanged &&
+                (currentSourceViewInfo.kind === SOURCE_VIEW_LIST || currentSourceViewInfo.kind === SOURCE_VIEW_LABEL)
+            ) {
+                sourceViewDisplayKind = currentSourceViewInfo.kind;
+            }
             const currentDisplayViewInfo = getSourceDisplayViewInfo(sourcePanel, currentSourceViewInfo);
             setNativeSourceListHidden(currentDisplayViewInfo.kind === 'list');
             attachScrollObserverToPanel(sourcePanel);
@@ -2818,7 +3163,7 @@
                 completeInitialStateLoad();
             }
             managerStatusReason = 'ready';
-            if (currentSourceViewInfo.kind !== previousSourceViewKind) {
+            if (nativeSourceViewChanged) {
                 if (!isAwaitingInitialStateLoad && panelState.state === 'ready') {
                     scanAndSyncSources({}, false);
                 }
@@ -2955,6 +3300,9 @@
         extensionRoot.id = 'sources-plus-root';
         applySourcePanelSurfaceColor(extensionRoot, sourcePanel);
         const initialSourceViewInfo = getSourceViewInfo(sourcePanel);
+        if (initialSourceViewInfo.kind === SOURCE_VIEW_LIST || initialSourceViewInfo.kind === SOURCE_VIEW_LABEL) {
+            sourceViewDisplayKind = initialSourceViewInfo.kind;
+        }
         const initialDisplayViewInfo = getSourceDisplayViewInfo(sourcePanel, initialSourceViewInfo);
         extensionHost = extensionRoot;
         shadowRoot = extensionRoot.attachShadow({ mode: 'open' });
@@ -3071,7 +3419,7 @@
             setNativeSourceListHidden(initialDisplayViewInfo.kind === 'list');
             attachedSourcePanel = sourcePanel;
             managerStatusReason = 'ready';
-            document.addEventListener('change', handleOriginalCheckboxChange, true);
+            document.addEventListener('change', handleNativeCheckboxChange, true);
 
             // --- Global Native Glassmorphism Injection ---
             if (!document.getElementById(GLOBAL_OVERLAY_STYLE_ID)) {
@@ -3405,6 +3753,7 @@
             _shouldSaveAfterMutationSyncForTest: shouldSaveAfterMutationSync,
             _getMutationRelevanceForTest: getMutationRelevance,
             _handleDomChangesForTest: handleDomChanges,
+            _handleNativeCheckboxChangeForTest: handleNativeCheckboxChange,
             _startNativeRenameWatcherForTest: startNativeRenameWatcher,
             _runNativeRenameSyncPassForTest: runNativeRenameSyncPass,
             _clearNativeRenameWatcherForTest: clearNativeRenameWatcher,
@@ -3549,6 +3898,9 @@
                 lastSourceViewChangedAt = '';
                 lastSourceViewTransition = null;
                 lastNativeLabelImportSummary = null;
+                lastNativeSelectionSyncFailure = null;
+                lastViewSwitchAttempt = null;
+                viewSwitchInProgress = false;
                 isExtensionEnabled = true;
                 setNativeSourceListHidden(false);
                 if (panelResizeObserver) {

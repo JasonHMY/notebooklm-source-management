@@ -140,7 +140,7 @@ test.describe.serial('extension smoke', () => {
     test('switches NotebookLM source views from the popup controls', async () => {
         const notebookPage = await env.context.newPage();
 
-        await notebookPage.goto('https://notebooklm.google.com/notebook/popup-view-switch?fixture=material-labels-noop');
+        await notebookPage.goto('https://notebooklm.google.com/notebook/popup-view-switch?fixture=material-labels');
         env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
         await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
 
@@ -197,6 +197,104 @@ test.describe.serial('extension smoke', () => {
             });
         }), { timeout: 10_000 }).toBeTruthy();
         await expect(popupPage.locator('#popup-source-view-list-btn')).toHaveAttribute('aria-pressed', 'true');
+
+        await notebookPage.evaluate(() => {
+            const root = document.querySelector('#sources-plus-root')?.shadowRoot;
+            const checkbox = root?.querySelector('.source-item .sp-checkbox');
+            if (!checkbox) throw new Error('Plugin source checkbox missing after list switch.');
+            checkbox.click();
+        });
+        await expect.poll(async () => notebookPage.evaluate(() => (
+            Boolean(document.querySelector('[data-testid="source-item"] input[type="checkbox"]')?.checked)
+        )), { timeout: 10_000 }).toBeTruthy();
+
+        await notebookPage.evaluate(() => {
+            const root = document.querySelector('#sources-plus-root')?.shadowRoot;
+            const checkbox = root?.querySelector('.source-item .sp-checkbox');
+            if (!checkbox) throw new Error('Plugin source checkbox missing before deselect.');
+            checkbox.click();
+        });
+        await expect.poll(async () => notebookPage.evaluate(() => (
+            Boolean(document.querySelector('[data-testid="source-item"] input[type="checkbox"]')?.checked)
+        )), { timeout: 10_000 }).toBeFalsy();
+    });
+
+    test('falls back to plugin list display when the native list view switch is not confirmed', async () => {
+        const notebookPage = await env.context.newPage();
+
+        await notebookPage.goto('https://notebooklm.google.com/notebook/popup-view-switch-noop?fixture=material-labels-noop');
+        env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
+        await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
+
+        const popupPage = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
+        await popupPage.evaluate(async () => {
+            const tabs = await chrome.tabs.query({ url: 'https://notebooklm.google.com/*' });
+            const targetTab = tabs.find((tab) => tab.url && tab.url.includes('/notebook/popup-view-switch-noop'));
+
+            if (!targetTab || typeof targetTab.id !== 'number') {
+                throw new Error('Popup no-op view switch notebook tab was not found.');
+            }
+
+            await chrome.tabs.update(targetTab.id, { active: true });
+        });
+        await popupPage.reload();
+        await popupPage.waitForLoadState('domcontentloaded');
+
+        await popupPage.locator('#popup-source-view-label-btn').click();
+        await expect(popupPage.locator('#popup-source-view-label-btn')).toHaveAttribute('aria-pressed', 'true');
+        await expect.poll(async () => notebookPage.evaluate(() => Boolean(
+            document.querySelector('#sources-plus-root')?.shadowRoot?.querySelector('.sp-container.is-native-label-view')
+        )), { timeout: 10_000 }).toBeTruthy();
+
+        await popupPage.locator('#popup-source-view-list-btn').click();
+
+        await expect(popupPage.locator('#popup-source-view-list-btn')).toHaveAttribute('aria-pressed', 'true');
+        await expect.poll(async () => notebookPage.evaluate(() => Boolean(
+            document.querySelector('#sources-plus-root')?.shadowRoot?.querySelector('.sp-container:not(.is-native-label-view)')
+        )), { timeout: 10_000 }).toBeTruthy();
+        await expect.poll(async () => notebookPage.evaluate(() => {
+            const panels = Array.from(document.querySelectorAll('mat-expansion-panel'));
+            if (panels.length === 0) return true;
+            return panels.every((panel) => {
+                const style = window.getComputedStyle(panel);
+                return style.visibility === 'hidden' ||
+                    style.display === 'none' ||
+                    style.opacity === '0' ||
+                    style.pointerEvents === 'none';
+            });
+        }), { timeout: 10_000 }).toBeTruthy();
+        await expect(popupPage.locator('#popup-detail')).toBeHidden({ timeout: 10_000 });
+    });
+
+    test('persists collapsed native label group checkbox changes before a native list switch', async () => {
+        const notebookPage = await env.context.newPage();
+
+        await notebookPage.goto('https://notebooklm.google.com/notebook/native-label-direct-switch');
+        env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
+        await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
+
+        await sendNotebookMessage('/notebook/native-label-direct-switch', { type: 'SWITCH_SOURCE_VIEW', viewKind: 'label' });
+        await expect(notebookPage.locator('[data-testid="source-label-group"]').first()).toBeVisible({ timeout: 10_000 });
+        await expect(notebookPage.locator('[data-testid="source-label-group"] [data-testid="source-title"]').first()).toBeVisible({ timeout: 10_000 });
+
+        await notebookPage.evaluate(() => {
+            document.querySelectorAll('[data-testid="source-label-group"]').forEach((group) => {
+                group.querySelector('[aria-expanded]')?.setAttribute('aria-expanded', 'false');
+                group.querySelectorAll('[data-testid="source-item"]').forEach((sourceRow) => sourceRow.remove());
+            });
+        });
+
+        const firstGroupCheckbox = notebookPage.locator('[data-testid="source-label-group"] input[type="checkbox"]').first();
+        await firstGroupCheckbox.click();
+        await expect.poll(async () => firstGroupCheckbox.evaluate((checkbox) => checkbox.checked), { timeout: 5_000 }).toBe(true);
+
+        await notebookPage.locator('[data-testid="source-view-list-button"]').click();
+
+        await expect.poll(async () => notebookPage.evaluate(() => {
+            const root = document.querySelector('#sources-plus-root')?.shadowRoot || null;
+            return Array.from(root?.querySelectorAll('#sources-list .source-item .sp-checkbox') || [])
+                .map((checkbox) => checkbox.checked);
+        }), { timeout: 10_000 }).toEqual([true, false]);
     });
 
     test('keeps NotebookLM label view visible in compact compatibility mode', async () => {
@@ -465,6 +563,29 @@ test.describe.serial('extension smoke', () => {
         expect(navigationCountAfter).toBe(navigationCountBefore);
     });
 
+    test('renders hostile source metadata as text and blocks third-party source icons', async () => {
+        const notebookPage = await env.context.newPage();
+
+        await notebookPage.goto('https://notebooklm.google.com/notebook/hostile-source?fixture=malicious-icons');
+        await waitForExtensionId(env.context, env.userDataDir, repoRoot);
+        await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
+
+        await expect.poll(async () => notebookPage.evaluate(() => {
+            const root = document.querySelector('#sources-plus-root')?.shadowRoot || null;
+            return {
+                titleExecuted: Boolean(window.__sourceTitleXss),
+                literalTitle: root?.querySelector('.source-title-text')?.textContent || '',
+                untrustedImages: Array.from(root?.querySelectorAll('img.source-icon-image') || [])
+                    .map((image) => image.getAttribute('src') || '')
+                    .filter((src) => src.includes('evil.example'))
+            };
+        }), { timeout: 10_000 }).toEqual({
+            titleExecuted: false,
+            literalTitle: '<img src=x onerror="window.__sourceTitleXss=1">',
+            untrustedImages: []
+        });
+    });
+
     test('reattaches after leaving a notebook for home and opening another notebook', async () => {
         const notebookPage = await env.context.newPage();
 
@@ -701,8 +822,47 @@ test.describe.serial('extension smoke', () => {
 
             await clickSelector('#sp-settings-btn', 'Settings button missing.');
             await clickSelector('.sp-settings-import-section .sp-settings-collapsible-toggle', 'Import configuration toggle missing.');
-            const importTextarea = await waitForSelector('.sp-settings-import-textarea', 'Import textarea missing.');
-            importTextarea.value = JSON.stringify({
+
+            const previewImportText = async (text) => {
+                const importTextarea = await waitForSelector('.sp-settings-import-textarea', 'Import textarea missing.');
+                importTextarea.value = text;
+                importTextarea.dispatchEvent(new Event('input', { bubbles: true }));
+                await clickSelector('.sp-settings-preview-import-btn', 'Preview import button missing.');
+            };
+
+            await previewImportText(JSON.stringify({
+                format: 'notebooklm-source-management-config',
+                data: {
+                    schemaVersion: 3,
+                    groups: ['cycle-a'],
+                    groupsById: {
+                        'cycle-a': {
+                            id: 'cycle-a',
+                            title: 'Cycle A',
+                            children: [{ type: 'group', id: 'cycle-b' }]
+                        },
+                        'cycle-b': {
+                            id: 'cycle-b',
+                            title: 'Cycle B',
+                            children: [{ type: 'group', id: 'cycle-a' }]
+                        }
+                    },
+                    ungrouped: [],
+                    sourceStateById: {},
+                    customHeight: null,
+                    tagsById: {},
+                    tagOrder: [],
+                    sourceTagsById: {}
+                }
+            }));
+            await waitForValue(() => {
+                const root = getRoot();
+                const preview = root?.querySelector('.sp-settings-import-preview.is-invalid');
+                const applyButton = root?.querySelector('.sp-settings-apply-import-btn');
+                return preview && applyButton?.disabled ? true : null;
+            }, 'Cyclic import preview was not rejected.');
+
+            await previewImportText(JSON.stringify({
                 format: 'notebooklm-source-management-config',
                 data: {
                     schemaVersion: 3,
@@ -721,9 +881,7 @@ test.describe.serial('extension smoke', () => {
                     tagOrder: [],
                     sourceTagsById: {}
                 }
-            });
-            importTextarea.dispatchEvent(new Event('input', { bubbles: true }));
-            await clickSelector('.sp-settings-preview-import-btn', 'Preview import button missing.');
+            }));
             await clickSelector('.sp-settings-apply-import-btn', 'Apply import button missing.');
             await clickRestoreImportToastAction();
 

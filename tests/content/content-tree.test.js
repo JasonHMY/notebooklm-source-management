@@ -119,6 +119,17 @@ describe('removeGroupFromTree', () => {
         expect(mod.state.groups).toEqual(['group1']);
         expect(parentGroup.children).toEqual([{ id: 'child1' }]);
     });
+
+    it('tolerates persisted groups that are missing children arrays', () => {
+        mod.state.groups = ['group1'];
+        const parentGroup = { id: 'parent1' };
+        mod.groupsById.set('parent1', parentGroup);
+
+        expect(() => mod.removeGroupFromTree('group1')).not.toThrow();
+
+        expect(mod.state.groups).toEqual([]);
+        expect(parentGroup.children).toEqual([]);
+    });
 });
 
 describe('drag and drop ordering guards', () => {
@@ -158,6 +169,112 @@ describe('drag and drop ordering guards', () => {
     });
 
     afterEach(teardownGlobalMocks);
+
+    it('creates unique group ids when multiple groups are added in the same millisecond', () => {
+        const state = { groups: [], ungrouped: [] };
+        const groupsById = new Map();
+        const saveState = jest.fn();
+        const render = jest.fn();
+        const buildParentMap = jest.fn();
+        const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(12345);
+        const interactions = createContentTreeInteractions({
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            saveState,
+            render,
+            buildParentMap,
+            getMessage: (key) => key
+        });
+
+        try {
+            expect(interactions.handleAddNewGroup()).toBe(true);
+            expect(interactions.handleAddNewGroup()).toBe(true);
+        } finally {
+            nowSpy.mockRestore();
+        }
+
+        expect(state.groups).toEqual(['group_12345', 'group_12345_1']);
+        expect(Array.from(groupsById.keys())).toEqual(['group_12345', 'group_12345_1']);
+        expect(saveState).toHaveBeenCalledTimes(2);
+        expect(render).toHaveBeenCalledTimes(2);
+        expect(buildParentMap).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not create an orphan subgroup when the parent group has gone stale', () => {
+        const state = { groups: [], ungrouped: [] };
+        const groupsById = new Map();
+        const saveState = jest.fn();
+        const render = jest.fn();
+        const buildParentMap = jest.fn();
+        const interactions = createContentTreeInteractions({
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            saveState,
+            render,
+            buildParentMap,
+            getMessage: (key) => key
+        });
+
+        expect(interactions.handleAddNewGroup('missing-parent')).toBe(false);
+
+        expect(groupsById.size).toBe(0);
+        expect(state.groups).toEqual([]);
+        expect(saveState).not.toHaveBeenCalled();
+        expect(render).not.toHaveBeenCalled();
+        expect(buildParentMap).not.toHaveBeenCalled();
+    });
+
+    it('ignores stale source row clicks when the source record no longer exists', () => {
+        const state = { groups: [], ungrouped: [], isBatchMode: false };
+        const sourceRow = {
+            dataset: { sourceKey: 'missing-source' },
+            querySelector: jest.fn(() => ({ checked: false }))
+        };
+        const openNativeDetails = jest.fn();
+        const render = jest.fn();
+        const saveState = jest.fn();
+        const target = {
+            classList: { contains: jest.fn(() => false) },
+            closest: jest.fn((selector) => {
+                if (selector === '.source-item') return sourceRow;
+                if (selector === '.icon-container') return {};
+                return null;
+            })
+        };
+        const interactions = createContentTreeInteractions({
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getSourcesByKey: () => new Map(),
+            getPendingBatchKeys: () => new Set(),
+            getSourceActionInvokers: () => ({ openNativeDetails }),
+            saveState,
+            render
+        });
+
+        expect(() => interactions.handleInteraction({ target })).not.toThrow();
+        expect(openNativeDetails).not.toHaveBeenCalled();
+        expect(saveState).not.toHaveBeenCalled();
+        expect(render).not.toHaveBeenCalled();
+    });
+
+    it('tolerates stale parent maps that point to groups without children arrays', () => {
+        const state = { groups: [], ungrouped: ['source-1'] };
+        const groupsById = new Map([
+            ['group-1', { id: 'group-1', title: 'Legacy Group' }]
+        ]);
+        const parentMap = new Map([
+            ['source-1', 'group-1']
+        ]);
+        const interactions = createContentTreeInteractions({
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getParentMap: () => parentMap
+        });
+
+        expect(() => interactions.removeSourceFromTree('source-1')).not.toThrow();
+
+        expect(groupsById.get('group-1').children).toEqual([]);
+    });
 
     it('does not save or render when a source is dropped back into the same position', () => {
         const state = { groups: [], ungrouped: ['source-1', 'source-2'] };

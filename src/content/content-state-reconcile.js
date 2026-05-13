@@ -349,7 +349,7 @@
             Object.values(groupsById).forEach((group) => {
                 if (!group || !Array.isArray(group.children)) return;
                 const nextChildren = [];
-                group.children.forEach((child) => {
+                (Array.isArray(group.children) ? group.children : []).forEach((child) => {
                     if (child?.type !== 'source') {
                         nextChildren.push(child);
                         return;
@@ -550,7 +550,7 @@
                 const nextGroup = nextGroupsById.get(groupId);
                 if (!nextGroup) return;
 
-                group.children.forEach((child) => {
+                (Array.isArray(group.children) ? group.children : []).forEach((child) => {
                     if (child.type === 'group' && appendGroupChildIfAcyclic(nextGroupsById, groupId, child.id)) {
                         return;
                     }
@@ -574,13 +574,13 @@
                 });
             });
 
-            runtime.state.groups.forEach((groupId) => {
+            (Array.isArray(runtime.state?.groups) ? runtime.state.groups : []).forEach((groupId) => {
                 if (nextGroupsById.has(groupId)) {
                     nextGroups.push(groupId);
                 }
             });
 
-            runtime.state.ungrouped.forEach((storedKey) => {
+            (Array.isArray(runtime.state?.ungrouped) ? runtime.state.ungrouped : []).forEach((storedKey) => {
                 const sourceRecord = previousState.sourceRecordsByKey.get(storedKey) || null;
                 const resolvedKey = resolveCurrentSourceKey(storedKey, sourceRecord);
                 if (!resolvedKey || seenSourceRefs.has(resolvedKey)) return;

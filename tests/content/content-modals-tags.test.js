@@ -181,6 +181,9 @@ const createModalMotionTestRuntime = ({
     setSourceTagIds = jest.fn(),
     saveState = jest.fn(),
     render = jest.fn(),
+    buildParentMap = jest.fn(),
+    removeSourceFromTree = jest.fn(),
+    closeSourceActionMenu = jest.fn(),
     createTag = jest.fn(() => null),
     showToast = jest.fn(),
     showUndoableToast = showToast,
@@ -230,11 +233,14 @@ const createModalMotionTestRuntime = ({
         getMessage: (key, substitutions = []) => (
             substitutions.length > 0 ? `${key}:${substitutions.join(',')}` : key
         ),
+        closeSourceActionMenu,
         getTagUsageCounts: () => new Map(),
         getSourceTagIds,
         setSourceTagIds,
         saveState,
         render,
+        buildParentMap,
+        removeSourceFromTree,
         createTag,
         getExportConfigText,
         previewImportConfig,
@@ -352,6 +358,48 @@ describe('move-to-folder options', () => {
             'padding-left:48px;--sp-modal-item-index:2;',
             '--sp-modal-item-index:3;'
         ]);
+    });
+
+    it('ignores empty move-to-folder requests without crashing', () => {
+        const { modals, shadowRoot } = createModalMotionTestRuntime();
+
+        expect(() => modals.renderMoveToFolderModal(null)).not.toThrow();
+
+        expect(shadowRoot.querySelector('#sp-move-modal')).toBeNull();
+    });
+
+    it('moves sources into folders whose children array is missing', () => {
+        const state = { groups: ['target'], ungrouped: ['source-1'] };
+        const groupsById = new Map([
+            ['target', { id: 'target', title: 'Target' }]
+        ]);
+        const sourcesByKey = new Map([
+            ['source-1', { key: 'source-1', title: 'Source 1' }]
+        ]);
+        const removeSourceFromTree = jest.fn();
+        const saveState = jest.fn();
+        const render = jest.fn();
+        const buildParentMap = jest.fn();
+        const closeSourceActionMenu = jest.fn();
+        const { modals } = createModalMotionTestRuntime({
+            state,
+            groupsById,
+            sourcesByKey,
+            removeSourceFromTree,
+            saveState,
+            render,
+            buildParentMap,
+            closeSourceActionMenu
+        });
+
+        expect(() => modals.executeMoveToFolder(['source-1'], 'target')).not.toThrow();
+
+        expect(groupsById.get('target').children).toEqual([{ type: 'source', key: 'source-1' }]);
+        expect(removeSourceFromTree).toHaveBeenCalledWith('source-1');
+        expect(buildParentMap).toHaveBeenCalled();
+        expect(saveState).toHaveBeenCalledWith({ immediate: true, critical: true });
+        expect(render).toHaveBeenCalled();
+        expect(closeSourceActionMenu).toHaveBeenCalled();
     });
 });
 
@@ -1326,6 +1374,29 @@ describe('tag persistence and filtering', () => {
             label: 'Beta',
             color: '#FF9500'
         });
+    });
+
+    it('preserves an existing tag color when a label-only update is applied', () => {
+        const tagId = mod.createTag('Research', { color: '#34C759' });
+
+        expect(mod.updateTag(tagId, { label: 'Reviewed' })).toBe(tagId);
+
+        expect(mod.tagsById.get(tagId)).toMatchObject({
+            id: tagId,
+            label: 'Reviewed',
+            color: '#34C759'
+        });
+    });
+
+    it('initializes a missing tag order before creating or sorting tags', () => {
+        delete mod.state.tagOrder;
+
+        const tagId = mod.createTag('Inbox');
+
+        expect(mod.state.tagOrder).toEqual([tagId]);
+        expect(mod.getSourceTagIds('source-1')).toEqual([]);
+        mod.setSourceTagIds('source-1', [tagId]);
+        expect(mod.getSourceTagIds('source-1')).toEqual([tagId]);
     });
 
     it('generates style variables only for colored tags', () => {

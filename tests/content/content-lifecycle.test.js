@@ -110,11 +110,29 @@ describe('manager launcher messaging', () => {
 
     it('routes popup source view switch requests to NotebookLM native controls', () => {
         const sendResponse = jest.fn();
+        let phase = 'list';
+        const labelGroup = {
+            textContent: 'AI Group',
+            parentElement: null,
+            parentNode: null,
+            style: {},
+            __computedStyle: {},
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return 'AI Group label';
+                if (attr === 'data-testid') return 'source-label-group';
+                return null;
+            }),
+            matches: jest.fn((selector) => selector.includes('source-label') || selector.includes('label-group')),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
         const labelButton = {
             textContent: 'Label view',
             disabled: false,
             style: {},
-            click: jest.fn(),
+            click: jest.fn(() => {
+                phase = 'label';
+            }),
             getAttribute: jest.fn((attr) => (attr === 'aria-label' ? 'Label view' : null)),
             matches: jest.fn(() => false),
             closest: jest.fn(() => null),
@@ -131,8 +149,12 @@ describe('manager launcher messaging', () => {
             querySelectorAll: jest.fn(() => [])
         };
         const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        labelGroup.parentElement = panel;
+        labelGroup.parentNode = panel;
         panel.querySelectorAll = jest.fn((selector) => {
-            if (selector.includes('button') || selector.includes('[role="button"]')) return [labelButton, listButton];
+            const value = String(selector);
+            if (value.includes('button') || value.includes('[role="button"]')) return [labelButton, listButton];
+            if (phase === 'label' && (value.includes('source-label') || value.includes('label-group'))) return [labelGroup];
             return [];
         });
         global.document.querySelector = jest.fn((selector) => (
@@ -151,6 +173,22 @@ describe('manager launcher messaging', () => {
 
     it('clicks NotebookLM icon-only label view controls from popup requests', () => {
         const sendResponse = jest.fn();
+        let phase = 'list';
+        const labelGroup = {
+            textContent: 'AI Group',
+            parentElement: null,
+            parentNode: null,
+            style: {},
+            __computedStyle: {},
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return 'AI Group label';
+                if (attr === 'data-testid') return 'source-label-group';
+                return null;
+            }),
+            matches: jest.fn((selector) => selector.includes('source-label') || selector.includes('label-group')),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
         const labelIcon = {
             textContent: '',
             getAttribute: jest.fn((attr) => {
@@ -163,15 +201,21 @@ describe('manager launcher messaging', () => {
             textContent: '',
             disabled: false,
             style: {},
-            click: jest.fn(),
+            click: jest.fn(() => {
+                phase = 'label';
+            }),
             getAttribute: jest.fn((attr) => (attr === 'aria-label' ? '整理来源' : null)),
             matches: jest.fn(() => false),
             closest: jest.fn(() => null),
             querySelectorAll: jest.fn(() => [labelIcon])
         };
         const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        labelGroup.parentElement = panel;
+        labelGroup.parentNode = panel;
         panel.querySelectorAll = jest.fn((selector) => {
-            if (selector.includes('button') || selector.includes('[role="button"]')) return [labelButton];
+            const value = String(selector);
+            if (value.includes('button') || value.includes('[role="button"]')) return [labelButton];
+            if (phase === 'label' && (value.includes('source-label') || value.includes('label-group'))) return [labelGroup];
             return [];
         });
         global.document.querySelector = jest.fn((selector) => (
@@ -190,6 +234,22 @@ describe('manager launcher messaging', () => {
 
     it('clicks the hidden native label-view entry point before showing plugin label mode', () => {
         const sendResponse = jest.fn();
+        let phase = 'list';
+        const labelGroup = {
+            textContent: 'AI Group',
+            parentElement: null,
+            parentNode: null,
+            style: {},
+            __computedStyle: {},
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return 'AI Group label';
+                if (attr === 'data-testid') return 'source-label-group';
+                return null;
+            }),
+            matches: jest.fn((selector) => selector.includes('source-label') || selector.includes('label-group')),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
         const labelButton = {
             textContent: 'label_auto 标签视图',
             disabled: false,
@@ -199,15 +259,21 @@ describe('manager launcher messaging', () => {
             __computedStyle: {
                 visibility: 'hidden'
             },
-            click: jest.fn(),
+            click: jest.fn(() => {
+                phase = 'label';
+            }),
             getAttribute: jest.fn((attr) => (attr === 'aria-label' ? '按主题自动为来源加标签' : null)),
             matches: jest.fn(() => false),
             closest: jest.fn(() => null),
             querySelectorAll: jest.fn(() => [])
         };
         const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        labelGroup.parentElement = panel;
+        labelGroup.parentNode = panel;
         panel.querySelectorAll = jest.fn((selector) => {
-            if (selector.includes('button') || selector.includes('[role="button"]')) return [labelButton];
+            const value = String(selector);
+            if (value.includes('button') || value.includes('[role="button"]')) return [labelButton];
+            if (phase === 'label' && (value.includes('source-label') || value.includes('label-group'))) return [labelGroup];
             return [];
         });
         global.document.querySelector = jest.fn((selector) => (
@@ -245,6 +311,202 @@ describe('manager launcher messaging', () => {
             sourceViewDisplayKind: 'list'
         }));
         expect(global.document.documentElement.classList.remove).not.toHaveBeenCalledWith('sources-plus-manager-active');
+    });
+
+    it('falls back to plugin list display when the native label DOM does not expose a reliable list switch', async () => {
+        const sendResponse = jest.fn();
+        global.setTimeout = jest.fn((callback) => {
+            callback();
+            return 1;
+        });
+        const labelGroup = {
+            textContent: 'AI Group',
+            parentElement: null,
+            parentNode: null,
+            style: {},
+            __computedStyle: {},
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return 'AI Group label';
+                if (attr === 'data-testid') return 'source-label-group';
+                return null;
+            }),
+            matches: jest.fn((selector) => selector.includes('source-label') || selector.includes('label-group')),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const listButton = {
+            textContent: 'List view',
+            disabled: false,
+            style: {},
+            click: jest.fn(),
+            getAttribute: jest.fn((attr) => (attr === 'aria-label' ? 'List view' : null)),
+            matches: jest.fn(() => false),
+            closest: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        labelGroup.parentElement = panel;
+        labelGroup.parentNode = panel;
+        panel.querySelectorAll = jest.fn((selector) => {
+            const value = String(selector);
+            if (value.includes('button') || value.includes('[role="button"]')) return [listButton];
+            if (value.includes('source-label') || value.includes('label-group')) return [labelGroup];
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        mod.handleManagerMessage({ type: 'SWITCH_SOURCE_VIEW', viewKind: 'list' }, {}, sendResponse);
+        await Promise.resolve();
+
+        expect(listButton.click).toHaveBeenCalledTimes(1);
+        expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: true,
+            viewKind: 'list',
+            nativeClicked: true,
+            nativeSwitchReason: 'native_view_switch_not_confirmed',
+            detectedSourceViewKind: 'label',
+            confirmedSourceViewKind: 'list',
+            sourceViewDisplayKind: 'list',
+            displayOverride: true
+        }));
+        expect(global.document.documentElement.classList.add).toHaveBeenCalledWith('sources-plus-manager-active');
+    });
+
+    it('uses plugin list display when NotebookLM label view has no list-view button', () => {
+        const sendResponse = jest.fn();
+        const labelGroup = {
+            textContent: 'AI Group',
+            parentElement: null,
+            parentNode: null,
+            style: {},
+            __computedStyle: {},
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return 'AI Group label';
+                if (attr === 'data-testid') return 'source-label-group';
+                return null;
+            }),
+            matches: jest.fn((selector) => selector.includes('source-label') || selector.includes('label-group')),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const labelActionButton = {
+            textContent: '撤销或重新为来源加标签',
+            disabled: false,
+            style: {},
+            getAttribute: jest.fn((attr) => (attr === 'aria-label' ? '撤销或重新为来源加标签' : null)),
+            matches: jest.fn(() => false),
+            closest: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        labelGroup.parentElement = panel;
+        labelGroup.parentNode = panel;
+        panel.querySelectorAll = jest.fn((selector) => {
+            const value = String(selector);
+            if (value.includes('button') || value.includes('[role="button"]')) return [labelActionButton];
+            if (value.includes('source-label') || value.includes('label-group')) return [labelGroup];
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        mod.handleManagerMessage({ type: 'SWITCH_SOURCE_VIEW', viewKind: 'list' }, {}, sendResponse);
+
+        expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: true,
+            viewKind: 'list',
+            nativeClicked: false,
+            nativeSwitchReason: 'source_view_switch_control_missing',
+            detectedSourceViewKind: 'label',
+            confirmedSourceViewKind: 'list',
+            sourceViewDisplayKind: 'list',
+            displayOverride: true
+        }));
+        expect(global.document.documentElement.classList.add).toHaveBeenCalledWith('sources-plus-manager-active');
+    });
+
+    it('waits for NotebookLM async DOM changes before confirming a popup list-view switch', async () => {
+        const sendResponse = jest.fn();
+        const timers = [];
+        global.setTimeout = jest.fn((callback) => {
+            timers.push(callback);
+            return timers.length;
+        });
+
+        let phase = 'label';
+        const listSource = createMockSourceRow({
+            title: 'Async List Source',
+            stableToken: 'async-list-doc',
+            checked: true
+        });
+        const labelGroup = {
+            textContent: 'AI Group',
+            parentElement: null,
+            parentNode: null,
+            style: {},
+            __computedStyle: {},
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return 'AI Group label';
+                if (attr === 'data-testid') return 'source-label-group';
+                return null;
+            }),
+            matches: jest.fn((selector) => selector.includes('source-label') || selector.includes('label-group')),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const listButton = {
+            textContent: 'List view',
+            disabled: false,
+            style: {},
+            click: jest.fn(() => {
+                global.setTimeout(() => {
+                    phase = 'list';
+                }, 25);
+            }),
+            getAttribute: jest.fn((attr) => (attr === 'aria-label' ? 'List view' : null)),
+            matches: jest.fn(() => false),
+            closest: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        labelGroup.parentElement = panel;
+        labelGroup.parentNode = panel;
+        panel.querySelectorAll = jest.fn((selector) => {
+            const value = String(selector);
+            if (value.includes('button') || value.includes('[role="button"]')) return [listButton];
+            if (value.includes('source-label') || value.includes('label-group')) {
+                return phase === 'label' ? [labelGroup] : [];
+            }
+            if (mod.DEPS.row.includes(selector) || value.includes('source')) {
+                return phase === 'list' ? [listSource.row] : [];
+            }
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        const result = mod.handleManagerMessage({ type: 'SWITCH_SOURCE_VIEW', viewKind: 'list' }, {}, sendResponse);
+
+        expect(result).toBe(true);
+        expect(sendResponse).not.toHaveBeenCalled();
+
+        for (let i = 0; i < 10 && !sendResponse.mock.calls.length; i++) {
+            const nextTimer = timers.shift();
+            if (nextTimer) nextTimer();
+            await Promise.resolve();
+        }
+
+        expect(listButton.click).toHaveBeenCalledTimes(1);
+        expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: true,
+            viewKind: 'list',
+            sourceViewDisplayKind: 'list',
+            confirmedSourceViewKind: 'list'
+        }));
     });
 
     it('keeps the popup ready when the manager host is inside the current panel but the stored panel reference is stale', () => {
@@ -347,7 +609,7 @@ describe('manager launcher messaging', () => {
         });
     });
 
-    it('forces plugin list mode from the popup even when NotebookLM is still exposing label-view controls', () => {
+    it('uses plugin list display when NotebookLM is still exposing label-view controls', () => {
         const sendResponse = jest.fn();
         const stale = createMockSourceRow({ title: 'Stale Source', stableToken: 'stale-doc', checked: true });
         const relabelControl = {
@@ -375,9 +637,409 @@ describe('manager launcher messaging', () => {
             success: true,
             viewKind: 'list',
             nativeClicked: false,
-            nativeSwitchReason: 'source_view_switch_control_missing'
+            nativeSwitchReason: 'source_view_switch_control_missing',
+            detectedSourceViewKind: 'label',
+            confirmedSourceViewKind: 'list',
+            sourceViewDisplayKind: 'list',
+            displayOverride: true
         }));
         expect(global.document.documentElement.classList.add).toHaveBeenCalledWith('sources-plus-manager-active');
+    });
+
+    it('syncs plugin source checkbox changes while list display is covering native label DOM', () => {
+        const sendResponse = jest.fn();
+        const nativeSource = createMockSourceRow({ title: 'Hidden Label Source', stableToken: 'hidden-label-doc', checked: true });
+        nativeSource.row.__nativeLabelTitle = 'AI Group';
+        const labelGroup = {
+            textContent: 'AI Group',
+            parentElement: null,
+            parentNode: null,
+            style: {},
+            __computedStyle: {},
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return 'AI Group label';
+                if (attr === 'data-testid') return 'source-label-group';
+                return null;
+            }),
+            matches: jest.fn((selector) => selector.includes('source-label') || selector.includes('label-group')),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        nativeSource.row.parentElement = labelGroup;
+        nativeSource.row.parentNode = labelGroup;
+        const relabelControl = {
+            textContent: 'label_auto',
+            disabled: false,
+            style: {},
+            getAttribute: jest.fn((attr) => (attr === 'aria-label' ? '撤销或重新为来源加标签' : null)),
+            matches: jest.fn(() => false),
+            closest: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        labelGroup.parentElement = panel;
+        labelGroup.parentNode = panel;
+        panel.querySelectorAll = jest.fn((selector) => {
+            const value = String(selector);
+            if (value.includes('button') || value.includes('[role="button"]')) return [relabelControl];
+            if (value.includes('source-label') || value.includes('label-group')) return [labelGroup];
+            if (
+                mod.DEPS.row.includes(selector) ||
+                value.includes('source-row') ||
+                value.includes('source-item') ||
+                value.includes('data-source-id')
+            ) {
+                return [nativeSource.row];
+            }
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+        global.document.body.contains = jest.fn(() => true);
+
+        mod.scanAndSyncSources({}, true);
+        const [sourceKey] = Array.from(mod.sourcesByKey.keys());
+        expect(sourceKey).toBeTruthy();
+
+        mod.handleManagerMessage({ type: 'SWITCH_SOURCE_VIEW', viewKind: 'list' }, {}, sendResponse);
+
+        expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: true,
+            viewKind: 'list',
+            detectedSourceViewKind: 'label',
+            sourceViewDisplayKind: 'list',
+            displayOverride: true
+        }));
+
+        const source = mod.sourcesByKey.get(sourceKey);
+        source.enabled = false;
+        expect(mod.syncSourceToPage(source, false)).toBe(true);
+
+        expect(nativeSource.checkbox.click).toHaveBeenCalledTimes(1);
+        expect(mod.getDiagnosticsInfo().lastNativeSelectionSyncFailure).toBe(null);
+    });
+
+    it('captures collapsed label group selection before switching the native view back to list', () => {
+        const sendResponse = jest.fn();
+        let phase = 'initial-label';
+        const initialFirst = createMockSourceRow({ title: 'First Paper', stableToken: 'doc-1', checked: true });
+        const initialSecond = createMockSourceRow({ title: 'Second Paper', stableToken: 'doc-2', checked: true });
+        initialFirst.row.__nativeLabelTitle = 'AI Group';
+        initialSecond.row.__nativeLabelTitle = 'AI Group';
+        const expandedLabelGroup = {
+            textContent: 'AI Group',
+            parentElement: null,
+            parentNode: null,
+            style: {},
+            __computedStyle: {},
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return 'AI Group label';
+                if (attr === 'data-testid') return 'source-label-group';
+                return null;
+            }),
+            matches: jest.fn((selector) => selector.includes('source-label') || selector.includes('label-group')),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        initialFirst.row.parentElement = expandedLabelGroup;
+        initialFirst.row.parentNode = expandedLabelGroup;
+        initialSecond.row.parentElement = expandedLabelGroup;
+        initialSecond.row.parentNode = expandedLabelGroup;
+
+        const groupCheckbox = {
+            checked: false,
+            parentElement: null,
+            parentNode: null,
+            style: {},
+            getAttribute: jest.fn(() => null),
+            matches: jest.fn(() => false)
+        };
+        const collapsedLabelGroup = {
+            textContent: 'AI Group',
+            parentElement: null,
+            parentNode: null,
+            style: {},
+            __computedStyle: {},
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return 'AI Group label';
+                if (attr === 'data-testid') return 'source-label-group';
+                return null;
+            }),
+            matches: jest.fn((selector) => selector.includes('source-label') || selector.includes('label-group')),
+            querySelector: jest.fn((selector) => (String(selector).includes('checkbox') ? groupCheckbox : null)),
+            querySelectorAll: jest.fn((selector) => (String(selector).includes('checkbox') ? [groupCheckbox] : []))
+        };
+        groupCheckbox.parentElement = collapsedLabelGroup;
+        groupCheckbox.parentNode = collapsedLabelGroup;
+
+        const listFirst = createMockSourceRow({ title: 'First Paper', stableToken: 'doc-1', checked: true });
+        const listSecond = createMockSourceRow({ title: 'Second Paper', stableToken: 'doc-2', checked: true });
+        const listButton = {
+            textContent: 'List view',
+            disabled: false,
+            style: {},
+            click: jest.fn(() => {
+                phase = 'list';
+            }),
+            getAttribute: jest.fn((attr) => (attr === 'aria-label' ? 'List view' : null)),
+            matches: jest.fn(() => false),
+            closest: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        expandedLabelGroup.parentElement = panel;
+        expandedLabelGroup.parentNode = panel;
+        collapsedLabelGroup.parentElement = panel;
+        collapsedLabelGroup.parentNode = panel;
+        panel.querySelectorAll = jest.fn((selector) => {
+            const value = String(selector);
+            if (value.includes('button') || value.includes('[role="button"]')) {
+                return phase === 'collapsed-label' ? [listButton] : [];
+            }
+            if (value.includes('source-label') || value.includes('label-group')) {
+                if (phase === 'initial-label') return [expandedLabelGroup];
+                if (phase === 'collapsed-label') return [collapsedLabelGroup];
+                return [];
+            }
+            if (
+                mod.DEPS.row.includes(selector) ||
+                value.includes('source-row') ||
+                value.includes('source-item') ||
+                value.includes('data-source-id')
+            ) {
+                if (phase === 'initial-label') return [initialFirst.row, initialSecond.row];
+                if (phase === 'list') return [listFirst.row, listSecond.row];
+            }
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        mod.scanAndSyncSources({}, true);
+        const sourceKeys = Array.from(mod.sourcesByKey.keys());
+        expect(sourceKeys).toHaveLength(2);
+        mod.groupsById.set('ai-group', {
+            id: 'ai-group',
+            title: 'AI Group',
+            children: sourceKeys.map((key) => ({ type: 'source', key })),
+            enabled: true,
+            collapsed: false
+        });
+        mod.state.groups = ['ai-group'];
+        mod.state.ungrouped = [];
+        phase = 'collapsed-label';
+
+        mod.handleManagerMessage({ type: 'SWITCH_SOURCE_VIEW', viewKind: 'list' }, {}, sendResponse);
+
+        expect(listButton.click).toHaveBeenCalledTimes(1);
+        expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: true,
+            viewKind: 'list'
+        }));
+        sourceKeys.forEach((sourceKey) => {
+            expect(mod.sourcesByKey.get(sourceKey).enabled).toBe(false);
+        });
+        expect(listFirst.checkbox.click).toHaveBeenCalledTimes(1);
+    });
+
+    it('observes native checkbox state attributes inside the source panel', () => {
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const initHarness = createInitShadowRoot();
+        let firstDiv = true;
+
+        mod._setProjectId('test-project');
+        mod._setManagerRuntimeForTest({ extensionHost: null, shadowRoot: null });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+        global.document.createElement = jest.fn((tag) => {
+            if (tag === 'div' && firstDiv) {
+                firstDiv = false;
+                return {
+                    id: '',
+                    attachShadow: jest.fn(() => initHarness.shadowRoot),
+                    remove: jest.fn(),
+                    isConnected: true
+                };
+            }
+
+            return {
+                appendChild: jest.fn(),
+                replaceChildren: jest.fn(),
+                cloneNode: jest.fn(function cloneNode() { return this; }),
+                setAttribute: jest.fn(),
+                getAttribute: jest.fn(() => null),
+                addEventListener: jest.fn(),
+                remove: jest.fn(),
+                classList: { add: jest.fn(), remove: jest.fn(), toggle: jest.fn() },
+                dataset: {},
+                matches: jest.fn(() => false),
+                closest: jest.fn(() => null),
+                querySelector: jest.fn(() => null),
+                querySelectorAll: jest.fn(() => []),
+                textContent: '',
+                style: {}
+            };
+        });
+
+        mod.syncManagerWithPanelLifecycle();
+
+        const sourceObserver = global.__mutationObserverInstances.find((observer) => (
+            observer.observe.mock.calls.some(([target]) => target === panel || target === mod._getObservedNativeScrollAreaForTest())
+        ));
+        const observeOptions = sourceObserver?.observe.mock.calls.find(([target]) => (
+            target === panel || target === mod._getObservedNativeScrollAreaForTest()
+        ))?.[1];
+
+        expect(observeOptions?.attributeFilter).toEqual(expect.arrayContaining(['aria-checked', 'checked']));
+    });
+
+    it('syncs collapsed native label group checkbox changes from native change events', async () => {
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const first = createMockSourceRow({ title: 'First Paper', stableToken: 'doc-1', checked: true });
+        const second = createMockSourceRow({ title: 'Second Paper', stableToken: 'doc-2', checked: true });
+        first.row.__nativeLabelTitle = 'AI Group';
+        second.row.__nativeLabelTitle = 'AI Group';
+        const expandedLabelGroup = {
+            textContent: 'AI Group',
+            parentElement: panel,
+            parentNode: panel,
+            style: {},
+            __computedStyle: {},
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return 'AI Group label';
+                if (attr === 'data-testid') return 'source-label-group';
+                return null;
+            }),
+            matches: jest.fn((selector) => selector.includes('source-label') || selector.includes('label-group')),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        first.row.parentElement = expandedLabelGroup;
+        first.row.parentNode = expandedLabelGroup;
+        second.row.parentElement = expandedLabelGroup;
+        second.row.parentNode = expandedLabelGroup;
+
+        mod._setProjectId('test-project');
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+        panel.querySelectorAll = jest.fn((selector) => {
+            const value = String(selector);
+            if (value.includes('source-label') || value.includes('label-group')) return [expandedLabelGroup];
+            if (
+                mod.DEPS.row.includes(selector) ||
+                value.includes('source-row') ||
+                value.includes('source-item') ||
+                value.includes('data-source-id')
+            ) {
+                return [first.row, second.row];
+            }
+            return [];
+        });
+
+        mod.scanAndSyncSources({}, true);
+        const sourceKeys = Array.from(mod.sourcesByKey.keys());
+        mod.groupsById.set('ai-group', {
+            id: 'ai-group',
+            title: 'AI Group',
+            children: sourceKeys.map((key) => ({ type: 'source', key })),
+            enabled: true,
+            collapsed: false
+        });
+        mod.state.groups = ['ai-group'];
+        mod.state.ungrouped = [];
+        global.chrome.runtime.sendMessage.mockClear();
+
+        const groupCheckbox = {
+            tagName: 'INPUT',
+            type: 'checkbox',
+            checked: false,
+            parentElement: null,
+            parentNode: null,
+            style: {},
+            getAttribute: jest.fn((attr) => (attr === 'type' ? 'checkbox' : null)),
+            matches: jest.fn((selector) => String(selector).includes('checkbox')),
+            closest: jest.fn(() => null)
+        };
+        const collapsedLabelGroup = {
+            textContent: 'AI Group',
+            parentElement: panel,
+            parentNode: panel,
+            style: {},
+            __computedStyle: {},
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return 'AI Group label';
+                if (attr === 'data-testid') return 'source-label-group';
+                return null;
+            }),
+            matches: jest.fn((selector) => selector.includes('source-label') || selector.includes('label-group')),
+            querySelector: jest.fn((selector) => (String(selector).includes('checkbox') ? groupCheckbox : null)),
+            querySelectorAll: jest.fn((selector) => (String(selector).includes('checkbox') ? [groupCheckbox] : []))
+        };
+        groupCheckbox.parentElement = collapsedLabelGroup;
+        groupCheckbox.parentNode = collapsedLabelGroup;
+        panel.querySelectorAll = jest.fn((selector) => {
+            const value = String(selector);
+            if (value.includes('source-label') || value.includes('label-group')) return [collapsedLabelGroup];
+            return [];
+        });
+
+        mod._handleNativeCheckboxChangeForTest({ target: groupCheckbox });
+        await mod.waitForPendingStateSave();
+
+        sourceKeys.forEach((sourceKey) => {
+            expect(mod.sourcesByKey.get(sourceKey).enabled).toBe(false);
+        });
+        expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(
+            expect.objectContaining({
+                type: 'SAVE_STATE',
+                key: 'sourcesPlusState_test-project'
+            }),
+            expect.any(Function)
+        );
+    });
+
+    it('does not run label-group sync for list-view native checkbox changes', async () => {
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const source = createMockSourceRow({ title: 'List Source', stableToken: 'doc-1', checked: true });
+        source.row.nodeType = 1;
+        source.row.matches = jest.fn((selector) => mod.DEPS.row.includes(selector));
+        source.row.closest = jest.fn(() => null);
+        panel.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [source.row] : []
+        ));
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        mod._setProjectId('test-project');
+        mod.scanAndSyncSources({}, true);
+        global.chrome.runtime.sendMessage.mockClear();
+
+        const nativeCheckbox = {
+            tagName: 'INPUT',
+            type: 'checkbox',
+            checked: false,
+            parentElement: panel,
+            parentNode: panel,
+            getAttribute: jest.fn((attr) => (attr === 'type' ? 'checkbox' : null)),
+            matches: jest.fn((selector) => String(selector).includes('checkbox')),
+            closest: jest.fn(() => null)
+        };
+
+        mod._handleNativeCheckboxChangeForTest({ target: nativeCheckbox });
+        await mod.waitForPendingStateSave();
+
+        expect(global.chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+            expect.objectContaining({
+                type: 'SAVE_STATE',
+                key: 'sourcesPlusState_test-project'
+            }),
+            expect.any(Function)
+        );
     });
 
     it('cleans up the previous content instance when the script is injected twice', () => {
@@ -636,7 +1298,11 @@ describe('manager launcher messaging', () => {
         expect(header.insertAdjacentElement).toHaveBeenCalledTimes(1);
         expect(mod._getAttachedSourcePanelForTest()).toBe(panel);
         expect(global.chrome.storage.local.get).toHaveBeenCalledWith(
-            ['sourcesPlusState_test-project', 'sourcesPlusState_test-project__backup'],
+            [
+                'sourcesPlusState_test-project',
+                'sourcesPlusState_test-project__backup',
+                'sourcesPlusHistory_test-project'
+            ],
             expect.any(Function)
         );
         expect(global.window.location.reload).not.toHaveBeenCalled();
@@ -735,7 +1401,11 @@ describe('manager launcher messaging', () => {
         expect(mod._getAttachedSourcePanelForTest()).toBe(panel);
         expect(mod._getPendingInitialLoadedState()).toEqual(expectedLoadedState);
         expect(global.chrome.storage.local.get).toHaveBeenCalledWith(
-            ['sourcesPlusState_test-project', 'sourcesPlusState_test-project__backup'],
+            [
+                'sourcesPlusState_test-project',
+                'sourcesPlusState_test-project__backup',
+                'sourcesPlusHistory_test-project'
+            ],
             expect.any(Function)
         );
     });
@@ -1262,7 +1932,11 @@ describe('manager launcher messaging', () => {
         expect(header.insertAdjacentElement).toHaveBeenCalledTimes(1);
         expect(mod._getAttachedSourcePanelForTest()).toBe(panel);
         expect(global.chrome.storage.local.get).toHaveBeenCalledWith(
-            ['sourcesPlusState_fresh-project', 'sourcesPlusState_fresh-project__backup'],
+            [
+                'sourcesPlusState_fresh-project',
+                'sourcesPlusState_fresh-project__backup',
+                'sourcesPlusHistory_fresh-project'
+            ],
             expect.any(Function)
         );
         expect(global.window.location.reload).not.toHaveBeenCalled();

@@ -406,7 +406,12 @@
         if (elements.sourceViewLabel) elements.sourceViewLabel.textContent = getMessage('popup_source_view_label');
         if (elements.sourceViewListButton) elements.sourceViewListButton.textContent = getMessage('popup_source_view_list');
         if (elements.sourceViewLabelButton) elements.sourceViewLabelButton.textContent = getMessage('popup_source_view_label_view');
-        if (elements.sourceViewStatus) elements.sourceViewStatus.textContent = getMessage('popup_source_view_status_list');
+        if (elements.sourceViewStatus) {
+            const statusKind = normalizeSourceViewKind(state.sourceViewKind || SOURCE_VIEW_LIST);
+            elements.sourceViewStatus.textContent = statusKind === SOURCE_VIEW_LABEL
+                ? getMessage('popup_source_view_switched_label')
+                : getMessage('popup_source_view_status_list');
+        }
         setSourceViewButtonsDisabled(elements, !isVisible);
         setSourceViewSelection(elements, state.sourceViewKind || SOURCE_VIEW_LIST);
     }
@@ -529,14 +534,16 @@
                 if (result && result.success === false) {
                     elements.detail.hidden = false;
                     elements.detail.textContent = resolveErrorMessage(result);
+                    setSourceViewSelection(elements, result.sourceViewDisplayKind || result.detectedSourceViewKind || state.sourceViewKind || SOURCE_VIEW_LIST);
                     setSourceViewButtonsDisabled(elements, false);
                     elements.primaryButton.disabled = false;
                     return;
                 }
 
-                setSourceViewSelection(elements, viewKind);
+                const confirmedViewKind = result?.confirmedSourceViewKind || result?.sourceViewDisplayKind || viewKind;
+                setSourceViewSelection(elements, confirmedViewKind);
                 if (elements.sourceViewStatus) {
-                    elements.sourceViewStatus.textContent = getMessage(getSourceViewSwitchedMessageKey(viewKind));
+                    elements.sourceViewStatus.textContent = getMessage(getSourceViewSwitchedMessageKey(confirmedViewKind));
                 }
                 setSourceViewButtonsDisabled(elements, false);
                 elements.primaryButton.disabled = false;

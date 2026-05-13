@@ -404,6 +404,150 @@
             };
         }
 
+        function collectSnapshotGroupedSourceKeys(snapshot) {
+            const result = new Set();
+            const groupsById = snapshot?.groupsById && typeof snapshot.groupsById === 'object'
+                ? snapshot.groupsById
+                : {};
+            const rootGroupIds = Array.isArray(snapshot?.groups) ? snapshot.groups : [];
+            const visitedGroups = new Set();
+
+            const walkGroup = (groupId) => {
+                if (!groupId || visitedGroups.has(groupId)) return;
+                visitedGroups.add(groupId);
+                const group = groupsById[groupId];
+                (Array.isArray(group?.children) ? group.children : []).forEach((child) => {
+                    if (child?.type === 'source' && child.key) {
+                        result.add(child.key);
+                    } else if (child?.type === 'group' && child.id) {
+                        walkGroup(child.id);
+                    }
+                });
+            };
+
+            rootGroupIds.forEach(walkGroup);
+            return result;
+        }
+
+        function getSnapshotGroupInfo(snapshot) {
+            const groupsById = snapshot?.groupsById && typeof snapshot.groupsById === 'object'
+                ? snapshot.groupsById
+                : {};
+            const groupIds = new Set();
+            const titleCounts = new Map();
+
+            getMapLikeEntries(groupsById).forEach(([groupId, group]) => {
+                if (groupId) groupIds.add(groupId);
+                const title = String(group?.title || '').trim();
+                if (title) {
+                    titleCounts.set(title, (titleCounts.get(title) || 0) + 1);
+                }
+            });
+
+            return {
+                groupIds,
+                titleCounts,
+                groupedSourceKeys: collectSnapshotGroupedSourceKeys(snapshot)
+            };
+        }
+
+        function isCompatibleStructuralRepairCandidate(currentState, candidateState) {
+            if (!hasRestorableStateSnapshot(currentState) || !hasRestorableStateSnapshot(candidateState)) {
+                return false;
+            }
+
+            const currentInfo = getSnapshotGroupInfo(currentState);
+            const candidateInfo = getSnapshotGroupInfo(candidateState);
+            if (candidateInfo.groupedSourceKeys.size <= currentInfo.groupedSourceKeys.size) {
+                return false;
+            }
+            if (candidateInfo.groupIds.size === 0 || currentInfo.groupIds.size === 0) {
+                return false;
+            }
+
+            const missingGroupIds = Array.from(candidateInfo.groupIds)
+                .filter((groupId) => !currentInfo.groupIds.has(groupId));
+            if (missingGroupIds.length > 0) {
+                const currentTitles = new Map(currentInfo.titleCounts);
+                const hasSameTitles = Array.from(candidateInfo.titleCounts.entries()).every(([title, count]) => (
+                    (currentTitles.get(title) || 0) >= count
+                ));
+                if (!hasSameTitles) return false;
+            }
+
+            const currentSourceKeys = new Set(getMapLikeEntries(currentState.sourceStateById || {}).map(([sourceKey]) => sourceKey));
+            const candidateSourceKeys = new Set(getMapLikeEntries(candidateState.sourceStateById || {}).map(([sourceKey]) => sourceKey));
+            return Array.from(candidateInfo.groupedSourceKeys).every((sourceKey) => (
+                currentSourceKeys.has(sourceKey) || candidateSourceKeys.has(sourceKey)
+            ));
+        }
+
+        function createStructurallyRepairedState(currentState, candidateState) {
+            const repairedState = cloneSerializableData(currentState || {});
+            const candidateGroups = Array.isArray(candidateState?.groups) ? candidateState.groups : [];
+            const candidateGroupsById = candidateState?.groupsById && typeof candidateState.groupsById === 'object'
+                ? candidateState.groupsById
+                : {};
+            const currentSourceState = currentState?.sourceStateById && typeof currentState.sourceStateById === 'object'
+                ? currentState.sourceStateById
+                : {};
+            const candidateSourceState = candidateState?.sourceStateById && typeof candidateState.sourceStateById === 'object'
+                ? candidateState.sourceStateById
+                : {};
+
+            repairedState.groups = cloneSerializableData(candidateGroups);
+            repairedState.groupsById = cloneSerializableData(candidateGroupsById);
+            repairedState.sourceStateById = Object.assign(
+                {},
+                cloneSerializableData(candidateSourceState),
+                cloneSerializableData(currentSourceState)
+            );
+
+            const groupedSourceKeys = collectSnapshotGroupedSourceKeys(repairedState);
+            const nextUngrouped = [];
+            const seenUngrouped = new Set();
+            const pushUngrouped = (sourceKey) => {
+                if (!sourceKey || groupedSourceKeys.has(sourceKey) || seenUngrouped.has(sourceKey)) return;
+                nextUngrouped.push(sourceKey);
+                seenUngrouped.add(sourceKey);
+            };
+
+            (Array.isArray(candidateState?.ungrouped) ? candidateState.ungrouped : []).forEach(pushUngrouped);
+            (Array.isArray(currentState?.ungrouped) ? currentState.ungrouped : []).forEach(pushUngrouped);
+            getMapLikeEntries(currentSourceState).forEach(([sourceKey]) => pushUngrouped(sourceKey));
+            repairedState.ungrouped = nextUngrouped;
+
+            if (currentState && typeof currentState === 'object') {
+                if (currentState.customHeight != null) repairedState.customHeight = currentState.customHeight;
+                if (currentState._saveRevision != null) repairedState._saveRevision = currentState._saveRevision;
+                if (currentState._savedAt != null) repairedState._savedAt = currentState._savedAt;
+            }
+
+            return repairedState;
+        }
+
+        function findStructuralRepairCandidate(currentState, backupState, historyEntries = []) {
+            if (!hasRestorableStateSnapshot(currentState)) return null;
+            const candidates = [];
+
+            if (backupState && backupState !== currentState) {
+                candidates.push(backupState);
+            }
+
+            normalizeStateHistoryEntries(historyEntries).forEach((entry) => {
+                if (entry.snapshot) candidates.push(entry.snapshot);
+            });
+
+            return candidates
+                .filter((candidate) => isCompatibleStructuralRepairCandidate(currentState, candidate))
+                .sort((left, right) => {
+                    const leftGroupedCount = collectSnapshotGroupedSourceKeys(left).size;
+                    const rightGroupedCount = collectSnapshotGroupedSourceKeys(right).size;
+                    if (rightGroupedCount !== leftGroupedCount) return rightGroupedCount - leftGroupedCount;
+                    return getSnapshotSaveRevision(right) - getSnapshotSaveRevision(left);
+                })[0] || null;
+        }
+
         function normalizeStateHistoryEntries(entries) {
             const list = Array.isArray(entries) ? entries : [];
             return list
@@ -538,41 +682,60 @@
                         entry
                     }, (response) => {
                         if (chromeApi.runtime.lastError || !response || response.success === false) {
-                            appendLocally().then(resolve);
+                            resolve(getStateHistoryEntries());
                             return;
                         }
                         resolve(setStateHistoryEntries(response.history || []));
                     });
                 } catch (error) {
-                    appendLocally().then(resolve);
+                    resolve(getStateHistoryEntries());
                 }
             });
         }
 
-        function pickPreferredStoredState(primaryState, backupState) {
+        function pickPreferredStoredState(primaryState, backupState, historyEntries = []) {
+            ctx.pendingStructuralStateRepair = null;
             const preferredPrimaryState = getComparableStoredState(primaryState, backupState);
+            let selectedState = null;
             if (preferredPrimaryState !== primaryState) {
                 rememberSnapshotSaveRevision(preferredPrimaryState);
-                return preferredPrimaryState;
-            }
-
-            if (hasRestorableStateSnapshot(primaryState)) {
+                selectedState = preferredPrimaryState;
+            } else if (hasRestorableStateSnapshot(primaryState)) {
                 rememberSnapshotSaveRevision(primaryState);
-                return primaryState;
-            }
-
-            if (hasRestorableStateSnapshot(backupState)) {
+                selectedState = primaryState;
+            } else if (hasRestorableStateSnapshot(backupState)) {
                 rememberSnapshotSaveRevision(backupState);
                 if (primaryState && typeof primaryState === 'object' && primaryState.customHeight != null) {
-                    return {
+                    selectedState = {
                         ...backupState,
                         customHeight: primaryState.customHeight
                     };
+                } else {
+                    selectedState = backupState;
                 }
-                return backupState;
+            } else {
+                selectedState = primaryState ?? null;
             }
 
-            return primaryState ?? null;
+            const repairCandidate = findStructuralRepairCandidate(selectedState, backupState, historyEntries);
+            if (repairCandidate) {
+                const repairedState = createStructurallyRepairedState(selectedState, repairCandidate);
+                const beforeCount = collectSnapshotGroupedSourceKeys(selectedState).size;
+                const afterCount = collectSnapshotGroupedSourceKeys(repairedState).size;
+                ctx.pendingStructuralStateRepair = {
+                    repairedAt: new Date().toISOString(),
+                    beforeGroupedSourceCount: beforeCount,
+                    afterGroupedSourceCount: afterCount,
+                    candidateRevision: getSnapshotSaveRevision(repairCandidate),
+                    currentRevision: getSnapshotSaveRevision(selectedState),
+                    reason: 'empty_group_children_repaired'
+                };
+                ctx.lastStructuralStateRepair = cloneSerializableData(ctx.pendingStructuralStateRepair);
+                rememberSnapshotSaveRevision(repairedState);
+                return repairedState;
+            }
+
+            return selectedState;
         }
 
         function writeStateToLocalStorage(key, data) {
@@ -724,6 +887,15 @@
                         ok: false,
                         reason: 'storage_quota_exceeded',
                         localResult: { skipped: true, reason: 'storage_quota_exceeded' },
+                        runtimeResult
+                    };
+                }
+                if (runtimeResult.reason !== 'runtime_unavailable') {
+                    const reason = runtimeResult.reason || 'save_failed';
+                    return {
+                        ok: false,
+                        reason,
+                        localResult: { skipped: true, reason },
                         runtimeResult
                     };
                 }
@@ -1070,7 +1242,7 @@
             rememberSnapshotSaveRevision(stateData);
 
             if (stateData.schemaVersion === storageSchemaVersion) {
-                ctx.pendingStorageUpgrade = false;
+                ctx.pendingStorageUpgrade = Boolean(ctx.pendingStructuralStateRepair);
                 return {
                     schemaVersion: storageSchemaVersion,
                     groups: Array.isArray(stateData.groups) ? stateData.groups : [],
@@ -1133,6 +1305,11 @@
             const panelState = getSourcePanelState(sourcePanel);
             if (panelState.state === 'missing' || panelState.state === 'collapsed') {
                 return true;
+            }
+
+            if (panelState.state === 'loading') {
+                const sourceViewKind = ctx.sourceViewInfo?.kind || ctx.sourceViewKind || '';
+                return sourceViewKind === 'label' && hasPersistableManagerState(buildPersistableState());
             }
 
             return panelState.state === 'ready';
@@ -1494,7 +1671,8 @@
             if (chromeApi?.storage?.local?.get) {
                 try {
                     const backupKey = getStateBackupKey(key);
-                    chromeApi.storage.local.get([key, backupKey], (data) => {
+                    const historyKey = getStateHistoryKey(expectedProjectId);
+                    chromeApi.storage.local.get([key, backupKey, historyKey], (data) => {
                         if (!isLiveManagerLoadRequest(expectedProjectId, expectedInstanceToken, requestId)) {
                             return;
                         }
@@ -1507,7 +1685,8 @@
 
                         const primaryState = data && typeof data === 'object' ? data[key] : null;
                         const backupState = data && typeof data === 'object' ? data[backupKey] : null;
-                        finalizeLoadedState(pickPreferredStoredState(primaryState, backupState));
+                        const historyEntries = data && typeof data === 'object' ? data[historyKey] : [];
+                        finalizeLoadedState(pickPreferredStoredState(primaryState, backupState, historyEntries));
                     });
                     return;
                 } catch (error) {

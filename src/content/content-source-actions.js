@@ -36,6 +36,9 @@
         const resolveFreshRowEntry = typeof deps.resolveFreshRowEntry === 'function'
             ? deps.resolveFreshRowEntry
             : () => null;
+        const extractSourceIdentitySnapshot = typeof deps.extractSourceIdentitySnapshot === 'function'
+            ? deps.extractSourceIdentitySnapshot
+            : () => null;
         const getSourceElements = typeof deps.getSourceElements === 'function'
             ? deps.getSourceElements
             : null;
@@ -121,8 +124,11 @@
             delete_menu_missing: 'ui_native_action_menu_item_missing',
             confirm_dialog_missing: 'ui_native_action_confirm_dialog_missing',
             confirm_dialog_unmatched: 'ui_native_action_confirm_dialog_missing',
+            confirm_dialog_ambiguous: 'ui_native_action_confirm_dialog_missing',
+            confirm_dialog_mismatched_source: 'ui_native_action_confirm_dialog_missing',
             confirm_button_missing: 'ui_native_action_confirm_button_missing',
             delete_not_confirmed: 'ui_native_action_failed',
+            source_row_mismatch: 'ui_native_action_source_unavailable',
             native_action_error: 'ui_native_action_failed',
             native_delete_error: 'ui_native_action_failed'
         };
@@ -754,25 +760,178 @@
             return false;
         }
 
-        async function waitForNativeDeleteConfirmTarget(existingDialogs = new Set(), maxAttempts = 10, delayMs = 100) {
+        function normalizeNativeSourceText(value) {
+            return String(value || '')
+                .trim()
+                .replace(/\s+/g, ' ')
+                .toLowerCase();
+        }
+
+        function getSourceComparableTitle(source) {
+            return normalizeNativeSourceText(source?.normalizedTitle || source?.title || source?.ariaLabel || '');
+        }
+
+        function hasComparableSourceIdentity(source) {
+            return Boolean(source && (
+                source.stableToken ||
+                source.fingerprint ||
+                getSourceComparableTitle(source)
+            ));
+        }
+
+        function getNativeRowIdentity(row) {
+            if (!row) return null;
+            try {
+                return extractSourceIdentitySnapshot(row);
+            } catch (error) {
+                return null;
+            }
+        }
+
+        function doesNativeRowMatchSource(source, row, identity = null) {
+            if (!source || !row) return false;
+            if (!hasComparableSourceIdentity(source)) return true;
+
+            const rowIdentity = identity || getNativeRowIdentity(row);
+            if (!rowIdentity) return false;
+
+            if (source.stableToken && rowIdentity.stableToken === source.stableToken) {
+                return true;
+            }
+            if (source.fingerprint && rowIdentity.fingerprint === source.fingerprint) {
+                return true;
+            }
+            if (source.stableToken || source.fingerprint) {
+                return false;
+            }
+
+            const sourceTitle = getSourceComparableTitle(source);
+            return Boolean(sourceTitle && rowIdentity.normalizedTitle === sourceTitle);
+        }
+
+        function resolveValidatedNativeSourceRow(sourceKey) {
+            const source = getSourcesByKey().get(sourceKey);
+            if (!source) return { row: null, reason: 'source_missing' };
+
+            const freshEntry = resolveFreshRowEntry(sourceKey);
+            if (freshEntry?.row && doesNativeRowMatchSource(source, freshEntry.row, freshEntry.identity)) {
+                return { row: freshEntry.row, identity: freshEntry.identity || null };
+            }
+
+            const doc = getDocument();
+            if (source.element && doc?.body?.contains?.(source.element)) {
+                const identity = getNativeRowIdentity(source.element);
+                if (doesNativeRowMatchSource(source, source.element, identity)) {
+                    return { row: source.element, identity };
+                }
+                return { row: null, reason: 'source_row_mismatch' };
+            }
+
+            if (hasComparableSourceIdentity(source) && queryNativeSourceRows().length > 0) {
+                return { row: null, reason: 'source_row_mismatch' };
+            }
+
+            return { row: null, reason: 'source_row_missing' };
+        }
+
+        function getDialogSourceTitleMatchState(dialog, source) {
+            const targetTitle = getSourceComparableTitle(source);
+            if (!targetTitle) return 'unknown';
+
+            const metadata = getNativeDialogMetadata(dialog);
+            const dialogText = normalizeNativeSourceText([
+                metadata.ariaLabel,
+                metadata.title,
+                metadata.textContent,
+                metadata.buttonText
+            ].filter(Boolean).join(' '));
+
+            if (dialogText.includes(targetTitle)) {
+                return 'match';
+            }
+
+            for (const otherSource of getSourcesByKey().values()) {
+                if (!otherSource || otherSource.key === source?.key) continue;
+                const otherTitle = getSourceComparableTitle(otherSource);
+                if (otherTitle && otherTitle.length >= 3 && dialogText.includes(otherTitle)) {
+                    return 'mismatch';
+                }
+            }
+
+            return 'unknown';
+        }
+
+        function filterNativeDeleteConfirmDialogsForSource(dialogs, source) {
+            const confirmDialogs = findNativeDeleteConfirmDialogs(dialogs);
+            const matchingDialogs = [];
+            const unknownDialogs = [];
+            const mismatchedDialogs = [];
+
+            confirmDialogs.forEach((dialog) => {
+                const matchState = getDialogSourceTitleMatchState(dialog, source);
+                if (matchState === 'match') {
+                    matchingDialogs.push(dialog);
+                } else if (matchState === 'mismatch') {
+                    mismatchedDialogs.push(dialog);
+                } else {
+                    unknownDialogs.push(dialog);
+                }
+            });
+
+            if (matchingDialogs.length === 1) {
+                return { dialogs: matchingDialogs, reason: '' };
+            }
+            if (matchingDialogs.length > 1) {
+                return { dialogs: [], reason: 'confirm_dialog_ambiguous' };
+            }
+            if (mismatchedDialogs.length > 0 && unknownDialogs.length === 0) {
+                return { dialogs: [], reason: 'confirm_dialog_mismatched_source' };
+            }
+            if (unknownDialogs.length > 1 || mismatchedDialogs.length > 1) {
+                return { dialogs: [], reason: 'confirm_dialog_ambiguous' };
+            }
+            if (unknownDialogs.length === 1 && mismatchedDialogs.length === 0) {
+                return { dialogs: unknownDialogs, reason: '' };
+            }
+            if (mismatchedDialogs.length === 1) {
+                return { dialogs: [], reason: 'confirm_dialog_mismatched_source' };
+            }
+
+            return { dialogs: [], reason: '' };
+        }
+
+        async function waitForNativeDeleteConfirmTarget(existingDialogs = new Set(), source = null, maxAttempts = 10, delayMs = 100) {
             const existingDialogSet = existingDialogs instanceof Set
                 ? existingDialogs
                 : new Set(Array.from(existingDialogs || []));
             let visibleDialogs = [];
             let candidateDialogs = [];
             let confirmDialogs = [];
+            let reason = '';
 
             for (let attempt = 0; attempt < maxAttempts; attempt++) {
                 visibleDialogs = queryNativeDialogs();
                 candidateDialogs = visibleDialogs.filter((dialog) => !existingDialogSet.has(dialog));
-                confirmDialogs = findNativeDeleteConfirmDialogs(candidateDialogs);
+                const filterResult = filterNativeDeleteConfirmDialogsForSource(candidateDialogs, source);
+                confirmDialogs = filterResult.dialogs;
+                reason = filterResult.reason;
+                if (reason) {
+                    return {
+                        visibleDialogs,
+                        candidateDialogs,
+                        confirmDialogs,
+                        confirmButton: null,
+                        reason
+                    };
+                }
                 const confirmButton = findNativeDeleteConfirmButton(confirmDialogs);
                 if (confirmButton) {
                     return {
                         visibleDialogs,
                         candidateDialogs,
                         confirmDialogs,
-                        confirmButton
+                        confirmButton,
+                        reason: ''
                     };
                 }
                 if (attempt < maxAttempts - 1) {
@@ -784,7 +943,8 @@
                 visibleDialogs,
                 candidateDialogs,
                 confirmDialogs,
-                confirmButton: null
+                confirmButton: null,
+                reason
             };
         }
 
@@ -1191,7 +1351,11 @@
                 return createNativeActionResult(false, 'source_unavailable');
             }
 
-            const nativeMoreBtn = findNativeSourceMenuButton(sourceKey);
+            const rowResult = resolveValidatedNativeSourceRow(sourceKey);
+            if (!rowResult.row) {
+                return createNativeActionResult(false, rowResult.reason || 'source_row_missing');
+            }
+            const nativeMoreBtn = findNativeMoreButtonInRow(rowResult.row);
             if (!nativeMoreBtn || typeof nativeMoreBtn.click !== 'function') {
                 return createNativeActionResult(false, 'menu_button_missing');
             }
@@ -1233,11 +1397,15 @@
                 return { deleted: false, reason: 'source_unavailable' };
             }
 
-            const nativeMoreBtn = findNativeSourceMenuButton(sourceKey);
+            const rowResult = resolveValidatedNativeSourceRow(sourceKey);
+            if (!rowResult.row) {
+                return { deleted: false, reason: rowResult.reason || 'source_row_missing' };
+            }
+            const nativeMoreBtn = findNativeMoreButtonInRow(rowResult.row);
             if (!nativeMoreBtn || typeof nativeMoreBtn.click !== 'function') {
                 return { deleted: false, reason: 'menu_button_missing' };
             }
-            const sourceRowBeforeDelete = resolveFreshSourceRow(sourceKey) || source.element || null;
+            const sourceRowBeforeDelete = rowResult.row;
             const sourceRowCountBeforeDelete = queryNativeSourceRows().length || (sourceRowBeforeDelete ? 1 : 0);
 
             const existingMenuFingerprints = new Set(
@@ -1256,10 +1424,14 @@
                 const existingDialogs = new Set(queryNativeDialogs());
                 deleteMenuItem.click();
 
-                const confirmTarget = await waitForNativeDeleteConfirmTarget(existingDialogs);
+                const confirmTarget = await waitForNativeDeleteConfirmTarget(existingDialogs, source);
                 if (confirmTarget.candidateDialogs.length === 0) {
                     closeNativeOverlay();
                     return { deleted: false, reason: 'confirm_dialog_missing' };
+                }
+                if (confirmTarget.reason) {
+                    closeNativeOverlay();
+                    return { deleted: false, reason: confirmTarget.reason };
                 }
 
                 const confirmDialogs = confirmTarget.confirmDialogs;
@@ -1295,50 +1467,50 @@
 
         function openNativeSourceDetails(sourceKey) {
             Promise.resolve(triggerNativeSourceDetailsDirectWithResult(sourceKey))
-	                .then((result) => {
-	                    if (result && result.ok) {
-	                        markSourceDetailViewRequested();
-	                    } else {
-	                        showNativeActionFailureToast('details', sourceKey, result?.reason || 'native_action_error', openNativeSourceDetails);
-	                    }
-	                })
-	                .catch((error) => {
-	                    console.error('NotebookLM Source Management: Source details open request failed.', error);
-	                    showNativeActionFailureToast('details', sourceKey, 'native_action_error', openNativeSourceDetails);
-	                });
+                .then((result) => {
+                    if (result && result.ok) {
+                        markSourceDetailViewRequested();
+                    } else {
+                        showNativeActionFailureToast('details', sourceKey, result?.reason || 'native_action_error', openNativeSourceDetails);
+                    }
+                })
+                .catch((error) => {
+                    console.error('NotebookLM Source Management: Source details open request failed.', error);
+                    showNativeActionFailureToast('details', sourceKey, 'native_action_error', openNativeSourceDetails);
+                });
 
             return true;
         }
 
         function renameNativeSourceFromAction(sourceKey) {
             Promise.resolve(triggerNativeSourceRenameWithResult(sourceKey))
-	                .then((result) => {
-	                    if (!result || !result.ok) {
-	                        showNativeActionFailureToast('rename', sourceKey, result?.reason || 'native_action_error', renameNativeSourceFromAction);
-	                    }
-	                })
-	                .catch((error) => {
-	                    console.error('NotebookLM Source Management: Source rename request failed.', error);
-	                    showNativeActionFailureToast('rename', sourceKey, 'native_action_error', renameNativeSourceFromAction);
-	                });
+                .then((result) => {
+                    if (!result || !result.ok) {
+                        showNativeActionFailureToast('rename', sourceKey, result?.reason || 'native_action_error', renameNativeSourceFromAction);
+                    }
+                })
+                .catch((error) => {
+                    console.error('NotebookLM Source Management: Source rename request failed.', error);
+                    showNativeActionFailureToast('rename', sourceKey, 'native_action_error', renameNativeSourceFromAction);
+                });
 
             return true;
         }
 
         function deleteNativeSourceFromAction(sourceKey) {
             Promise.resolve(deleteNativeSource(sourceKey))
-	                .then((result) => {
-	                    if (result && result.deleted) {
-	                        showToast(getMessage('ui_deleted_toast', ['1']), { variant: 'success' });
-	                        render();
-	                        return;
-	                    }
-	                    showNativeActionFailureToast('delete', sourceKey, result?.reason || 'native_delete_error', deleteNativeSourceFromAction);
-	                })
-	                .catch((error) => {
-	                    console.error('NotebookLM Source Management: Source delete request failed.', error);
-	                    showNativeActionFailureToast('delete', sourceKey, 'native_delete_error', deleteNativeSourceFromAction);
-	                });
+                .then((result) => {
+                    if (result && result.deleted) {
+                        showToast(getMessage('ui_deleted_toast', ['1']), { variant: 'success' });
+                        render();
+                        return;
+                    }
+                    showNativeActionFailureToast('delete', sourceKey, result?.reason || 'native_delete_error', deleteNativeSourceFromAction);
+                })
+                .catch((error) => {
+                    console.error('NotebookLM Source Management: Source delete request failed.', error);
+                    showNativeActionFailureToast('delete', sourceKey, 'native_delete_error', deleteNativeSourceFromAction);
+                });
 
             return true;
         }
@@ -1388,12 +1560,12 @@
             }
 
             switch (action) {
-	            case 'view-source-details': {
-	                const didOpen = sourceActionInvokers.openNativeDetails(sourceKey);
-	                if (didOpen === false) {
-	                    showNativeActionFailureToast('details', sourceKey, 'native_action_error', openNativeSourceDetails);
-	                    return false;
-	                }
+            case 'view-source-details': {
+                const didOpen = sourceActionInvokers.openNativeDetails(sourceKey);
+                if (didOpen === false) {
+                    showNativeActionFailureToast('details', sourceKey, 'native_action_error', openNativeSourceDetails);
+                    return false;
+                }
                 return true;
             }
             case 'rename-source':

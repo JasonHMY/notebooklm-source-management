@@ -1248,7 +1248,7 @@
             const shadowRoot = getShadowRoot();
             if (!shadowRoot || !el) return;
 
-            const keys = Array.isArray(sourceKeys) ? sourceKeys : (typeof sourceKeys === 'string' ? [sourceKeys] : Array.from(sourceKeys));
+            const keys = Array.isArray(sourceKeys) ? sourceKeys : (typeof sourceKeys === 'string' ? [sourceKeys] : Array.from(sourceKeys || []));
             if (keys.length === 0) return;
 
             prepareModalOpen('sp-move-modal', 'sp-move-backdrop');
@@ -1341,8 +1341,11 @@
                 closeMoveToFolderModal();
                 return;
             }
+            targetGroup.children = Array.isArray(targetGroup.children) ? targetGroup.children : [];
 
-            const keys = Array.isArray(sourceKeys) ? sourceKeys : (typeof sourceKeys === 'string' ? [sourceKeys] : Array.from(sourceKeys));
+            const keys = Array.isArray(sourceKeys)
+                ? sourceKeys
+                : (typeof sourceKeys === 'string' ? [sourceKeys] : Array.from(sourceKeys || []));
 
             keys.forEach((sourceKey) => {
                 const sourceData = sourcesByKey.get(sourceKey);

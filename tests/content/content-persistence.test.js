@@ -189,17 +189,12 @@ describe('saveState', () => {
         expect(capturedData.groupsById.group1.title).toBe('Group 1');
     });
 
-    it('shows an error toast when a critical save fails in both local and runtime storage', async () => {
+    it('shows an error toast when background rejects a critical save without local overwrite fallback', async () => {
         seedPersistedState();
         mod._setShadowRootForTest({
             host: { isConnected: true },
             querySelector: jest.fn(() => null),
             appendChild: jest.fn()
-        });
-        global.chrome.storage.local.set.mockImplementationOnce((payload, cb) => {
-            global.chrome.runtime.lastError = { message: 'local failed' };
-            cb();
-            global.chrome.runtime.lastError = null;
         });
         global.chrome.runtime.sendMessage.mockImplementationOnce((message, cb) => {
             cb({ success: false, errorCode: 'runtime_failure' });
@@ -208,6 +203,8 @@ describe('saveState', () => {
         const result = await mod.saveState({ immediate: true, critical: true });
 
         expect(result.ok).toBe(false);
+        expect(result.reason).toBe('runtime_failure');
+        expect(global.chrome.storage.local.set).not.toHaveBeenCalled();
         expect(mod._getActiveToastItemForTest()).toMatchObject({
             message: 'ui_save_failed',
             variant: 'error'
@@ -259,29 +256,58 @@ describe('saveState', () => {
         mod._hideActiveToastForTest(false);
     });
 
-    it('does not let a local fallback write overwrite a newer saved revision', async () => {
-        const projectId = seedPersistedState();
-        const newerState = {
-            _saveRevision: 5,
-            groups: ['newer'],
-            groupsById: { newer: { id: 'newer', title: 'Newer', children: [] } },
-            ungrouped: [],
-            sourceStateById: {}
-        };
-
+    it('does not use a local fallback when background rejects a save with an invalid key', async () => {
+        seedPersistedState();
         global.chrome.runtime.sendMessage.mockImplementationOnce((message, cb) => {
-            cb({ success: false, errorCode: 'runtime_failure' });
-        });
-        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
-            cb({ [`sourcesPlusState_${projectId}`]: newerState });
+            cb({ success: false, errorCode: 'invalid_storage_key' });
         });
 
         const result = await mod.saveState({ immediate: true, critical: true });
 
         expect(result.ok).toBe(false);
-        expect(result.reason).toBe('stale_revision');
-        expect(result.localResult).toMatchObject({ ok: true, stale: true });
+        expect(result.reason).toBe('invalid_storage_key');
+        expect(result.localResult).toMatchObject({
+            skipped: true,
+            reason: 'invalid_storage_key'
+        });
+        expect(global.chrome.storage.local.get).not.toHaveBeenCalled();
         expect(global.chrome.storage.local.set).not.toHaveBeenCalled();
+    });
+
+    it('does not use a local fallback when runtime messaging fails', async () => {
+        seedPersistedState();
+        global.chrome.runtime.sendMessage.mockImplementationOnce((message, cb) => {
+            global.chrome.runtime.lastError = { message: 'context invalidated' };
+            cb();
+            global.chrome.runtime.lastError = null;
+        });
+
+        const result = await mod.saveState({ immediate: true, critical: true });
+
+        expect(result.ok).toBe(false);
+        expect(result.reason).toBe('runtime_message_error');
+        expect(global.chrome.storage.local.get).not.toHaveBeenCalled();
+        expect(global.chrome.storage.local.set).not.toHaveBeenCalled();
+    });
+
+    it('keeps the explicit skipRuntimeMessage path available for local test fallback writes', async () => {
+        seedPersistedState();
+
+        const result = await mod.saveState({ immediate: true, critical: true, skipRuntimeMessage: true });
+
+        expect(result.ok).toBe(true);
+        expect(global.chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+            expect.objectContaining({ type: 'SAVE_STATE' }),
+            expect.any(Function)
+        );
+        expect(global.chrome.storage.local.set).toHaveBeenCalledWith(
+            expect.objectContaining({
+                sourcesPlusState_test_project_id: expect.objectContaining({
+                    groups: ['group1', 'group2']
+                })
+            }),
+            expect.any(Function)
+        );
     });
 
     it('writes a recovery snapshot before critical saves and clears it after success', async () => {
@@ -1537,11 +1563,87 @@ describe('loadState', () => {
         mod.loadState(callback);
 
         expect(global.chrome.storage.local.get).toHaveBeenCalledWith(
-            ['sourcesPlusState_test-project', 'sourcesPlusState_test-project__backup'],
+            [
+                'sourcesPlusState_test-project',
+                'sourcesPlusState_test-project__backup',
+                'sourcesPlusHistory_test-project'
+            ],
             expect.any(Function)
         );
         expect(global.chrome.runtime.sendMessage).not.toHaveBeenCalled();
         expect(callback).toHaveBeenCalledWith(storedState);
+    });
+
+    it('repairs empty folder source children from a compatible history snapshot during load', () => {
+        const callback = jest.fn();
+        const currentState = {
+            schemaVersion: 3,
+            _saveRevision: 259,
+            groups: ['group-00', 'group-02'],
+            groupsById: {
+                'group-00': { id: 'group-00', title: '00', children: [] },
+                'group-02': { id: 'group-02', title: '02', children: [{ type: 'group', id: 'group-a' }] },
+                'group-a': { id: 'group-a', title: 'A', children: [] }
+            },
+            ungrouped: ['source-a', 'source-b', 'source-c'],
+            sourceStateById: {
+                'source-a': { enabled: true, title: 'A.pdf', normalizedTitle: 'a.pdf', fingerprint: 'a.pdf|article', identityType: 'fingerprint' },
+                'source-b': { enabled: true, title: 'B.pdf', normalizedTitle: 'b.pdf', fingerprint: 'b.pdf|article', identityType: 'fingerprint' },
+                'source-c': { enabled: true, title: 'C.pdf', normalizedTitle: 'c.pdf', fingerprint: 'c.pdf|article', identityType: 'fingerprint' }
+            },
+            customHeight: 704,
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {}
+        };
+        const goodSnapshot = {
+            schemaVersion: 3,
+            _saveRevision: 254,
+            groups: ['group-00', 'group-02'],
+            groupsById: {
+                'group-00': { id: 'group-00', title: '00', children: [{ type: 'source', key: 'source-a' }] },
+                'group-02': { id: 'group-02', title: '02', children: [{ type: 'group', id: 'group-a' }] },
+                'group-a': { id: 'group-a', title: 'A', children: [{ type: 'source', key: 'source-b' }] }
+            },
+            ungrouped: ['source-c'],
+            sourceStateById: {
+                'source-a': { enabled: true, title: 'A.pdf', normalizedTitle: 'a.pdf', fingerprint: 'a.pdf|article', identityType: 'fingerprint' },
+                'source-b': { enabled: true, title: 'B.pdf', normalizedTitle: 'b.pdf', fingerprint: 'b.pdf|article', identityType: 'fingerprint' },
+                'source-c': { enabled: true, title: 'C.pdf', normalizedTitle: 'c.pdf', fingerprint: 'c.pdf|article', identityType: 'fingerprint' }
+            },
+            customHeight: 691,
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {}
+        };
+
+        mod._setProjectId('test-project');
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({
+                'sourcesPlusState_test-project': currentState,
+                'sourcesPlusState_test-project__backup': currentState,
+                'sourcesPlusHistory_test-project': [{
+                    id: 'history-good',
+                    createdAt: '2026-05-08T00:35:14.335Z',
+                    reason: 'critical_save',
+                    snapshot: goodSnapshot
+                }]
+            });
+        });
+
+        mod.loadState(callback);
+
+        expect(callback).toHaveBeenCalledWith(expect.objectContaining({
+            groups: ['group-00', 'group-02'],
+            groupsById: {
+                'group-00': { id: 'group-00', title: '00', children: [{ type: 'source', key: 'source-a' }] },
+                'group-02': { id: 'group-02', title: '02', children: [{ type: 'group', id: 'group-a' }] },
+                'group-a': { id: 'group-a', title: 'A', children: [{ type: 'source', key: 'source-b' }] }
+            },
+            ungrouped: ['source-c'],
+            customHeight: 704
+        }));
+        expect(mod._getPendingStorageUpgrade()).toBe(true);
     });
 
     it('restores v2 state and custom height', () => {

@@ -748,6 +748,66 @@ describe('deleteNativeSource', () => {
         });
     });
 
+    it('refuses to delete when the current native row no longer matches the source identity', async () => {
+        const wrongMoreButton = { click: jest.fn() };
+        const wrongRow = createMockSourceRow({
+            title: 'Wrong Source',
+            stableToken: 'wrong-doc',
+            nativeMoreButton: wrongMoreButton
+        });
+
+        mod.sourcesByKey.set('key1', {
+            key: 'key1',
+            title: 'Expected Source',
+            normalizedTitle: 'expected source',
+            stableToken: 'expected-doc',
+            fingerprint: 'expected source||article',
+            element: wrongRow.row,
+            isDisabled: false,
+            isLoading: false
+        });
+        global.document.body.contains = jest.fn((element) => element === wrongRow.row);
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [wrongRow.row] : []
+        ));
+
+        await expect(mod.deleteNativeSource('key1')).resolves.toEqual({
+            deleted: false,
+            reason: 'source_row_mismatch'
+        });
+        expect(wrongMoreButton.click).not.toHaveBeenCalled();
+    });
+
+    it('refuses to rename when the current native row no longer matches the source identity', async () => {
+        const wrongMoreButton = { click: jest.fn() };
+        const wrongRow = createMockSourceRow({
+            title: 'Wrong Rename Source',
+            stableToken: 'wrong-rename-doc',
+            nativeMoreButton: wrongMoreButton
+        });
+
+        mod.sourcesByKey.set('key1', {
+            key: 'key1',
+            title: 'Expected Rename Source',
+            normalizedTitle: 'expected rename source',
+            stableToken: 'expected-rename-doc',
+            fingerprint: 'expected rename source||article',
+            element: wrongRow.row,
+            isDisabled: false,
+            isLoading: false
+        });
+        global.document.body.contains = jest.fn((element) => element === wrongRow.row);
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [wrongRow.row] : []
+        ));
+
+        await expect(mod.triggerNativeSourceRenameWithResult('key1')).resolves.toEqual({
+            ok: false,
+            reason: 'source_row_mismatch'
+        });
+        expect(wrongMoreButton.click).not.toHaveBeenCalled();
+    });
+
     it('closes native UI when the delete menu item is missing', async () => {
         const { moreButton } = seedSourceWithMoreButton();
         global.document.querySelectorAll = jest.fn(() => []);
@@ -856,6 +916,112 @@ describe('deleteNativeSource', () => {
         await expect(mod.deleteNativeSource('key1')).resolves.toEqual({ deleted: true });
         expect(deleteMenuItem.click).toHaveBeenCalled();
         expect(confirmButton.click).toHaveBeenCalled();
+    });
+
+    it('does not confirm when multiple fresh delete dialogs are plausible', async () => {
+        const { isNativeMenuOpened } = seedSourceWithMoreButton();
+        let deleteClicked = false;
+        const deleteMenuItem = createDeleteMenuItem({
+            onClick: () => {
+                deleteClicked = true;
+            }
+        });
+        const firstConfirmButton = {
+            textContent: 'Delete',
+            className: 'warn',
+            click: jest.fn(),
+            querySelector: jest.fn(() => null),
+            getAttribute: jest.fn(() => null)
+        };
+        const secondConfirmButton = {
+            textContent: 'Delete',
+            className: 'warn',
+            click: jest.fn(),
+            querySelector: jest.fn(() => null),
+            getAttribute: jest.fn(() => null)
+        };
+        const firstDialog = createConfirmDialog([firstConfirmButton]);
+        const secondDialog = createConfirmDialog([secondConfirmButton]);
+
+        global.document.querySelectorAll = jest.fn(sel => {
+            if (sel.includes('[role="menuitem"]')) return isNativeMenuOpened() ? [deleteMenuItem] : [];
+            if (sel.includes('dialog')) return deleteClicked ? [firstDialog, secondDialog] : [];
+            return [];
+        });
+
+        await expect(mod.deleteNativeSource('key1')).resolves.toEqual({
+            deleted: false,
+            reason: 'confirm_dialog_ambiguous'
+        });
+        expect(firstConfirmButton.click).not.toHaveBeenCalled();
+        expect(secondConfirmButton.click).not.toHaveBeenCalled();
+        expect(global.document.body.click).toHaveBeenCalled();
+    });
+
+    it('does not confirm a delete dialog that names a different source', async () => {
+        let nativeMenuOpened = false;
+        const moreButton = {
+            click: jest.fn(() => {
+                nativeMenuOpened = true;
+            })
+        };
+        const row = createMockSourceRow({
+            title: 'Target Source',
+            stableToken: 'target-doc',
+            nativeMoreButton: moreButton
+        });
+        const descriptor = mod.createSourceDescriptor(row.row, new Map(), new Map());
+        let deleteClicked = false;
+        const deleteMenuItem = createDeleteMenuItem({
+            onClick: () => {
+                deleteClicked = true;
+            }
+        });
+        const confirmButton = {
+            textContent: 'Delete',
+            className: 'warn',
+            click: jest.fn(),
+            querySelector: jest.fn(() => null),
+            getAttribute: jest.fn(() => null)
+        };
+        const wrongDialog = {
+            textContent: 'Delete Other Source?',
+            getAttribute: jest.fn(() => null),
+            querySelectorAll: jest.fn(sel => (sel === 'button' ? [confirmButton] : []))
+        };
+
+        mod.sourcesByKey.set('key1', {
+            key: 'key1',
+            title: 'Target Source',
+            normalizedTitle: 'target source',
+            stableToken: descriptor.stableToken,
+            fingerprint: descriptor.fingerprint,
+            element: row.row,
+            isDisabled: false,
+            isLoading: false
+        });
+        mod.sourcesByKey.set('other-key', {
+            key: 'other-key',
+            title: 'Other Source',
+            normalizedTitle: 'other source',
+            fingerprint: 'other source||article',
+            isDisabled: false,
+            isLoading: false
+        });
+        global.document.body.contains = jest.fn((element) => element === row.row);
+        global.document.querySelectorAll = jest.fn(sel => {
+            if (mod.DEPS.row.includes(sel)) return [row.row];
+            if (sel.includes('[role="menuitem"]')) return nativeMenuOpened && !deleteClicked ? [deleteMenuItem] : [];
+            if (sel.includes('dialog')) return deleteClicked ? [wrongDialog] : [];
+            return [];
+        });
+
+        await expect(mod.deleteNativeSource('key1')).resolves.toEqual({
+            deleted: false,
+            reason: 'confirm_dialog_mismatched_source'
+        });
+        expect(confirmButton.click).not.toHaveBeenCalled();
+        expect(global.document.body.click).toHaveBeenCalled();
     });
 
     it('does not use a stale dialog when no fresh confirmation appears', async () => {
@@ -1260,18 +1426,20 @@ describe('source action menu', () => {
     it('opens the native rename source action without exposing the native menu as a second menu', async () => {
         let nativeMenuOpened = false;
         const mockMoreBtn = { click: jest.fn(() => { nativeMenuOpened = true; }) };
-        const mockSourceElement = {
-            querySelector: jest.fn((selector) => {
-                if (mod.DEPS.moreBtn.includes(selector)) return mockMoreBtn;
-                return null;
-            })
-        };
+        const mockSourceRow = createMockSourceRow({
+            title: 'Source One',
+            stableToken: 'source-one-doc',
+            nativeMoreButton: mockMoreBtn
+        });
+        const descriptor = mod.createSourceDescriptor(mockSourceRow.row, new Map(), new Map());
         const renameMenuItem = createNativeMenuItem({ text: 'Rename source', icon: 'edit' });
         renameMenuItem.click = jest.fn();
         mod.sourcesByKey.set('source-1', {
             key: 'source-1',
             title: 'Source One',
-            element: mockSourceElement,
+            stableToken: descriptor.stableToken,
+            fingerprint: descriptor.fingerprint,
+            element: mockSourceRow.row,
             enabled: true,
             isLoading: false,
             isDisabled: false
@@ -1400,11 +1568,17 @@ describe('source action menu', () => {
             if (key === 'ui_retry') return 'Retry';
             return key;
         });
-        const sourceElement = { querySelector: jest.fn(() => null) };
+        const sourceElement = createMockSourceRow({
+            title: 'Source One',
+            stableToken: 'source-one-doc'
+        });
+        const descriptor = mod.createSourceDescriptor(sourceElement.row, new Map(), new Map());
         mod.sourcesByKey.set('source-1', {
             key: 'source-1',
             title: 'Source One',
-            element: sourceElement,
+            stableToken: descriptor.stableToken,
+            fingerprint: descriptor.fingerprint,
+            element: sourceElement.row,
             enabled: true,
             isLoading: false,
             isDisabled: false
@@ -1421,7 +1595,12 @@ describe('source action menu', () => {
         const moreButton = { click: jest.fn(() => { nativeMenuOpened = true; }) };
         const renameMenuItem = createNativeMenuItem({ text: 'Rename source', icon: 'edit' });
         renameMenuItem.click = jest.fn();
-        sourceElement.querySelector = jest.fn((selector) => (mod.DEPS.moreBtn.includes(selector) ? moreButton : null));
+        const retrySourceElement = createMockSourceRow({
+            title: 'Source One',
+            stableToken: 'source-one-doc',
+            nativeMoreButton: moreButton
+        });
+        mod.sourcesByKey.get('source-1').element = retrySourceElement.row;
         global.document.querySelectorAll = jest.fn((selector) => (
             selector.includes('[role="menuitem"]') && nativeMenuOpened ? [renameMenuItem] : []
         ));
@@ -1442,11 +1621,17 @@ describe('source action menu', () => {
             if (key === 'ui_retry') return 'Retry';
             return key;
         });
-        const sourceElement = { querySelector: jest.fn(() => null) };
+        const sourceElement = createMockSourceRow({
+            title: 'Source One',
+            stableToken: 'source-one-doc'
+        });
+        const descriptor = mod.createSourceDescriptor(sourceElement.row, new Map(), new Map());
         mod.sourcesByKey.set('source-1', {
             key: 'source-1',
             title: 'Source One',
-            element: sourceElement,
+            stableToken: descriptor.stableToken,
+            fingerprint: descriptor.fingerprint,
+            element: sourceElement.row,
             enabled: true,
             isLoading: false,
             isDisabled: false
@@ -1476,7 +1661,12 @@ describe('source action menu', () => {
             getAttribute: jest.fn(() => null),
             querySelectorAll: jest.fn((selector) => (selector === 'button' ? [confirmButton] : []))
         };
-        sourceElement.querySelector = jest.fn((selector) => (mod.DEPS.moreBtn.includes(selector) ? moreButton : null));
+        const retrySourceElement = createMockSourceRow({
+            title: 'Source One',
+            stableToken: 'source-one-doc',
+            nativeMoreButton: moreButton
+        });
+        mod.sourcesByKey.get('source-1').element = retrySourceElement.row;
         global.document.querySelectorAll = jest.fn((selector) => {
             if (selector.includes('[role="menuitem"]')) return nativeMenuOpened ? [deleteMenuItem] : [];
             if (selector.includes('dialog')) return deleteClicked ? [confirmDialog] : [];

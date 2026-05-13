@@ -6,7 +6,15 @@
         scroll: ['.scroll-area'],
         row: ['[data-testid="source-item"]', '.single-source-container'],
         title: ['[data-testid="source-title"]', '.source-title'],
-        checkbox: ['input[type="checkbox"]', '.select-checkbox input[type="checkbox"]'],
+        checkbox: [
+            'input[type="checkbox"]',
+            '.select-checkbox input[type="checkbox"]',
+            '[role="checkbox"]',
+            'mat-checkbox',
+            '.mat-checkbox',
+            '.mat-mdc-checkbox',
+            '.mdc-checkbox'
+        ],
         moreBtn: ['[aria-label="More options"]', '.source-item-more-button'],
         icon: ['mat-icon[class*="-icon-color"]', 'mat-icon:not([aria-label="More options"] mat-icon):not(button mat-icon)'],
         iconImage: [

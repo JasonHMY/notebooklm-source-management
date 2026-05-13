@@ -1384,6 +1384,43 @@ describe('batch count and source menu motion rendering', () => {
         expect(longSources[10].attrs.style).toBe('--sp-list-item-index:10;');
         expect(longSources[11].attrs.style).toBe('--sp-list-item-index:10;');
     });
+
+    it('renders persisted groups that are missing children arrays without crashing', () => {
+        const listContainer = createRenderTestElement('div', { id: 'sources-list' });
+        const groupsById = new Map([
+            ['broken', {
+                id: 'broken',
+                title: 'Broken',
+                enabled: true,
+                collapsed: false
+            }]
+        ]);
+        const renderModule = createContentRender({
+            el: createRenderTestElement,
+            getDocument: () => ({
+                createDocumentFragment: createRenderTestFragment,
+                createElement: (tag) => createRenderTestElement(tag)
+            }),
+            getShadowRoot: () => ({
+                querySelector: jest.fn((selector) => (selector === '#sources-list' ? listContainer : null)),
+                getElementById: jest.fn((id) => (id === 'sources-list' ? listContainer : null)),
+                appendChild: jest.fn()
+            }),
+            getState: () => ({
+                groups: ['broken'],
+                ungrouped: [],
+                isBatchMode: false,
+                activeTagId: null
+            }),
+            getGroupsById: () => groupsById,
+            getSourcesByKey: () => new Map(),
+            getMessage: (key) => key
+        });
+
+        expect(() => renderModule.render()).not.toThrow();
+        expect(findRenderTestNodesByClass(listContainer, 'group-container')).toHaveLength(1);
+        expect(findRenderTestNodesByClass(listContainer, 'sp-empty-state')).toHaveLength(1);
+    });
 });
 
 describe('source icon handling', () => {
@@ -1400,24 +1437,76 @@ describe('source icon handling', () => {
 
     afterEach(teardownGlobalMocks);
 
-    it('extracts native image urls without changing existing icon mapping', () => {
+    it('extracts trusted native image urls without changing existing icon mapping', () => {
         const sourceRow = createMockSourceRow({
             title: 'Image Source',
             iconName: 'video_youtube',
             imageCandidates: [
-                createMockImageCandidate({ src: 'https://example.com/favicon.ico' })
+                createMockImageCandidate({ src: 'https://lh3.googleusercontent.com/favicon.ico' })
             ]
         });
 
         const descriptor = mod.createSourceDescriptor(sourceRow.row, new Map(), new Map());
 
-        expect(descriptor.iconImageUrl).toBe('https://example.com/favicon.ico');
+        expect(descriptor.iconImageUrl).toBe('https://lh3.googleusercontent.com/favicon.ico');
         expect(descriptor.iconName).toBe('smart_display');
+    });
+
+    it('rejects untrusted source image urls from DOM candidates', () => {
+        const sourceRow = createMockSourceRow({
+            title: 'Untrusted Image Source',
+            imageCandidates: [
+                createMockImageCandidate({ src: 'https://evil.example/icon.png' })
+            ]
+        });
+
+        const descriptor = mod.createSourceDescriptor(sourceRow.row, new Map(), new Map());
+
+        expect(descriptor.iconImageUrl).toBeNull();
+    });
+
+    it('rejects unsafe image URL schemes and SVG data URLs', () => {
+        const unsafeUrls = [
+            'javascript:alert(1)',
+            'file:///Users/hmy/private.png',
+            'http://notebooklm.google.com/insecure.png',
+            'data:image/svg+xml,<svg onload=alert(1)>'
+        ];
+
+        unsafeUrls.forEach((src) => {
+            const sourceRow = createMockSourceRow({
+                title: `Unsafe ${src}`,
+                imageCandidates: [
+                    createMockImageCandidate({ src })
+                ]
+            });
+
+            expect(mod.extractSourceIconImageUrl(sourceRow.row)).toBeNull();
+        });
+    });
+
+    it('allows small raster data URLs and current extension image URLs', () => {
+        global.chrome.runtime.id = 'extension-under-test';
+        const dataImage = 'data:image/png;base64,iVBORw0KGgo=';
+        expect(mod.extractSourceIconImageUrl(createMockSourceRow({
+            title: 'Raster Data Image',
+            imageCandidates: [
+                createMockImageCandidate({ src: dataImage })
+            ]
+        }).row)).toBe(dataImage);
+
+        const extensionUrl = 'chrome-extension://extension-under-test/src/assets/icons/icon16.png';
+        expect(mod.extractSourceIconImageUrl(createMockSourceRow({
+            title: 'Extension Image',
+            imageCandidates: [
+                createMockImageCandidate({ src: extensionUrl })
+            ]
+        }).row)).toBe(extensionUrl);
     });
 
     it('does not discard a source icon when the source row itself is clickable', () => {
         const sourceCandidate = createMockImageCandidate({
-            src: 'https://example.com/source.png',
+            src: 'https://lh3.googleusercontent.com/source.png',
             interactiveAncestor: null
         });
         const sourceRow = createMockSourceRow({
@@ -1427,7 +1516,7 @@ describe('source icon handling', () => {
         sourceCandidate.closest = jest.fn(() => sourceRow.row);
 
         const descriptor = mod.createSourceDescriptor(sourceRow.row, new Map(), new Map());
-        expect(descriptor.iconImageUrl).toBe('https://example.com/source.png');
+        expect(descriptor.iconImageUrl).toBe('https://lh3.googleusercontent.com/source.png');
     });
 
     it('extracts background image urls and resolves relative paths against the page', () => {
@@ -1460,7 +1549,7 @@ describe('source icon handling', () => {
             ]
         });
 
-        expect(mod.extractSourceIconImageUrl(sourceRow.row)).toBe('https://example.com/mask-source.svg');
+        expect(mod.extractSourceIconImageUrl(sourceRow.row)).toBeNull();
     });
 
     it('extracts webkit mask image urls through the configured fast path', () => {
@@ -1471,29 +1560,29 @@ describe('source icon handling', () => {
             ]
         });
 
-        expect(mod.extractSourceIconImageUrl(sourceRow.row)).toBe('https://example.com/webkit-mask-source.svg');
+        expect(mod.extractSourceIconImageUrl(sourceRow.row)).toBeNull();
     });
 
     it('falls back to descendant scanning for computed background images', () => {
         const sourceRow = createMockSourceRow({
             title: 'Computed Background Source',
             descendantCandidates: [
-                createMockImageCandidate({ backgroundImage: 'url("https://example.com/computed.png")' })
+                createMockImageCandidate({ backgroundImage: 'url("https://www.gstatic.com/computed.png")' })
             ]
         });
 
-        expect(mod.extractSourceIconImageUrl(sourceRow.row)).toBe('https://example.com/computed.png');
+        expect(mod.extractSourceIconImageUrl(sourceRow.row)).toBe('https://www.gstatic.com/computed.png');
     });
 
     it('finds image candidates inside open shadow roots', () => {
-        const shadowImage = createMockImageCandidate({ src: 'https://example.com/shadow.png' });
+        const shadowImage = createMockImageCandidate({ src: 'https://lh3.googleusercontent.com/shadow.png' });
         const shadowHost = createMockImageCandidate({ shadowChildren: [shadowImage] });
         const sourceRow = createMockSourceRow({
             title: 'Shadow Source',
             descendantCandidates: [shadowHost]
         });
 
-        expect(mod.extractSourceIconImageUrl(sourceRow.row)).toBe('https://example.com/shadow.png');
+        expect(mod.extractSourceIconImageUrl(sourceRow.row)).toBe('https://lh3.googleusercontent.com/shadow.png');
     });
 
     it('ignores decorative images inside interactive controls', () => {
@@ -1505,7 +1594,7 @@ describe('source icon handling', () => {
             nativeMoreButton,
             imageCandidates: [
                 createMockImageCandidate({
-                    src: 'https://example.com/ignore.png'
+                    src: 'https://lh3.googleusercontent.com/ignore.png'
                 })
             ]
         });
@@ -1521,14 +1610,14 @@ describe('source icon handling', () => {
             title: 'Persistent Source',
             iconName: 'article',
             imageCandidates: [
-                createMockImageCandidate({ src: 'https://example.com/a.png' })
+                createMockImageCandidate({ src: 'https://lh3.googleusercontent.com/a.png' })
             ]
         });
         const secondPass = createMockSourceRow({
             title: 'Persistent Source',
             iconName: 'article',
             imageCandidates: [
-                createMockImageCandidate({ src: 'https://example.com/b.png' })
+                createMockImageCandidate({ src: 'https://lh3.googleusercontent.com/b.png' })
             ]
         });
 

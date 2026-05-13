@@ -451,6 +451,10 @@
             return String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
         }
 
+        function getComparableNativeLabelTitle(value) {
+            return getComparableLabelText(cleanNativeLabelTitleCandidate(value));
+        }
+
         function isLikelyNativeLabelTitle(value, rowIdentity = null) {
             const title = cleanNativeLabelTitleCandidate(value);
             if (!title || title.length > 120) return false;
@@ -580,6 +584,19 @@
             while (cursor && depth < 24) {
                 if (cursor !== boundary && isLikelySourceRowElement(cursor)) return true;
                 if (boundary && cursor === boundary) break;
+                cursor = getParentElement(cursor);
+                depth += 1;
+            }
+            return false;
+        }
+
+        function isInsideNativeLabelGroupElement(element, boundary = null) {
+            if (!element) return false;
+            let cursor = getParentElement(element);
+            let depth = 0;
+            while (cursor && depth < 24) {
+                if (boundary && cursor === boundary) break;
+                if (elementMatchesAny(cursor, LABEL_GROUP_SELECTORS)) return true;
                 cursor = getParentElement(cursor);
                 depth += 1;
             }
@@ -1007,6 +1024,7 @@
             const shouldFilterHidden = Boolean(options.filterHidden);
             return rows
                 .filter((row) => !shouldFilterHidden || !isNodeHiddenForSourceScan(row, parent))
+                .filter((row) => !options.excludeLabelRows || !isInsideNativeLabelGroupElement(row, parent))
                 .map((row) => ({
                     row,
                     viewKind: SOURCE_VIEW_KIND_LIST,
@@ -1038,6 +1056,193 @@
             return entries;
         }
 
+        function getNativeCheckboxState(checkbox) {
+            if (!checkbox) return null;
+            if (checkbox.indeterminate === true) return null;
+            const ariaChecked = getAttributeValue(checkbox, 'aria-checked').toLowerCase();
+            if (ariaChecked === 'mixed') return null;
+            if (ariaChecked === 'true') return true;
+            if (ariaChecked === 'false') return false;
+            if (typeof checkbox.checked === 'boolean') return Boolean(checkbox.checked);
+            return null;
+        }
+
+        function getNativeLabelGroupTitle(group, panel, options = {}) {
+            if (!group) return '';
+            if (typeof group.__nativeLabelTitle === 'string' && group.__nativeLabelTitle.trim()) {
+                return group.__nativeLabelTitle.trim();
+            }
+
+            const ownLabel = getElementOwnLabel(group);
+            if (isLikelyNativeLabelTitle(ownLabel)) {
+                return cleanNativeLabelTitleCandidate(ownLabel);
+            }
+
+            const title = getNativeLabelTitleFromContainer(group, null, panel, options);
+            return title && isLikelyNativeLabelTitle(title) ? title : '';
+        }
+
+        function getNativeLabelGroupCheckboxState(group, panel, options = {}) {
+            if (!group || isNodeHiddenForSourceScan(group, panel, options)) return null;
+
+            const checkboxCandidates = queryDescendantElements(group, [
+                'input[type="checkbox"]',
+                '[role="checkbox"]',
+                'mat-checkbox',
+                '.mat-checkbox',
+                '.mat-mdc-checkbox',
+                '.mdc-checkbox'
+            ]);
+            if (typeof group.querySelector === 'function') {
+                const fallback = group.querySelector('input[type="checkbox"], [role="checkbox"], mat-checkbox, .mat-checkbox, .mat-mdc-checkbox, .mdc-checkbox');
+                if (fallback && !checkboxCandidates.includes(fallback)) {
+                    checkboxCandidates.push(fallback);
+                }
+            }
+
+            for (const checkbox of checkboxCandidates) {
+                if (!checkbox) continue;
+                if (isInsideNativeSourceRowElement(checkbox, group)) continue;
+                if (isNativeSourceViewSwitchControl(checkbox)) continue;
+                if (isNodeHiddenForSourceScan(checkbox, group, options)) continue;
+                const state = getNativeCheckboxState(checkbox);
+                if (state !== null) return state;
+            }
+
+            return null;
+        }
+
+        function getNativeLabelGroupSelectionMap(panel = findSourcePanel(), options = {}) {
+            const sourcePanel = panel || findSourcePanel();
+            const selections = new Map();
+            if (!sourcePanel) return selections;
+
+            const scanOptions = Object.assign({ ignoreManagerSuppression: true, inferNativeLabelTitles: true }, options || {});
+            const groups = queryPanelElements(sourcePanel, LABEL_GROUP_SELECTORS)
+                .filter((group) => (
+                    group &&
+                    !isNativeSourceViewSwitchControl(group) &&
+                    !isNodeHiddenForSourceScan(group, sourcePanel, scanOptions)
+                ));
+
+            groups.forEach((group) => {
+                const title = getNativeLabelGroupTitle(group, sourcePanel, scanOptions);
+                if (!title) return;
+                const state = getNativeLabelGroupCheckboxState(group, sourcePanel, scanOptions);
+                if (state === null) return;
+                selections.set(getComparableNativeLabelTitle(title), {
+                    title,
+                    enabled: state
+                });
+            });
+
+            return selections;
+        }
+
+        function collectSourceKeysFromGroup(group, groupsById, result = new Set()) {
+            if (!group || !Array.isArray(group.children)) return result;
+            group.children.forEach((child) => {
+                if (!child) return;
+                if (child.type === 'source' && child.key) {
+                    result.add(child.key);
+                    return;
+                }
+                if (child.type === 'group' && child.id && groupsById.has(child.id)) {
+                    collectSourceKeysFromGroup(groupsById.get(child.id), groupsById, result);
+                }
+            });
+            return result;
+        }
+
+        function collectGroupedSourceRefs(groupsById) {
+            const refs = new Set();
+            if (!groupsById || typeof groupsById.forEach !== 'function') return refs;
+            groupsById.forEach((group) => {
+                collectSourceKeysFromGroup(group, groupsById, refs);
+            });
+            return refs;
+        }
+
+        function shouldPreserveExistingTreeDuringUnsafeRemap(remappedState, previousSourceRecordsByKey, sourceLookup) {
+            const currentGroupsById = getGroupsById();
+            const previousGroupedRefs = collectGroupedSourceRefs(currentGroupsById);
+            if (previousGroupedRefs.size === 0) return false;
+
+            const remappedGroupsById = remappedState?.groupsById instanceof Map
+                ? remappedState.groupsById
+                : new Map();
+            const nextGroupedRefs = collectGroupedSourceRefs(remappedGroupsById);
+            const lostGroupedRefs = [];
+            const lostGroupedRefsWithoutRecords = [];
+
+            previousGroupedRefs.forEach((storedKey) => {
+                const sourceRecord = previousSourceRecordsByKey?.get?.(storedKey) || null;
+                const resolution = resolveStoredSourceKeyWithReason(storedKey, sourceLookup, sourceRecord);
+                const resolvedKey = resolution?.key || storedKey;
+                if (!nextGroupedRefs.has(resolvedKey)) {
+                    lostGroupedRefs.push(storedKey);
+                    if (!sourceRecord) {
+                        lostGroupedRefsWithoutRecords.push(storedKey);
+                    }
+                }
+            });
+
+            if (lostGroupedRefs.length === 0) return false;
+            if (lostGroupedRefsWithoutRecords.length === 0) return false;
+
+            const recentNativeDeletedSourceKeys = runtime.recentNativeDeletedSourceKeys instanceof Set
+                ? runtime.recentNativeDeletedSourceKeys
+                : null;
+            if (
+                recentNativeDeletedSourceKeys &&
+                lostGroupedRefs.every((key) => recentNativeDeletedSourceKeys.has(key))
+            ) {
+                lostGroupedRefs.forEach((key) => recentNativeDeletedSourceKeys.delete(key));
+                return false;
+            }
+
+            runtime.lastSkippedStructuralSourceSync = {
+                previousGroupedSourceCount: previousGroupedRefs.size,
+                nextGroupedSourceCount: nextGroupedRefs.size,
+                lostGroupedSourceCount: lostGroupedRefs.length,
+                lostGroupedSourceWithoutRecordCount: lostGroupedRefsWithoutRecords.length,
+                lostGroupedSourceKeys: lostGroupedRefs.slice(0, 10),
+                skippedAt: new Date().toISOString(),
+                reason: 'would_drop_grouped_sources'
+            };
+            return true;
+        }
+
+        function applyNativeLabelGroupSelectionsToExistingSources(selectionMap) {
+            const sourcesByKey = getSourcesByKey();
+            const groupsById = getGroupsById();
+            if (!(selectionMap instanceof Map) || selectionMap.size === 0 || sourcesByKey.size === 0) return false;
+
+            const selectedKeys = new Set();
+            groupsById.forEach((group) => {
+                const selection = selectionMap.get(getComparableNativeLabelTitle(group?.title));
+                if (!selection) return;
+                collectSourceKeysFromGroup(group, groupsById, new Set()).forEach((sourceKey) => {
+                    selectedKeys.add(sourceKey);
+                    const source = sourcesByKey.get(sourceKey);
+                    if (source && source.enabled !== selection.enabled) {
+                        source.enabled = selection.enabled;
+                    }
+                });
+            });
+
+            sourcesByKey.forEach((source, sourceKey) => {
+                const selection = selectionMap.get(getComparableNativeLabelTitle(source?.nativeLabelTitle));
+                if (!selection) return;
+                selectedKeys.add(sourceKey);
+                if (source.enabled !== selection.enabled) {
+                    source.enabled = selection.enabled;
+                }
+            });
+
+            return selectedKeys.size > 0;
+        }
+
         function detectSourceView(panel = findSourcePanel()) {
             const sourcePanel = panel || findSourcePanel();
             if (!sourcePanel || !isSourcePanelRenderable(sourcePanel)) {
@@ -1048,13 +1253,13 @@
                 });
             }
 
-            const baseLabelScanOptions = { ignoreManagerSuppression: true };
+            const baseLabelScanOptions = {};
             const labelGroups = queryPanelElements(sourcePanel, LABEL_GROUP_SELECTORS)
                 .filter((group) => (
                     !isNativeSourceViewSwitchControl(group) &&
                     !isNodeHiddenForSourceScan(group, sourcePanel, baseLabelScanOptions)
                 ));
-            const listEntries = getListSourceEntries(sourcePanel);
+            const listEntries = getListSourceEntries(sourcePanel, { excludeLabelRows: true });
             const activeLabelControls = getActiveNativeLabelViewControls(sourcePanel, baseLabelScanOptions)
                 .filter((control) => !isNativeSourceViewSwitchControl(control))
                 .filter((control) => !isControlInsideSourceEntry(control, listEntries));
@@ -1118,7 +1323,10 @@
                 if (labelEntries.length > 0) return labelEntries;
                 return getListSourceEntries(parent, { filterHidden: true });
             }
-            return getListSourceEntries(parent);
+            if (info.kind === SOURCE_VIEW_KIND_LIST) {
+                return getListSourceEntries(parent, { excludeLabelRows: true });
+            }
+            return getListSourceEntries(parent, { filterHidden: true, excludeLabelRows: true });
         }
 
         function hasNativeSourceDetailView(panel) {
@@ -1456,7 +1664,10 @@
 
             if (!isFirstLoad) {
                 sourcesByKey.forEach((source, key) => {
-                    oldSourcesMap.set(key, { enabled: source.enabled });
+                    oldSourcesMap.set(key, {
+                        enabled: source.enabled,
+                        nativeLabelTitle: source.nativeLabelTitle || ''
+                    });
                 });
                 sourceTagsById.forEach((tagIds, key) => {
                     oldSourceTags.set(key, [...tagIds]);
@@ -1466,6 +1677,9 @@
             const sourcePanel = findSourcePanel();
             const sourceRoot = sourcePanel || getDocument();
             const sourceEntries = getSourceEntries(sourceRoot);
+            const nativeLabelGroupSelections = (runtime.sourceViewKind === SOURCE_VIEW_KIND_LABEL)
+                ? getNativeLabelGroupSelectionMap(sourceRoot)
+                : new Map();
             const sourceElements = sourceEntries.map((entry) => entry.row);
             if (sourceElements.length === 0 && Array.from(getDocument()?.body?.children || []).length > 2) {
                 // The native panel can be empty while NotebookLM is still loading initial results.
@@ -1484,6 +1698,15 @@
                 })
                 .filter(Boolean);
             const sourceLookup = buildSourceLookup(currentSources);
+            if (!isFirstLoad && nativeLabelGroupSelections.size > 0 && applyNativeLabelGroupSelectionsToExistingSources(nativeLabelGroupSelections)) {
+                oldSourcesMap.clear();
+                sourcesByKey.forEach((source, key) => {
+                    oldSourcesMap.set(key, {
+                        enabled: source.enabled,
+                        nativeLabelTitle: source.nativeLabelTitle || ''
+                    });
+                });
+            }
             if (!isFirstLoad && shouldPreserveExistingSourcesDuringPartialSync(currentSources, sourceLookup, previousSourceRecordsByKey)) {
                 runtime.lastSkippedPartialSourceSync = {
                     previousCount: previousSourceRecordsByKey.size,
@@ -1529,6 +1752,9 @@
                     sourceRecordsByKey: previousSourceRecordsByKey,
                     sourceTagsById: oldSourceTags
                 });
+                if (shouldPreserveExistingTreeDuringUnsafeRemap(remappedState, previousSourceRecordsByKey, sourceLookup)) {
+                    return false;
+                }
                 state.groups = remappedState.groups;
                 state.ungrouped = remappedState.ungrouped;
                 groupsById.clear();
@@ -1537,7 +1763,11 @@
                 });
                 oldSourcesMap.clear();
                 remappedState.sourceStateById.forEach((sourceRecord, sourceKey) => {
-                    oldSourcesMap.set(sourceKey, { enabled: Boolean(sourceRecord.enabled) });
+                    const existingSource = sourcesByKey.get(sourceKey);
+                    oldSourcesMap.set(sourceKey, {
+                        enabled: Boolean(sourceRecord.enabled),
+                        nativeLabelTitle: sourceRecord.nativeLabelTitle || existingSource?.nativeLabelTitle || ''
+                    });
                 });
                 oldSourceTags.clear();
                 remappedState.sourceTagsById.forEach((tagIds, sourceKey) => {
@@ -1549,10 +1779,15 @@
             currentSources.forEach((source) => {
                 let enabled;
                 const nativeCheckboxState = source.hasNativeCheckbox ? Boolean(source.checkbox?.checked) : true;
+                const previousSourceState = oldSourcesMap.get(source.key) || null;
+                const nativeLabelTitle = source.nativeLabelTitle || previousSourceState?.nativeLabelTitle || '';
+                const nativeLabelGroupSelection = nativeLabelGroupSelections.get(getComparableNativeLabelTitle(nativeLabelTitle));
                 if (isFirstLoad) {
                     enabled = resolvedSourceStateById.has(source.key)
                         ? Boolean(resolvedSourceStateById.get(source.key).enabled)
                         : nativeCheckboxState;
+                } else if (source.sourceViewKind === SOURCE_VIEW_KIND_LABEL && nativeLabelGroupSelection) {
+                    enabled = Boolean(nativeLabelGroupSelection.enabled);
                 } else if (source.sourceViewKind === SOURCE_VIEW_KIND_LABEL && source.hasNativeCheckbox) {
                     enabled = nativeCheckboxState;
                 } else {
@@ -1563,7 +1798,8 @@
 
                 const hydratedSource = {
                     ...source,
-                    enabled
+                    enabled,
+                    nativeLabelTitle
                 };
 
                 sourcesByKey.set(source.key, hydratedSource);
@@ -1587,7 +1823,10 @@
 
             buildParentMap();
             sourcesByKey.forEach((source) => {
-                syncSourceToPage(source, isSourceEffectivelyEnabled(source));
+                syncSourceToPage(source, isSourceEffectivelyEnabled(source), {
+                    currentSourceViewKind: runtime.sourceViewKind || SOURCE_VIEW_KIND_UNKNOWN,
+                    preferStoredCheckbox: true
+                });
             });
 
             return isFirstLoad && getPendingStorageUpgrade();
@@ -1684,6 +1923,68 @@
             });
         }
 
+        function isCheckboxLikeMutationTarget(element) {
+            if (!element || element.nodeType !== 1) return false;
+            const tagName = String(element.tagName || '').toLowerCase();
+            const type = String(element.type || getAttributeValue(element, 'type')).toLowerCase();
+            const role = getAttributeValue(element, 'role').toLowerCase();
+            if ((tagName === 'input' && type === 'checkbox') || role === 'checkbox') return true;
+            if (tagName === 'mat-checkbox') return true;
+            try {
+                return Boolean(element.matches?.('input[type="checkbox"], [role="checkbox"], mat-checkbox, .mat-checkbox, .mat-mdc-checkbox, .mdc-checkbox'));
+            } catch (error) {
+                return false;
+            }
+        }
+
+        function isCurrentNativeLabelView() {
+            return (
+                runtime.sourceViewKind === SOURCE_VIEW_KIND_LABEL ||
+                runtime.sourceViewInfo?.kind === SOURCE_VIEW_KIND_LABEL
+            );
+        }
+
+        function isNativeLabelMutationTarget(element) {
+            if (!element || element.nodeType !== 1) return false;
+            if (isInsideNativeSourceRowElement(element)) return false;
+            if (isNativeSourceViewSwitchControl(element)) return true;
+            if (isNativeLabelHeaderElement(element)) return true;
+
+            let cursor = element;
+            let depth = 0;
+            while (cursor && depth < 8) {
+                if (elementMatchesAny(cursor, LABEL_GROUP_SELECTORS)) return true;
+                cursor = getParentElement(cursor);
+                depth += 1;
+            }
+
+            return false;
+        }
+
+        function isNonCriticalAttributeMutationRelevant(attributeName, targetElement) {
+            if (!targetElement) return false;
+
+            if (['aria-checked', 'checked'].includes(attributeName)) {
+                return isCheckboxLikeMutationTarget(targetElement);
+            }
+
+            if (attributeName === 'aria-expanded') {
+                return isElementWithinSourceRow(targetElement) || isNativeLabelMutationTarget(targetElement);
+            }
+
+            if (['class', 'style', 'hidden'].includes(attributeName)) {
+                if (isElementWithinSourceRow(targetElement)) return true;
+                return isCurrentNativeLabelView() && isNativeLabelMutationTarget(targetElement);
+            }
+
+            if (attributeName === 'data-testid') {
+                if (isElementWithinSourceRow(targetElement)) return true;
+                return isCurrentNativeLabelView() && isNativeLabelMutationTarget(targetElement);
+            }
+
+            return false;
+        }
+
         function isRelevantSourceChildNode(node) {
             if (!node) return false;
             if (node.nodeType === 3) {
@@ -1722,15 +2023,18 @@
 
             if (mutation?.type === 'attributes') {
                 const attributeName = String(mutation.attributeName || '');
-                if (['aria-expanded', 'class', 'data-testid', 'hidden', 'style'].includes(attributeName)) {
+                if (isNonCriticalAttributeMutationRelevant(attributeName, targetElement)) {
                     return {
                         relevant: true,
                         critical: false
                     };
                 }
+                if (!SOURCE_RENAME_ATTRIBUTE_NAMES.has(attributeName)) {
+                    return { relevant: false, critical: false };
+                }
                 return {
-                    relevant: SOURCE_RENAME_ATTRIBUTE_NAMES.has(attributeName) && isElementWithinSourceRow(targetElement),
-                    critical: true
+                    relevant: isElementWithinSourceRow(targetElement),
+                    critical: isElementWithinSourceRow(targetElement)
                 };
             }
 

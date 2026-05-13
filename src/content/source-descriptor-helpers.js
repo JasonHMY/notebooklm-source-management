@@ -12,6 +12,19 @@
     const MAX_EXPLICIT_ICON_CANDIDATES = 24;
     const MAX_FALLBACK_ICON_CANDIDATES = 18;
     const MAX_QUERY_RESULTS_PER_SELECTOR = 12;
+    const MAX_SAFE_DATA_IMAGE_URL_LENGTH = 32 * 1024;
+    const NOTEBOOKLM_IMAGE_ORIGIN = 'https://notebooklm.google.com';
+    const TRUSTED_IMAGE_HOSTS = new Set([
+        'notebooklm.google.com',
+        'gstatic.com',
+        'googleusercontent.com',
+        'ggpht.com'
+    ]);
+    const TRUSTED_IMAGE_HOST_SUFFIXES = [
+        '.gstatic.com',
+        '.googleusercontent.com',
+        '.ggpht.com'
+    ];
     const SOURCE_PROCESSING_SELECTOR = '[role="progressbar"], mat-spinner, svg animateTransform';
     const SOURCE_PROCESSING_STATUS_SELECTORS = [
         '[aria-busy="true"]',
@@ -403,26 +416,70 @@
         return match && match[2] ? match[2] : null;
     }
 
+    function getSourceImageBaseUrl() {
+        return window.location.href || window.location.origin || location.href || NOTEBOOKLM_IMAGE_ORIGIN;
+    }
+
+    function getCurrentExtensionId() {
+        return typeof globalThis.chrome?.runtime?.id === 'string' ? globalThis.chrome.runtime.id : '';
+    }
+
+    function isTrustedSourceImageHost(hostname) {
+        const normalizedHost = String(hostname || '').toLowerCase();
+        return TRUSTED_IMAGE_HOSTS.has(normalizedHost) ||
+            TRUSTED_IMAGE_HOST_SUFFIXES.some((suffix) => normalizedHost.endsWith(suffix));
+    }
+
+    function isSafeRasterDataImageUrl(value) {
+        if (typeof value !== 'string' || value.length > MAX_SAFE_DATA_IMAGE_URL_LENGTH) return false;
+        return /^data:image\/(?:png|jpe?g|gif|webp);base64,[a-z0-9+/=\s]+$/i.test(value);
+    }
+
+    function isAllowedBlobSourceImageUrl(value) {
+        if (!String(value || '').toLowerCase().startsWith('blob:')) return false;
+        try {
+            const blobInnerUrl = new URL(String(value).slice('blob:'.length));
+            return blobInnerUrl.origin === NOTEBOOKLM_IMAGE_ORIGIN;
+        } catch (error) {
+            return false;
+        }
+    }
+
+    function isAllowedExtensionSourceImageUrl(parsedUrl) {
+        const extensionId = getCurrentExtensionId();
+        return Boolean(
+            parsedUrl &&
+            parsedUrl.protocol === 'chrome-extension:' &&
+            extensionId &&
+            parsedUrl.hostname === extensionId
+        );
+    }
+
     function resolveSourceImageUrl(url) {
         if (typeof url !== 'string') return null;
 
         const trimmed = url.trim();
         if (!trimmed || trimmed === 'none') return null;
 
-        const lowerValue = trimmed.toLowerCase();
-        if (
-            lowerValue.startsWith('data:') ||
-            lowerValue.startsWith('blob:') ||
-            lowerValue.startsWith('chrome-extension:')
-        ) {
-            return trimmed;
+        if (trimmed.toLowerCase().startsWith('data:')) {
+            return isSafeRasterDataImageUrl(trimmed) ? trimmed : null;
         }
 
-        const baseUrl = window.location.href || window.location.origin || location.href;
+        if (trimmed.toLowerCase().startsWith('blob:')) {
+            return isAllowedBlobSourceImageUrl(trimmed) ? trimmed : null;
+        }
+
         try {
-            return new URL(trimmed, baseUrl).href;
+            const parsedUrl = new URL(trimmed, getSourceImageBaseUrl());
+            if (isAllowedExtensionSourceImageUrl(parsedUrl)) {
+                return parsedUrl.href;
+            }
+            if (parsedUrl.protocol !== 'https:') {
+                return null;
+            }
+            return isTrustedSourceImageHost(parsedUrl.hostname) ? parsedUrl.href : null;
         } catch (error) {
-            return trimmed;
+            return null;
         }
     }
 

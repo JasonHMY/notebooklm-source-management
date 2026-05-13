@@ -23,6 +23,7 @@ const CONTENT_HELPER_GLOBALS = [
 
 const setupGlobalMocks = () => {
     delete globalThis.__NSM_CONTENT_SCRIPT_INSTANCE__;
+    global.__mutationObserverInstances = [];
     global.__resizeObserverInstances = [];
     global.__rafCallbacks = [];
     const sessionStorageData = new Map();
@@ -175,7 +176,14 @@ const setupGlobalMocks = () => {
         visibilityState: 'visible',
     };
 
-    global.MutationObserver = class { observe() {} disconnect() {} };
+    global.MutationObserver = class {
+        constructor(callback) {
+            this.callback = callback;
+            this.observe = jest.fn();
+            this.disconnect = jest.fn();
+            global.__mutationObserverInstances.push(this);
+        }
+    };
     global.ResizeObserver = class {
         constructor(callback) {
             this.callback = callback;
@@ -618,6 +626,7 @@ const teardownGlobalMocks = () => {
     CONTENT_HELPER_GLOBALS.forEach((key) => delete global[key]);
     delete globalThis.__NSM_CONTENT_SCRIPT_INSTANCE__;
     delete global.__resizeObserverInstances;
+    delete global.__mutationObserverInstances;
     delete global.__rafCallbacks;
 };
 
