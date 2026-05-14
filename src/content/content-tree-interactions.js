@@ -799,8 +799,10 @@
             const key = keyByElement.get(sourceRow);
             if (key) {
                 const source = sourcesByKey.get(key);
-                if (source && source.enabled !== checkbox.checked) {
-                    source.enabled = checkbox.checked;
+                const checkboxState = getNativeCheckboxState(checkbox);
+                if (checkboxState === null) return;
+                if (source && source.enabled !== checkboxState) {
+                    source.enabled = checkboxState;
                     const desiredState = isSourceEffectivelyEnabled(source);
 
                     const virtualCheckbox = shadowRoot?.querySelector?.(`.sp-checkbox[data-source-key="${key}"]`);
@@ -808,7 +810,7 @@
                         virtualCheckbox.checked = source.enabled;
                     }
 
-                    if (checkbox.checked !== desiredState) {
+                    if (checkboxState !== desiredState) {
                         syncSourceToPage(source, desiredState);
                     }
 

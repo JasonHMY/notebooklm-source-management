@@ -42,7 +42,8 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
         labelViewWithoutRows: Boolean(options.labelViewWithoutRows),
         labelViewCollapsedGroups: Boolean(options.labelViewCollapsedGroups),
         labelViewMaterialGroups: Boolean(options.labelViewMaterialGroups),
-        labelViewListSwitchNoop: Boolean(options.labelViewListSwitchNoop)
+        labelViewListSwitchNoop: Boolean(options.labelViewListSwitchNoop),
+        ariaCheckboxes: Boolean(options.ariaCheckboxes)
     };
 
     return `<!doctype html>
@@ -186,7 +187,21 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
                 hydrationTimerIds.push(timerId);
             }
 
-            function createSourceItem(source, phase) {
+            function createAriaCheckbox(label, checked = true) {
+                const checkbox = document.createElement('div');
+                checkbox.setAttribute('role', 'checkbox');
+                checkbox.setAttribute('tabindex', '0');
+                checkbox.setAttribute('aria-label', label);
+                checkbox.setAttribute('aria-checked', checked ? 'true' : 'false');
+                checkbox.className = 'native-aria-checkbox';
+                checkbox.addEventListener('click', () => {
+                    const nextState = checkbox.getAttribute('aria-checked') !== 'true';
+                    checkbox.setAttribute('aria-checked', nextState ? 'true' : 'false');
+                });
+                return checkbox;
+            }
+
+            function createSourceItem(source, phase, options) {
                 const wrapper = document.createElement('div');
                 wrapper.className = 'single-source-container';
                 wrapper.setAttribute('data-testid', 'source-item');
@@ -216,9 +231,13 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
                 row.appendChild(title);
 
                 if (phase === 'full') {
-                    const checkbox = document.createElement('input');
-                    checkbox.type = 'checkbox';
-                    checkbox.setAttribute('aria-label', source.title);
+                    const checkbox = options && options.ariaCheckboxes
+                        ? createAriaCheckbox(source.title, source.enabled !== false)
+                        : document.createElement('input');
+                    if (!options || !options.ariaCheckboxes) {
+                        checkbox.type = 'checkbox';
+                        checkbox.setAttribute('aria-label', source.title);
+                    }
 
                     const moreButton = document.createElement('button');
                     moreButton.type = 'button';
@@ -237,10 +256,10 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
                 return wrapper;
             }
 
-            function renderSources(scrollArea, sources, phase) {
+            function renderSources(scrollArea, sources, phase, options) {
                 scrollArea.replaceChildren();
                 sources.forEach((source) => {
-                    scrollArea.appendChild(createSourceItem(source, phase));
+                    scrollArea.appendChild(createSourceItem(source, phase, options));
                 });
             }
 
@@ -298,7 +317,7 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
                 return controls;
             }
 
-            function createLabelGroup(labelTitle, sources, collapsed) {
+            function createLabelGroup(labelTitle, sources, collapsed, options) {
                 const group = document.createElement('section');
                 group.className = 'source-label-group';
                 group.setAttribute('data-testid', 'source-label-group');
@@ -311,9 +330,13 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
                 header.setAttribute('aria-label', labelTitle);
                 header.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
                 header.textContent = labelTitle;
-                const checkbox = document.createElement('input');
-                checkbox.type = 'checkbox';
-                checkbox.setAttribute('aria-label', labelTitle);
+                const checkbox = options && options.ariaCheckboxes
+                    ? createAriaCheckbox(labelTitle, true)
+                    : document.createElement('input');
+                if (!options || !options.ariaCheckboxes) {
+                    checkbox.type = 'checkbox';
+                    checkbox.setAttribute('aria-label', labelTitle);
+                }
                 header.appendChild(checkbox);
                 group.appendChild(header);
 
@@ -322,7 +345,7 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
                     if (rowsRendered) return;
                     rowsRendered = true;
                     sources.forEach((source) => {
-                        const item = createSourceItem(source, 'full');
+                        const item = createSourceItem(source, 'full', options);
                         item.setAttribute('data-source-label', labelTitle);
                         group.appendChild(item);
                     });
@@ -337,7 +360,7 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
                 return group;
             }
 
-            function createMaterialLabelGroup(labelTitle, sources, collapsed) {
+            function createMaterialLabelGroup(labelTitle, sources, collapsed, options) {
                 const panel = document.createElement('mat-expansion-panel');
                 panel.className = 'mat-expansion-panel';
                 panel.setAttribute('aria-label', labelTitle + ' label');
@@ -348,9 +371,13 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
                 header.setAttribute('aria-label', labelTitle);
                 header.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
                 header.textContent = labelTitle;
-                const checkbox = document.createElement('input');
-                checkbox.type = 'checkbox';
-                checkbox.setAttribute('aria-label', labelTitle);
+                const checkbox = options && options.ariaCheckboxes
+                    ? createAriaCheckbox(labelTitle, true)
+                    : document.createElement('input');
+                if (!options || !options.ariaCheckboxes) {
+                    checkbox.type = 'checkbox';
+                    checkbox.setAttribute('aria-label', labelTitle);
+                }
                 header.appendChild(checkbox);
                 panel.appendChild(header);
 
@@ -359,7 +386,7 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
                     if (rowsRendered) return;
                     rowsRendered = true;
                     sources.forEach((source) => {
-                        const item = createSourceItem(source, 'full');
+                        const item = createSourceItem(source, 'full', options);
                         item.setAttribute('data-source-label', labelTitle);
                         panel.appendChild(item);
                     });
@@ -383,8 +410,8 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
                     groupContainer.className = 'mat-accordion';
                     sourcePanel.appendChild(groupContainer);
                 }
-                groupContainer.appendChild(groupFactory('Research papers', shouldRenderRows ? sources.slice(0, 1) : [], Boolean(options.labelViewCollapsedGroups)));
-                groupContainer.appendChild(groupFactory('Reference material', shouldRenderRows ? sources.slice(1) : [], Boolean(options.labelViewCollapsedGroups)));
+                groupContainer.appendChild(groupFactory('Research papers', shouldRenderRows ? sources.slice(0, 1) : [], Boolean(options.labelViewCollapsedGroups), options));
+                groupContainer.appendChild(groupFactory('Reference material', shouldRenderRows ? sources.slice(1) : [], Boolean(options.labelViewCollapsedGroups), options));
                 setHydrationPhase('full');
             }
 
@@ -434,19 +461,19 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
             function hydrateSources(scrollArea, sources, options) {
                 clearHydrationTimers();
                 if (!options || !options.stagedHydration) {
-                    renderSources(scrollArea, sources, 'full');
+                    renderSources(scrollArea, sources, 'full', options);
                     setHydrationPhase('full');
                     return;
                 }
 
                 setHydrationPhase('empty');
-                renderSources(scrollArea, [], 'full');
+                renderSources(scrollArea, [], 'full', options);
                 scheduleHydrationPhase(() => {
-                    renderSources(scrollArea, sources, 'partial');
+                    renderSources(scrollArea, sources, 'partial', options);
                     setHydrationPhase('partial');
                 }, 40);
                 scheduleHydrationPhase(() => {
-                    renderSources(scrollArea, sources, 'full');
+                    renderSources(scrollArea, sources, 'full', options);
                     setHydrationPhase('full');
                 }, 120);
             }
@@ -501,7 +528,8 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
                         labelView: Boolean(nextNotebook.labelView),
                         labelViewWithoutRows: Boolean(nextNotebook.labelViewWithoutRows),
                         labelViewMaterialGroups: Boolean(nextNotebook.labelViewMaterialGroups),
-                        labelViewListSwitchNoop: Boolean(nextNotebook.labelViewListSwitchNoop)
+                        labelViewListSwitchNoop: Boolean(nextNotebook.labelViewListSwitchNoop),
+                        ariaCheckboxes: Boolean(nextNotebook.ariaCheckboxes)
                     }
                     : initialOptions;
                 history.pushState({}, '', '/notebook/' + encodeURIComponent(notebookId));
@@ -634,8 +662,9 @@ async function installNotebookFixture(context) {
                 labelView: ['label', 'label-empty', 'label-collapsed'].includes(fixtureName),
                 labelViewWithoutRows: fixtureName === 'label-empty',
                 labelViewCollapsedGroups: fixtureName === 'label-collapsed',
-                labelViewMaterialGroups: ['material-labels', 'material-labels-noop'].includes(fixtureName),
-                labelViewListSwitchNoop: fixtureName === 'material-labels-noop'
+                labelViewMaterialGroups: ['material-labels', 'material-labels-noop', 'material-labels-aria'].includes(fixtureName),
+                labelViewListSwitchNoop: fixtureName === 'material-labels-noop',
+                ariaCheckboxes: fixtureName === 'material-labels-aria'
             })
         });
     });

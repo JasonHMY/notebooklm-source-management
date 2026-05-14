@@ -219,6 +219,69 @@ test.describe.serial('extension smoke', () => {
         )), { timeout: 10_000 }).toBeFalsy();
     });
 
+    test('keeps ARIA native checkbox state when switching label view back to list', async () => {
+        const notebookPage = await env.context.newPage();
+
+        await notebookPage.goto('https://notebooklm.google.com/notebook/popup-view-switch-aria?fixture=material-labels-aria');
+        env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
+        await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
+
+        const popupPage = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
+        await popupPage.evaluate(async () => {
+            const tabs = await chrome.tabs.query({ url: 'https://notebooklm.google.com/*' });
+            const targetTab = tabs.find((tab) => tab.url && tab.url.includes('/notebook/popup-view-switch-aria'));
+
+            if (!targetTab || typeof targetTab.id !== 'number') {
+                throw new Error('Popup ARIA view switch notebook tab was not found.');
+            }
+
+            await chrome.tabs.update(targetTab.id, { active: true });
+        });
+        await popupPage.reload();
+        await popupPage.waitForLoadState('domcontentloaded');
+
+        await expect(popupPage.locator('#popup-source-view-section')).toBeVisible({ timeout: 10_000 });
+        await popupPage.locator('#popup-source-view-label-btn').click();
+        await expect(notebookPage.locator('mat-expansion-panel').first()).toBeVisible({ timeout: 10_000 });
+
+        await popupPage.locator('#popup-source-view-list-btn').click();
+        await expect.poll(async () => notebookPage.evaluate(() => Boolean(
+            document.querySelector('#sources-plus-root')?.shadowRoot?.querySelector('.sp-container:not(.is-native-label-view)')
+        )), { timeout: 10_000 }).toBeTruthy();
+
+        await expect.poll(async () => notebookPage.evaluate(() => (
+            Array.from(document.querySelectorAll('[data-testid="source-item"] [role="checkbox"]'))
+                .map((checkbox) => checkbox.getAttribute('aria-checked'))
+        )), { timeout: 10_000 }).toHaveLength(2);
+
+        const statesBeforeToggle = await notebookPage.evaluate(() => (
+            Array.from(document.querySelectorAll('[data-testid="source-item"] [role="checkbox"]'))
+                .map((checkbox) => checkbox.getAttribute('aria-checked'))
+        ));
+        await expect.poll(async () => notebookPage.evaluate(() => {
+            const nativeChecked = Array.from(document.querySelectorAll('[data-testid="source-item"] [role="checkbox"]'))
+                .map((checkbox) => checkbox.getAttribute('aria-checked') === 'true');
+            const root = document.querySelector('#sources-plus-root')?.shadowRoot || null;
+            const managerChecked = Array.from(root?.querySelectorAll('#sources-list .source-item .sp-checkbox') || [])
+                .map((checkbox) => checkbox.checked);
+            return { nativeChecked, managerChecked };
+        }), { timeout: 10_000 }).toEqual({
+            nativeChecked: statesBeforeToggle.map((state) => state === 'true'),
+            managerChecked: statesBeforeToggle.map((state) => state === 'true')
+        });
+
+        await notebookPage.evaluate(() => {
+            const root = document.querySelector('#sources-plus-root')?.shadowRoot;
+            const checkbox = root?.querySelector('.source-item .sp-checkbox');
+            if (!checkbox) throw new Error('Plugin source checkbox missing after ARIA list switch.');
+            checkbox.click();
+        });
+        const expectedFirstState = statesBeforeToggle[0] === 'true' ? 'false' : 'true';
+        await expect.poll(async () => notebookPage.evaluate(() => (
+            document.querySelector('[data-testid="source-item"] [role="checkbox"]')?.getAttribute('aria-checked')
+        )), { timeout: 10_000 }).toBe(expectedFirstState);
+    });
+
     test('falls back to plugin list display when the native list view switch is not confirmed', async () => {
         const notebookPage = await env.context.newPage();
 

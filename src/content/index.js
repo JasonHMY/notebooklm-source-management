@@ -1205,6 +1205,7 @@
                 group = {
                     id: createImportedNativeLabelGroupId(label.title, usedGroupIds),
                     title: label.title,
+                    nativeLabelTitle: label.title || '',
                     children: [],
                     enabled: true,
                     collapsed: false,
@@ -1214,6 +1215,9 @@
                 if (!state.groups.includes(group.id)) {
                     state.groups.push(group.id);
                 }
+            }
+            if (label.title) {
+                group.nativeLabelTitle = label.title;
             }
 
             importableSourceKeys.forEach((sourceKey) => {
@@ -1991,25 +1995,39 @@
         return getSourceViewInfo(sourcePanel)?.kind === SOURCE_VIEW_LABEL;
     }
 
-    function handleNativeCheckboxChange(event) {
-        handleOriginalCheckboxChange(event);
-
+    function syncNativeLabelSelectionsFromCurrentPanel(options = {}) {
         const sourcePanel = findSourcePanel();
-        if (
-            isAwaitingInitialStateLoad ||
-            !isNativeLabelCheckboxChangeTarget(event?.target, sourcePanel)
-        ) {
-            return;
+        if (!sourcePanel || getSourceViewInfo(sourcePanel)?.kind !== SOURCE_VIEW_LABEL) {
+            return false;
         }
 
         const previousPersistableSignature = getPersistableStateSignature();
         scanAndSyncSources({}, false);
+        if (pendingInitialLoadedState) {
+            pendingInitialLoadedState = cloneSerializableData(buildPersistableState());
+        }
         render();
 
         const nextPersistableSignature = getPersistableStateSignature();
         if (shouldSaveAfterMutationSync(previousPersistableSignature, nextPersistableSignature)) {
-            saveState({ immediate: true, critical: true });
+            if (options.saveImmediately) {
+                saveState({ immediate: true, critical: true });
+            } else {
+                saveState();
+            }
         }
+        return true;
+    }
+
+    function handleNativeCheckboxChange(event) {
+        handleOriginalCheckboxChange(event);
+
+        const sourcePanel = findSourcePanel();
+        if (!isNativeLabelCheckboxChangeTarget(event?.target, sourcePanel)) {
+            return;
+        }
+
+        syncNativeLabelSelectionsFromCurrentPanel({ saveImmediately: true });
     }
 
     function scoreNativeViewSwitchCandidate(element, targetViewKind, options = {}) {
@@ -2278,15 +2296,9 @@
         });
         if (
             nextViewKind === SOURCE_VIEW_LIST &&
-            currentInfo?.kind === SOURCE_VIEW_LABEL &&
-            !isAwaitingInitialStateLoad
+            currentInfo?.kind === SOURCE_VIEW_LABEL
         ) {
-            const previousPersistableSignature = getPersistableStateSignature();
-            scanAndSyncSources({}, false);
-            const nextPersistableSignature = getPersistableStateSignature();
-            if (shouldSaveAfterMutationSync(previousPersistableSignature, nextPersistableSignature)) {
-                saveState();
-            }
+            syncNativeLabelSelectionsFromCurrentPanel({ saveImmediately: true });
         }
         const nativeAlreadyActive = currentInfo?.kind === nextViewKind;
         let nativeClicked = false;

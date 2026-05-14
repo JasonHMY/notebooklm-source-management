@@ -1067,6 +1067,13 @@
             return null;
         }
 
+        function getNativeSourceCheckboxState(source, fallbackState = true) {
+            if (!source?.hasNativeCheckbox) return true;
+            const checkboxState = getNativeCheckboxState(source.checkbox);
+            if (checkboxState !== null) return checkboxState;
+            return Boolean(fallbackState);
+        }
+
         function getNativeLabelGroupTitle(group, panel, options = {}) {
             if (!group) return '';
             if (typeof group.__nativeLabelTitle === 'string' && group.__nativeLabelTitle.trim()) {
@@ -1219,17 +1226,6 @@
             if (!(selectionMap instanceof Map) || selectionMap.size === 0 || sourcesByKey.size === 0) return false;
 
             const selectedKeys = new Set();
-            groupsById.forEach((group) => {
-                const selection = selectionMap.get(getComparableNativeLabelTitle(group?.title));
-                if (!selection) return;
-                collectSourceKeysFromGroup(group, groupsById, new Set()).forEach((sourceKey) => {
-                    selectedKeys.add(sourceKey);
-                    const source = sourcesByKey.get(sourceKey);
-                    if (source && source.enabled !== selection.enabled) {
-                        source.enabled = selection.enabled;
-                    }
-                });
-            });
 
             sourcesByKey.forEach((source, sourceKey) => {
                 const selection = selectionMap.get(getComparableNativeLabelTitle(source?.nativeLabelTitle));
@@ -1238,6 +1234,18 @@
                 if (source.enabled !== selection.enabled) {
                     source.enabled = selection.enabled;
                 }
+            });
+
+            groupsById.forEach((group) => {
+                const selection = selectionMap.get(getComparableNativeLabelTitle(group?.nativeLabelTitle));
+                if (!selection) return;
+                collectSourceKeysFromGroup(group, groupsById, new Set()).forEach((sourceKey) => {
+                    selectedKeys.add(sourceKey);
+                    const source = sourcesByKey.get(sourceKey);
+                    if (source && source.enabled !== selection.enabled) {
+                        source.enabled = selection.enabled;
+                    }
+                });
             });
 
             return selectedKeys.size > 0;
@@ -1778,8 +1786,9 @@
 
             currentSources.forEach((source) => {
                 let enabled;
-                const nativeCheckboxState = source.hasNativeCheckbox ? Boolean(source.checkbox?.checked) : true;
                 const previousSourceState = oldSourcesMap.get(source.key) || null;
+                const previousEnabled = previousSourceState ? Boolean(previousSourceState.enabled) : true;
+                const nativeCheckboxState = getNativeSourceCheckboxState(source, previousEnabled);
                 const nativeLabelTitle = source.nativeLabelTitle || previousSourceState?.nativeLabelTitle || '';
                 const nativeLabelGroupSelection = nativeLabelGroupSelections.get(getComparableNativeLabelTitle(nativeLabelTitle));
                 if (isFirstLoad) {

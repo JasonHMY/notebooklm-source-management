@@ -9,7 +9,7 @@
 
 ### Fixed
 - **安全加固 (Security Hardening)**: 阻断从 NotebookLM DOM/CSS 提取的任意第三方来源图标 URL，收紧 content script 在 background 拒绝或通信失败时的 direct storage fallback，并在原生删除/重命名前增加 fresh row 身份校验与删除确认弹窗歧义防护。
-- **NotebookLM 标签/列表切换状态同步 (Native Label/List State Sync)**: 修复在原生标签视图中折叠标签组后修改组头复选框，再切回列表视图时插件仍恢复旧勾选状态的问题。根因是同步逻辑只读取可见来源行，未读取折叠标签组头部的 `aria-checked` / `checked` 状态；现在会在切换前同步并持久化标签组状态，并补充单测与 Playwright 冒烟回归。
+- **NotebookLM 标签/列表切换状态同步 (Native Label/List State Sync)**: 修复在原生标签视图中折叠标签组后修改组头复选框，再切回列表视图时插件仍恢复旧勾选状态的问题。现在 source scan 与原生 change 事件统一读取 `checked` / `aria-checked` / checkbox role，切回列表前会先同步并持久化标签组状态；原生标签组同步也不再盲目匹配普通同名插件文件夹，只对带 `nativeLabelTitle` 元数据的导入标签组或来源生效。
 - **分组树交互健壮性 (Group Tree Interaction Hardening)**: 修复同一毫秒连续新建分组时 `Date.now()` 生成相同 ID 导致分组覆盖的问题，同时避免父分组已过期时创建不可见孤儿分组，以及来源行 DOM 已过期但来源记录不存在时点击行触发运行时异常。
 - **历史/导入分组数据容错 (Persisted Group Shape Guarding)**: 修复历史数据或导入数据中的分组缺少 `children` 数组时，移除分组、状态重映射、构建父级索引或渲染列表可能抛错的问题；现在这些路径会按空子列表处理。
 - **标签状态更新容错 (Tag State Update Guarding)**: 修复只更新标签名称时会意外清空原有颜色的问题，并在旧状态缺少 `tagOrder` 时自动初始化，避免创建或排序标签时报错。

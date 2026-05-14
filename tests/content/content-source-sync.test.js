@@ -14,6 +14,20 @@ const {
     createTreeEl
 } = require('../helpers/content-test-harness');
 
+function configureAriaCheckbox(mockSourceRow, ariaChecked = 'true') {
+    mockSourceRow.checkbox.tagName = 'DIV';
+    mockSourceRow.checkbox.checked = undefined;
+    mockSourceRow.checkbox.getAttribute = jest.fn((attr) => {
+        if (attr === 'role') return 'checkbox';
+        if (attr === 'aria-checked') return ariaChecked;
+        if (attr === 'aria-label') return mockSourceRow.title || '';
+        return null;
+    });
+    mockSourceRow.checkbox.matches = jest.fn((selector) => String(selector).includes('checkbox'));
+    mockSourceRow.checkbox.closest = jest.fn(() => mockSourceRow.row);
+    return mockSourceRow;
+}
+
 describe('scanAndSyncSources', () => {
     let mod;
 
@@ -66,6 +80,29 @@ describe('scanAndSyncSources', () => {
             kind: 'list',
             listRows: 1,
             labelRows: 0
+        });
+    });
+
+    it('reads ARIA checkbox state when scanning list source rows', () => {
+        const source = configureAriaCheckbox(createMockSourceRow({
+            title: 'ARIA List Source',
+            stableToken: 'aria-list-doc',
+            checked: false
+        }), 'true');
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        panel.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [source.row] : []
+        ));
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        mod.scanAndSyncSources({}, true);
+
+        const [sourceRecord] = Array.from(mod.sourcesByKey.values());
+        expect(sourceRecord).toMatchObject({
+            title: 'ARIA List Source',
+            enabled: true
         });
     });
 
@@ -257,6 +294,58 @@ describe('scanAndSyncSources', () => {
         expect(labelSource.checkbox.click).not.toHaveBeenCalled();
     });
 
+    it('reads ARIA checkbox state when scanning label source rows', () => {
+        const labelSource = configureAriaCheckbox(createMockSourceRow({
+            title: 'ARIA Label Source',
+            stableToken: 'aria-label-doc',
+            checked: true
+        }), 'false');
+        labelSource.row.__nativeLabelTitle = 'AI Group';
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const labelGroup = {
+            textContent: 'AI Group',
+            parentElement: panel,
+            parentNode: panel,
+            style: {},
+            __computedStyle: {},
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return 'AI Group label';
+                if (attr === 'data-testid') return 'source-label-group';
+                return null;
+            }),
+            matches: jest.fn((selector) => selector.includes('source-label') || selector.includes('label-group')),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        labelSource.row.parentElement = labelGroup;
+        labelSource.row.parentNode = labelGroup;
+        panel.querySelectorAll = jest.fn((selector) => {
+            const value = String(selector);
+            if (value.includes('source-label') || value.includes('label-group')) return [labelGroup];
+            if (
+                mod.DEPS.row.includes(selector) ||
+                value.includes('source-row') ||
+                value.includes('source-item') ||
+                value.includes('data-source-id')
+            ) {
+                return [labelSource.row];
+            }
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        mod.scanAndSyncSources({}, true);
+
+        const [sourceRecord] = Array.from(mod.sourcesByKey.values());
+        expect(sourceRecord).toMatchObject({
+            title: 'ARIA Label Source',
+            enabled: false,
+            nativeLabelTitle: 'AI Group'
+        });
+    });
+
     it('adopts collapsed native label group checkbox changes before switching back to list view', () => {
         const { panel } = createMockPanel({ visible: true, contentVisible: true });
         const first = createMockSourceRow({ title: 'First Paper', stableToken: 'doc-1', checked: true });
@@ -306,6 +395,7 @@ describe('scanAndSyncSources', () => {
         mod.groupsById.set('ai-group', {
             id: 'ai-group',
             title: 'AI Group',
+            nativeLabelTitle: 'AI Group',
             children: sourceKeys.map((key) => ({ type: 'source', key })),
             enabled: true,
             collapsed: false
@@ -350,6 +440,119 @@ describe('scanAndSyncSources', () => {
         sourceKeys.forEach((sourceKey) => {
             expect(mod.sourcesByKey.get(sourceKey).enabled).toBe(false);
         });
+    });
+
+    it('applies collapsed native label selections through imported group metadata', () => {
+        const existing = createMockSourceRow({ title: 'Imported Source', stableToken: 'imported-doc', checked: true });
+        const descriptor = mod.createSourceDescriptor(existing.row, new Map(), new Map());
+        mod.sourcesByKey.set(descriptor.key, { ...descriptor, enabled: true, nativeLabelTitle: '' });
+        mod.groupsById.set('imported-folder', {
+            id: 'imported-folder',
+            title: 'Renamed Imported Folder',
+            nativeLabelTitle: 'AI Group',
+            children: [{ type: 'source', key: descriptor.key }],
+            enabled: true,
+            collapsed: false
+        });
+        mod.state.groups = ['imported-folder'];
+        mod.state.ungrouped = [];
+
+        const groupCheckbox = {
+            checked: false,
+            parentElement: null,
+            parentNode: null,
+            style: {},
+            getAttribute: jest.fn(() => null),
+            matches: jest.fn(() => false)
+        };
+        const collapsedLabelGroup = {
+            textContent: 'AI Group',
+            parentElement: null,
+            parentNode: null,
+            style: {},
+            __computedStyle: {},
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return 'AI Group label';
+                if (attr === 'data-testid') return 'source-label-group';
+                return null;
+            }),
+            matches: jest.fn((selector) => selector.includes('source-label') || selector.includes('label-group')),
+            querySelector: jest.fn((selector) => (String(selector).includes('checkbox') ? groupCheckbox : null)),
+            querySelectorAll: jest.fn((selector) => (String(selector).includes('checkbox') ? [groupCheckbox] : []))
+        };
+        groupCheckbox.parentElement = collapsedLabelGroup;
+        groupCheckbox.parentNode = collapsedLabelGroup;
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        collapsedLabelGroup.parentElement = panel;
+        collapsedLabelGroup.parentNode = panel;
+        panel.querySelectorAll = jest.fn((selector) => {
+            const value = String(selector);
+            if (value.includes('source-label') || value.includes('label-group')) return [collapsedLabelGroup];
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        mod.scanAndSyncSources({}, false);
+
+        expect(mod.sourcesByKey.get(descriptor.key).enabled).toBe(false);
+    });
+
+    it('does not apply collapsed native label selections to ordinary same-title plugin groups', () => {
+        const existing = createMockSourceRow({ title: 'Ordinary Group Source', stableToken: 'ordinary-doc', checked: true });
+        const descriptor = mod.createSourceDescriptor(existing.row, new Map(), new Map());
+        mod.sourcesByKey.set(descriptor.key, { ...descriptor, enabled: true, nativeLabelTitle: '' });
+        mod.groupsById.set('ordinary-folder', {
+            id: 'ordinary-folder',
+            title: 'AI Group',
+            children: [{ type: 'source', key: descriptor.key }],
+            enabled: true,
+            collapsed: false
+        });
+        mod.state.groups = ['ordinary-folder'];
+        mod.state.ungrouped = [];
+
+        const groupCheckbox = {
+            checked: false,
+            parentElement: null,
+            parentNode: null,
+            style: {},
+            getAttribute: jest.fn(() => null),
+            matches: jest.fn(() => false)
+        };
+        const collapsedLabelGroup = {
+            textContent: 'AI Group',
+            parentElement: null,
+            parentNode: null,
+            style: {},
+            __computedStyle: {},
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return 'AI Group label';
+                if (attr === 'data-testid') return 'source-label-group';
+                return null;
+            }),
+            matches: jest.fn((selector) => selector.includes('source-label') || selector.includes('label-group')),
+            querySelector: jest.fn((selector) => (String(selector).includes('checkbox') ? groupCheckbox : null)),
+            querySelectorAll: jest.fn((selector) => (String(selector).includes('checkbox') ? [groupCheckbox] : []))
+        };
+        groupCheckbox.parentElement = collapsedLabelGroup;
+        groupCheckbox.parentNode = collapsedLabelGroup;
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        collapsedLabelGroup.parentElement = panel;
+        collapsedLabelGroup.parentNode = panel;
+        panel.querySelectorAll = jest.fn((selector) => {
+            const value = String(selector);
+            if (value.includes('source-label') || value.includes('label-group')) return [collapsedLabelGroup];
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        mod.scanAndSyncSources({}, false);
+
+        expect(mod.sourcesByKey.get(descriptor.key).enabled).toBe(true);
     });
 
     it('keeps the pre-labeling entry point in the traditional list source view', () => {
@@ -535,6 +738,42 @@ describe('scanAndSyncSources', () => {
             'Clinical Papers',
             'Clinical Papers'
         ]);
+    });
+
+    it('persists source native label titles for collapsed native label sync', () => {
+        const source = createMockSourceRow({ title: 'Paper One', stableToken: 'paper-1', checked: true });
+        source.row.__nativeLabelTitle = 'Clinical Papers';
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const labelGroup = {
+            textContent: 'Clinical Papers',
+            parentElement: panel,
+            parentNode: panel,
+            style: {},
+            __computedStyle: {},
+            getAttribute: jest.fn((attr) => (attr === 'aria-label' ? 'Clinical Papers label' : null)),
+            matches: jest.fn((selector) => selector.includes('source-label') || selector.includes('label-group')),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        source.row.parentElement = labelGroup;
+        source.row.parentNode = labelGroup;
+        panel.querySelectorAll = jest.fn((selector) => {
+            const value = String(selector);
+            if (value.includes('source-label') || value.includes('label-group')) return [labelGroup];
+            if (value.includes('source')) return [source.row];
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        mod.scanAndSyncSources({}, true);
+        const [sourceKey] = Array.from(mod.sourcesByKey.keys());
+
+        expect(mod.buildPersistableState().sourceStateById[sourceKey]).toMatchObject({
+            title: 'Paper One',
+            nativeLabelTitle: 'Clinical Papers'
+        });
     });
 
     it('infers NotebookLM label titles from expanded native label headers without test ids', () => {
@@ -951,7 +1190,12 @@ describe('scanAndSyncSources', () => {
 
         expect(mod.applyNativeLabelImport()).toBe(true);
         expect(mod.groupsById.get('existing-clinical').children).toHaveLength(1);
+        expect(mod.groupsById.get('existing-clinical').nativeLabelTitle).toBe('Clinical Papers');
         expect(Array.from(mod.groupsById.values()).map((group) => group.title).sort()).toEqual([
+            'Clinical Papers',
+            'Policy Notes'
+        ]);
+        expect(Array.from(mod.groupsById.values()).map((group) => group.nativeLabelTitle).sort()).toEqual([
             'Clinical Papers',
             'Policy Notes'
         ]);
@@ -994,6 +1238,7 @@ describe('scanAndSyncSources', () => {
             { type: 'source', key: groupedDescriptor.key }
         ]);
         const importedGroup = Array.from(mod.groupsById.values()).find((group) => group.title === 'NotebookLM Label');
+        expect(importedGroup.nativeLabelTitle).toBe('NotebookLM Label');
         expect(importedGroup.children).toEqual([
             { type: 'source', key: ungroupedDescriptor.key }
         ]);
@@ -1804,6 +2049,7 @@ describe('scanAndSyncSources', () => {
                     enabled: false,
                     title: 'Deferred Source',
                     normalizedTitle: 'deferred source',
+                    nativeLabelTitle: 'AI Group',
                     fingerprint: 'deferred source||article',
                     identityType: 'stable-token'
                 }
@@ -1831,6 +2077,7 @@ describe('scanAndSyncSources', () => {
         expect(mod.sourcesByKey.get('source_id_doc-1')).toMatchObject({
             title: 'Deferred Source',
             enabled: false,
+            nativeLabelTitle: 'AI Group',
             hasNativeCheckbox: false,
             isPendingNativeHydration: true
         });

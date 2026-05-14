@@ -1153,7 +1153,7 @@
             const persistedSourceTagsById = {};
 
             sourcesByKey.forEach((source, sourceKey) => {
-                sourceStateById[sourceKey] = {
+                const sourceRecord = {
                     enabled: Boolean(source.enabled),
                     title: source.title,
                     normalizedTitle: source.normalizedTitle || normalizeSourceText(source.title),
@@ -1161,6 +1161,10 @@
                     fingerprint: source.fingerprint || '',
                     identityType: source.identityType || 'fingerprint'
                 };
+                if (source.nativeLabelTitle) {
+                    sourceRecord.nativeLabelTitle = source.nativeLabelTitle;
+                }
+                sourceStateById[sourceKey] = sourceRecord;
 
                 const tagIds = getSourceTagIds(sourceKey);
                 if (tagIds.length > 0) {
@@ -1403,6 +1407,7 @@
                     isLoading: false,
                     isDisabled: false,
                     enabled: sourceRecord?.enabled !== false,
+                    nativeLabelTitle: sourceRecord?.nativeLabelTitle || '',
                     isPendingNativeHydration: true
                 });
             });

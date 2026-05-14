@@ -823,6 +823,7 @@ describe('manager launcher messaging', () => {
         mod.groupsById.set('ai-group', {
             id: 'ai-group',
             title: 'AI Group',
+            nativeLabelTitle: 'AI Group',
             children: sourceKeys.map((key) => ({ type: 'source', key })),
             enabled: true,
             collapsed: false
@@ -842,6 +843,129 @@ describe('manager launcher messaging', () => {
             expect(mod.sourcesByKey.get(sourceKey).enabled).toBe(false);
         });
         expect(listFirst.checkbox.click).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps collapsed label group changes made while initial restore is deferred', () => {
+        const sendResponse = jest.fn();
+        let phase = 'empty';
+        const sourceKey = 'source_id_doc-1';
+        const loadedState = {
+            schemaVersion: 3,
+            groups: ['native-label-group'],
+            groupsById: {
+                'native-label-group': {
+                    id: 'native-label-group',
+                    title: 'Imported Label Folder',
+                    nativeLabelTitle: 'AI Group',
+                    children: [{ type: 'source', key: sourceKey }],
+                    enabled: true,
+                    collapsed: false
+                }
+            },
+            ungrouped: [],
+            sourceStateById: {
+                [sourceKey]: {
+                    enabled: true,
+                    title: 'Deferred Label Source',
+                    normalizedTitle: 'deferred label source',
+                    stableToken: 'doc-1',
+                    nativeLabelTitle: 'AI Group',
+                    fingerprint: 'deferred label source||article',
+                    identityType: 'stable-token'
+                }
+            },
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {}
+        };
+        const groupCheckbox = {
+            tagName: 'INPUT',
+            type: 'checkbox',
+            checked: false,
+            parentElement: null,
+            parentNode: null,
+            style: {},
+            getAttribute: jest.fn((attr) => (attr === 'type' ? 'checkbox' : null)),
+            matches: jest.fn((selector) => String(selector).includes('checkbox')),
+            closest: jest.fn(() => null)
+        };
+        const collapsedLabelGroup = {
+            textContent: 'AI Group',
+            parentElement: null,
+            parentNode: null,
+            style: {},
+            __computedStyle: {},
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return 'AI Group label';
+                if (attr === 'data-testid') return 'source-label-group';
+                return null;
+            }),
+            matches: jest.fn((selector) => selector.includes('source-label') || selector.includes('label-group')),
+            querySelector: jest.fn((selector) => (String(selector).includes('checkbox') ? groupCheckbox : null)),
+            querySelectorAll: jest.fn((selector) => (String(selector).includes('checkbox') ? [groupCheckbox] : []))
+        };
+        groupCheckbox.parentElement = collapsedLabelGroup;
+        groupCheckbox.parentNode = collapsedLabelGroup;
+
+        const listSource = createMockSourceRow({ title: 'Deferred Label Source', stableToken: 'doc-1', checked: true });
+        const listButton = {
+            textContent: 'List view',
+            disabled: false,
+            style: {},
+            click: jest.fn(() => {
+                phase = 'list';
+            }),
+            getAttribute: jest.fn((attr) => (attr === 'aria-label' ? 'List view' : null)),
+            matches: jest.fn(() => false),
+            closest: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        collapsedLabelGroup.parentElement = panel;
+        collapsedLabelGroup.parentNode = panel;
+        panel.querySelectorAll = jest.fn((selector) => {
+            const value = String(selector);
+            if (value.includes('button') || value.includes('[role="button"]')) {
+                return phase === 'collapsed-label' ? [listButton] : [];
+            }
+            if (value.includes('source-label') || value.includes('label-group')) {
+                return phase === 'collapsed-label' ? [collapsedLabelGroup] : [];
+            }
+            if (
+                mod.DEPS.row.includes(selector) ||
+                value.includes('source-row') ||
+                value.includes('source-item') ||
+                value.includes('data-source-id')
+            ) {
+                return phase === 'list' ? [listSource.row] : [];
+            }
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+        global.document.querySelectorAll = jest.fn((selector) => panel.querySelectorAll(selector));
+
+        expect(mod.restoreInitialLoadedState(loadedState)).toEqual({
+            deferred: true,
+            shouldUpgradeStorage: false
+        });
+        mod._setAwaitingInitialStateLoadForTest(true);
+        phase = 'collapsed-label';
+
+        mod._handleNativeCheckboxChangeForTest({ target: groupCheckbox });
+
+        expect(mod._getPendingInitialLoadedState().sourceStateById[sourceKey].enabled).toBe(false);
+
+        mod.handleManagerMessage({ type: 'SWITCH_SOURCE_VIEW', viewKind: 'list' }, {}, sendResponse);
+        mod._completeInitialStateLoadForTest();
+
+        expect(listButton.click).toHaveBeenCalledTimes(1);
+        expect(mod._getPendingInitialLoadedState()).toBe(null);
+        const restoredSource = Array.from(mod.sourcesByKey.values())
+            .find((source) => source.title === 'Deferred Label Source');
+        expect(restoredSource?.enabled).toBe(false);
+        expect(listSource.checkbox.click).toHaveBeenCalledTimes(1);
     });
 
     it('observes native checkbox state attributes inside the source panel', () => {
@@ -945,6 +1069,7 @@ describe('manager launcher messaging', () => {
         mod.groupsById.set('ai-group', {
             id: 'ai-group',
             title: 'AI Group',
+            nativeLabelTitle: 'AI Group',
             children: sourceKeys.map((key) => ({ type: 'source', key })),
             enabled: true,
             collapsed: false
@@ -993,6 +1118,57 @@ describe('manager launcher messaging', () => {
         sourceKeys.forEach((sourceKey) => {
             expect(mod.sourcesByKey.get(sourceKey).enabled).toBe(false);
         });
+        expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(
+            expect.objectContaining({
+                type: 'SAVE_STATE',
+                key: 'sourcesPlusState_test-project'
+            }),
+            expect.any(Function)
+        );
+    });
+
+    it('syncs list row native checkbox changes from ARIA checkbox state', async () => {
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const source = createMockSourceRow({ title: 'ARIA Native Source', stableToken: 'aria-native-doc', checked: true });
+        source.row.nodeType = 1;
+        source.row.matches = jest.fn((selector) => mod.DEPS.row.includes(selector));
+        source.row.closest = jest.fn(() => null);
+        source.checkbox.tagName = 'DIV';
+        source.checkbox.matches = jest.fn((selector) => String(selector).includes('checkbox'));
+        source.checkbox.closest = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? source.row : null
+        ));
+        panel.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [source.row] : []
+        ));
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        mod._setProjectId('test-project');
+        mod.scanAndSyncSources({}, true);
+        const [sourceKey] = Array.from(mod.sourcesByKey.keys());
+        const virtualCheckbox = { checked: true };
+        mod._setShadowRootForTest({
+            querySelector: jest.fn((selector) => (
+                String(selector).includes(sourceKey) ? virtualCheckbox : null
+            ))
+        });
+        global.chrome.runtime.sendMessage.mockClear();
+
+        source.checkbox.checked = undefined;
+        source.checkbox.getAttribute = jest.fn((attr) => {
+            if (attr === 'role') return 'checkbox';
+            if (attr === 'aria-checked') return 'false';
+            if (attr === 'aria-label') return 'ARIA Native Source';
+            return null;
+        });
+
+        mod._handleNativeCheckboxChangeForTest({ target: source.checkbox });
+        await mod.waitForPendingStateSave();
+
+        expect(mod.sourcesByKey.get(sourceKey).enabled).toBe(false);
+        expect(virtualCheckbox.checked).toBe(false);
         expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(
             expect.objectContaining({
                 type: 'SAVE_STATE',
