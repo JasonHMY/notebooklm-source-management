@@ -672,6 +672,43 @@ describe('saveState', () => {
         expect(mod.getDiagnosticsText()).not.toContain('Sensitive import body');
     });
 
+    it('adds developer log metadata to diagnostics without exposing developer log entries', async () => {
+        const projectId = seedPersistedState();
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'SAVE_PREFERENCES') {
+                cb({ success: true, preferences: message.preferences });
+                return;
+            }
+            if (message?.type === 'LOAD_DEVELOPER_LOGS') {
+                cb({ success: true, logs: [] });
+                return;
+            }
+            if (message?.type === 'APPEND_DEVELOPER_LOG') {
+                cb({ success: true, logs: [message.entry] });
+                return;
+            }
+            cb({ success: true });
+        });
+
+        await mod.setDeveloperModeEnabled(true);
+        mod.developerLog('error', 'native_action', 'delete_failed', {
+            sourceKey: 'secret-source',
+            sourceTitle: 'Sensitive Source Title',
+            reason: 'confirm_dialog_missing'
+        });
+
+        const diagnostics = JSON.parse(mod.getDiagnosticsText());
+        expect(diagnostics).toMatchObject({
+            notebookId: projectId,
+            developerModeEnabled: true,
+            developerLogCount: 1,
+            latestDeveloperLogAt: expect.any(String)
+        });
+        expect(mod.getDiagnosticsText()).not.toContain('delete_failed');
+        expect(mod.getDiagnosticsText()).not.toContain('Sensitive Source Title');
+        expect(mod.getDiagnosticsText()).not.toContain('confirm_dialog_missing');
+    });
+
     it('logs structured background save failures without throwing', () => {
         seedPersistedState();
         const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});

@@ -965,6 +965,9 @@
                 display: flex;
                 align-items: center;
             }
+            .sp-source-actions-placeholder {
+                pointer-events: none;
+            }
             .title-container, .group-title {
                 flex-grow: 1;
                 min-width: 0;
@@ -987,6 +990,15 @@
                 white-space: normal;
                 overflow-wrap: anywhere;
                 word-break: break-word;
+            }
+            .source-loading-status {
+                width: 100%;
+                color: var(--sp-text-secondary);
+                font-size: 11px;
+                line-height: 1.2;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
             }
             .source-tag-list {
                 display: flex;
@@ -1332,6 +1344,9 @@
             .loading-source .title-container { 
                 opacity: 0.6; 
                 animation: pulse-text 2s cubic-bezier(0.25, 1, 0.5, 1) infinite; 
+            }
+            .loading-source .source-loading-status {
+                color: var(--sp-accent);
             }
             .loading-source .sp-checkbox {
                 opacity: 0;
@@ -2306,25 +2321,10 @@
             }
             
             /* --- Batch Mode Additions --- */
-            @keyframes sp-batch-selected-pop {
-                0% {
-                    transform: scale(1);
-                    box-shadow: inset 0 0 0 1px rgba(0, 122, 255, 0.08), 0 0 0 0 rgba(0, 122, 255, 0);
-                }
-                48% {
-                    transform: scale(1.018);
-                    box-shadow: inset 0 0 0 1px rgba(0, 122, 255, 0.16), 0 0 0 3px rgba(0, 122, 255, 0.12);
-                }
-                100% {
-                    transform: scale(1);
-                    box-shadow: inset 0 0 0 1px rgba(0, 122, 255, 0.08), 0 0 0 0 rgba(0, 122, 255, 0);
-                }
-            }
             .source-item.selected-for-batch {
                 background-color: var(--sp-batch-selected-bg);
                 border: 1px dashed var(--sp-accent);
                 box-shadow: inset 0 0 0 1px rgba(0, 122, 255, 0.08);
-                animation: sp-batch-selected-pop var(--sp-motion-medium) var(--sp-ease-emphasized);
                 transition:
                     background-color var(--sp-motion-base) var(--sp-ease-standard),
                     border-color var(--sp-motion-base) var(--sp-ease-standard),
@@ -2494,6 +2494,8 @@
             }
 
             .sp-cancel-batch-btn {
+                flex: 0 0 auto;
+                min-width: 72px;
                 background: transparent;
                 border: 1px solid var(--sp-border-light);
             }

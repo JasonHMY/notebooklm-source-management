@@ -217,6 +217,10 @@ const createModalMotionTestRuntime = ({
         lastNativeActionFailure: null
     })),
     getDiagnosticsText = jest.fn(() => '{"notebookId":"notebook-test"}'),
+    getDeveloperModeEnabled = jest.fn(() => false),
+    setDeveloperModeEnabled = jest.fn(() => Promise.resolve(false)),
+    getDeveloperLogExportText = jest.fn(() => '{"logs":[]}'),
+    clearDeveloperLogs = jest.fn(() => Promise.resolve(true)),
     renderSaveStatus = jest.fn()
 } = {}) => {
     const createContentModals = require('../../src/content/content-modals.js');
@@ -253,6 +257,10 @@ const createModalMotionTestRuntime = ({
         applyNativeLabelImport,
         getDiagnosticsInfo,
         getDiagnosticsText,
+        getDeveloperModeEnabled,
+        setDeveloperModeEnabled,
+        getDeveloperLogExportText,
+        clearDeveloperLogs,
         renderSaveStatus,
         updateTag: jest.fn(() => null),
         deleteTag: jest.fn(),
@@ -837,6 +845,45 @@ describe('modal option motion', () => {
         shadowRoot.querySelector('.sp-history-restore-btn').dispatchEvent({ type: 'click' });
         await Promise.resolve();
         expect(restoreStateHistoryEntry).toHaveBeenCalledWith('history-1');
+    });
+
+    it('renders developer mode controls in settings and wires log actions', async () => {
+        const writeText = jest.fn(() => Promise.resolve());
+        global.window.navigator = { clipboard: { writeText } };
+        const setDeveloperModeEnabled = jest.fn(() => Promise.resolve(true));
+        const getDeveloperLogExportText = jest.fn(() => '{"developerModeEnabled":true,"logs":[]}');
+        const clearDeveloperLogs = jest.fn(() => Promise.resolve(true));
+        const showToast = jest.fn();
+        const { modals, shadowRoot } = createModalMotionTestRuntime({
+            getDeveloperModeEnabled: () => false,
+            setDeveloperModeEnabled,
+            getDeveloperLogExportText,
+            clearDeveloperLogs,
+            showToast
+        });
+
+        expect(modals.renderSettingsModal()).toBe(true);
+
+        const developerSection = shadowRoot.querySelector('.sp-settings-developer-section');
+        expect(developerSection).toBeTruthy();
+        expect(developerSection.textContent).toContain('ui_settings_developer_mode_title');
+        expect(developerSection.textContent).toContain('ui_settings_developer_mode_body');
+
+        const toggle = shadowRoot.querySelector('.sp-settings-developer-mode-toggle');
+        expect(toggle).toBeTruthy();
+        expect(toggle.checked).toBe(false);
+
+        toggle.checked = true;
+        toggle.dispatchEvent({ type: 'change' });
+        expect(setDeveloperModeEnabled).toHaveBeenCalledWith(true);
+
+        shadowRoot.querySelector('.sp-settings-copy-developer-logs-btn').dispatchEvent({ type: 'click' });
+        expect(getDeveloperLogExportText).toHaveBeenCalled();
+        expect(writeText).toHaveBeenCalledWith('{"developerModeEnabled":true,"logs":[]}');
+
+        shadowRoot.querySelector('.sp-settings-clear-developer-logs-btn').dispatchEvent({ type: 'click' });
+        await Promise.resolve();
+        expect(clearDeveloperLogs).toHaveBeenCalled();
     });
 
     it('shows a localized toast when Chrome Web Store feedback cannot open', () => {

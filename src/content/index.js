@@ -27,6 +27,10 @@
     const createContentSourceActions = globalThis.NSM_CREATE_CONTENT_SOURCE_ACTIONS;
     const createContentTags = globalThis.NSM_CREATE_CONTENT_TAGS;
     const createContentStateReconcile = globalThis.NSM_CREATE_CONTENT_STATE_RECONCILE;
+    const createContentDeveloperLogger = globalThis.NSM_CREATE_CONTENT_DEVELOPER_LOGGER;
+    const createContentRuntimeState = globalThis.NSM_CREATE_CONTENT_RUNTIME_STATE;
+    const createContentMessageRouter = globalThis.NSM_CREATE_CONTENT_MESSAGE_ROUTER;
+    const createContentNativeLabelImport = globalThis.NSM_CREATE_CONTENT_NATIVE_LABEL_IMPORT;
     const createContentPersistence = globalThis.NSM_CREATE_CONTENT_PERSISTENCE;
     const createContentModals = globalThis.NSM_CREATE_CONTENT_MODALS;
     const createContentRender = globalThis.NSM_CREATE_CONTENT_RENDER;
@@ -44,6 +48,10 @@
         typeof createContentSourceActions !== 'function' ||
         typeof createContentTags !== 'function' ||
         typeof createContentStateReconcile !== 'function' ||
+        typeof createContentDeveloperLogger !== 'function' ||
+        typeof createContentRuntimeState !== 'function' ||
+        typeof createContentMessageRouter !== 'function' ||
+        typeof createContentNativeLabelImport !== 'function' ||
         typeof createContentPersistence !== 'function' ||
         typeof createContentModals !== 'function' ||
         typeof createContentRender !== 'function' ||
@@ -194,19 +202,7 @@
         return JSON.parse(JSON.stringify(value));
     }
 
-    const runtimeContext = {};
-
-    function bindRuntimeProperty(name, getter, setter) {
-        const descriptor = {
-            enumerable: true,
-            configurable: true,
-            get: getter
-        };
-        if (typeof setter === 'function') {
-            descriptor.set = setter;
-        }
-        Object.defineProperty(runtimeContext, name, descriptor);
-    }
+    const { runtimeContext, bindRuntimeProperty } = createContentRuntimeState();
 
     bindRuntimeProperty('state', () => state, (value) => { state = value; });
     bindRuntimeProperty('pendingBatchKeys', () => pendingBatchKeys, (value) => { pendingBatchKeys = value; });
@@ -346,6 +342,23 @@
         appendGroupChildIfAcyclic
     } = stateReconcileModule;
 
+    const developerLoggerModule = createContentDeveloperLogger({
+        chrome,
+        getProjectId: () => projectId || '',
+        getDiagnosticsInfo: () => getDiagnosticsInfo()
+    });
+    const {
+        developerLog,
+        getDeveloperModeEnabled,
+        setDeveloperModeEnabled,
+        loadDeveloperPreferences,
+        loadDeveloperLogs,
+        getDeveloperLogs,
+        getLatestDeveloperLogAt,
+        getDeveloperLogExportText,
+        clearDeveloperLogs
+    } = developerLoggerModule;
+
     const sourceActionsModule = createContentSourceActions({
         getDocument: () => document,
         getWindow: () => window,
@@ -356,6 +369,7 @@
         getMessage,
         runtime: runtimeContext,
         showToast: (...args) => showToast(...args),
+        developerLog: (...args) => developerLog(...args),
         render: (...args) => render(...args),
         sourceMatchesCurrentFilters: (...args) => sourceMatchesCurrentFilters(...args),
         resolveFreshRowEntry: (...args) => resolveFreshRowEntry(...args),
@@ -380,6 +394,7 @@
             }, 1550);
         },
         onNativeSourceRenameStarted: (...args) => startNativeRenameWatcher(...args),
+        onNativeSourceDeleteAccepted: (...args) => handleNativeSourceDeleteAccepted(...args),
         recordNativeActionFailure: (details) => {
             const failure = Object.assign({
                 occurredAt: new Date().toISOString()
@@ -391,6 +406,25 @@
         },
         findElement: (...args) => findElement(...args)
     });
+
+    function handleNativeSourceDeleteAccepted(sourceKey) {
+        if (!sourceKey || !sourcesByKey.has(sourceKey)) return false;
+
+        const source = sourcesByKey.get(sourceKey);
+        removeSourceFromTree(sourceKey);
+        sourcesByKey.delete(sourceKey);
+        sourceTagsById.delete(sourceKey);
+        pendingBatchKeys.delete(sourceKey);
+
+        if (runtimeContext.keyByElement instanceof WeakMap && source?.element) {
+            runtimeContext.keyByElement.delete(source.element);
+        }
+
+        buildParentMap();
+        saveState({ immediate: true, critical: true });
+        return true;
+    }
+
     const {
         canOpenSourceActionMenu,
         getViewportSize,
@@ -537,6 +571,10 @@
         applyNativeLabelImport: (...args) => applyNativeLabelImport(...args),
         getDiagnosticsInfo: (...args) => getDiagnosticsInfo(...args),
         getDiagnosticsText: (...args) => getDiagnosticsText(...args),
+        getDeveloperModeEnabled: (...args) => getDeveloperModeEnabled(...args),
+        setDeveloperModeEnabled: (...args) => setDeveloperModeEnabled(...args),
+        getDeveloperLogExportText: (...args) => getDeveloperLogExportText(...args),
+        clearDeveloperLogs: (...args) => clearDeveloperLogs(...args),
         renderSaveStatus: (...args) => renderSaveStatus(...args),
         normalizeTagColor,
         normalizeTagColorInputValue,
@@ -599,6 +637,7 @@
         buildParentMap: (...args) => buildParentMap(...args),
         buildPersistableState: (...args) => buildPersistableState(...args),
         saveState: (options = {}) => saveState(Object.assign({}, options, { recordUndo: false })),
+        developerLog: (...args) => developerLog(...args),
         render: (...args) => render(...args),
         suspendManagerForSourceDetailView: (...args) => suspendManagerForSourceDetailView(...args),
         flushPendingInitialLoadedState: (...args) => flushPendingInitialLoadedState(...args),
@@ -611,7 +650,10 @@
         getSourceViewInfo,
         detectSourceView,
         getSourceEntries,
+        getCollapsedNativeLabelGroupSummaries,
+        getCollapsedNativeLabelGroupTitles,
         expandCollapsedNativeLabelGroups,
+        restoreNativeLabelExpansionControls,
         getSourceElements,
         getManageableSourceElements,
         hasRenderableSourceRows,
@@ -766,6 +808,7 @@
         normalizeSourceText,
         getMessage,
         showToast: (...args) => showToast(...args),
+        developerLog: (...args) => developerLog(...args),
         onSaveStatusChange: (status) => renderSaveStatus(status),
         getSourceTagIds,
         getSerializedTag,
@@ -1101,8 +1144,101 @@
         isNoopTreeMove
     } = treeInteractionsModule;
 
-    function getNativeLabelImportPreview() {
-        const viewInfo = sourceViewInfo || { kind: sourceViewKind, confidence: sourceViewConfidence };
+    function getComparableNativeImportLabelTitle(value) {
+        return normalizeSourceText(String(value || '').replace(/\s+/g, ' ').trim()).toLowerCase();
+    }
+
+    const nativeLabelImportModule = createContentNativeLabelImport({
+        getComparableNativeImportLabelTitle
+    });
+    const {
+        previewContainsTitles: nativeLabelPreviewContainsTitles,
+        getIncompleteSummaries: getIncompleteNativeLabelImportSummaries
+    } = nativeLabelImportModule;
+
+    function findReusableNativeLabelImportGroup(labelTitle) {
+        const comparableTitle = getComparableNativeImportLabelTitle(labelTitle);
+        if (!comparableTitle) return null;
+        return Array.from(groupsById.values()).find((group) => (
+            group?.nativeLabelTitle &&
+            getComparableNativeImportLabelTitle(group.nativeLabelTitle) === comparableTitle
+        )) || null;
+    }
+
+    function resolveNativeLabelPreviewSourceKey(descriptor) {
+        if (!descriptor) return '';
+        if (descriptor.key && sourcesByKey.has(descriptor.key)) return descriptor.key;
+        if (descriptor.legacyKey && sourcesByKey.has(descriptor.legacyKey)) return descriptor.legacyKey;
+
+        const findUniqueSourceMatch = (predicate) => {
+            const matches = [];
+            sourcesByKey.forEach((source, sourceKey) => {
+                if (predicate(source, sourceKey)) matches.push(sourceKey);
+            });
+            return matches.length === 1 ? matches[0] : '';
+        };
+
+        if (descriptor.stableToken) {
+            const stableTokenMatch = findUniqueSourceMatch((source) => source?.stableToken === descriptor.stableToken);
+            if (stableTokenMatch) return stableTokenMatch;
+        }
+        if (descriptor.fingerprint) {
+            const fingerprintMatch = findUniqueSourceMatch((source) => source?.fingerprint === descriptor.fingerprint);
+            if (fingerprintMatch) return fingerprintMatch;
+        }
+        const normalizedTitle = normalizeSourceText(descriptor.title || descriptor.normalizedTitle || '');
+        if (normalizedTitle) {
+            const titleMatch = findUniqueSourceMatch((source) => (
+                normalizeSourceText(source?.title || source?.normalizedTitle || '') === normalizedTitle
+            ));
+            if (titleMatch) return titleMatch;
+        }
+        return descriptor.key || descriptor.legacyKey || '';
+    }
+
+    function createNativeLabelPreviewSourceRecord(descriptor, nativeLabelTitle, sourceKey) {
+        if (!descriptor || !sourceKey) return null;
+        return Object.assign({}, descriptor, {
+            key: sourceKey,
+            sourceViewKind: 'label',
+            nativeLabelTitle: nativeLabelTitle || descriptor.nativeLabelTitle || '',
+            enabled: typeof descriptor.enabled === 'boolean' ? descriptor.enabled : true
+        });
+    }
+
+    function ensureNativeLabelPreviewSources(label) {
+        if (!label || !Array.isArray(label.sourceRecords)) return 0;
+        let addedCount = 0;
+        label.sourceRecords.forEach((sourceRecord) => {
+            const sourceKey = sourceRecord?.key;
+            if (!sourceKey) return;
+            const nativeLabelTitle = label.title || sourceRecord.nativeLabelTitle || '';
+            if (sourcesByKey.has(sourceKey)) {
+                const existingSource = sourcesByKey.get(sourceKey);
+                if (existingSource && nativeLabelTitle && !existingSource.nativeLabelTitle) {
+                    existingSource.nativeLabelTitle = nativeLabelTitle;
+                }
+                return;
+            }
+            const hydratedSource = Object.assign({}, sourceRecord, {
+                nativeLabelTitle,
+                enabled: typeof sourceRecord.enabled === 'boolean' ? sourceRecord.enabled : true
+            });
+            sourcesByKey.set(sourceKey, hydratedSource);
+            if (!sourceTagsById.has(sourceKey)) {
+                sourceTagsById.set(sourceKey, []);
+            }
+            if (hydratedSource.element) {
+                keyByElement.set(hydratedSource.element, sourceKey);
+            }
+            addedCount += 1;
+        });
+        return addedCount;
+    }
+
+    function getNativeLabelImportPreview(options = {}) {
+        const sourcePanel = options?.panel || findSourcePanel();
+        const viewInfo = options?.viewInfo || (sourcePanel ? getSourceViewInfo(sourcePanel) : sourceViewInfo) || { kind: sourceViewKind, confidence: sourceViewConfidence };
         if (viewInfo.kind !== 'label') {
             return {
                 ok: false,
@@ -1114,28 +1250,44 @@
         }
 
         const labelsByTitle = new Map();
-        sourcesByKey.forEach((source, sourceKey) => {
-            const title = String(source?.nativeLabelTitle || '').replace(/\s+/g, ' ').trim();
-            if (!title || !sourceKey) return;
-            const normalizedTitle = normalizeSourceText(title).toLowerCase();
+        const seenSourceIds = new Map();
+        const seenLegacyKeys = new Map();
+        const sourceEntries = sourcePanel
+            ? getSourceEntries(sourcePanel, { includeHiddenNativeLabelRows: true })
+            : [];
+        sourceEntries.forEach((entry) => {
+            const title = String(entry?.nativeLabelTitle || '').replace(/\s+/g, ' ').trim();
+            if (!title || !entry?.row) return;
+            const descriptor = createSourceDescriptor(entry.row, seenSourceIds, seenLegacyKeys);
+            const sourceKey = resolveNativeLabelPreviewSourceKey(descriptor);
+            if (!sourceKey) return;
+            const normalizedTitle = getComparableNativeImportLabelTitle(title);
             if (!labelsByTitle.has(normalizedTitle)) {
                 labelsByTitle.set(normalizedTitle, {
                     title,
                     sourceKeys: [],
-                    sourceTitles: []
+                    sourceTitles: [],
+                    sourceRecords: [],
+                    sourceKeySet: new Set()
                 });
             }
             const label = labelsByTitle.get(normalizedTitle);
+            if (label.sourceKeySet.has(sourceKey)) return;
+            const existingSource = sourcesByKey.get(sourceKey);
+            const sourceRecord = existingSource || createNativeLabelPreviewSourceRecord(descriptor, title, sourceKey);
+            label.sourceKeySet.add(sourceKey);
             label.sourceKeys.push(sourceKey);
-            label.sourceTitles.push(source?.title || source?.normalizedTitle || sourceKey);
+            label.sourceTitles.push(existingSource?.title || descriptor?.title || descriptor?.normalizedTitle || sourceKey);
+            if (sourceRecord) {
+                label.sourceRecords.push(sourceRecord);
+            }
         });
 
         const labels = Array.from(labelsByTitle.values())
             .map((label) => {
-                const existingGroup = Array.from(groupsById.values()).find((group) => (
-                    normalizeSourceText(group?.title || '').toLowerCase() === normalizeSourceText(label.title).toLowerCase()
-                ));
-                return Object.assign({}, label, {
+                const existingGroup = findReusableNativeLabelImportGroup(label.title);
+                const { sourceKeySet, ...publicLabel } = label;
+                return Object.assign({}, publicLabel, {
                     sourceCount: label.sourceKeys.length,
                     existingGroupId: existingGroup?.id || null,
                     action: existingGroup ? 'reuse' : 'create'
@@ -1185,10 +1337,12 @@
         const importedLabels = [];
         let importedSourceCount = 0;
         let skippedExistingAssignmentCount = 0;
+        let previewSourceAddedCount = 0;
         previewLabels.forEach((label) => {
             const sourceKeys = Array.isArray(label?.sourceKeys) ? label.sourceKeys : [];
             let group = label.existingGroupId ? groupsById.get(label.existingGroupId) : null;
             const targetGroupId = group?.id || null;
+            previewSourceAddedCount += ensureNativeLabelPreviewSources(label);
             const importableSourceKeys = sourceKeys.filter((sourceKey) => {
                 if (!sourcesByKey.has(sourceKey)) return false;
                 const currentParentId = parentMap.get(sourceKey);
@@ -1239,6 +1393,7 @@
             labelCount: importedLabels.length,
             sourceCount: importedSourceCount,
             skippedExistingAssignmentCount,
+            previewSourceAddedCount,
             importedAt: new Date().toISOString(),
             labels: importedLabels
         };
@@ -1251,21 +1406,93 @@
         return true;
     }
 
-    function waitForNativeLabelExpansionForImport(delayMs = 350) {
+    function waitForNativeLabelExpansionDelay(delayMs = 150) {
         return new Promise((resolve) => {
-            window.setTimeout(resolve, delayMs);
+            const timeoutFn = typeof window?.setTimeout === 'function' ? window.setTimeout : setTimeout;
+            timeoutFn(resolve, delayMs);
         });
     }
 
-    async function applyNativeLabelImportFromUi() {
-        if (sourceViewInfo?.kind === 'label' || sourceViewKind === 'label') {
-            const expansionResult = expandCollapsedNativeLabelGroups();
-            if (expansionResult?.clickedCount > 0) {
-                await waitForNativeLabelExpansionForImport();
+    async function waitForNativeLabelExpansionForImport(options = {}) {
+        const maxAttempts = Number.isFinite(options.maxAttempts) ? Math.max(1, Math.floor(options.maxAttempts)) : 8;
+        const delayMs = Number.isFinite(options.delayMs) ? Math.max(0, Math.floor(options.delayMs)) : 150;
+        const expectedLabelTitles = Array.isArray(options.expectedLabelTitles) ? options.expectedLabelTitles : [];
+        const expectedSummaries = Array.isArray(options.expectedSummaries) ? options.expectedSummaries : [];
+        let preview = null;
+        for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+            await waitForNativeLabelExpansionDelay(delayMs);
+            preview = getNativeLabelImportPreview(options);
+            if (
+                preview?.ok &&
+                nativeLabelPreviewContainsTitles(preview, expectedLabelTitles) &&
+                getIncompleteNativeLabelImportSummaries(preview, expectedSummaries).length === 0
+            ) {
+                return preview;
             }
-            scanAndSyncSources({}, false);
         }
-        const preview = getNativeLabelImportPreview();
+        return preview;
+    }
+
+    async function applyNativeLabelImportFromUi() {
+        let preview = null;
+        const sourcePanel = findSourcePanel();
+        const currentSourceViewInfo = getSourceViewInfo(sourcePanel);
+        const currentSourceViewKind = currentSourceViewInfo?.kind || sourceViewInfo?.kind || sourceViewKind;
+        developerLog('info', 'import_export', 'native_label_preview_started', {
+            viewKind: currentSourceViewKind || 'unknown'
+        });
+        if (currentSourceViewKind === 'label') {
+            const collapsedLabelSummaries = getCollapsedNativeLabelGroupSummaries(sourcePanel);
+            preview = getNativeLabelImportPreview({ panel: sourcePanel, viewInfo: currentSourceViewInfo });
+            if (preview?.sourceCount > 0 && collapsedLabelSummaries.length > 0) {
+                developerLog('debug', 'source_sync', 'hidden_label_rows_collected', {
+                    labelCount: preview.labelCount,
+                    sourceCount: preview.sourceCount
+                });
+            }
+            const incompleteSummaries = getIncompleteNativeLabelImportSummaries(preview, collapsedLabelSummaries);
+            if (incompleteSummaries.length > 0) {
+                developerLog('warn', 'import_export', 'native_label_preview_incomplete', {
+                    reason: 'missing_or_incomplete_label',
+                    labelCount: Number(preview?.labelCount) || 0,
+                    sourceCount: Number(preview?.sourceCount) || 0,
+                    incompleteLabelCount: incompleteSummaries.length
+                });
+                const expansionResult = expandCollapsedNativeLabelGroups(sourcePanel, {
+                    onlyTitles: incompleteSummaries.map((summary) => summary.title).filter(Boolean)
+                });
+                if (expansionResult?.clickedCount > 0) {
+                    developerLog('info', 'native_action', 'native_label_expand_fallback_used', {
+                        labelCount: expansionResult.clickedCount,
+                        reason: 'preview_incomplete'
+                    });
+                    preview = await waitForNativeLabelExpansionForImport({
+                        panel: sourcePanel,
+                        viewInfo: currentSourceViewInfo,
+                        expectedLabelTitles: expansionResult.titles,
+                        expectedSummaries: incompleteSummaries
+                    });
+                    const restoreResult = restoreNativeLabelExpansionControls(expansionResult.clickedControls || []);
+                    if (restoreResult.failedCount > 0) {
+                        developerLog('warn', 'native_action', 'native_label_expand_restore_failed', {
+                            failedCount: restoreResult.failedCount,
+                            restoredCount: restoreResult.clickedCount
+                        });
+                    }
+                } else {
+                    preview = getNativeLabelImportPreview({ panel: sourcePanel, viewInfo: currentSourceViewInfo });
+                }
+            }
+        }
+        if (!preview) {
+            preview = getNativeLabelImportPreview();
+        }
+        developerLog(preview?.ok ? 'info' : 'warn', 'import_export', 'native_label_preview_ready', {
+            result: preview?.ok ? 'ready' : 'unavailable',
+            reason: preview?.reason || 'unknown',
+            labelCount: Number(preview?.labelCount) || 0,
+            sourceCount: Number(preview?.sourceCount) || 0
+        });
         renderNativeLabelImportModal(preview);
         return preview.ok;
     }
@@ -1621,6 +1848,9 @@
                 groupCount: Number(importBackup.groupCount) || 0,
                 tagCount: Number(importBackup.tagCount) || 0
             } : null,
+            developerModeEnabled: getDeveloperModeEnabled(),
+            developerLogCount: getDeveloperLogs().length,
+            latestDeveloperLogAt: getLatestDeveloperLogAt(),
             lastNativeActionFailure: latestNativeFailure,
             nativeActionFailureHistory: nativeActionFailureHistory.map((failure) => Object.assign({}, failure))
         };
@@ -1628,6 +1858,28 @@
 
     function getDiagnosticsText() {
         return JSON.stringify(getDiagnosticsInfo(), null, 2);
+    }
+
+    function handleContentErrorLog(event) {
+        const error = event?.error instanceof Error
+            ? event.error
+            : new Error(event?.message || 'content_error');
+        developerLog('error', 'lifecycle', 'content_error', {
+            error,
+            sourcePresent: Boolean(event?.filename),
+            line: Number(event?.lineno) || 0,
+            column: Number(event?.colno) || 0
+        });
+    }
+
+    function handleUnhandledRejectionLog(event) {
+        const reason = event?.reason;
+        const error = reason instanceof Error
+            ? reason
+            : new Error(String(reason?.message || reason || 'unhandled_rejection'));
+        developerLog('error', 'lifecycle', 'unhandled_rejection', {
+            error
+        });
     }
 
     function showCrashBanner(message) {
@@ -1681,6 +1933,11 @@
                     'data-resource-id',
                     'data-testid',
                     'href',
+                    'role',
+                    'aria-busy',
+                    'aria-live',
+                    'data-state',
+                    'data-status',
                     'aria-expanded',
                     'aria-checked',
                     'checked',
@@ -2132,6 +2389,14 @@
             completedAt: new Date().toISOString(),
             durationMs: Math.max(0, Date.now() - startedAtMs)
         });
+        developerLog(result?.success ? 'info' : 'warn', 'view_switch', result?.success ? 'source_view_switch_succeeded' : 'source_view_switch_failed', {
+            targetViewKind: result?.viewKind || 'unknown',
+            nativeClicked: Boolean(result?.nativeClicked),
+            nativeSwitchReason: result?.nativeSwitchReason || '',
+            reason: result?.reason || '',
+            sourceViewDisplayKind: result?.sourceViewDisplayKind || '',
+            durationMs: lastViewSwitchAttempt.durationMs
+        });
         return Object.assign({
             viewSwitchDurationMs: lastViewSwitchAttempt.durationMs
         }, result || {});
@@ -2372,53 +2637,41 @@
     }
 
     function handleManagerMessage(request, sender, sendResponse) {
-        if (!request || typeof request.type !== 'string') return;
-
-        if (request.type === 'GET_MANAGER_STATUS') {
-            sendResponse(getManagerStatus());
-            return;
-        }
-
-        if (request.type === 'FOCUS_MANAGER') {
-            sendResponse(focusManagerPanel());
-            return;
-        }
-
-        if (request.type === 'SWITCH_SOURCE_VIEW') {
-            const result = switchNativeSourceView(request.viewKind);
-            if (result && typeof result.then === 'function') {
-                result
-                    .then((response) => sendResponse(response))
-                    .catch((error) => {
-                        console.warn('NotebookLM Source Management: Failed to switch source view.', error);
-                        viewSwitchInProgress = false;
-                        sendResponse({
-                            success: false,
-                            reason: 'source_view_switch_failed',
-                            errorMessageKey: 'popup_source_view_switch_failed'
-                        });
-                    });
-                return true;
-            }
-            sendResponse(result);
-            return;
-        }
-
-        if (request.type === 'DISABLE_MANAGER') {
-            disableManagerRuntime();
-            sendResponse({ success: true, disabled: true });
-            return;
-        }
-
-        if (request.type === 'ENABLE_MANAGER') {
-            enableManagerRuntime();
-            sendResponse({
-                success: true,
-                enabled: true,
-                attempted: Boolean(projectId)
-            });
-        }
+        return managerMessageRouter.handleMessage(request, sender, sendResponse);
     }
+
+    const managerMessageRouter = createContentMessageRouter({
+        handlers: {
+            GET_MANAGER_STATUS: () => getManagerStatus(),
+            FOCUS_MANAGER: () => focusManagerPanel(),
+            SWITCH_SOURCE_VIEW: (request) => switchNativeSourceView(request.viewKind),
+            DISABLE_MANAGER: () => {
+                disableManagerRuntime();
+                return { success: true, disabled: true };
+            },
+            ENABLE_MANAGER: () => {
+                enableManagerRuntime();
+                return {
+                    success: true,
+                    enabled: true,
+                    attempted: Boolean(projectId)
+                };
+            }
+        },
+        onAsyncError: (error, request) => {
+            if (request?.type === 'SWITCH_SOURCE_VIEW') {
+                console.warn('NotebookLM Source Management: Failed to switch source view.', error);
+                viewSwitchInProgress = false;
+                return {
+                    success: false,
+                    reason: 'source_view_switch_failed',
+                    errorMessageKey: 'popup_source_view_switch_failed'
+                };
+            }
+            console.warn('NotebookLM Source Management: Content message handler failed.', error);
+            return { success: false, reason: 'message_handler_failed' };
+        }
+    });
 
     function buildParentMap() {
         parentMap.clear();
@@ -2696,7 +2949,13 @@
     }
 
     function getExportConfigText() {
-        return JSON.stringify(createExportConfigPayload(), null, 2);
+        const payload = createExportConfigPayload();
+        developerLog('info', 'import_export', 'config_export_created', {
+            sourceCount: Object.keys(payload.data?.sourceStateById || {}).length,
+            groupCount: Object.keys(payload.data?.groupsById || {}).length,
+            tagCount: Object.keys(payload.data?.tagsById || {}).length
+        });
+        return JSON.stringify(payload, null, 2);
     }
 
     function unwrapImportConfigPayload(parsedConfig) {
@@ -2842,7 +3101,12 @@
 
     function previewImportConfig(text) {
         const parsed = parseImportConfigText(text);
-        if (!parsed.ok) return parsed;
+        if (!parsed.ok) {
+            developerLog('warn', 'import_export', 'config_import_preview_failed', {
+                reason: parsed.reason || 'invalid'
+            });
+            return parsed;
+        }
 
         const sourceLookup = buildSourceLookup(Array.from(sourcesByKey.values()));
         const sourceRefs = collectImportSourceRefs(parsed.state);
@@ -2865,7 +3129,7 @@
             }
         });
 
-        return {
+        const preview = {
             ok: true,
             state: parsed.state,
             totalSources: sourceRefs.size,
@@ -2875,11 +3139,22 @@
             groupCount: Object.keys(parsed.state.groupsById || {}).length,
             tagCount: Object.keys(parsed.state.tagsById || {}).length
         };
+        developerLog('info', 'import_export', 'config_import_preview_succeeded', {
+            totalSources: preview.totalSources,
+            matchedSources: preview.matchedSources,
+            unmatchedSources: preview.unmatchedSourceDetails.length,
+            groupCount: preview.groupCount,
+            tagCount: preview.tagCount
+        });
+        return preview;
     }
 
     async function applyImportConfig(text) {
         const preview = previewImportConfig(text);
         if (!preview.ok) {
+            developerLog('warn', 'import_export', 'config_import_apply_failed', {
+                reason: preview.reason || 'invalid'
+            });
             showToast(getMessage(preview.reason === 'empty'
                 ? 'ui_settings_import_empty'
                 : 'ui_settings_import_invalid'), { variant: 'error' });
@@ -2899,18 +3174,31 @@
         if (restoreResult.deferred) {
             render();
             showToast(getMessage('ui_settings_import_deferred'), { variant: 'info' });
+            developerLog('info', 'import_export', 'config_import_deferred', {
+                totalSources: preview.totalSources,
+                matchedSources: preview.matchedSources
+            });
             return { ...preview, ok: false, reason: 'deferred' };
         }
 
         render();
         const saveResult = await saveState({ immediate: true, critical: true });
         if (saveResult && saveResult.ok === false) {
+            developerLog('warn', 'import_export', 'config_import_apply_failed', {
+                reason: saveResult.reason || 'save_failed'
+            });
             return { ...preview, ok: false, reason: saveResult.reason || 'save_failed' };
         }
         showToast(getMessage('ui_settings_imported_toast'), {
             variant: 'success',
             actionLabel: getMessage('ui_settings_restore_import_backup'),
             onAction: restoreImportBackupSnapshotFromUi
+        });
+        developerLog('info', 'import_export', 'config_import_applied', {
+            totalSources: preview.totalSources,
+            matchedSources: preview.matchedSources,
+            groupCount: preview.groupCount,
+            tagCount: preview.tagCount
         });
         return preview;
     }
@@ -3057,6 +3345,10 @@
     }
 
     function teardown() {
+        developerLog('info', 'lifecycle', 'manager_teardown', {
+            hadShadowRoot: Boolean(shadowRoot),
+            hadSourcePanel: Boolean(attachedSourcePanel)
+        });
         bindPanelLifecycleHooks(null);
         if (routeRecoveryTimeout) {
             clearTimeout(routeRecoveryTimeout);
@@ -3246,6 +3538,7 @@
         const newProjectId = getProjectId();
         if (!newProjectId) {
             if (projectId) {
+                developerLog('info', 'lifecycle', 'route_left_notebook', { hadProject: true });
                 console.log(`NotebookLM Source Management: Route changed from notebook ${projectId} to a non-notebook page. Tearing down.`);
                 flushPendingStateSave();
                 activeRouteRecoveryToken += 1;
@@ -3267,6 +3560,10 @@
         }
 
         if (newProjectId !== projectId) {
+            developerLog('info', 'lifecycle', 'route_changed_notebook', {
+                hadPreviousProject: Boolean(projectId),
+                hasNewProject: Boolean(newProjectId)
+            });
             console.log(`NotebookLM Source Management: Route changed from ${projectId} to ${newProjectId}. Reinitializing manager.`);
             flushPendingStateSave();
             activeRouteRecoveryToken += 1;
@@ -3280,6 +3577,7 @@
     function init(sourcePanel) {
         if (!isSourcePanelRenderable(sourcePanel)) {
             managerStatusReason = 'manager_not_ready';
+            developerLog('warn', 'lifecycle', 'manager_mount_skipped', { reason: 'panel_not_renderable' });
             return;
         }
 
@@ -3431,6 +3729,9 @@
             setNativeSourceListHidden(initialDisplayViewInfo.kind === 'list');
             attachedSourcePanel = sourcePanel;
             managerStatusReason = 'ready';
+            developerLog('info', 'lifecycle', 'manager_mounted', {
+                sourceViewKind: initialDisplayViewInfo.kind || 'unknown'
+            });
             document.addEventListener('change', handleNativeCheckboxChange, true);
 
             // --- Global Native Glassmorphism Injection ---
@@ -3481,6 +3782,9 @@
     if (chrome.runtime && chrome.runtime.onMessage && typeof chrome.runtime.onMessage.addListener === 'function') {
         chrome.runtime.onMessage.addListener(handleManagerMessage);
     }
+    loadDeveloperPreferences().catch(() => {});
+    window.addEventListener('error', handleContentErrorLog);
+    window.addEventListener('unhandledrejection', handleUnhandledRejectionLog);
 
     if (projectId) {
         requestExtensionEnabledStatus().then((enabled) => {
@@ -3559,6 +3863,9 @@
         } catch (error) {
             console.warn('NotebookLM Source Management: Content teardown failed.', error);
         }
+
+        window.removeEventListener('error', handleContentErrorLog);
+        window.removeEventListener('unhandledrejection', handleUnhandledRejectionLog);
 
         try {
             if (
@@ -3684,6 +3991,14 @@
             dismissRecoverySnapshotFromUi,
             getDiagnosticsInfo,
             getDiagnosticsText,
+            developerLog,
+            getDeveloperModeEnabled,
+            setDeveloperModeEnabled,
+            loadDeveloperPreferences,
+            loadDeveloperLogs,
+            getDeveloperLogs,
+            getDeveloperLogExportText,
+            clearDeveloperLogs,
             getManagerStatus,
             focusManagerPanel,
             handleAddNewGroup,
@@ -3876,6 +4191,9 @@
                 nativeActionFailureHistory = [];
                 if (runtimeContext.recentNativeDeletedSourceKeys instanceof Set) {
                     runtimeContext.recentNativeDeletedSourceKeys.clear();
+                }
+                if (runtimeContext.recentNativeDeletedSourceIdentityKeys instanceof Set) {
+                    runtimeContext.recentNativeDeletedSourceIdentityKeys.clear();
                 }
                 groupsById.clear();
                 sourcesByKey.clear();

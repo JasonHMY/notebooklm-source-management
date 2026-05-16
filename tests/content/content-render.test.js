@@ -492,8 +492,8 @@ describe('manager shell structure', () => {
         expect(global.NSM_CONTENT_STYLE_TEXT).toContain('@keyframes sp-list-item-enter');
         expect(listItemEnter).toContain('animation: sp-list-item-enter var(--sp-motion-medium) var(--sp-ease-emphasized) backwards;');
         expect(listItemEnter).toContain('animation-delay: calc(var(--sp-list-item-index, 0) * 18ms);');
-        expect(global.NSM_CONTENT_STYLE_TEXT).toContain('@keyframes sp-batch-selected-pop');
-        expect(selectedSource).toContain('animation: sp-batch-selected-pop var(--sp-motion-medium) var(--sp-ease-emphasized);');
+        expect(global.NSM_CONTENT_STYLE_TEXT).not.toContain('@keyframes sp-batch-selected-pop');
+        expect(selectedSource).not.toContain('animation:');
         expect(global.NSM_CONTENT_STYLE_TEXT).toContain('@keyframes sp-batch-bar-enter');
         expect(selectedSource).toContain('transition:');
         expect(batchActionBar).toContain('animation: sp-batch-bar-enter var(--sp-motion-medium) var(--sp-ease-emphasized) both;');
@@ -505,12 +505,9 @@ describe('manager shell structure', () => {
         require('../../src/content/content-style-text.js');
 
         const modalItemEnter = extractCssBlock(global.NSM_CONTENT_STYLE_TEXT, '.sp-folder-option,');
-        const selectedPopKeyframes = extractCssBlock(global.NSM_CONTENT_STYLE_TEXT, '@keyframes sp-batch-selected-pop');
-
         expect(global.NSM_CONTENT_STYLE_TEXT).toContain('@keyframes sp-modal-item-enter');
         expect(modalItemEnter).toContain('animation: sp-modal-item-enter var(--sp-motion-medium) var(--sp-ease-emphasized) backwards;');
         expect(modalItemEnter).toContain('animation-delay: calc(var(--sp-modal-item-index, 0) * 24ms);');
-        expect(selectedPopKeyframes).not.toContain('translateY');
         expect(global.NSM_CONTENT_STYLE_TEXT).toContain('.source-item.sp-list-item-enter,');
         expect(global.NSM_CONTENT_STYLE_TEXT).toContain('.group-container.sp-list-item-enter,');
         expect(global.NSM_CONTENT_STYLE_TEXT).toContain('.sp-tag-manage-item,');
@@ -539,14 +536,17 @@ describe('manager shell structure', () => {
         expect(global.NSM_CONTENT_STYLE_TEXT).not.toContain('translateY(-1px)');
     });
 
-    it('defines count-up number styling for batch action counts', () => {
+    it('defines count-up number styling and keeps the batch cancel button unsqueezed', () => {
         jest.resetModules();
         require('../../src/content/content-style-text.js');
 
         const countUpNumber = extractCssBlock(global.NSM_CONTENT_STYLE_TEXT, '.sp-count-up-number {');
+        const cancelBatchButton = extractCssBlock(global.NSM_CONTENT_STYLE_TEXT, '.sp-cancel-batch-btn {');
         expect(countUpNumber).toContain('display: inline-block;');
         expect(countUpNumber).toContain('font-variant-numeric: tabular-nums;');
         expect(countUpNumber).toContain('min-width: 1ch;');
+        expect(cancelBatchButton).toContain('flex: 0 0 auto;');
+        expect(cancelBatchButton).toContain('min-width: 72px;');
     });
 
     it('uses property-level transitions for core interactive content controls', () => {
@@ -729,7 +729,7 @@ describe('batch count and source menu motion rendering', () => {
         ]));
     });
 
-    it('renders batch tag action buttons with stable count spans', () => {
+    it('renders batch action labels without repeated counts and keeps delete count stable', () => {
         const listContainer = createRenderTestElement('div', { id: 'sources-list' });
         const pendingBatchKeys = new Set(['source-1', 'source-2']);
         const renderModule = createContentRender({
@@ -751,6 +751,10 @@ describe('batch count and source menu motion rendering', () => {
             }),
             getPendingBatchKeys: () => pendingBatchKeys,
             getMessage: (key, substitutions = []) => {
+                if (key === 'ui_batch_add') return 'Add';
+                if (key === 'ui_batch_add_tags_title') return 'Add Tags';
+                if (key === 'ui_batch_remove_tags_title') return 'Remove Tags';
+                if (key === 'ui_move_to_ungrouped') return 'Ungroup';
                 if (key === 'ui_batch_add_tags_count') return `Add Tags (${substitutions[0]})`;
                 if (key === 'ui_batch_remove_tags_count') return `Remove Tags (${substitutions[0]})`;
                 if (key === 'ui_batch_ungroup_count') return `Ungroup (${substitutions[0]})`;
@@ -762,24 +766,161 @@ describe('batch count and source menu motion rendering', () => {
 
         renderModule.render();
 
+        const addFolderButton = findRenderTestNodesByClass(listContainer, 'sp-batch-add-folder-btn')[0];
         const addTagsButton = findRenderTestNodesByClass(listContainer, 'sp-batch-add-tags-btn')[0];
         const removeTagsButton = findRenderTestNodesByClass(listContainer, 'sp-batch-remove-tags-btn')[0];
         const ungroupButton = findRenderTestNodesByClass(listContainer, 'sp-batch-ungroup-btn')[0];
-        expect(addTagsButton.textContent).toBe('Add Tags (2)');
-        expect(removeTagsButton.textContent).toBe('Remove Tags (2)');
-        expect(ungroupButton.textContent).toBe('Ungroup (2)');
-        expect(findRenderTestNodesByClass(addTagsButton, 'sp-count-up-number')[0].dataset).toEqual({
-            countId: 'batch-add-tags',
+        const deleteButton = findRenderTestNodesByClass(listContainer, 'sp-confirm-delete-btn')[0];
+        expect(addFolderButton.textContent).toBe('Add');
+        expect(addTagsButton.textContent).toBe('Add Tags');
+        expect(removeTagsButton.textContent).toBe('Remove Tags');
+        expect(ungroupButton.textContent).toBe('Ungroup');
+        expect(deleteButton.textContent).toBe('Delete (2)');
+        expect(findRenderTestNodesByClass(addFolderButton, 'sp-count-up-number')).toHaveLength(0);
+        expect(findRenderTestNodesByClass(addTagsButton, 'sp-count-up-number')).toHaveLength(0);
+        expect(findRenderTestNodesByClass(removeTagsButton, 'sp-count-up-number')).toHaveLength(0);
+        expect(findRenderTestNodesByClass(ungroupButton, 'sp-count-up-number')).toHaveLength(0);
+        expect(findRenderTestNodesByClass(deleteButton, 'sp-count-up-number')[0].dataset).toEqual({
+            countId: 'batch-delete',
             countValue: '2'
         });
-        expect(findRenderTestNodesByClass(removeTagsButton, 'sp-count-up-number')[0].dataset).toEqual({
-            countId: 'batch-remove-tags',
-            countValue: '2'
+    });
+
+    it('keeps the source title in the title grid column while batch mode hides action buttons', () => {
+        const listContainer = createRenderTestElement('div', { id: 'sources-list' });
+        const sourcesByKey = new Map([
+            ['source-1', {
+                key: 'source-1',
+                title: 'https://hai.stanford.edu/assets/files/ai_index_report_2026.pdf',
+                enabled: true
+            }]
+        ]);
+        const renderModule = createContentRender({
+            el: createRenderTestElement,
+            getDocument: () => ({
+                createDocumentFragment: createRenderTestFragment,
+                createElement: (tag) => createRenderTestElement(tag)
+            }),
+            getShadowRoot: () => ({
+                querySelector: jest.fn((selector) => (selector === '#sources-list' ? listContainer : null)),
+                getElementById: jest.fn((id) => (id === 'sources-list' ? listContainer : null)),
+                appendChild: jest.fn()
+            }),
+            getState: () => ({
+                groups: [],
+                ungrouped: ['source-1'],
+                isBatchMode: true,
+                activeTagId: null
+            }),
+            getSourcesByKey: () => sourcesByKey,
+            getMessage: (key) => key
         });
-        expect(findRenderTestNodesByClass(ungroupButton, 'sp-count-up-number')[0].dataset).toEqual({
-            countId: 'batch-ungroup',
-            countValue: '2'
+
+        renderModule.render();
+
+        const source = findRenderTestNodesByClass(listContainer, 'source-item')[0];
+        expect(source.childNodes.map((child) => child?.className || child)).toEqual([
+            'icon-container',
+            'sp-source-actions-anchor sp-source-actions-placeholder',
+            'title-container',
+            'checkbox-container'
+        ]);
+        expect(findRenderTestNodesByClass(source, 'sp-source-actions-button')).toHaveLength(0);
+        expect(findRenderTestNodesByClass(source, 'source-title-text')[0].textContent).toBe(
+            'https://hai.stanford.edu/assets/files/ai_index_report_2026.pdf'
+        );
+    });
+
+    it('renders visible loading status text for importing sources', () => {
+        const listContainer = createRenderTestElement('div', { id: 'sources-list' });
+        const sourcesByKey = new Map([
+            ['loading-source', {
+                key: 'loading-source',
+                title: 'Temporary upload',
+                lowercaseTitle: 'temporary upload',
+                enabled: true,
+                isLoading: true,
+                isDisabled: false,
+                hasNativeCheckbox: false
+            }]
+        ]);
+        const renderModule = createContentRender({
+            el: createRenderTestElement,
+            getDocument: () => ({
+                createDocumentFragment: createRenderTestFragment,
+                createElement: (tag) => createRenderTestElement(tag)
+            }),
+            getShadowRoot: () => ({
+                querySelector: jest.fn((selector) => (selector === '#sources-list' ? listContainer : null)),
+                getElementById: jest.fn((id) => (id === 'sources-list' ? listContainer : null)),
+                appendChild: jest.fn()
+            }),
+            getState: () => ({
+                groups: [],
+                ungrouped: ['loading-source'],
+                filterQuery: '',
+                isBatchMode: false,
+                activeTagId: null
+            }),
+            getSourcesByKey: () => sourcesByKey,
+            getMessage: (key) => (
+                key === 'ui_source_parsing' ? '正在解析来源...' : key
+            )
         });
+
+        renderModule.render();
+
+        const source = findRenderTestNodesByClass(listContainer, 'source-item')[0];
+        expect(source.className).toContain('loading-source');
+        expect(source.attrs.title).toBe('正在解析来源...');
+        expect(findRenderTestNodesByClass(source, 'source-loading-status')[0].textContent).toBe('正在解析来源...');
+    });
+
+    it('renders explicit failed sources with failed styling and disabled controls', () => {
+        const listContainer = createRenderTestElement('div', { id: 'sources-list' });
+        const sourcesByKey = new Map([
+            ['failed-source', {
+                key: 'failed-source',
+                title: 'Failed Source',
+                lowercaseTitle: 'failed source',
+                enabled: true,
+                isLoading: false,
+                isFailed: true,
+                isDisabled: false,
+                hasNativeCheckbox: true
+            }]
+        ]);
+        const renderModule = createContentRender({
+            el: createRenderTestElement,
+            getDocument: () => ({
+                createDocumentFragment: createRenderTestFragment,
+                createElement: (tag) => createRenderTestElement(tag)
+            }),
+            getShadowRoot: () => ({
+                querySelector: jest.fn((selector) => (selector === '#sources-list' ? listContainer : null)),
+                getElementById: jest.fn((id) => (id === 'sources-list' ? listContainer : null)),
+                appendChild: jest.fn()
+            }),
+            getState: () => ({
+                groups: [],
+                ungrouped: ['failed-source'],
+                filterQuery: '',
+                isBatchMode: false,
+                activeTagId: null
+            }),
+            getSourcesByKey: () => sourcesByKey,
+            getMessage: (key) => (
+                key === 'ui_source_import_failed' ? '来源导入失败' : key
+            )
+        });
+
+        renderModule.render();
+
+        const source = findRenderTestNodesByClass(listContainer, 'source-item')[0];
+        const checkbox = findRenderTestNodesByClass(source, 'sp-checkbox')[0];
+        expect(source.className).toContain('failed-source');
+        expect(source.attrs.title).toBe('来源导入失败');
+        expect(checkbox.disabled).toBe(true);
     });
 
     it('renders a compact compatibility panel in NotebookLM native label view', () => {
@@ -1209,9 +1350,9 @@ describe('batch count and source menu motion rendering', () => {
 
         expect(source).toContain("? [getMessage('ui_deleting')]");
         expect(source).toContain(": createBatchCountMessageChildren('ui_delete_count', pendingBatchKeys.size, 'batch-delete')");
-        expect(source).toContain("createBatchCountMessageChildren('ui_batch_add_tags_count', pendingBatchKeys.size, 'batch-add-tags')");
-        expect(source).toContain("createBatchCountMessageChildren('ui_batch_remove_tags_count', pendingBatchKeys.size, 'batch-remove-tags')");
-        expect(source).toContain("createBatchCountMessageChildren('ui_batch_ungroup_count', pendingBatchKeys.size, 'batch-ungroup')");
+        expect(source).not.toContain("createBatchCountMessageChildren('ui_batch_add_tags_count'");
+        expect(source).not.toContain("createBatchCountMessageChildren('ui_batch_remove_tags_count'");
+        expect(source).not.toContain("createBatchCountMessageChildren('ui_batch_ungroup_count'");
     });
 
     it('tracks spotlight pointer coordinates and clears the active surface on leave', () => {

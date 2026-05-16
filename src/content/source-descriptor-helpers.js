@@ -25,7 +25,17 @@
         '.googleusercontent.com',
         '.ggpht.com'
     ];
-    const SOURCE_PROCESSING_SELECTOR = '[role="progressbar"], mat-spinner, svg animateTransform';
+    const SOURCE_PROCESSING_SELECTOR = [
+        '[role="progressbar"]',
+        'mat-spinner',
+        'mat-progress-spinner',
+        'mat-progress-bar',
+        '.mat-mdc-progress-spinner',
+        '.mat-mdc-progress-bar',
+        '.mdc-circular-progress',
+        '.mdc-linear-progress',
+        'svg animateTransform'
+    ].join(', ');
     const SOURCE_PROCESSING_STATUS_SELECTORS = [
         '[aria-busy="true"]',
         '[role="status"]',
@@ -45,8 +55,8 @@
         '[data-testid*="failed" i]',
         '[data-testid*="error" i]'
     ].join(', ');
-    const SOURCE_PROCESSING_TEXT_PATTERN = /\b(?:loading|analy[sz](?:ing|e)?|processing|parsing|uploading|importing|pending)\b|正在|载入|載入|加载|讀取|读取|分析|处理中|處理中|cargando|analizando|procesando|importando|subiendo/i;
-    const SOURCE_PROCESSING_STATUS_VALUE_PATTERN = /^(?:true|loading|loaded_pending|analy[sz](?:ing|e)?|processing|parsing|uploading|importing|pending|正在|载入|載入|加载|讀取|读取|分析|处理中|處理中|cargando|analizando|procesando|importando|subiendo)$/i;
+    const SOURCE_PROCESSING_TEXT_PATTERN = /\b(?:loading|analy[sz](?:ing|e)?|processing|parsing|uploading|importing|adding|pending)\b|正在|正在添加|添加中|载入|載入|加载|讀取|读取|分析|处理中|處理中|cargando|analizando|procesando|importando|subiendo/i;
+    const SOURCE_PROCESSING_STATUS_VALUE_PATTERN = /^(?:true|loading|loaded_pending|in_progress|analy[sz](?:ing|e)?|processing|parsing|uploading|importing|adding|pending|正在|正在添加|添加中|载入|載入|加载|讀取|读取|分析|处理中|處理中|cargando|analizando|procesando|importando|subiendo)$/i;
     const SOURCE_FAILURE_TEXT_PATTERN = /\b(?:failed|failure|could(?:n['’]?t| not)|unable|unsupported|invalid)\b|\b(?:error (?:loading|processing|importing|analy[sz]ing)|(?:loading|processing|importing|analy[sz]ing) error)\b|失败|失敗|错误|錯誤|无法|無法|fall[oó]|no se pudo|no pudo|no compatible/i;
     const STABLE_SOURCE_TOKEN_ATTRIBUTES = [
         'data-source-id',
@@ -329,6 +339,58 @@
         });
     }
 
+    function removeKnownSourceTitleText(text, sourceElement) {
+        const titleElement = findElement(DEPS.title, sourceElement);
+        const titleText = String(titleElement?.textContent || '').replace(/\s+/g, ' ').trim();
+        let remainingText = String(text || '').replace(/\s+/g, ' ').trim();
+        if (!titleText || !remainingText) return remainingText;
+
+        return remainingText
+            .split(titleText)
+            .join(' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    function isLikelyProcessingStatusTextElement(element, sourceElement) {
+        if (!element || element === sourceElement || !isElementVisibleForSignal(element)) return false;
+
+        const titleElement = findElement(DEPS.title, sourceElement);
+        const checkbox = findElement(DEPS.checkbox, sourceElement);
+        const nativeMoreButton = findElement(DEPS.moreBtn, sourceElement);
+        if (element === titleElement || element === checkbox || element === nativeMoreButton) return false;
+
+        const tagName = String(element.tagName || '').toLowerCase();
+        const role = typeof element.getAttribute === 'function'
+            ? String(element.getAttribute('role') || '').toLowerCase()
+            : '';
+        if (
+            tagName === 'button' ||
+            tagName === 'input' ||
+            tagName === 'select' ||
+            tagName === 'textarea' ||
+            role === 'button' ||
+            role === 'checkbox' ||
+            role === 'menuitem'
+        ) {
+            return false;
+        }
+
+        const signalText = removeKnownSourceTitleText(getElementOwnSignalText(element), sourceElement);
+        return SOURCE_PROCESSING_TEXT_PATTERN.test(signalText);
+    }
+
+    function hasVisibleProcessingStatusText(sourceElement) {
+        if (!sourceElement || typeof sourceElement.querySelectorAll !== 'function') return false;
+        try {
+            return Array.from(sourceElement.querySelectorAll('*'))
+                .slice(0, MAX_QUERY_RESULTS_PER_SELECTOR * 4)
+                .some((element) => isLikelyProcessingStatusTextElement(element, sourceElement));
+        } catch (error) {
+            return false;
+        }
+    }
+
     function hasSourceProcessingSignal(sourceElement) {
         if (!sourceElement) return false;
         if (typeof sourceElement.querySelector === 'function') {
@@ -357,6 +419,10 @@
         }
 
         if (hasProcessingStatusAttribute(sourceElement)) {
+            return true;
+        }
+
+        if (hasVisibleProcessingStatusText(sourceElement)) {
             return true;
         }
 
@@ -775,7 +841,8 @@
         const legacyKey = buildLegacySourceKey(keyTitle, seenLegacyKeys);
         const isLoading = Boolean(hasProcessingSignal);
         const hasNativeCheckbox = Boolean(checkbox);
-        const isDisabled = Boolean(checkbox?.disabled || isLoading || (hasFailureSignal && !hasNativeCheckbox));
+        const isFailed = Boolean(hasFailureSignal && !isLoading);
+        const isDisabled = Boolean(checkbox?.disabled || isLoading || isFailed);
 
         return {
             key,
@@ -794,7 +861,7 @@
             checkbox,
             hasNativeCheckbox,
             isLoading,
-            isFailed: Boolean(hasFailureSignal && !isLoading),
+            isFailed,
             isDisabled
         };
     }

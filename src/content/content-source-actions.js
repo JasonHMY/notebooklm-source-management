@@ -27,6 +27,9 @@
         const showToast = typeof deps.showToast === 'function'
             ? deps.showToast
             : () => {};
+        const developerLog = typeof deps.developerLog === 'function'
+            ? deps.developerLog
+            : () => false;
         const render = typeof deps.render === 'function'
             ? deps.render
             : () => {};
@@ -59,6 +62,9 @@
             : () => {};
         const onNativeSourceRenameStarted = typeof deps.onNativeSourceRenameStarted === 'function'
             ? deps.onNativeSourceRenameStarted
+            : () => {};
+        const onNativeSourceDeleteAccepted = typeof deps.onNativeSourceDeleteAccepted === 'function'
+            ? deps.onNativeSourceDeleteAccepted
             : () => {};
         const recordNativeActionFailure = typeof deps.recordNativeActionFailure === 'function'
             ? deps.recordNativeActionFailure
@@ -96,9 +102,19 @@
             '.cdk-overlay-container [mat-menu-item]'
         ];
         const NATIVE_DIALOG_SELECTORS = [
+            'dialog',
             'mat-dialog-container',
+            'mat-mdc-dialog-container',
+            '.mat-dialog-container',
             '[role="dialog"]',
-            '.cdk-dialog-container'
+            '[role="alertdialog"]',
+            '[aria-modal="true"]',
+            '.mat-mdc-dialog-container',
+            '.mat-mdc-dialog-surface',
+            '.mdc-dialog',
+            '.mdc-dialog__surface',
+            '.cdk-dialog-container',
+            '.cdk-overlay-pane'
         ];
         const NATIVE_DELETE_ICON_HINTS = new Set(['delete', 'delete_forever', 'remove_circle']);
         const NATIVE_RENAME_ICON_HINTS = new Set(['edit', 'edit_note', 'drive_file_rename_outline']);
@@ -135,7 +151,9 @@
 
         function canOpenSourceActionMenu(source) {
             const state = getState() || {};
-            return Boolean(source && !state.isBatchMode && !source.isLoading && !source.isDisabled);
+            if (!source || state.isBatchMode || source.isLoading) return false;
+            if (source.isFailed) return true;
+            return !source.isDisabled;
         }
 
         function createNativeActionResult(ok, reason = '') {
@@ -147,7 +165,20 @@
             if (!(runtime.recentNativeDeletedSourceKeys instanceof Set)) {
                 runtime.recentNativeDeletedSourceKeys = new Set();
             }
+            if (!(runtime.recentNativeDeletedSourceIdentityKeys instanceof Set)) {
+                runtime.recentNativeDeletedSourceIdentityKeys = new Set();
+            }
+            const source = getSourcesByKey().get(sourceKey) || null;
             runtime.recentNativeDeletedSourceKeys.add(sourceKey);
+            if (source?.key) {
+                runtime.recentNativeDeletedSourceKeys.add(source.key);
+            }
+            if (source?.stableToken) {
+                runtime.recentNativeDeletedSourceIdentityKeys.add(`stable:${source.stableToken}`);
+            }
+            if (source?.fingerprint) {
+                runtime.recentNativeDeletedSourceIdentityKeys.add(`fingerprint:${source.fingerprint}`);
+            }
         }
 
         function getNativeActionFailureMessage(action, reason) {
@@ -163,6 +194,12 @@
 
         function showNativeActionFailureToast(action, sourceKey, reason, retryHandler) {
             recordNativeActionFailure({
+                action,
+                sourceKey,
+                reason: reason || 'native_action_error',
+                retryable: typeof retryHandler === 'function'
+            });
+            developerLog('warn', 'native_action', `${action}_failed`, {
                 action,
                 sourceKey,
                 reason: reason || 'native_action_error',
@@ -196,6 +233,17 @@
         function getSourceActionMenuItems(sourceKey) {
             const source = sourceKey ? getSourcesByKey().get(sourceKey) : null;
             if (!source || !canOpenSourceActionMenu(source)) return [];
+
+            if (source.isFailed) {
+                return [
+                    {
+                        action: 'delete-source',
+                        kind: 'action',
+                        icon: 'delete',
+                        label: getMessage('ui_delete_failed_source')
+                    }
+                ];
+            }
 
             return [
                 {
@@ -521,16 +569,58 @@
             const doc = getDocument();
             if (!doc || typeof doc.querySelectorAll !== 'function') return [];
 
-            const seen = new Set();
             const dialogs = [];
             const selector = NATIVE_DIALOG_SELECTORS.join(', ');
             Array.from(doc.querySelectorAll(selector)).forEach((dialog) => {
-                if (!dialog || seen.has(dialog)) return;
-                if (!isNativeDialogVisible(dialog)) return;
-                seen.add(dialog);
-                dialogs.push(dialog);
+                appendNativeDialogCandidate(dialogs, dialog);
             });
             return dialogs;
+        }
+
+        function nativeElementContains(container, element) {
+            if (!container || !element || container === element || typeof container.contains !== 'function') {
+                return false;
+            }
+            try {
+                return Boolean(container.contains(element));
+            } catch (error) {
+                return false;
+            }
+        }
+
+        function appendNativeDialogCandidate(dialogs, dialog) {
+            if (!dialog || !isNativeDialogVisible(dialog)) return;
+
+            for (let index = dialogs.length - 1; index >= 0; index--) {
+                const existing = dialogs[index];
+                if (existing === dialog) return;
+                if (nativeElementContains(dialog, existing)) return;
+                if (nativeElementContains(existing, dialog)) {
+                    dialogs.splice(index, 1);
+                }
+            }
+
+            dialogs.push(dialog);
+        }
+
+        function queryNativeDialogButtons(dialog) {
+            if (!dialog || typeof dialog.querySelectorAll !== 'function') return [];
+
+            const buttons = [];
+            const appendButton = (button) => {
+                if (!button || buttons.includes(button)) return;
+                buttons.push(button);
+            };
+
+            ['button', '[role="button"]'].forEach((selector) => {
+                try {
+                    Array.from(dialog.querySelectorAll(selector)).forEach(appendButton);
+                } catch (error) {
+                    // Ignore unsupported selector variants in test or older DOM contexts.
+                }
+            });
+
+            return buttons;
         }
 
         function isNativeDialogVisible(dialog) {
@@ -556,7 +646,7 @@
         }
 
         function getNativeDialogMetadata(dialog) {
-            const buttons = dialog?.querySelectorAll ? Array.from(dialog.querySelectorAll('button')) : [];
+            const buttons = queryNativeDialogButtons(dialog);
             const buttonText = buttons.map((button) => ([
                 button?.textContent,
                 button?.getAttribute?.('aria-label'),
@@ -575,6 +665,30 @@
         function getNativeDialogFingerprint(dialog) {
             const { ariaLabel, title, textContent, buttonText } = getNativeDialogMetadata(dialog);
             return [ariaLabel, title, textContent, buttonText].join('||');
+        }
+
+        function createNativeDialogSnapshot(dialogs = []) {
+            const dialogList = Array.isArray(dialogs) ? dialogs : Array.from(dialogs || []);
+            const snapshot = new Map();
+            dialogList.forEach((dialog) => {
+                if (dialog) {
+                    snapshot.set(dialog, getNativeDialogFingerprint(dialog));
+                }
+            });
+            return snapshot;
+        }
+
+        function normalizeNativeDialogSnapshot(dialogsOrSnapshot = []) {
+            if (dialogsOrSnapshot instanceof Map) {
+                return dialogsOrSnapshot;
+            }
+            return createNativeDialogSnapshot(dialogsOrSnapshot);
+        }
+
+        function isNativeDialogNewOrChanged(dialog, existingDialogSnapshot) {
+            if (!dialog || !(existingDialogSnapshot instanceof Map)) return Boolean(dialog);
+            if (!existingDialogSnapshot.has(dialog)) return true;
+            return existingDialogSnapshot.get(dialog) !== getNativeDialogFingerprint(dialog);
         }
 
         function isNativeDeleteConfirmDialog(dialog) {
@@ -679,7 +793,7 @@
             const dialogList = findNativeDeleteConfirmDialogs(dialogs);
 
             for (const dialog of dialogList) {
-                const buttons = dialog?.querySelectorAll ? Array.from(dialog.querySelectorAll('button')) : [];
+                const buttons = queryNativeDialogButtons(dialog);
                 let fallbackButton = null;
 
                 for (const button of buttons) {
@@ -746,10 +860,14 @@
         async function waitForNativeDialogsToClose(dialogs = [], maxAttempts = 8, delayMs = 100) {
             const dialogList = Array.isArray(dialogs) ? dialogs : Array.from(dialogs || []);
             if (dialogList.length === 0) return true;
+            const dialogSnapshot = createNativeDialogSnapshot(dialogList);
 
             for (let attempt = 0; attempt < maxAttempts; attempt++) {
                 const openDialogs = queryNativeDialogs();
-                const hasOpenDialog = dialogList.some((dialog) => openDialogs.includes(dialog));
+                const hasOpenDialog = openDialogs.some((dialog) => (
+                    dialogSnapshot.has(dialog) &&
+                    dialogSnapshot.get(dialog) === getNativeDialogFingerprint(dialog)
+                ));
                 if (!hasOpenDialog) {
                     return true;
                 }
@@ -901,9 +1019,7 @@
         }
 
         async function waitForNativeDeleteConfirmTarget(existingDialogs = new Set(), source = null, maxAttempts = 10, delayMs = 100) {
-            const existingDialogSet = existingDialogs instanceof Set
-                ? existingDialogs
-                : new Set(Array.from(existingDialogs || []));
+            const existingDialogSnapshot = normalizeNativeDialogSnapshot(existingDialogs);
             let visibleDialogs = [];
             let candidateDialogs = [];
             let confirmDialogs = [];
@@ -911,7 +1027,9 @@
 
             for (let attempt = 0; attempt < maxAttempts; attempt++) {
                 visibleDialogs = queryNativeDialogs();
-                candidateDialogs = visibleDialogs.filter((dialog) => !existingDialogSet.has(dialog));
+                candidateDialogs = visibleDialogs.filter((dialog) => (
+                    isNativeDialogNewOrChanged(dialog, existingDialogSnapshot)
+                ));
                 const filterResult = filterNativeDeleteConfirmDialogsForSource(candidateDialogs, source);
                 confirmDialogs = filterResult.dialogs;
                 reason = filterResult.reason;
@@ -1098,6 +1216,28 @@
             return Boolean(element.isConnected);
         }
 
+        function isNativeControlUsable(control) {
+            if (!control) return false;
+            if (control.disabled === true) return false;
+            if (String(control.getAttribute?.('aria-disabled') || '').toLowerCase() === 'true') return false;
+            return typeof control.click === 'function' || typeof control.dispatchEvent === 'function';
+        }
+
+        function isNativeSourceRowPendingDeletion(row) {
+            if (!row || !isElementInDocument(row)) return false;
+
+            const identity = getNativeRowIdentity(row);
+            if (identity?.hasProcessingSignal) return true;
+
+            const nativeMoreButton = findNativeMoreButtonInRow(row);
+            if (isNativeControlUsable(nativeMoreButton)) return false;
+
+            const checkbox = findElement(getDEPS().checkbox, row);
+            if (isNativeControlUsable(checkbox)) return false;
+
+            return true;
+        }
+
         async function waitForNativeSourceRowRemoval(sourceKey, originalRow = null, originalRowCount = 0, maxAttempts = 10, delayMs = 100) {
             for (let attempt = 0; attempt < maxAttempts; attempt++) {
                 const freshRow = resolveFreshSourceRow(sourceKey);
@@ -1110,6 +1250,9 @@
                     return true;
                 }
                 if (listShrank) {
+                    return true;
+                }
+                if (isNativeSourceRowPendingDeletion(freshRow || originalRow)) {
                     return true;
                 }
                 if (attempt < maxAttempts - 1) {
@@ -1390,19 +1533,24 @@
 
         async function deleteNativeSource(sourceKey) {
             const source = getSourcesByKey().get(sourceKey);
+            developerLog('info', 'native_action', 'delete_started', { sourceKey });
             if (!source) {
+                developerLog('warn', 'native_action', 'delete_failed', { sourceKey, reason: 'source_missing' });
                 return { deleted: false, reason: 'source_missing' };
             }
-            if (source.isDisabled || source.isLoading) {
+            if (source.isLoading || (source.isDisabled && !source.isFailed)) {
+                developerLog('warn', 'native_action', 'delete_failed', { sourceKey, reason: 'source_unavailable' });
                 return { deleted: false, reason: 'source_unavailable' };
             }
 
             const rowResult = resolveValidatedNativeSourceRow(sourceKey);
             if (!rowResult.row) {
+                developerLog('warn', 'native_action', 'delete_failed', { sourceKey, reason: rowResult.reason || 'source_row_missing' });
                 return { deleted: false, reason: rowResult.reason || 'source_row_missing' };
             }
             const nativeMoreBtn = findNativeMoreButtonInRow(rowResult.row);
             if (!nativeMoreBtn || typeof nativeMoreBtn.click !== 'function') {
+                developerLog('warn', 'native_action', 'delete_failed', { sourceKey, reason: 'menu_button_missing' });
                 return { deleted: false, reason: 'menu_button_missing' };
             }
             const sourceRowBeforeDelete = rowResult.row;
@@ -1418,49 +1566,68 @@
                 const deleteMenuItem = findNativeDeleteMenuItem(menuItems);
                 if (!deleteMenuItem || typeof deleteMenuItem.click !== 'function') {
                     closeNativeOverlay();
+                    developerLog('warn', 'native_action', 'delete_failed', { sourceKey, reason: 'delete_menu_missing' });
                     return { deleted: false, reason: 'delete_menu_missing' };
                 }
 
-                const existingDialogs = new Set(queryNativeDialogs());
+                const existingDialogs = createNativeDialogSnapshot(queryNativeDialogs());
                 deleteMenuItem.click();
 
                 const confirmTarget = await waitForNativeDeleteConfirmTarget(existingDialogs, source);
                 if (confirmTarget.candidateDialogs.length === 0) {
                     closeNativeOverlay();
+                    developerLog('warn', 'native_action', 'delete_failed', { sourceKey, reason: 'confirm_dialog_missing' });
                     return { deleted: false, reason: 'confirm_dialog_missing' };
                 }
                 if (confirmTarget.reason) {
                     closeNativeOverlay();
+                    developerLog('warn', 'native_action', 'delete_failed', { sourceKey, reason: confirmTarget.reason });
                     return { deleted: false, reason: confirmTarget.reason };
                 }
 
                 const confirmDialogs = confirmTarget.confirmDialogs;
                 if (confirmDialogs.length === 0) {
                     closeNativeOverlay();
+                    developerLog('warn', 'native_action', 'delete_failed', { sourceKey, reason: 'confirm_dialog_unmatched' });
                     return { deleted: false, reason: 'confirm_dialog_unmatched' };
                 }
 
                 const confirmButton = confirmTarget.confirmButton;
                 if (!confirmButton || typeof confirmButton.click !== 'function') {
                     closeNativeOverlay();
+                    developerLog('warn', 'native_action', 'delete_failed', { sourceKey, reason: 'confirm_button_missing' });
                     return { deleted: false, reason: 'confirm_button_missing' };
                 }
 
                 confirmButton.click();
-                await waitForNativeDialogsToClose(confirmDialogs);
-                const deleteConfirmed = await waitForNativeSourceRowRemoval(
+                developerLog('info', 'native_action', 'delete_confirm_clicked', { sourceKey });
+                const confirmDialogClosed = await waitForNativeDialogsToClose(confirmDialogs);
+                const rowRemovedOrPending = await waitForNativeSourceRowRemoval(
                     sourceKey,
                     sourceRowBeforeDelete,
-                    sourceRowCountBeforeDelete
+                    sourceRowCountBeforeDelete,
+                    confirmDialogClosed ? 2 : 10,
+                    confirmDialogClosed ? 75 : 100
                 );
-                if (!deleteConfirmed) {
+                if (!confirmDialogClosed && !rowRemovedOrPending) {
+                    developerLog('warn', 'native_action', 'delete_failed', { sourceKey, reason: 'delete_not_confirmed' });
                     return { deleted: false, reason: 'delete_not_confirmed' };
                 }
                 markNativeSourceDeleted(sourceKey);
+                try {
+                    onNativeSourceDeleteAccepted(sourceKey);
+                } catch (callbackError) {
+                    console.warn('NotebookLM Source Management: Failed to apply accepted native deletion locally.', callbackError);
+                }
+                developerLog('info', 'native_action', 'delete_confirmed', {
+                    sourceKey,
+                    result: rowRemovedOrPending ? 'row_removed_or_pending' : 'accepted_pending_native_refresh'
+                });
                 return { deleted: true };
             } catch (error) {
                 console.error('NotebookLM Source Management: Error during native source deletion.', error);
                 closeNativeOverlay();
+                developerLog('error', 'native_action', 'delete_failed', { sourceKey, reason: 'native_delete_error', error });
                 return { deleted: false, reason: 'native_delete_error' };
             }
         }
@@ -1554,6 +1721,9 @@
 
             closeSourceActionMenu();
             const menuItem = getSourceActionMenuItems(sourceKey).find((item) => item.action === action);
+            if (!menuItem) {
+                return false;
+            }
             if (menuItem?.disabled) {
                 showToast(getMessage('ui_keyboard_move_unavailable'), { variant: 'info' });
                 return false;

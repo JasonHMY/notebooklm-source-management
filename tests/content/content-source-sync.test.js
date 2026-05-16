@@ -28,6 +28,15 @@ function configureAriaCheckbox(mockSourceRow, ariaChecked = 'true') {
     return mockSourceRow;
 }
 
+function seedMockSource(mod, mockSourceRow, overrides = {}) {
+    const descriptor = mod.createSourceDescriptor(mockSourceRow.row, new Map(), new Map());
+    mod.sourcesByKey.set(descriptor.key, Object.assign({}, descriptor, overrides));
+    if (!mod.state.ungrouped.includes(descriptor.key)) {
+        mod.state.ungrouped.push(descriptor.key);
+    }
+    return descriptor.key;
+}
+
 describe('scanAndSyncSources', () => {
     let mod;
 
@@ -558,14 +567,43 @@ describe('scanAndSyncSources', () => {
     it('keeps the pre-labeling entry point in the traditional list source view', () => {
         const source = createMockSourceRow({ title: 'List Source', stableToken: 'list-doc', checked: true });
         const labelEntryPoint = {
+            tagName: 'BUTTON',
             textContent: 'label_auto',
             style: {},
+            parentElement: null,
+            parentNode: null,
+            previousElementSibling: null,
+            previousSibling: null,
             getAttribute: jest.fn((attr) => (attr === 'aria-label' ? '按主题自动为来源加标签' : null)),
-            matches: jest.fn(() => false)
+            matches: jest.fn((selector) => selector === '[aria-label*="标签"]'),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const listContainer = {
+            tagName: 'DIV',
+            textContent: 'List Source',
+            style: {},
+            parentElement: null,
+            parentNode: null,
+            previousElementSibling: labelEntryPoint,
+            previousSibling: labelEntryPoint,
+            getAttribute: jest.fn(() => null),
+            matches: jest.fn(() => false),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
         };
         const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        labelEntryPoint.parentElement = panel;
+        labelEntryPoint.parentNode = panel;
+        listContainer.parentElement = panel;
+        listContainer.parentNode = panel;
+        source.row.parentElement = listContainer;
+        source.row.parentNode = listContainer;
+        source.row.previousElementSibling = null;
+        source.row.previousSibling = null;
         panel.querySelectorAll = jest.fn((selector) => {
             if (selector === 'button' || selector === '[role="button"]') return [labelEntryPoint];
+            if (selector === '[aria-label*="标签"]') return [labelEntryPoint];
             if (mod.DEPS.row.includes(selector)) return [source.row];
             return [];
         });
@@ -843,6 +881,879 @@ describe('scanAndSyncSources', () => {
         });
     });
 
+    it('infers NotebookLM label titles from plain header buttons with group checkboxes', () => {
+        const first = createMockSourceRow({ title: 'Market Source A', stableToken: 'market-a', checked: true });
+        const second = createMockSourceRow({ title: 'Market Source B', stableToken: 'market-b', checked: true });
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const sourceListContainer = {
+            tagName: 'DIV',
+            textContent: 'Market Source A Market Source B',
+            style: {},
+            parentElement: panel,
+            parentNode: panel,
+            previousElementSibling: null,
+            previousSibling: null,
+            getAttribute: jest.fn(() => null),
+            matches: jest.fn(() => false),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const headerCheckbox = {
+            tagName: 'DIV',
+            checked: true,
+            style: {},
+            parentElement: null,
+            parentNode: null,
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'role') return 'checkbox';
+                if (attr === 'aria-checked') return 'true';
+                return null;
+            }),
+            matches: jest.fn((selector) => String(selector).includes('checkbox')),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const plainHeader = {
+            tagName: 'BUTTON',
+            textContent: '美股与宏观经济 美股与宏观经济',
+            style: {},
+            parentElement: panel,
+            parentNode: panel,
+            previousElementSibling: null,
+            previousSibling: null,
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'role') return 'button';
+                return null;
+            }),
+            matches: jest.fn(() => false),
+            querySelector: jest.fn((selector) => (String(selector).includes('checkbox') ? headerCheckbox : null)),
+            querySelectorAll: jest.fn((selector) => (String(selector).includes('checkbox') ? [headerCheckbox] : []))
+        };
+        headerCheckbox.parentElement = plainHeader;
+        headerCheckbox.parentNode = plainHeader;
+        sourceListContainer.previousElementSibling = plainHeader;
+        sourceListContainer.previousSibling = plainHeader;
+        first.row.parentElement = sourceListContainer;
+        first.row.parentNode = sourceListContainer;
+        second.row.parentElement = sourceListContainer;
+        second.row.parentNode = sourceListContainer;
+        first.row.previousElementSibling = null;
+        first.row.previousSibling = null;
+        second.row.previousElementSibling = first.row;
+        second.row.previousSibling = first.row;
+        first.row.matches = jest.fn((selector) => selector === '[role="listitem"]');
+        second.row.matches = jest.fn((selector) => selector === '[role="listitem"]');
+
+        panel.querySelectorAll = jest.fn((selector) => {
+            if (selector === 'button' || selector === '[role="button"]') return [plainHeader];
+            if (selector === '[role="listitem"]') return [first.row, second.row];
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        mod.scanAndSyncSources({}, true);
+
+        expect(Array.from(mod.sourcesByKey.values()).map((source) => source.nativeLabelTitle)).toEqual([
+            '美股与宏观经济',
+            '美股与宏观经济'
+        ]);
+        expect(mod.getNativeLabelImportPreview()).toMatchObject({
+            ok: true,
+            labelCount: 1,
+            sourceCount: 2
+        });
+    });
+
+    it('infers NotebookLM label titles from Angular Material expansion panel headers', () => {
+        const first = createMockSourceRow({ title: 'Macro Source A', stableToken: 'macro-a', checked: true });
+        const second = createMockSourceRow({ title: 'Macro Source B', stableToken: 'macro-b', checked: true });
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const headerCheckbox = {
+            tagName: 'MAT-CHECKBOX',
+            checked: true,
+            style: {},
+            parentElement: null,
+            parentNode: null,
+            getAttribute: jest.fn(() => null),
+            matches: jest.fn((selector) => (
+                String(selector).includes('mat-checkbox') ||
+                String(selector).includes('.mat-mdc-checkbox')
+            )),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const header = {
+            tagName: 'MAT-EXPANSION-PANEL-HEADER',
+            className: 'mat-expansion-panel-header mat-focus-indicator mat-expanded',
+            textContent: 'keyboard_arrow_down 美股与宏观经济 more_vert',
+            style: {},
+            parentElement: null,
+            parentNode: null,
+            previousElementSibling: null,
+            previousSibling: null,
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'role') return 'button';
+                if (attr === 'aria-expanded') return 'true';
+                return null;
+            }),
+            matches: jest.fn((selector) => (
+                selector === 'mat-expansion-panel-header' ||
+                selector === '.mat-expansion-panel-header' ||
+                selector === '[aria-expanded]' ||
+                selector === '[role="button"][aria-expanded]'
+            )),
+            querySelector: jest.fn((selector) => (
+                String(selector).includes('checkbox') ||
+                String(selector).includes('mat-checkbox') ||
+                String(selector).includes('.mat-mdc-checkbox')
+                    ? headerCheckbox
+                    : null
+            )),
+            querySelectorAll: jest.fn((selector) => (
+                String(selector).includes('checkbox') ||
+                String(selector).includes('mat-checkbox') ||
+                String(selector).includes('.mat-mdc-checkbox')
+                    ? [headerCheckbox]
+                    : []
+            ))
+        };
+        const body = {
+            tagName: 'DIV',
+            className: 'mat-expansion-panel-body',
+            textContent: 'Macro Source A Macro Source B',
+            style: {},
+            parentElement: null,
+            parentNode: null,
+            previousElementSibling: null,
+            previousSibling: null,
+            getAttribute: jest.fn(() => null),
+            matches: jest.fn(() => false),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const content = {
+            tagName: 'DIV',
+            className: 'mat-expansion-panel-content',
+            textContent: body.textContent,
+            style: {},
+            parentElement: null,
+            parentNode: null,
+            previousElementSibling: null,
+            previousSibling: null,
+            getAttribute: jest.fn((attr) => (attr === 'role' ? 'region' : null)),
+            matches: jest.fn(() => false),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const wrapper = {
+            tagName: 'DIV',
+            className: 'mat-expansion-panel-content-wrapper',
+            textContent: body.textContent,
+            style: {},
+            parentElement: null,
+            parentNode: null,
+            previousElementSibling: header,
+            previousSibling: header,
+            getAttribute: jest.fn(() => null),
+            matches: jest.fn(() => false),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const expansionPanel = {
+            tagName: 'MAT-EXPANSION-PANEL',
+            className: 'mat-expansion-panel source-expansion-panel mat-expanded',
+            textContent: `${header.textContent} ${body.textContent}`,
+            style: {},
+            parentElement: null,
+            parentNode: null,
+            previousElementSibling: null,
+            previousSibling: null,
+            getAttribute: jest.fn(() => null),
+            matches: jest.fn((selector) => (
+                selector === 'mat-expansion-panel' ||
+                selector === '.mat-expansion-panel'
+            )),
+            querySelector: jest.fn((selector) => (
+                String(selector).includes('mat-expansion-panel-header') ||
+                String(selector).includes('[aria-expanded]')
+                    ? header
+                    : null
+            )),
+            querySelectorAll: jest.fn((selector) => (
+                String(selector).includes('mat-expansion-panel-header') ||
+                String(selector).includes('[aria-expanded]')
+                    ? [header]
+                    : []
+            ))
+        };
+        const accordion = {
+            tagName: 'MAT-ACCORDION',
+            className: 'mat-accordion mat-accordion-multi',
+            textContent: expansionPanel.textContent,
+            style: {},
+            parentElement: panel,
+            parentNode: panel,
+            getAttribute: jest.fn(() => null),
+            matches: jest.fn((selector) => (
+                selector === 'mat-accordion' ||
+                selector === '.mat-accordion'
+            )),
+            querySelector: jest.fn((selector) => (
+                String(selector).includes('mat-expansion-panel') ? expansionPanel : null
+            )),
+            querySelectorAll: jest.fn((selector) => {
+                if (String(selector).includes('mat-expansion-panel')) return [expansionPanel];
+                if (String(selector).includes('[aria-expanded]')) return [header];
+                return [];
+            })
+        };
+        header.parentElement = expansionPanel;
+        header.parentNode = expansionPanel;
+        headerCheckbox.parentElement = header;
+        headerCheckbox.parentNode = header;
+        expansionPanel.parentElement = accordion;
+        expansionPanel.parentNode = accordion;
+        wrapper.parentElement = expansionPanel;
+        wrapper.parentNode = expansionPanel;
+        content.parentElement = wrapper;
+        content.parentNode = wrapper;
+        body.parentElement = content;
+        body.parentNode = content;
+        first.row.parentElement = body;
+        first.row.parentNode = body;
+        second.row.parentElement = body;
+        second.row.parentNode = body;
+        first.row.previousElementSibling = null;
+        first.row.previousSibling = null;
+        second.row.previousElementSibling = first.row;
+        second.row.previousSibling = first.row;
+        first.row.matches = jest.fn((selector) => selector === '.single-source-container');
+        second.row.matches = jest.fn((selector) => selector === '.single-source-container');
+
+        panel.querySelectorAll = jest.fn((selector) => {
+            if (selector === '.single-source-container') return [first.row, second.row];
+            if (selector === 'mat-accordion' || selector === '.mat-accordion') return [accordion];
+            if (selector === 'mat-expansion-panel' || selector === '.mat-expansion-panel') return [expansionPanel];
+            if (
+                selector === 'mat-expansion-panel-header' ||
+                selector === '.mat-expansion-panel-header' ||
+                selector === '[aria-expanded]' ||
+                selector === '[role="button"][aria-expanded]'
+            ) {
+                return [header];
+            }
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        mod.scanAndSyncSources({}, true);
+
+        expect(Array.from(mod.sourcesByKey.values()).map((source) => source.nativeLabelTitle)).toEqual([
+            '美股与宏观经济',
+            '美股与宏观经济'
+        ]);
+        expect(mod.getNativeLabelImportPreview()).toMatchObject({
+            ok: true,
+            labelCount: 1,
+            sourceCount: 2
+        });
+    });
+
+    it('previews collapsed NotebookLM label groups from hidden rows without expanding them', async () => {
+        const first = createMockSourceRow({ title: 'Hidden Macro Source', stableToken: 'hidden-macro', checked: true });
+        const second = createMockSourceRow({ title: 'Hidden Python Source', stableToken: 'hidden-python', checked: true });
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+
+        const createCollapsedGroup = (title, row) => {
+            const header = {
+                tagName: 'MAT-EXPANSION-PANEL-HEADER',
+                className: 'mat-expansion-panel-header',
+                textContent: `keyboard_arrow_right ${title} more_vert`,
+                style: {},
+                __computedStyle: {},
+                parentElement: null,
+                parentNode: null,
+                click: jest.fn(),
+                getAttribute: jest.fn((attr) => {
+                    if (attr === 'role') return 'button';
+                    if (attr === 'aria-expanded') return 'false';
+                    if (attr === 'aria-label') return title;
+                    return null;
+                }),
+                matches: jest.fn((selector) => (
+                    selector === 'mat-expansion-panel-header' ||
+                    selector === '.mat-expansion-panel-header' ||
+                    selector === '[aria-expanded]' ||
+                    selector === '[role="button"][aria-expanded]'
+                )),
+                querySelector: jest.fn(() => null),
+                querySelectorAll: jest.fn(() => [])
+            };
+            const body = {
+                tagName: 'DIV',
+                className: 'mat-expansion-panel-body',
+                textContent: row.title || row.row?.textContent || '',
+                style: { display: 'none' },
+                __computedStyle: { display: 'none', visibility: 'hidden' },
+                parentElement: null,
+                parentNode: null,
+                previousElementSibling: header,
+                previousSibling: header,
+                getAttribute: jest.fn(() => null),
+                matches: jest.fn(() => false),
+                querySelector: jest.fn(() => null),
+                querySelectorAll: jest.fn(() => [])
+            };
+            const group = {
+                tagName: 'MAT-EXPANSION-PANEL',
+                className: 'mat-expansion-panel',
+                textContent: `${header.textContent} ${body.textContent}`,
+                style: {},
+                __computedStyle: {},
+                parentElement: panel,
+                parentNode: panel,
+                getAttribute: jest.fn(() => null),
+                matches: jest.fn((selector) => (
+                    selector === 'mat-expansion-panel' ||
+                    selector === '.mat-expansion-panel'
+                )),
+                querySelector: jest.fn((selector) => (
+                    String(selector).includes('mat-expansion-panel-header') ||
+                    String(selector).includes('[aria-expanded]')
+                        ? header
+                        : null
+                )),
+                querySelectorAll: jest.fn((selector) => (
+                    String(selector).includes('mat-expansion-panel-header') ||
+                    String(selector).includes('[aria-expanded]')
+                        ? [header]
+                        : []
+                ))
+            };
+
+            header.parentElement = group;
+            header.parentNode = group;
+            body.parentElement = group;
+            body.parentNode = group;
+            row.row.parentElement = body;
+            row.row.parentNode = body;
+            row.row.previousElementSibling = null;
+            row.row.previousSibling = null;
+            row.row.matches = jest.fn((selector) => selector === '.single-source-container');
+
+            return { group, header, body, row: row.row };
+        };
+
+        const macroGroup = createCollapsedGroup('美股与宏观经济', first);
+        const pythonGroup = createCollapsedGroup('Python 编程语言', second);
+        const groups = [macroGroup, pythonGroup];
+
+        panel.querySelectorAll = jest.fn((selector) => {
+            if (selector === '.single-source-container') return groups.map((group) => group.row);
+            if (selector === 'mat-expansion-panel' || selector === '.mat-expansion-panel') {
+                return groups.map((group) => group.group);
+            }
+            if (
+                selector === 'mat-expansion-panel-header' ||
+                selector === '.mat-expansion-panel-header' ||
+                selector === '[aria-expanded]' ||
+                selector === '[role="button"][aria-expanded]'
+            ) {
+                return groups.map((group) => group.header);
+            }
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+        global.requestAnimationFrame = (callback) => {
+            callback();
+            return 1;
+        };
+
+        const importResult = await mod.applyNativeLabelImportFromUi();
+        const preview = mod.getNativeLabelImportPreview();
+
+        expect(importResult).toBe(true);
+        expect(macroGroup.header.click).not.toHaveBeenCalled();
+        expect(pythonGroup.header.click).not.toHaveBeenCalled();
+        expect(preview).toMatchObject({
+            ok: true,
+            labelCount: 2,
+            sourceCount: 2
+        });
+        expect(preview.labels.map((label) => label.title)).toEqual([
+            'Python 编程语言',
+            '美股与宏观经济'
+        ]);
+    });
+
+    it('builds the native label import preview from DOM without mutating source state', async () => {
+        const source = createMockSourceRow({ title: 'Paper One', stableToken: 'paper-1', checked: true });
+        const sourceKey = seedMockSource(mod, source, { enabled: true, nativeLabelTitle: '' });
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const header = {
+            tagName: 'MAT-EXPANSION-PANEL-HEADER',
+            className: 'mat-expansion-panel-header',
+            textContent: 'keyboard_arrow_right Research 1 sources',
+            style: {},
+            parentElement: null,
+            parentNode: null,
+            click: jest.fn(),
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'role') return 'button';
+                if (attr === 'aria-expanded') return 'false';
+                if (attr === 'aria-label') return 'Research';
+                return null;
+            }),
+            matches: jest.fn((selector) => (
+                selector === 'mat-expansion-panel-header' ||
+                selector === '.mat-expansion-panel-header' ||
+                selector === '[aria-expanded]' ||
+                selector === '[role="button"][aria-expanded]'
+            )),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const body = {
+            tagName: 'DIV',
+            className: 'mat-expansion-panel-body',
+            textContent: source.row.textContent,
+            style: { display: 'none' },
+            __computedStyle: { display: 'none' },
+            parentElement: null,
+            parentNode: null,
+            previousElementSibling: header,
+            previousSibling: header,
+            getAttribute: jest.fn(() => null),
+            matches: jest.fn((selector) => selector === '.mat-expansion-panel-body'),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const group = {
+            tagName: 'MAT-EXPANSION-PANEL',
+            className: 'mat-expansion-panel',
+            textContent: `${header.textContent} ${body.textContent}`,
+            style: {},
+            parentElement: panel,
+            parentNode: panel,
+            getAttribute: jest.fn(() => null),
+            matches: jest.fn((selector) => selector === 'mat-expansion-panel' || selector === '.mat-expansion-panel'),
+            querySelector: jest.fn((selector) => (String(selector).includes('mat-expansion-panel-header') ? header : null)),
+            querySelectorAll: jest.fn((selector) => (String(selector).includes('mat-expansion-panel-header') ? [header] : []))
+        };
+        header.parentElement = group;
+        header.parentNode = group;
+        body.parentElement = group;
+        body.parentNode = group;
+        source.row.parentElement = body;
+        source.row.parentNode = body;
+        source.row.previousElementSibling = null;
+        source.row.previousSibling = null;
+        source.row.matches = jest.fn((selector) => selector === '.single-source-container');
+
+        panel.querySelectorAll = jest.fn((selector) => {
+            if (selector === '.single-source-container') return [source.row];
+            if (selector === 'mat-expansion-panel' || selector === '.mat-expansion-panel') return [group];
+            if (
+                selector === 'mat-expansion-panel-header' ||
+                selector === '.mat-expansion-panel-header' ||
+                selector === '[aria-expanded]' ||
+                selector === '[role="button"][aria-expanded]'
+            ) {
+                return [header];
+            }
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+        global.requestAnimationFrame = (callback) => {
+            callback();
+            return 1;
+        };
+
+        const importResult = await mod.applyNativeLabelImportFromUi();
+        const preview = mod.getNativeLabelImportPreview();
+
+        expect(importResult).toBe(true);
+        expect(header.click).not.toHaveBeenCalled();
+        expect(preview).toMatchObject({
+            ok: true,
+            labelCount: 1,
+            sourceCount: 1
+        });
+        expect(preview.labels[0].sourceKeys).toEqual([sourceKey]);
+        expect(mod.sourcesByKey.get(sourceKey).nativeLabelTitle).toBe('');
+        expect(mod.state.ungrouped).toEqual([sourceKey]);
+    });
+
+    it('does not collect hidden native label rows from non-label containers', () => {
+        const source = createMockSourceRow({ title: 'Hidden Paper', stableToken: 'hidden-paper', checked: true });
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const header = {
+            tagName: 'BUTTON',
+            textContent: 'Research 1 sources',
+            style: {},
+            parentElement: panel,
+            parentNode: panel,
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'role') return 'button';
+                if (attr === 'aria-expanded') return 'false';
+                if (attr === 'aria-label') return 'Research';
+                return null;
+            }),
+            matches: jest.fn(() => false),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const hiddenContainer = {
+            tagName: 'DIV',
+            className: 'unrelated-hidden-container',
+            textContent: source.row.textContent,
+            style: { display: 'none' },
+            __computedStyle: { display: 'none' },
+            parentElement: panel,
+            parentNode: panel,
+            previousElementSibling: header,
+            previousSibling: header,
+            getAttribute: jest.fn(() => null),
+            matches: jest.fn(() => false),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        source.row.parentElement = hiddenContainer;
+        source.row.parentNode = hiddenContainer;
+        source.row.matches = jest.fn((selector) => selector === '[role="listitem"]');
+
+        panel.querySelectorAll = jest.fn((selector) => {
+            if (selector === 'button' || selector === '[role="button"]' || selector === '[aria-expanded]') return [header];
+            if (selector === '[role="listitem"]') return [source.row];
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        expect(mod.getSourceEntries(panel, { includeHiddenNativeLabelRows: true })).toEqual([]);
+    });
+
+    it('does not collect aria-hidden or disconnected native label rows', () => {
+        const ariaHiddenSource = createMockSourceRow({ title: 'Hidden Paper', stableToken: 'hidden-paper', checked: true });
+        const disconnectedSource = createMockSourceRow({ title: 'Disconnected Paper', stableToken: 'disconnected-paper', checked: true });
+        disconnectedSource.row.isConnected = false;
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const header = {
+            tagName: 'MAT-EXPANSION-PANEL-HEADER',
+            className: 'mat-expansion-panel-header',
+            textContent: 'keyboard_arrow_right Research 2 sources',
+            style: {},
+            parentElement: panel,
+            parentNode: panel,
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'role') return 'button';
+                if (attr === 'aria-expanded') return 'false';
+                if (attr === 'aria-label') return 'Research';
+                return null;
+            }),
+            matches: jest.fn((selector) => (
+                selector === 'mat-expansion-panel-header' ||
+                selector === '.mat-expansion-panel-header' ||
+                selector === '[aria-expanded]' ||
+                selector === '[role="button"][aria-expanded]'
+            )),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const ariaHiddenBody = {
+            tagName: 'DIV',
+            className: 'mat-expansion-panel-body',
+            style: { display: 'none' },
+            __computedStyle: { display: 'none' },
+            parentElement: panel,
+            parentNode: panel,
+            previousElementSibling: header,
+            previousSibling: header,
+            getAttribute: jest.fn((attr) => (attr === 'aria-hidden' ? 'true' : null)),
+            matches: jest.fn((selector) => selector === '.mat-expansion-panel-body'),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const disconnectedBody = {
+            tagName: 'DIV',
+            className: 'mat-expansion-panel-body',
+            style: { display: 'none' },
+            __computedStyle: { display: 'none' },
+            parentElement: panel,
+            parentNode: panel,
+            previousElementSibling: header,
+            previousSibling: header,
+            getAttribute: jest.fn(() => null),
+            matches: jest.fn((selector) => selector === '.mat-expansion-panel-body'),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        ariaHiddenSource.row.parentElement = ariaHiddenBody;
+        ariaHiddenSource.row.parentNode = ariaHiddenBody;
+        disconnectedSource.row.parentElement = disconnectedBody;
+        disconnectedSource.row.parentNode = disconnectedBody;
+        ariaHiddenSource.row.matches = jest.fn((selector) => selector === '.single-source-container');
+        disconnectedSource.row.matches = jest.fn((selector) => selector === '.single-source-container');
+
+        panel.querySelectorAll = jest.fn((selector) => {
+            if (selector === 'button' || selector === '[role="button"]') return [header];
+            if (selector === '.single-source-container') return [ariaHiddenSource.row, disconnectedSource.row];
+            if (
+                selector === 'mat-expansion-panel-header' ||
+                selector === '.mat-expansion-panel-header' ||
+                selector === '[aria-expanded]' ||
+                selector === '[role="button"][aria-expanded]'
+            ) {
+                return [header];
+            }
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        expect(mod.getSourceEntries(panel, { includeHiddenNativeLabelRows: true })).toEqual([]);
+    });
+
+    it('expands only incomplete native label groups and restores the fallback expansion', async () => {
+        const complete = createMockSourceRow({ title: 'Complete Source', stableToken: 'complete-1', checked: true });
+        const partialOne = createMockSourceRow({ title: 'Partial Source One', stableToken: 'partial-1', checked: true });
+        const partialTwo = createMockSourceRow({ title: 'Partial Source Two', stableToken: 'partial-2', checked: true });
+        seedMockSource(mod, complete, { enabled: true, nativeLabelTitle: '' });
+        seedMockSource(mod, partialOne, { enabled: true, nativeLabelTitle: '' });
+        seedMockSource(mod, partialTwo, { enabled: true, nativeLabelTitle: '' });
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        let partialExpanded = false;
+
+        const createCollapsedGroup = (title, expectedCount, rows, options = {}) => {
+            const header = {
+                tagName: 'MAT-EXPANSION-PANEL-HEADER',
+                className: 'mat-expansion-panel-header',
+                textContent: `keyboard_arrow_right ${title} ${expectedCount} sources`,
+                style: {},
+                parentElement: null,
+                parentNode: null,
+                click: jest.fn(() => {
+                    if (options.togglePartial) {
+                        partialExpanded = !partialExpanded;
+                        body.style.display = partialExpanded ? 'block' : 'none';
+                        body.__computedStyle.display = body.style.display;
+                    }
+                }),
+                getAttribute: jest.fn((attr) => {
+                    if (attr === 'role') return 'button';
+                    if (attr === 'aria-expanded') return options.togglePartial && partialExpanded ? 'true' : 'false';
+                    if (attr === 'aria-label') return title;
+                    return null;
+                }),
+                matches: jest.fn((selector) => (
+                    selector === 'mat-expansion-panel-header' ||
+                    selector === '.mat-expansion-panel-header' ||
+                    selector === '[aria-expanded]' ||
+                    selector === '[role="button"][aria-expanded]'
+                )),
+                querySelector: jest.fn(() => null),
+                querySelectorAll: jest.fn(() => [])
+            };
+            const body = {
+                tagName: 'DIV',
+                className: 'mat-expansion-panel-body',
+                textContent: rows.map((row) => row.row.textContent).join(' '),
+                style: { display: 'none' },
+                __computedStyle: { display: 'none' },
+                parentElement: null,
+                parentNode: null,
+                previousElementSibling: header,
+                previousSibling: header,
+                getAttribute: jest.fn(() => null),
+                matches: jest.fn((selector) => selector === '.mat-expansion-panel-body'),
+                querySelector: jest.fn(() => null),
+                querySelectorAll: jest.fn(() => [])
+            };
+            const group = {
+                tagName: 'MAT-EXPANSION-PANEL',
+                className: 'mat-expansion-panel',
+                textContent: `${header.textContent} ${body.textContent}`,
+                style: {},
+                parentElement: panel,
+                parentNode: panel,
+                getAttribute: jest.fn(() => null),
+                matches: jest.fn((selector) => selector === 'mat-expansion-panel' || selector === '.mat-expansion-panel'),
+                querySelector: jest.fn((selector) => (String(selector).includes('mat-expansion-panel-header') ? header : null)),
+                querySelectorAll: jest.fn((selector) => (String(selector).includes('mat-expansion-panel-header') ? [header] : []))
+            };
+            header.parentElement = group;
+            header.parentNode = group;
+            body.parentElement = group;
+            body.parentNode = group;
+            rows.forEach((row, index) => {
+                row.row.parentElement = body;
+                row.row.parentNode = body;
+                row.row.previousElementSibling = index > 0 ? rows[index - 1].row : null;
+                row.row.previousSibling = row.row.previousElementSibling;
+                row.row.matches = jest.fn((selector) => selector === '.single-source-container');
+            });
+            return { group, header, body, rows: rows.map((row) => row.row) };
+        };
+
+        const completeGroup = createCollapsedGroup('Complete Label', 1, [complete]);
+        const partialGroup = createCollapsedGroup('Partial Label', 2, [partialOne, partialTwo], { togglePartial: true });
+        const allGroups = [completeGroup, partialGroup];
+        panel.querySelectorAll = jest.fn((selector) => {
+            if (selector === '.single-source-container') {
+                return [
+                    complete.row,
+                    partialOne.row,
+                    ...(partialExpanded ? [partialTwo.row] : [])
+                ];
+            }
+            if (selector === 'mat-expansion-panel' || selector === '.mat-expansion-panel') {
+                return allGroups.map((group) => group.group);
+            }
+            if (
+                selector === 'mat-expansion-panel-header' ||
+                selector === '.mat-expansion-panel-header' ||
+                selector === '[aria-expanded]' ||
+                selector === '[role="button"][aria-expanded]'
+            ) {
+                return allGroups.map((group) => group.header);
+            }
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+        global.requestAnimationFrame = (callback) => {
+            callback();
+            return 1;
+        };
+
+        const importResult = await mod.applyNativeLabelImportFromUi();
+
+        expect(importResult).toBe(true);
+        expect(completeGroup.header.click).not.toHaveBeenCalled();
+        expect(partialGroup.header.click).toHaveBeenCalledTimes(2);
+        expect(partialExpanded).toBe(false);
+    });
+
+    it('writes redacted developer logs for native label import preview fallback', async () => {
+        expect(await mod.setDeveloperModeEnabled(true)).toBe(true);
+
+        const secretSource = createMockSourceRow({ title: 'Sensitive Paper Title', stableToken: 'sensitive-1', checked: true });
+        const missingSource = createMockSourceRow({ title: 'Second Sensitive Paper', stableToken: 'sensitive-2', checked: true });
+        seedMockSource(mod, secretSource, { enabled: true, nativeLabelTitle: '' });
+        seedMockSource(mod, missingSource, { enabled: true, nativeLabelTitle: '' });
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        let expanded = false;
+        const header = {
+            tagName: 'MAT-EXPANSION-PANEL-HEADER',
+            className: 'mat-expansion-panel-header',
+            textContent: 'keyboard_arrow_right Secret NotebookLM Label 2 sources',
+            style: {},
+            parentElement: null,
+            parentNode: null,
+            click: jest.fn(() => {
+                expanded = !expanded;
+                body.style.display = expanded ? 'block' : 'none';
+                body.__computedStyle.display = body.style.display;
+            }),
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'role') return 'button';
+                if (attr === 'aria-expanded') return expanded ? 'true' : 'false';
+                if (attr === 'aria-label') return 'Secret NotebookLM Label';
+                return null;
+            }),
+            matches: jest.fn((selector) => (
+                selector === 'mat-expansion-panel-header' ||
+                selector === '.mat-expansion-panel-header' ||
+                selector === '[aria-expanded]' ||
+                selector === '[role="button"][aria-expanded]'
+            )),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const body = {
+            tagName: 'DIV',
+            className: 'mat-expansion-panel-body',
+            textContent: `${secretSource.row.textContent} ${missingSource.row.textContent}`,
+            style: { display: 'none' },
+            __computedStyle: { display: 'none' },
+            parentElement: null,
+            parentNode: null,
+            previousElementSibling: header,
+            previousSibling: header,
+            getAttribute: jest.fn(() => null),
+            matches: jest.fn((selector) => selector === '.mat-expansion-panel-body'),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const group = {
+            tagName: 'MAT-EXPANSION-PANEL',
+            className: 'mat-expansion-panel',
+            textContent: `${header.textContent} ${body.textContent}`,
+            style: {},
+            parentElement: panel,
+            parentNode: panel,
+            getAttribute: jest.fn(() => null),
+            matches: jest.fn((selector) => selector === 'mat-expansion-panel' || selector === '.mat-expansion-panel'),
+            querySelector: jest.fn((selector) => (String(selector).includes('mat-expansion-panel-header') ? header : null)),
+            querySelectorAll: jest.fn((selector) => (String(selector).includes('mat-expansion-panel-header') ? [header] : []))
+        };
+        header.parentElement = group;
+        header.parentNode = group;
+        body.parentElement = group;
+        body.parentNode = group;
+        [secretSource, missingSource].forEach((source) => {
+            source.row.parentElement = body;
+            source.row.parentNode = body;
+            source.row.matches = jest.fn((selector) => selector === '.single-source-container');
+        });
+
+        panel.querySelectorAll = jest.fn((selector) => {
+            if (selector === '.single-source-container') {
+                return expanded ? [secretSource.row, missingSource.row] : [secretSource.row];
+            }
+            if (selector === 'mat-expansion-panel' || selector === '.mat-expansion-panel') return [group];
+            if (
+                selector === 'mat-expansion-panel-header' ||
+                selector === '.mat-expansion-panel-header' ||
+                selector === '[aria-expanded]' ||
+                selector === '[role="button"][aria-expanded]'
+            ) {
+                return [header];
+            }
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+        global.requestAnimationFrame = (callback) => {
+            callback();
+            return 1;
+        };
+
+        await mod.applyNativeLabelImportFromUi();
+
+        const developerLogs = mod.getDeveloperLogs();
+        expect(developerLogs.map((entry) => entry.event)).toEqual(expect.arrayContaining([
+            'native_label_preview_started',
+            'native_label_preview_incomplete',
+            'native_label_expand_fallback_used',
+            'native_label_preview_ready'
+        ]));
+        const serializedLogs = JSON.stringify(developerLogs);
+        expect(serializedLogs).not.toContain('Secret NotebookLM Label');
+        expect(serializedLogs).not.toContain('Sensitive Paper Title');
+        expect(serializedLogs).not.toContain('Second Sensitive Paper');
+    });
+
     it('does not use source row more buttons as NotebookLM label titles', () => {
         const first = createMockSourceRow({ title: 'Paper One', stableToken: 'paper-1', checked: true });
         const second = createMockSourceRow({ title: 'Paper Two', stableToken: 'paper-2', checked: true });
@@ -1113,6 +2024,221 @@ describe('scanAndSyncSources', () => {
         expect(rowMoreButton.click).not.toHaveBeenCalled();
     });
 
+    it('expands collapsed NotebookLM label groups that only expose a chevron icon signal', () => {
+        const source = createMockSourceRow({ title: 'Paper One', stableToken: 'paper-1', checked: true });
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const labelGroup = {
+            tagName: 'DIV',
+            className: 'source-label-group',
+            textContent: 'keyboard_arrow_right Practical Economics',
+            style: {},
+            parentElement: panel,
+            parentNode: panel,
+            click: jest.fn(),
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'data-testid') return 'source-label-group';
+                if (attr === 'aria-label') return 'Practical Economics label';
+                return null;
+            }),
+            matches: jest.fn((selector) => selector.includes('source-label') || selector.includes('label-group')),
+            contains: jest.fn((node) => node === header || node === checkbox),
+            querySelector: jest.fn((selector) => {
+                if (selector === 'button' || selector === '[role="button"]' || selector.includes('mat-expansion-panel-header')) return header;
+                if (selector.includes('checkbox')) return checkbox;
+                return null;
+            }),
+            querySelectorAll: jest.fn((selector) => {
+                if (selector === 'button' || selector === '[role="button"]' || selector.includes('mat-expansion-panel-header')) return [header];
+                if (selector.includes('checkbox')) return [checkbox];
+                return [];
+            })
+        };
+        const header = {
+            tagName: 'DIV',
+            className: 'mat-expansion-panel-header',
+            textContent: 'keyboard_arrow_right Practical Economics',
+            style: {},
+            parentElement: labelGroup,
+            parentNode: labelGroup,
+            click: jest.fn(),
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'role') return 'button';
+                if (attr === 'aria-label') return 'Practical Economics';
+                return null;
+            }),
+            matches: jest.fn((selector) => selector === '[role="button"]' || selector.includes('mat-expansion-panel-header')),
+            contains: jest.fn((node) => node === checkbox),
+            querySelector: jest.fn((selector) => (selector.includes('checkbox') ? checkbox : null)),
+            querySelectorAll: jest.fn((selector) => (selector.includes('checkbox') ? [checkbox] : []))
+        };
+        const checkbox = {
+            checked: true,
+            parentElement: header,
+            parentNode: header,
+            getAttribute: jest.fn((attr) => (attr === 'aria-label' ? 'Practical Economics' : null)),
+            matches: jest.fn(() => false)
+        };
+        source.row.parentElement = labelGroup;
+        source.row.parentNode = labelGroup;
+
+        panel.querySelectorAll = jest.fn((selector) => {
+            const value = String(selector);
+            if (value.includes('source-label') || value.includes('label-group')) return [labelGroup];
+            if (value === 'button' || value === '[role="button"]' || value.includes('mat-expansion-panel-header')) return [header];
+            if (value.includes('source')) return [source.row];
+            return [];
+        });
+
+        expect(mod.expandCollapsedNativeLabelGroups(panel)).toEqual({
+            clickedCount: 1,
+            titles: ['Practical Economics']
+        });
+        expect(header.click).toHaveBeenCalledTimes(1);
+        expect(labelGroup.click).not.toHaveBeenCalled();
+    });
+
+    it('expands collapsed NotebookLM label tree items that expose only a chevron icon', () => {
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const checkbox = {
+            checked: true,
+            parentElement: null,
+            parentNode: null,
+            getAttribute: jest.fn((attr) => (attr === 'aria-label' ? 'AI ethics and risk' : null)),
+            matches: jest.fn(() => false)
+        };
+        const chevron = {
+            tagName: 'MAT-ICON',
+            className: 'mat-icon',
+            textContent: 'keyboard_arrow_right',
+            style: {},
+            parentElement: null,
+            parentNode: null,
+            click: jest.fn(),
+            getAttribute: jest.fn(() => null),
+            matches: jest.fn((selector) => selector === 'mat-icon' || selector === '.mat-icon'),
+            contains: jest.fn(() => false),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const treeItem = {
+            tagName: 'DIV',
+            className: 'mat-tree-node',
+            textContent: 'keyboard_arrow_right AI ethics and risk',
+            style: {},
+            parentElement: panel,
+            parentNode: panel,
+            click: jest.fn(),
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'role') return 'treeitem';
+                if (attr === 'aria-label') return 'AI ethics and risk';
+                return null;
+            }),
+            matches: jest.fn((selector) => (
+                selector === '[role="treeitem"]' ||
+                selector === '.mat-tree-node' ||
+                selector === 'mat-tree-node'
+            )),
+            contains: jest.fn((node) => node === chevron || node === checkbox),
+            querySelector: jest.fn((selector) => {
+                if (selector === 'mat-icon' || selector === '.mat-icon') return chevron;
+                if (selector.includes('checkbox')) return checkbox;
+                return null;
+            }),
+            querySelectorAll: jest.fn((selector) => {
+                if (selector === 'mat-icon' || selector === '.mat-icon') return [chevron];
+                if (selector.includes('checkbox')) return [checkbox];
+                return [];
+            })
+        };
+        checkbox.parentElement = treeItem;
+        checkbox.parentNode = treeItem;
+        chevron.parentElement = treeItem;
+        chevron.parentNode = treeItem;
+
+        panel.querySelectorAll = jest.fn((selector) => {
+            const value = String(selector);
+            if (value.includes('treeitem') || value.includes('mat-tree-node')) return [treeItem];
+            if (value === 'mat-icon' || value === '.mat-icon') return [chevron];
+            return [];
+        });
+
+        expect(mod.expandCollapsedNativeLabelGroups(panel)).toEqual({
+            clickedCount: 1,
+            titles: ['AI ethics and risk']
+        });
+        expect(treeItem.click).toHaveBeenCalledTimes(1);
+        expect(chevron.click).not.toHaveBeenCalled();
+    });
+
+    it('waits for expanded native label rows before showing the import preview', async () => {
+        const source = createMockSourceRow({ title: 'Ethics Paper', stableToken: 'ethics-paper', checked: true });
+        source.row.__nativeLabelTitle = 'AI ethics and risk';
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        let expanded = false;
+        let sourceRowScanCount = 0;
+        const treeItem = {
+            tagName: 'DIV',
+            className: 'mat-tree-node',
+            textContent: 'keyboard_arrow_right AI ethics and risk',
+            style: {},
+            parentElement: panel,
+            parentNode: panel,
+            click: jest.fn(() => {
+                expanded = true;
+            }),
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'role') return 'treeitem';
+                if (attr === 'aria-label') return 'AI ethics and risk';
+                return null;
+            }),
+            matches: jest.fn((selector) => (
+                selector === '[role="treeitem"]' ||
+                selector === '.mat-tree-node' ||
+                selector === 'mat-tree-node'
+            )),
+            contains: jest.fn(() => false),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        source.row.parentElement = panel;
+        source.row.parentNode = panel;
+        source.row.matches = jest.fn((selector) => selector === '[role="listitem"]');
+
+        panel.querySelectorAll = jest.fn((selector) => {
+            const value = String(selector);
+            if (value.includes('treeitem') || value.includes('mat-tree-node')) return [treeItem];
+            if (value === '[role="listitem"]' || value.includes('source')) {
+                if (!expanded) return [];
+                sourceRowScanCount += 1;
+                return sourceRowScanCount >= 2 ? [source.row] : [];
+            }
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+        global.requestAnimationFrame = (callback) => {
+            callback();
+            return 1;
+        };
+
+        const importResult = await mod.applyNativeLabelImportFromUi();
+
+        expect(treeItem.click).toHaveBeenCalledTimes(2);
+        expect(sourceRowScanCount).toBeGreaterThanOrEqual(2);
+        expect({
+            importResult,
+            preview: mod.getNativeLabelImportPreview()
+        }).toMatchObject({
+            importResult: true,
+            preview: {
+                ok: true,
+                labelCount: 1,
+                sourceCount: 1
+            }
+        });
+    });
+
     it('ignores suppressed label rows when detecting the active source view', () => {
         global.document.documentElement.className = 'sources-plus-manager-active';
         global.document.documentElement.classList.contains = jest.fn((className) => (
@@ -1175,6 +2301,7 @@ describe('scanAndSyncSources', () => {
         mod.groupsById.set('existing-clinical', {
             id: 'existing-clinical',
             title: 'Clinical Papers',
+            nativeLabelTitle: 'Clinical Papers',
             children: [],
             enabled: true,
             collapsed: false
@@ -1200,6 +2327,84 @@ describe('scanAndSyncSources', () => {
             'Policy Notes'
         ]);
         expect(mod.state.ungrouped).toEqual([]);
+    });
+
+    it('imports preview-only native label sources when confirmation is applied', () => {
+        const first = createMockSourceRow({ title: 'Paper One', stableToken: 'paper-1', checked: true });
+        const second = createMockSourceRow({ title: 'Paper Two', stableToken: 'paper-2', checked: true });
+        first.row.__nativeLabelTitle = 'Clinical Papers';
+        second.row.__nativeLabelTitle = 'Policy Notes';
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        panel.querySelectorAll = jest.fn((selector) => {
+            if (selector.includes('source-label') || selector.includes('label-group')) return [];
+            if (selector.includes('source')) return [first.row, second.row];
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        const preview = mod.getNativeLabelImportPreview();
+
+        expect(preview).toMatchObject({
+            ok: true,
+            labelCount: 2,
+            sourceCount: 2
+        });
+        expect(mod.sourcesByKey.size).toBe(0);
+
+        expect(mod.applyNativeLabelImport(preview)).toBe(true);
+        expect(mod.sourcesByKey.size).toBe(2);
+        expect(Array.from(mod.groupsById.values()).map((group) => group.nativeLabelTitle).sort()).toEqual([
+            'Clinical Papers',
+            'Policy Notes'
+        ]);
+        expect(Array.from(mod.groupsById.values()).flatMap((group) => group.children)).toHaveLength(2);
+        expect(mod.state.ungrouped).toEqual([]);
+    });
+
+    it('does not silently reuse ordinary same-title folders during native label import', () => {
+        const source = createMockSourceRow({ title: 'Paper One', stableToken: 'paper-1', checked: true });
+        source.row.__nativeLabelTitle = 'Clinical Papers';
+        const sourceKey = seedMockSource(mod, source, { enabled: true, nativeLabelTitle: '' });
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        panel.querySelectorAll = jest.fn((selector) => {
+            if (selector.includes('source-label') || selector.includes('label-group')) return [];
+            if (selector.includes('source')) return [source.row];
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        mod.groupsById.set('ordinary-clinical', {
+            id: 'ordinary-clinical',
+            title: 'Clinical Papers',
+            children: [],
+            enabled: true,
+            collapsed: false
+        });
+        mod.state.groups = ['ordinary-clinical'];
+
+        expect(mod.getSourceViewInfo(panel).kind).toBe('label');
+        expect(mod.getNativeLabelImportPreview()).toMatchObject({
+            ok: true,
+            labels: [
+                {
+                    title: 'Clinical Papers',
+                    existingGroupId: null,
+                    action: 'create'
+                }
+            ]
+        });
+
+        expect(mod.applyNativeLabelImport()).toBe(true);
+        expect(mod.groupsById.get('ordinary-clinical').children).toEqual([]);
+        const importedGroups = Array.from(mod.groupsById.values())
+            .filter((group) => group.nativeLabelTitle === 'Clinical Papers');
+        expect(importedGroups).toHaveLength(1);
+        expect(importedGroups[0].id).not.toBe('ordinary-clinical');
+        expect(importedGroups[0].children).toEqual([{ type: 'source', key: sourceKey }]);
     });
 
     it('does not move sources out of existing user folders when importing native labels', () => {
@@ -1701,6 +2906,136 @@ describe('scanAndSyncSources', () => {
         });
     });
 
+    it('treats visible Material progress indicators as loading even when source controls exist', () => {
+        const progressBar = {
+            nodeType: 1,
+            hidden: false,
+            textContent: '',
+            style: {},
+            parentElement: null,
+            getAttribute: jest.fn(() => null),
+            matches: jest.fn((selector) => (
+                String(selector).includes('mat-progress-bar') ||
+                String(selector).includes('.mat-mdc-progress-bar')
+            ))
+        };
+        const mock = createMockSourceRow({
+            title: 'Uploading Source',
+            stableToken: 'uploading-doc',
+            checked: true
+        });
+        const originalQuerySelector = mock.row.querySelector;
+        const originalQuerySelectorAll = mock.row.querySelectorAll;
+        mock.row.querySelector = jest.fn((selector) => {
+            if (
+                String(selector).includes('mat-progress-bar') ||
+                String(selector).includes('.mat-mdc-progress-bar')
+            ) {
+                return progressBar;
+            }
+            return originalQuerySelector(selector);
+        });
+        mock.row.querySelectorAll = jest.fn((selector) => {
+            if (
+                String(selector).includes('mat-progress-bar') ||
+                String(selector).includes('.mat-mdc-progress-bar')
+            ) {
+                return [progressBar];
+            }
+            return originalQuerySelectorAll(selector);
+        });
+
+        const descriptor = mod.createSourceDescriptor(mock.row, new Map(), new Map());
+
+        expect(descriptor).toMatchObject({
+            title: 'Uploading Source',
+            hasNativeCheckbox: true,
+            isLoading: true,
+            isDisabled: true
+        });
+    });
+
+    it('treats visible non-title processing text as loading even when source controls exist', () => {
+        const statusNode = {
+            nodeType: 1,
+            hidden: false,
+            textContent: '正在添加来源',
+            style: {},
+            parentElement: null,
+            getAttribute: jest.fn(() => null),
+            matches: jest.fn(() => false),
+            closest: jest.fn(() => null)
+        };
+        const mock = createMockSourceRow({
+            title: 'Uploading Source',
+            stableToken: 'uploading-doc',
+            checked: true,
+            descendantCandidates: [statusNode]
+        });
+        statusNode.parentElement = mock.row;
+        statusNode.closest = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? mock.row : null
+        ));
+
+        const descriptor = mod.createSourceDescriptor(mock.row, new Map(), new Map());
+
+        expect(descriptor).toMatchObject({
+            title: 'Uploading Source',
+            hasNativeCheckbox: true,
+            isLoading: true,
+            isDisabled: true
+        });
+    });
+
+    it('marks newly added raw URL source rows as transient loading without changing existing URL sources', () => {
+        const existingUrlRow = createMockSourceRow({
+            title: 'https://example.com/already-added',
+            stableToken: 'existing-url',
+            checked: true
+        });
+        const existingNamedRow = createMockSourceRow({
+            title: 'Existing Named Source',
+            stableToken: 'existing-named',
+            checked: true
+        });
+        const newUrlRow = createMockSourceRow({
+            title: 'https://blog.csdn.net/gitblog_00760/article/details/144345646',
+            stableToken: 'new-url',
+            checked: true
+        });
+        const existingUrlDescriptor = mod.createSourceDescriptor(existingUrlRow.row, new Map(), new Map());
+        const existingNamedDescriptor = mod.createSourceDescriptor(existingNamedRow.row, new Map(), new Map());
+        const newUrlDescriptor = mod.createSourceDescriptor(newUrlRow.row, new Map(), new Map());
+
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [existingUrlRow.row, existingNamedRow.row] : []
+        ));
+        mod.scanAndSyncSources(null, true);
+        expect(mod.sourcesByKey.get(existingUrlDescriptor.key)).toMatchObject({
+            title: 'https://example.com/already-added',
+            isLoading: false
+        });
+
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [existingUrlRow.row, existingNamedRow.row, newUrlRow.row] : []
+        ));
+        mod.scanAndSyncSources(null, false);
+
+        expect(mod.sourcesByKey.get(existingUrlDescriptor.key)).toMatchObject({
+            title: 'https://example.com/already-added',
+            isLoading: false
+        });
+        expect(mod.sourcesByKey.get(existingNamedDescriptor.key)).toMatchObject({
+            title: 'Existing Named Source',
+            isLoading: false
+        });
+        expect(mod.sourcesByKey.get(newUrlDescriptor.key)).toMatchObject({
+            title: 'https://blog.csdn.net/gitblog_00760/article/details/144345646',
+            isLoading: true,
+            isDisabled: true
+        });
+    });
+
     it('does not keep a ready source loading from title text or hidden stale progress nodes', () => {
         const hiddenProgress = {
             hidden: true,
@@ -1766,6 +3101,26 @@ describe('scanAndSyncSources', () => {
             failedRows: 1
         }));
         expect(mod.sourcesByKey.get(descriptor.key)).toMatchObject({
+            isFailed: true,
+            isDisabled: true
+        });
+    });
+
+    it('treats failed source rows with native checkboxes as disabled failed sources', () => {
+        const mock = createMockSourceRow({
+            title: 'Failed URL Source',
+            stableToken: 'failed-url-doc',
+            checked: true,
+            status: 'failed',
+            statusText: 'Import failed'
+        });
+
+        const descriptor = mod.createSourceDescriptor(mock.row, new Map(), new Map());
+
+        expect(descriptor).toMatchObject({
+            title: 'Failed URL Source',
+            hasNativeCheckbox: true,
+            isLoading: false,
             isFailed: true,
             isDisabled: true
         });
@@ -1847,6 +3202,179 @@ describe('scanAndSyncSources', () => {
 
         expect(mod.state.ungrouped).toEqual([firstDescriptor.key, secondDescriptor.key, newDescriptor.key]);
         expect(mod.sourcesByKey.has(newDescriptor.key)).toBe(true);
+        expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(
+            expect.objectContaining({ type: 'SAVE_STATE' }),
+            expect.any(Function)
+        );
+    });
+
+    it('shows a newly importing source during a partial NotebookLM rescan without dropping existing sources', () => {
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const firstRow = createMockSourceRow({ title: 'Existing Source A', stableToken: 'doc-a', checked: true });
+        const secondRow = createMockSourceRow({ title: 'Existing Source B', stableToken: 'doc-b', checked: true });
+        const loadingRow = createMockSourceRow({
+            title: 'Importing Source C',
+            stableToken: null,
+            hasCheckbox: false,
+            nativeMoreButton: null,
+            loading: true
+        });
+        const firstDescriptor = mod.createSourceDescriptor(firstRow.row, new Map(), new Map());
+        const secondDescriptor = mod.createSourceDescriptor(secondRow.row, new Map(), new Map());
+        const loadingDescriptor = mod.createSourceDescriptor(loadingRow.row, new Map(), new Map());
+
+        mod._setProjectId('test-project');
+        global.document.querySelector = jest.fn(() => panel);
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [firstRow.row, secondRow.row] : []
+        ));
+        mod.scanAndSyncSources(null, true);
+        global.chrome.runtime.sendMessage.mockClear();
+
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [loadingRow.row] : []
+        ));
+        mod._debouncedScanAndSyncForTest();
+        mod.flushPendingStateSave();
+
+        expect(mod.state.ungrouped).toEqual([
+            firstDescriptor.key,
+            secondDescriptor.key,
+            loadingDescriptor.key
+        ]);
+        expect(Array.from(mod.sourcesByKey.keys()).sort()).toEqual([
+            firstDescriptor.key,
+            secondDescriptor.key,
+            loadingDescriptor.key
+        ].sort());
+        expect(mod.sourcesByKey.get(loadingDescriptor.key)).toMatchObject({
+            title: 'Importing Source C',
+            isLoading: true,
+            isDisabled: true,
+            hasNativeCheckbox: false
+        });
+        expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(
+            expect.objectContaining({ type: 'SAVE_STATE' }),
+            expect.any(Function)
+        );
+    });
+
+    it('shows an importing source row that NotebookLM exposes only as a listitem', () => {
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const firstRow = createMockSourceRow({ title: 'Existing Source A', stableToken: 'doc-a', checked: true });
+        const secondRow = createMockSourceRow({ title: 'Existing Source B', stableToken: 'doc-b', checked: true });
+        const loadingRow = createMockSourceRow({
+            title: 'Temporary Upload Source',
+            stableToken: null,
+            hasCheckbox: false,
+            nativeMoreButton: null,
+            loading: true
+        });
+        loadingRow.row.getAttribute = jest.fn((attr) => {
+            if (attr === 'role') return 'listitem';
+            if (attr === 'title') return '';
+            if (attr === 'data-status') return null;
+            if (attr === 'data-state') return null;
+            return null;
+        });
+        const firstDescriptor = mod.createSourceDescriptor(firstRow.row, new Map(), new Map());
+        const secondDescriptor = mod.createSourceDescriptor(secondRow.row, new Map(), new Map());
+        const loadingDescriptor = mod.createSourceDescriptor(loadingRow.row, new Map(), new Map());
+
+        mod._setProjectId('test-project');
+        global.document.querySelector = jest.fn(() => panel);
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [firstRow.row, secondRow.row] : []
+        ));
+        mod.scanAndSyncSources(null, true);
+        global.chrome.runtime.sendMessage.mockClear();
+
+        panel.querySelectorAll = jest.fn((selector) => {
+            if (selector === '[role="listitem"]') return [loadingRow.row];
+            return [];
+        });
+        global.document.querySelectorAll = jest.fn((selector) => {
+            if (selector === '[role="listitem"]') return [loadingRow.row];
+            return [];
+        });
+        mod._debouncedScanAndSyncForTest();
+        mod.flushPendingStateSave();
+
+        expect(mod.state.ungrouped).toEqual([
+            firstDescriptor.key,
+            secondDescriptor.key,
+            loadingDescriptor.key
+        ]);
+        expect(mod.sourcesByKey.get(loadingDescriptor.key)).toMatchObject({
+            title: 'Temporary Upload Source',
+            isLoading: true,
+            isDisabled: true
+        });
+        expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(
+            expect.objectContaining({ type: 'SAVE_STATE' }),
+            expect.any(Function)
+        );
+    });
+
+    it('resyncs when NotebookLM inserts an importing source inside a wrapper node', () => {
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const firstRow = createMockSourceRow({ title: 'Existing Source A', stableToken: 'doc-a', checked: true });
+        const secondRow = createMockSourceRow({ title: 'Existing Source B', stableToken: 'doc-b', checked: true });
+        const loadingRow = createMockSourceRow({
+            title: 'Wrapped Upload Source',
+            stableToken: null,
+            hasCheckbox: false,
+            nativeMoreButton: null,
+            loading: true
+        });
+        loadingRow.row.getAttribute = jest.fn((attr) => {
+            if (attr === 'role') return 'listitem';
+            if (attr === 'title') return '';
+            if (attr === 'data-status') return null;
+            if (attr === 'data-state') return null;
+            return null;
+        });
+        const loadingDescriptor = mod.createSourceDescriptor(loadingRow.row, new Map(), new Map());
+        const wrapperNode = {
+            nodeType: 1,
+            hasAttribute: jest.fn(() => false),
+            classList: { contains: jest.fn(() => false) },
+            querySelector: jest.fn((selector) => (
+                selector === '[role="listitem"]' ? loadingRow.row : null
+            )),
+            matches: jest.fn(() => false),
+            closest: jest.fn(() => null)
+        };
+
+        mod._setProjectId('test-project');
+        global.document.querySelector = jest.fn(() => panel);
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [firstRow.row, secondRow.row] : []
+        ));
+        mod.scanAndSyncSources(null, true);
+        global.chrome.runtime.sendMessage.mockClear();
+
+        panel.querySelectorAll = jest.fn((selector) => {
+            if (selector === '[role="listitem"]') return [loadingRow.row];
+            return [];
+        });
+        global.document.querySelectorAll = jest.fn((selector) => {
+            if (selector === '[role="listitem"]') return [loadingRow.row];
+            return [];
+        });
+        mod._handleDomChangesForTest([{
+            type: 'childList',
+            target: panel,
+            addedNodes: [wrapperNode],
+            removedNodes: []
+        }]);
+        mod.flushPendingStateSave();
+
+        expect(mod.sourcesByKey.get(loadingDescriptor.key)).toMatchObject({
+            title: 'Wrapped Upload Source',
+            isLoading: true,
+            isDisabled: true
+        });
         expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(
             expect.objectContaining({ type: 'SAVE_STATE' }),
             expect.any(Function)
@@ -2755,6 +4283,50 @@ describe('mutation-driven persistence', () => {
             attributeName: 'data-source-id',
             target: sourceRow.row
         })).toEqual({ relevant: true, critical: true });
+    });
+
+    it('updates loading state when NotebookLM changes a source status attribute', () => {
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const sourceRow = createMockSourceRow({ title: 'Uploading Source', stableToken: 'doc-1', checked: true });
+        let statusValue = null;
+        global.setTimeout.mockImplementation((callback) => {
+            callback();
+            return 1;
+        });
+        sourceRow.row.nodeType = 1;
+        sourceRow.row.getAttribute = jest.fn((attr) => {
+            if (attr === 'data-source-id') return 'doc-1';
+            if (attr === 'data-state') return statusValue;
+            if (attr === 'data-status') return statusValue;
+            if (attr === 'aria-label') return '';
+            return null;
+        });
+        sourceRow.row.matches = jest.fn((selector) => mod.DEPS.row.includes(selector));
+        sourceRow.row.closest = jest.fn(() => null);
+
+        mod._setProjectId('test-project');
+        global.document.querySelector = jest.fn(() => panel);
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [sourceRow.row] : []
+        ));
+        mod.scanAndSyncSources(null, true);
+        global.chrome.runtime.sendMessage.mockClear();
+
+        statusValue = 'importing';
+        mod._handleDomChangesForTest([{
+            type: 'attributes',
+            target: sourceRow.row,
+            attributeName: 'data-state',
+            addedNodes: [],
+            removedNodes: []
+        }]);
+        mod.flushPendingStateSave();
+
+        expect(Array.from(mod.sourcesByKey.values())[0]).toMatchObject({
+            title: 'Uploading Source',
+            isLoading: true,
+            isDisabled: true
+        });
     });
 
     it('does not resync for repeated irrelevant list-view class and style mutations', () => {

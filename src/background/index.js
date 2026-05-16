@@ -3,9 +3,13 @@ const NOTEBOOKLM_URL_PATTERN = 'https://notebooklm.google.com/*';
 const NOTEBOOKLM_NOTEBOOK_PREFIX = 'https://notebooklm.google.com/notebook/';
 const CHROME_WEB_STORE_DETAIL_URL_PREFIX = 'https://chrome.google.com/webstore/detail/';
 const EXTENSION_ENABLED_KEY = 'extensionEnabled';
+const PREFERENCES_KEY = 'sourcesPlusPreferences';
 const STATE_KEY_PREFIX = 'sourcesPlusState_';
 const STATE_HISTORY_KEY_PREFIX = 'sourcesPlusHistory_';
+const DEVELOPER_LOG_KEY_PREFIX = 'sourcesPlusDeveloperLogs_';
 const STATE_HISTORY_LIMIT = 5;
+const DEVELOPER_LOG_LIMIT = 500;
+const DEVELOPER_LOG_MAX_BYTES = 512 * 1024;
 const DEFAULT_STORAGE_QUOTA_BYTES = 10 * 1024 * 1024;
 const STORAGE_WARNING_RATIO = 0.8;
 const STORAGE_CRITICAL_RATIO = 0.95;
@@ -251,6 +255,134 @@ function setExtensionEnabled(request, sendResponse) {
         }
 
         forwardManagerToggleToTab(request?.tabId, enabled, sendResponse);
+    });
+}
+
+function normalizePreferences(preferences = {}) {
+    return {
+        developerModeEnabled: Boolean(preferences?.developerModeEnabled)
+    };
+}
+
+function getPreferences(sendResponse) {
+    chrome.storage.local.get([PREFERENCES_KEY], (data) => {
+        if (chrome.runtime.lastError) {
+            sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
+            return;
+        }
+
+        sendResponse({
+            success: true,
+            preferences: normalizePreferences(data?.[PREFERENCES_KEY])
+        });
+    });
+}
+
+function setPreferences(request, sendResponse) {
+    const preferences = normalizePreferences(request?.preferences);
+    chrome.storage.local.set({ [PREFERENCES_KEY]: preferences }, () => {
+        if (chrome.runtime.lastError) {
+            sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
+            return;
+        }
+
+        sendResponse({ success: true, preferences });
+    });
+}
+
+function isValidDeveloperLogKey(key) {
+    return typeof key === 'string' &&
+        key.startsWith(DEVELOPER_LOG_KEY_PREFIX) &&
+        key.length > DEVELOPER_LOG_KEY_PREFIX.length;
+}
+
+function normalizeDeveloperLogEntry(entry = {}) {
+    return {
+        id: typeof entry.id === 'string' && entry.id ? entry.id : String(Date.now()),
+        timestamp: typeof entry.timestamp === 'string' ? entry.timestamp : new Date().toISOString(),
+        level: typeof entry.level === 'string' ? entry.level : 'info',
+        category: typeof entry.category === 'string' ? entry.category : 'ui',
+        event: typeof entry.event === 'string' ? entry.event : 'unknown_event',
+        notebookId: typeof entry.notebookId === 'string' ? entry.notebookId : '',
+        details: entry.details && typeof entry.details === 'object' && !Array.isArray(entry.details)
+            ? entry.details
+            : {}
+    };
+}
+
+function trimDeveloperLogs(logs = []) {
+    const nextLogs = (Array.isArray(logs) ? logs : [])
+        .filter((entry) => entry && typeof entry === 'object')
+        .map(normalizeDeveloperLogEntry);
+
+    while (nextLogs.length > DEVELOPER_LOG_LIMIT) {
+        nextLogs.shift();
+    }
+    while (nextLogs.length > 0 && getSerializedByteLength(nextLogs) > DEVELOPER_LOG_MAX_BYTES) {
+        nextLogs.shift();
+    }
+    return nextLogs;
+}
+
+function loadDeveloperLogs(request, sendResponse) {
+    if (!isValidDeveloperLogKey(request?.key)) {
+        sendResponse({ success: false, errorCode: ERROR_CODES.INVALID_STORAGE_KEY });
+        return;
+    }
+
+    chrome.storage.local.get([request.key], (data) => {
+        if (chrome.runtime.lastError) {
+            sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
+            return;
+        }
+
+        sendResponse({
+            success: true,
+            logs: trimDeveloperLogs(data?.[request.key] || [])
+        });
+    });
+}
+
+function appendDeveloperLog(request, sendResponse) {
+    if (!isValidDeveloperLogKey(request?.key)) {
+        sendResponse({ success: false, errorCode: ERROR_CODES.INVALID_STORAGE_KEY });
+        return;
+    }
+
+    chrome.storage.local.get([request.key], (data) => {
+        if (chrome.runtime.lastError) {
+            sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
+            return;
+        }
+
+        const logs = trimDeveloperLogs([
+            ...(Array.isArray(data?.[request.key]) ? data[request.key] : []),
+            normalizeDeveloperLogEntry(request.entry)
+        ]);
+        chrome.storage.local.set({ [request.key]: logs }, () => {
+            if (chrome.runtime.lastError) {
+                sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
+                return;
+            }
+
+            sendResponse({ success: true, logs });
+        });
+    });
+}
+
+function clearDeveloperLogs(request, sendResponse) {
+    if (!isValidDeveloperLogKey(request?.key)) {
+        sendResponse({ success: false, errorCode: ERROR_CODES.INVALID_STORAGE_KEY });
+        return;
+    }
+
+    chrome.storage.local.set({ [request.key]: [] }, () => {
+        if (chrome.runtime.lastError) {
+            sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
+            return;
+        }
+
+        sendResponse({ success: true, logs: [] });
     });
 }
 
@@ -765,6 +897,43 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return true;
     }
 
+    if (request.type === 'LOAD_PREFERENCES') {
+        getPreferences(sendResponse);
+        return true;
+    }
+
+    if (request.type === 'SAVE_PREFERENCES') {
+        setPreferences(request, sendResponse);
+        return true;
+    }
+
+    if (
+        request.type === 'APPEND_DEVELOPER_LOG' ||
+        request.type === 'LOAD_DEVELOPER_LOGS' ||
+        request.type === 'CLEAR_DEVELOPER_LOGS'
+    ) {
+        if (!isAuthorizedNotebookSender(sender)) {
+            console.warn('NotebookLM Source Management: Received message from unauthorized sender:', sender);
+            sendResponse({ success: false, errorCode: ERROR_CODES.UNAUTHORIZED_SENDER });
+            return;
+        }
+        if (!isValidDeveloperLogKey(request.key)) {
+            console.warn(`NotebookLM Source Management: Received ${request.type} with invalid key:`, request.key);
+            sendResponse({ success: false, errorCode: ERROR_CODES.INVALID_STORAGE_KEY });
+            return;
+        }
+        if (request.type === 'LOAD_DEVELOPER_LOGS') {
+            loadDeveloperLogs(request, sendResponse);
+            return true;
+        }
+        if (request.type === 'CLEAR_DEVELOPER_LOGS') {
+            clearDeveloperLogs(request, sendResponse);
+            return true;
+        }
+        appendDeveloperLog(request, sendResponse);
+        return true;
+    }
+
     if (
         request.type !== 'SAVE_STATE' &&
         request.type !== 'LOAD_STATE' &&
@@ -834,8 +1003,12 @@ if (typeof module !== 'undefined' && module.exports) {
         NOTEBOOKLM_HOME_URL,
         NOTEBOOKLM_NOTEBOOK_PREFIX,
         EXTENSION_ENABLED_KEY,
+        PREFERENCES_KEY,
         STATE_HISTORY_KEY_PREFIX,
+        DEVELOPER_LOG_KEY_PREFIX,
         STATE_HISTORY_LIMIT,
+        DEVELOPER_LOG_LIMIT,
+        DEVELOPER_LOG_MAX_BYTES,
         DEFAULT_STORAGE_QUOTA_BYTES,
         STORAGE_WARNING_RATIO,
         STORAGE_CRITICAL_RATIO,
@@ -866,6 +1039,15 @@ if (typeof module !== 'undefined' && module.exports) {
         getWebStoreFeedbackUrl,
         openWebStoreFeedback,
         getExtensionEnabled,
-        setExtensionEnabled
+        setExtensionEnabled,
+        normalizePreferences,
+        isValidDeveloperLogKey,
+        normalizeDeveloperLogEntry,
+        trimDeveloperLogs,
+        getPreferences,
+        setPreferences,
+        loadDeveloperLogs,
+        appendDeveloperLog,
+        clearDeveloperLogs
     };
 }

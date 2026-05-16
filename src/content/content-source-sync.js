@@ -99,6 +99,9 @@
         const saveState = typeof deps.saveState === 'function'
             ? deps.saveState
             : () => {};
+        const developerLog = typeof deps.developerLog === 'function'
+            ? deps.developerLog
+            : () => false;
         const render = typeof deps.render === 'function'
             ? deps.render
             : () => {};
@@ -111,6 +114,27 @@
         const debounceFn = typeof deps.debounce === 'function'
             ? deps.debounce
             : (typeof globalThis.debounce === 'function' ? globalThis.debounce : null);
+        const createContentSourceListScan = typeof deps.createContentSourceListScan === 'function'
+            ? deps.createContentSourceListScan
+            : globalThis.NSM_CREATE_CONTENT_SOURCE_LIST_SCAN;
+        const createContentNativeLabelScan = typeof deps.createContentNativeLabelScan === 'function'
+            ? deps.createContentNativeLabelScan
+            : globalThis.NSM_CREATE_CONTENT_NATIVE_LABEL_SCAN;
+        const sourceListScan = typeof createContentSourceListScan === 'function'
+            ? createContentSourceListScan()
+            : {};
+        const nativeLabelScan = typeof createContentNativeLabelScan === 'function'
+            ? createContentNativeLabelScan()
+            : {};
+        const getNativeCheckboxState = typeof sourceListScan.getNativeCheckboxState === 'function'
+            ? sourceListScan.getNativeCheckboxState
+            : () => null;
+        const getNativeSourceCheckboxState = typeof sourceListScan.getNativeSourceCheckboxState === 'function'
+            ? sourceListScan.getNativeSourceCheckboxState
+            : (source, fallbackState = true) => (source?.hasNativeCheckbox ? Boolean(fallbackState) : true);
+        const parseNativeLabelSourceCount = typeof nativeLabelScan.parseNativeLabelSourceCount === 'function'
+            ? nativeLabelScan.parseNativeLabelSourceCount
+            : () => null;
 
         const ensureMap = (name) => {
             const current = runtime[name];
@@ -275,12 +299,15 @@
             '[aria-label*="分类"]',
             'mat-accordion',
             'mat-expansion-panel',
+            'mat-tree-node',
+            '[role="treeitem"]',
             '.source-label',
             '.source-label-group',
             '.source-group',
             '.label-group',
             '.mat-accordion',
-            '.mat-expansion-panel'
+            '.mat-expansion-panel',
+            '.mat-tree-node'
         ];
         const LABEL_TITLE_SELECTORS = [
             '[data-testid*="label-title" i]',
@@ -323,6 +350,11 @@
             '.group-title',
             '.mat-expansion-panel-header-title',
             '.mat-content',
+            'button',
+            '[role="button"]',
+            'mat-tree-node',
+            '.mat-tree-node',
+            '[role="treeitem"]',
             '[aria-expanded]',
             'button[aria-expanded]',
             '[role="button"][aria-expanded]',
@@ -334,16 +366,42 @@
             'h5',
             'h6'
         ];
+        const LABEL_EXPANSION_CONTROL_SELECTORS = [
+            'button[aria-expanded]',
+            '[role="button"][aria-expanded]',
+            '[aria-expanded]',
+            'button',
+            '[role="button"]',
+            '[role="treeitem"]',
+            'mat-expansion-panel-header',
+            'mat-tree-node',
+            '.mat-tree-node',
+            '.mat-expansion-panel-header',
+            '.source-label-title',
+            'mat-icon',
+            '.mat-icon',
+            '.google-symbols',
+            ...LABEL_GROUP_SELECTORS
+        ];
         const LABEL_VIEW_TEXT_PATTERN = /\b(label|labels|categor(?:y|ies|ize)|group|groups)\b|标签|分类|分组/i;
         const ACTIVE_LABEL_VIEW_CONTROL_PATTERN = /\b(relabel|re-label|undo\s+labels?|redo\s+labels?|recategor(?:y|ies|ize))\b|撤销.*标签|重新.*标签|撤销.*分类|重新.*分类/i;
         const SOURCE_VIEW_SWITCH_TEXT_PATTERN = /\b(?:list\s*view|view\s*list|view_list|format_list_bulleted|label\s*view|labels?\s*view|view\s*by\s*label)\b|列表视图|标签视图/i;
         const SOURCE_VIEW_SWITCH_ID_PATTERN = /(?:source[-_\s]*view|view[-_\s]*(?:list|label)|list[-_\s]*view|label[-_\s]*view)/i;
         const SOURCE_VIEW_SWITCH_ICON_PATTERN = /\b(?:label_auto|view_list|format_list_bulleted)\b/i;
+        const COLLAPSED_NATIVE_LABEL_ICON_PATTERN = /\b(?:keyboard_arrow_right|chevron_right|arrow_right|navigate_next)\b|(?:^|\s)[>›▸](?:\s|$)/i;
+        const NATIVE_LABEL_ENTRY_POINT_TEXT_PATTERN = /\b(?:auto[-\s]*label|label\s+sources?\s+by\s+topic|categor(?:ize|ise)\s+sources?\s+by\s+topic|organize\s+sources?\s+by\s+topic)\b|按主题.*(?:来源)?(?:加|打)?标签|自动.*(?:来源)?(?:加|打)?标签/i;
         const SELECT_ALL_TEXT_PATTERN = /\bselect\s+all\b|全选/i;
         const NATIVE_SOURCE_CONTROL_TEXT_PATTERN = /\b(add\s+source|web|fast\s+research|submit)\b|language\s*web|languageWeb|fastResearch|添加来源|提交/i;
         const NATIVE_LABEL_TITLE_BLOCKED_TEXT_PATTERN = /\b(more\s+options?|source\s+guide|source\s+details?|loading|analyzing|failed|error|dock_to_(?:right|left|top|bottom)|left_panel_open|left_panel_close)\b|来源指南|来源详情|加载中|正在分析|失败|出错/i;
         const NATIVE_LABEL_TITLE_RESERVED_TEXT_PATTERN = /^(?:sources?|source|来源)$|\bsources?\s+for\b/i;
         const GENERIC_NATIVE_CONTROL_TITLE_PATTERN = /^(?:more|more options?|options?|menu|overflow|ellipsis|kebab|actions?|更多|更多选项|更多操作|选项|選項|菜单|菜單|操作)$/i;
+        const SOURCE_STATUS_ATTRIBUTE_NAMES = new Set([
+            'aria-busy',
+            'aria-live',
+            'role',
+            'data-state',
+            'data-status'
+        ]);
         const MANAGER_ACTIVE_CLASS = 'sources-plus-manager-active';
         const NATIVE_SOURCE_LIST_CONTAINER_SELECTORS = [
             '.scroll-area-desktop',
@@ -434,17 +492,30 @@
             return cleaned || text;
         }
 
+        function collapseRepeatedNativeLabelTitle(value) {
+            const text = String(value || '').replace(/\s+/g, ' ').trim();
+            if (!text) return '';
+            const tokens = text.split(/\s+/);
+            if (tokens.length >= 2 && tokens.length % 2 === 0) {
+                const midpoint = tokens.length / 2;
+                const left = tokens.slice(0, midpoint).join(' ');
+                const right = tokens.slice(midpoint).join(' ');
+                if (left && left === right) return left;
+            }
+            return text;
+        }
+
         function cleanNativeLabelTitleCandidate(value) {
             const text = cleanAccessibleLabelTitle(value)
                 .replace(/^\s*(?:expand|collapse|open|close)\s+(?:source\s+)?(?:label|group|category|folder)\s*/i, ' ')
                 .replace(/^\s*(?:展开|折叠|打开|关闭)\s*/i, ' ')
                 .replace(/\s*(?:expanded|collapsed|已展开|已折叠)\s*$/i, ' ')
-                .replace(/(?:keyboard_arrow_(?:right|down)|arrow_drop_down|expand_(?:more|less)|chevron_(?:right|left)|label_auto|dock_to_(?:right|left|top|bottom)|left_panel_(?:open|close))/gi, ' ')
+                .replace(/(?:keyboard_arrow_(?:right|down)|arrow_drop_down|expand_(?:more|less)|chevron_(?:right|left)|label_auto|more_(?:vert|horiz)|dock_to_(?:right|left|top|bottom)|left_panel_(?:open|close))/gi, ' ')
                 .replace(/\b\d+\s*(?:sources?|items?)\b/gi, ' ')
                 .replace(/\b\d+\s*(?:个)?(?:来源|项目)\b/gi, ' ')
                 .replace(/\s+/g, ' ')
                 .trim();
-            return text;
+            return collapseRepeatedNativeLabelTitle(text);
         }
 
         function getComparableLabelText(value) {
@@ -458,6 +529,7 @@
         function isLikelyNativeLabelTitle(value, rowIdentity = null) {
             const title = cleanNativeLabelTitleCandidate(value);
             if (!title || title.length > 120) return false;
+            if (NATIVE_LABEL_ENTRY_POINT_TEXT_PATTERN.test(String(value || ''))) return false;
             if (SELECT_ALL_TEXT_PATTERN.test(title)) return false;
             if (NATIVE_SOURCE_CONTROL_TEXT_PATTERN.test(title)) return false;
             if (ACTIVE_LABEL_VIEW_CONTROL_PATTERN.test(title)) return false;
@@ -465,6 +537,11 @@
             if (NATIVE_LABEL_TITLE_RESERVED_TEXT_PATTERN.test(title)) return false;
             if (rowIdentity?.title && getComparableLabelText(title) === getComparableLabelText(rowIdentity.title)) return false;
             return /[A-Za-z0-9\u3400-\u9FFF]/.test(title);
+        }
+
+        function isNativeLabelEntryPointControl(element) {
+            if (!element) return false;
+            return NATIVE_LABEL_ENTRY_POINT_TEXT_PATTERN.test(getElementTextSignal(element));
         }
 
         function isNativeSourceViewSwitchControl(element) {
@@ -631,6 +708,7 @@
             if (!element) return false;
             if (isInsideNativeSourceRowElement(element)) return false;
             if (isNativeSourceViewSwitchControl(element)) return false;
+            if (isNativeLabelEntryPointControl(element)) return false;
             const tagName = String(element.tagName || '').toLowerCase();
             const role = getAttributeValue(element, 'role').toLowerCase();
             const ariaExpanded = getAttributeValue(element, 'aria-expanded');
@@ -640,6 +718,12 @@
             if (role === 'heading') return true;
             if (/^h[1-6]$/.test(tagName)) return true;
             if (elementMatchesAny(element, LABEL_GROUP_SELECTORS)) return true;
+            if ((tagName === 'button' || role === 'button' || role === 'treeitem') && isLikelyNativeLabelTitle(getElementTextSignal(element))) {
+                const checkbox = typeof element.querySelector === 'function'
+                    ? element.querySelector('input[type="checkbox"], [role="checkbox"], mat-checkbox, .mat-checkbox, .mat-mdc-checkbox, .mdc-checkbox')
+                    : null;
+                if (checkbox) return true;
+            }
             return /(label|group|category|folder|header|title|expansion-panel)/i.test(`${className} ${testId}`);
         }
 
@@ -647,7 +731,8 @@
             if (!element || element === row || elementContains(element, row)) return '';
             if (isInsideNativeSourceRowElement(element, panel)) return '';
             if (isNativeSourceViewSwitchControl(element)) return '';
-            if (isNodeHiddenForSourceScan(element, panel, options)) return '';
+            if (isNativeLabelEntryPointControl(element)) return '';
+            if (isHiddenForNativeLabelRowScan(element, panel, options)) return '';
 
             const candidates = [
                 element.dataset?.sourceLabel,
@@ -701,9 +786,10 @@
         }
 
         function getNativeLabelTitleFromContainer(container, row, panel, options = {}, rowIdentity = null) {
-            if (!container || container === panel || isNodeHiddenForSourceScan(container, panel, options)) return '';
+            if (!container || container === panel || isHiddenForNativeLabelRowScan(container, panel, options)) return '';
             if (isLikelySourceRowElement(container)) return '';
             if (isNativeSourceViewSwitchControl(container)) return '';
+            if (isNativeLabelEntryPointControl(container)) return '';
 
             if (elementMatchesAny(container, LABEL_GROUP_SELECTORS)) {
                 const ownLabel = getElementOwnLabel(container);
@@ -730,7 +816,7 @@
                 let sibling = getPreviousSibling(cursor);
                 let siblingDepth = 0;
                 while (sibling && siblingDepth < 8) {
-                    if (!isNodeHiddenForSourceScan(sibling, panel, options)) {
+                    if (!isHiddenForNativeLabelRowScan(sibling, panel, options)) {
                         if (isNativeLabelHeaderElement(sibling)) {
                             const directTitle = getNativeLabelTitleFromCandidate(sibling, row, panel, options, rowIdentity);
                             if (directTitle) return directTitle;
@@ -787,6 +873,119 @@
                 options.ignoreManagerSuppression &&
                 isElementInsideManagerSuppressedNativeArea(element, boundary)
             );
+        }
+
+        function shouldIncludeHiddenNativeLabelRows(options = {}) {
+            return Boolean(options.includeHiddenNativeLabelRows || options.includeHiddenLabelRows);
+        }
+
+        function isHardHiddenForSourceScan(element, boundary = null) {
+            if (!element) return true;
+            if ('isConnected' in element && element.isConnected === false) return true;
+
+            let cursor = element;
+            let depth = 0;
+            while (cursor && depth < 24) {
+                if (cursor.hidden === true) return true;
+                if (getAttributeValue(cursor, 'aria-hidden') === 'true') return true;
+                if (boundary && cursor === boundary) break;
+                cursor = getParentElement(cursor);
+                depth += 1;
+            }
+            return false;
+        }
+
+        function hasNativeLabelHeaderNearCollapsedContent(element, boundary = null) {
+            if (!element) return false;
+            const previous = getPreviousSibling(element);
+            if (previous && isNativeLabelHeaderElement(previous)) return true;
+
+            let cursor = getParentElement(element);
+            let depth = 0;
+            while (cursor && depth < 6) {
+                if (boundary && cursor === boundary) break;
+                if (elementMatchesAny(cursor, LABEL_GROUP_SELECTORS)) {
+                    const title = getNativeLabelGroupTitle(cursor, boundary, { ignoreManagerSuppression: true });
+                    if (title) return true;
+                    const header = typeof cursor.querySelector === 'function'
+                        ? cursor.querySelector('mat-expansion-panel-header, .mat-expansion-panel-header, [aria-expanded], button, [role="button"], [role="treeitem"]')
+                        : null;
+                    if (header && isNativeLabelHeaderElement(header)) return true;
+                }
+                cursor = getParentElement(cursor);
+                depth += 1;
+            }
+            return false;
+        }
+
+        function isCollapsedNativeLabelBodyElement(element, boundary = null) {
+            if (!element) return false;
+            const identity = [
+                String(element.className || ''),
+                getAttributeValue(element, 'data-testid'),
+                getAttributeValue(element, 'role')
+            ].filter(Boolean).join(' ');
+            const hasBodySignal = (
+                /\bmat-expansion-panel-(?:body|content|content-wrapper)\b/i.test(identity) ||
+                /\b(?:label|source-label|category|group)[-_ ](?:body|content|children|items)\b/i.test(identity) ||
+                /\b(?:body|content|children|items)[-_ ](?:label|source-label|category|group)\b/i.test(identity) ||
+                /\b(mat-tree-node-children|cdk-tree-node-group)\b/i.test(identity) ||
+                getAttributeValue(element, 'role').toLowerCase() === 'group' ||
+                elementMatchesAny(element, [
+                    '.mat-expansion-panel-body',
+                    '.mat-expansion-panel-content',
+                    '.mat-expansion-panel-content-wrapper',
+                    '.mat-tree-node-children',
+                    '[role="group"]'
+                ])
+            );
+            return Boolean(hasBodySignal && hasNativeLabelHeaderNearCollapsedContent(element, boundary));
+        }
+
+        function isHiddenForNativeLabelRowScan(element, boundary = null, options = {}) {
+            if (!shouldIncludeHiddenNativeLabelRows(options)) {
+                return isNodeHiddenForSourceScan(element, boundary, options);
+            }
+            if (isHardHiddenForSourceScan(element, boundary)) return true;
+
+            const win = getWindow();
+            let cursor = element;
+            let depth = 0;
+            while (cursor && depth < 24) {
+                const style = cursor.style || {};
+                const styleHidden = (
+                    style.display === 'none' ||
+                    style.visibility === 'hidden' ||
+                    style.visibility === 'collapse'
+                );
+                let computedHidden = false;
+                try {
+                    const computedStyle = typeof win?.getComputedStyle === 'function'
+                        ? win.getComputedStyle(cursor)
+                        : null;
+                    computedHidden = Boolean(
+                        computedStyle &&
+                        (
+                            computedStyle.display === 'none' ||
+                            computedStyle.visibility === 'hidden' ||
+                            computedStyle.visibility === 'collapse'
+                        )
+                    );
+                } catch (error) {
+                    computedHidden = false;
+                }
+
+                if (styleHidden || computedHidden) {
+                    if (!isCollapsedNativeLabelBodyElement(cursor, boundary)) {
+                        return true;
+                    }
+                }
+
+                if (boundary && cursor === boundary) break;
+                cursor = getParentElement(cursor);
+                depth += 1;
+            }
+            return false;
         }
 
         function isNodeHiddenForSourceScan(element, boundary = null, options = {}) {
@@ -854,7 +1053,7 @@
             let cursor = getParentElement(row);
             let depth = 0;
             while (cursor && cursor !== panel && depth < 8) {
-                if (!isNodeHiddenForSourceScan(cursor, panel, options)) {
+                if (!isHiddenForNativeLabelRowScan(cursor, panel, options)) {
                     if (elementMatchesAny(cursor, LABEL_GROUP_SELECTORS)) {
                         const label = getElementOwnLabel(cursor);
                         if (label) return label;
@@ -872,7 +1071,7 @@
             cursor = getParentElement(row);
             depth = 0;
             while (cursor && cursor !== panel && depth < 8) {
-                if (!isNodeHiddenForSourceScan(cursor, panel, options) && options.inferNativeLabelTitles) {
+                if (!isHiddenForNativeLabelRowScan(cursor, panel, options) && options.inferNativeLabelTitles) {
                     const inferredLabel = getNativeLabelTitleFromContainer(cursor, row, panel, options, rowIdentity);
                     if (inferredLabel) return inferredLabel;
                 }
@@ -888,6 +1087,7 @@
         function isActiveNativeLabelViewControl(element, panel, options = {}) {
             if (!element || isNodeHiddenForSourceScan(element, panel, options)) return false;
             if (isInsideNativeSourceRowElement(element, panel)) return false;
+            if (isNativeLabelEntryPointControl(element)) return false;
             const text = getElementTextSignal(element);
             if (isGenericNativeControlTitleElement(element, cleanNativeLabelTitleCandidate(text))) return false;
             if (ACTIVE_LABEL_VIEW_CONTROL_PATTERN.test(text)) {
@@ -924,25 +1124,139 @@
             });
         }
 
+        function hasCollapsedNativeLabelIconSignal(element) {
+            if (!element) return false;
+            const textSignal = getElementTextSignal(element);
+            const identitySignal = [
+                getAttributeValue(element, 'data-testid'),
+                getAttributeValue(element, 'class'),
+                String(element.className || '')
+            ].filter(Boolean).join(' ');
+            return COLLAPSED_NATIVE_LABEL_ICON_PATTERN.test(`${textSignal} ${identitySignal}`);
+        }
+
+        function getNativeLabelExpansionTitle(element, panel, options = {}) {
+            if (!element) return '';
+            const directTitle = getNativeLabelTitleFromCandidate(element, null, panel, options);
+            if (directTitle) return directTitle;
+            const groupTitle = getNativeLabelGroupTitle(element, panel, options);
+            if (groupTitle) return groupTitle;
+            const textSignal = getElementTextSignal(element);
+            const textTitle = cleanNativeLabelTitleCandidate(textSignal);
+            return textTitle && isLikelyNativeLabelTitle(textSignal) ? textTitle : '';
+        }
+
+        function getNativeLabelExpansionExpectedSourceCount(element, panel) {
+            if (!element) return null;
+            const candidates = [];
+            candidates.push(getElementTextSignal(element));
+            let cursor = getParentElement(element);
+            let depth = 0;
+            while (cursor && cursor !== panel && depth < 4) {
+                candidates.push(getElementTextSignal(cursor));
+                cursor = getParentElement(cursor);
+                depth += 1;
+            }
+            for (const candidate of candidates) {
+                const count = parseNativeLabelSourceCount(candidate);
+                if (count !== null) return count;
+            }
+            return null;
+        }
+
+        function isNativeLabelExpansionClickTargetCandidate(element, panel, options = {}) {
+            if (!element) return false;
+            if (isInsideNativeSourceRowElement(element, panel)) return false;
+            if (isNativeSourceViewSwitchControl(element)) return false;
+            if (isNativeLabelEntryPointControl(element)) return false;
+            if (isNodeHiddenForSourceScan(element, panel, options)) return false;
+
+            const tagName = String(element.tagName || '').toLowerCase();
+            const role = getAttributeValue(element, 'role').toLowerCase();
+            const isInteractiveHeader = (
+                tagName === 'button' ||
+                tagName === 'mat-tree-node' ||
+                role === 'button' ||
+                role === 'treeitem' ||
+                isNativeLabelHeaderElement(element) ||
+                elementMatchesAny(element, LABEL_GROUP_SELECTORS)
+            );
+            if (!isInteractiveHeader) return false;
+
+            const textTitle = cleanNativeLabelTitleCandidate(getElementTextSignal(element));
+            if (isGenericNativeControlTitleElement(element, textTitle)) return false;
+            return Boolean(getNativeLabelExpansionTitle(element, panel, options));
+        }
+
+        function getNativeLabelExpansionClickTarget(control, panel, options = {}) {
+            if (!control) return null;
+            const descendants = queryDescendantElements(control, LABEL_EXPANSION_CONTROL_SELECTORS);
+            const tagName = String(control.tagName || '').toLowerCase();
+            const role = getAttributeValue(control, 'role').toLowerCase();
+            const isContainerControl = elementMatchesAny(control, LABEL_GROUP_SELECTORS) &&
+                tagName !== 'button' &&
+                role !== 'button';
+            const candidates = isContainerControl
+                ? [...descendants, control]
+                : [control, ...descendants];
+            const seen = new Set();
+            const uniqueCandidates = candidates.filter((candidate) => {
+                if (!candidate || seen.has(candidate)) return false;
+                seen.add(candidate);
+                return isNativeLabelExpansionClickTargetCandidate(candidate, panel, options);
+            });
+
+            const directAriaExpanded = String(getAttributeValue(control, 'aria-expanded')).toLowerCase();
+            if (
+                directAriaExpanded === 'false' &&
+                !isContainerControl &&
+                !isInsideNativeSourceRowElement(control, panel) &&
+                !isNativeSourceViewSwitchControl(control) &&
+                !isNodeHiddenForSourceScan(control, panel, options) &&
+                !isGenericNativeControlTitleElement(control, cleanNativeLabelTitleCandidate(getElementTextSignal(control)))
+            ) {
+                return control;
+            }
+
+            const ariaExpandedTarget = uniqueCandidates.find((candidate) => (
+                String(getAttributeValue(candidate, 'aria-expanded')).toLowerCase() === 'false'
+            ));
+            if (ariaExpandedTarget) return ariaExpandedTarget;
+
+            return uniqueCandidates.find((candidate) => hasCollapsedNativeLabelIconSignal(candidate)) || null;
+        }
+
+        function shouldIncludeNativeLabelExpansionTitle(title, options = {}) {
+            const requestedTitles = Array.isArray(options.onlyTitles)
+                ? options.onlyTitles
+                : (Array.isArray(options.expectedLabelTitles) ? options.expectedLabelTitles : []);
+            const requestedSet = new Set(requestedTitles
+                .map((value) => getComparableNativeLabelTitle(value))
+                .filter(Boolean));
+            if (requestedSet.size === 0) return true;
+            return requestedSet.has(getComparableNativeLabelTitle(title));
+        }
+
         function getCollapsedNativeLabelViewControls(panel = findSourcePanel(), options = {}) {
             const sourcePanel = panel || findSourcePanel();
             if (!sourcePanel) return [];
             const scanOptions = Object.assign({ ignoreManagerSuppression: true }, options || {});
-            const controls = queryPanelElements(sourcePanel, [
-                'button[aria-expanded]',
-                '[role="button"][aria-expanded]',
-                '[aria-expanded]'
-            ]);
+            const controls = queryPanelElements(sourcePanel, LABEL_EXPANSION_CONTROL_SELECTORS);
             const seen = new Set();
-            return controls.filter((control) => {
-                if (!control || seen.has(control)) return false;
-                seen.add(control);
-                if (String(getAttributeValue(control, 'aria-expanded')).toLowerCase() !== 'false') return false;
-                if (isInsideNativeSourceRowElement(control, sourcePanel)) return false;
-                if (isNativeSourceViewSwitchControl(control)) return false;
-                if (isGenericNativeControlTitleElement(control, cleanNativeLabelTitleCandidate(getElementTextSignal(control)))) return false;
-                return isActiveNativeLabelViewControl(control, sourcePanel, scanOptions);
-            });
+            return controls
+                .map((control) => getNativeLabelExpansionClickTarget(control, sourcePanel, scanOptions))
+                .filter((control) => {
+                    if (!control || seen.has(control)) return false;
+                    seen.add(control);
+                    if (isInsideNativeSourceRowElement(control, sourcePanel)) return false;
+                    if (isNativeSourceViewSwitchControl(control)) return false;
+                    if (isGenericNativeControlTitleElement(control, cleanNativeLabelTitleCandidate(getElementTextSignal(control)))) return false;
+                    const title = getNativeLabelExpansionTitle(control, sourcePanel, scanOptions);
+                    if (!shouldIncludeNativeLabelExpansionTitle(title, scanOptions)) return false;
+                    const ariaExpanded = String(getAttributeValue(control, 'aria-expanded')).toLowerCase();
+                    if (ariaExpanded) return ariaExpanded === 'false';
+                    return hasCollapsedNativeLabelIconSignal(control);
+                });
         }
 
         function clickNativeLabelExpansionControl(control) {
@@ -967,15 +1281,74 @@
             }
             const controls = getCollapsedNativeLabelViewControls(sourcePanel, options);
             const titles = [];
+            const clickedControls = [];
             let clickedCount = 0;
             controls.forEach((control) => {
-                const title = cleanNativeLabelTitleCandidate(getElementTextSignal(control));
+                const title = getNativeLabelExpansionTitle(control, sourcePanel, options);
                 if (clickNativeLabelExpansionControl(control)) {
                     clickedCount += 1;
+                    clickedControls.push(control);
                     if (title) titles.push(title);
                 }
             });
-            return { clickedCount, titles };
+            const result = { clickedCount, titles };
+            Object.defineProperty(result, 'clickedControls', {
+                value: clickedControls,
+                enumerable: false
+            });
+            return result;
+        }
+
+        function restoreNativeLabelExpansionControls(controls = []) {
+            const uniqueControls = [];
+            const seen = new Set();
+            (Array.isArray(controls) ? controls : []).forEach((control) => {
+                if (!control || seen.has(control)) return;
+                seen.add(control);
+                uniqueControls.push(control);
+            });
+
+            let clickedCount = 0;
+            let failedCount = 0;
+            uniqueControls.forEach((control) => {
+                try {
+                    if (clickNativeLabelExpansionControl(control)) {
+                        clickedCount += 1;
+                    } else {
+                        failedCount += 1;
+                    }
+                } catch (error) {
+                    failedCount += 1;
+                }
+            });
+            return { clickedCount, failedCount };
+        }
+
+        function getCollapsedNativeLabelGroupSummaries(panel = findSourcePanel(), options = {}) {
+            const sourcePanel = panel || findSourcePanel();
+            if (!sourcePanel) return [];
+            const summaries = [];
+            const seenTitles = new Set();
+            getCollapsedNativeLabelViewControls(sourcePanel, options).forEach((control) => {
+                const title = getNativeLabelExpansionTitle(control, sourcePanel, options);
+                const comparableTitle = getComparableNativeLabelTitle(title);
+                if (!title || !comparableTitle || seenTitles.has(comparableTitle)) return;
+                seenTitles.add(comparableTitle);
+                summaries.push({
+                    title,
+                    comparableTitle,
+                    expectedSourceCount: getNativeLabelExpansionExpectedSourceCount(control, sourcePanel),
+                    control
+                });
+            });
+            return summaries;
+        }
+
+        function getCollapsedNativeLabelGroupTitles(panel = findSourcePanel(), options = {}) {
+            const sourcePanel = panel || findSourcePanel();
+            if (!sourcePanel) return [];
+            return getCollapsedNativeLabelGroupSummaries(sourcePanel, options)
+                .map((summary) => summary.title);
         }
 
         function isControlInsideSourceEntry(control, sourceEntries = []) {
@@ -1018,13 +1391,25 @@
             return updateRuntimeSourceViewInfo(detectSourceView(panel));
         }
 
-        function getListSourceEntries(parent = getDocument(), options = {}) {
+        function getListSourceRowSelectors() {
             const depsConfig = getDEPS();
-            const rows = queryPanelElements(parent, Array.isArray(depsConfig.row) ? depsConfig.row : []);
+            const configuredRows = Array.isArray(depsConfig.row) ? depsConfig.row : [];
+            return Array.from(new Set([
+                ...configuredRows,
+                ...LABEL_SOURCE_ROW_SELECTORS
+            ]));
+        }
+
+        function getListSourceEntries(parent = getDocument(), options = {}) {
+            const rows = queryPanelElements(parent, getListSourceRowSelectors());
             const shouldFilterHidden = Boolean(options.filterHidden);
             return rows
                 .filter((row) => !shouldFilterHidden || !isNodeHiddenForSourceScan(row, parent))
                 .filter((row) => !options.excludeLabelRows || !isInsideNativeLabelGroupElement(row, parent))
+                .filter((row) => {
+                    const identity = extractSourceIdentitySnapshot(row);
+                    return isManageableSourceIdentity(identity) || isDetailLikeSourceIdentity(identity);
+                })
                 .map((row) => ({
                     row,
                     viewKind: SOURCE_VIEW_KIND_LIST,
@@ -1038,7 +1423,7 @@
             const entries = [];
 
             rows.forEach((row) => {
-                if (!row || seenRows.has(row) || isNodeHiddenForSourceScan(row, parent, options)) return;
+                if (!row || seenRows.has(row) || isHiddenForNativeLabelRowScan(row, parent, options)) return;
                 if (getAttributeValue(row, 'aria-expanded')) return;
                 const identity = extractSourceIdentitySnapshot(row);
                 if (!isManageableSourceIdentity(identity)) return;
@@ -1054,24 +1439,6 @@
             });
 
             return entries;
-        }
-
-        function getNativeCheckboxState(checkbox) {
-            if (!checkbox) return null;
-            if (checkbox.indeterminate === true) return null;
-            const ariaChecked = getAttributeValue(checkbox, 'aria-checked').toLowerCase();
-            if (ariaChecked === 'mixed') return null;
-            if (ariaChecked === 'true') return true;
-            if (ariaChecked === 'false') return false;
-            if (typeof checkbox.checked === 'boolean') return Boolean(checkbox.checked);
-            return null;
-        }
-
-        function getNativeSourceCheckboxState(source, fallbackState = true) {
-            if (!source?.hasNativeCheckbox) return true;
-            const checkboxState = getNativeCheckboxState(source.checkbox);
-            if (checkboxState !== null) return checkboxState;
-            return Boolean(fallbackState);
         }
 
         function getNativeLabelGroupTitle(group, panel, options = {}) {
@@ -1129,6 +1496,7 @@
                 .filter((group) => (
                     group &&
                     !isNativeSourceViewSwitchControl(group) &&
+                    !isNativeLabelEntryPointControl(group) &&
                     !isNodeHiddenForSourceScan(group, sourcePanel, scanOptions)
                 ));
 
@@ -1265,6 +1633,7 @@
             const labelGroups = queryPanelElements(sourcePanel, LABEL_GROUP_SELECTORS)
                 .filter((group) => (
                     !isNativeSourceViewSwitchControl(group) &&
+                    !isNativeLabelEntryPointControl(group) &&
                     !isNodeHiddenForSourceScan(group, sourcePanel, baseLabelScanOptions)
                 ));
             const listEntries = getListSourceEntries(sourcePanel, { excludeLabelRows: true });
@@ -1321,12 +1690,13 @@
             });
         }
 
-        function getSourceEntries(parent = getDocument()) {
+        function getSourceEntries(parent = getDocument(), options = {}) {
             const info = getSourceViewInfo(parent);
             if (info.kind === SOURCE_VIEW_KIND_LABEL) {
                 const labelEntries = getLabelSourceEntries(parent, {
                     ignoreManagerSuppression: true,
-                    inferNativeLabelTitles: true
+                    inferNativeLabelTitles: true,
+                    includeHiddenNativeLabelRows: Boolean(options.includeHiddenNativeLabelRows)
                 });
                 if (labelEntries.length > 0) return labelEntries;
                 return getListSourceEntries(parent, { filterHidden: true });
@@ -1660,7 +2030,155 @@
             return true;
         }
 
-        function scanAndSyncSources(loadedState, isFirstLoad = false) {
+        function hasPreviousRecordForCurrentSource(source, sourceLookup, previousSourceRecordsByKey) {
+            if (!source?.key || !previousSourceRecordsByKey || typeof previousSourceRecordsByKey.forEach !== 'function') {
+                return false;
+            }
+            if (previousSourceRecordsByKey.has(source.key)) return true;
+
+            let matched = false;
+            previousSourceRecordsByKey.forEach((sourceRecord, storedKey) => {
+                if (matched) return;
+                const resolution = resolveStoredSourceKeyWithReason(storedKey, sourceLookup, sourceRecord);
+                if (resolution?.key === source.key) {
+                    matched = true;
+                }
+            });
+
+            return matched;
+        }
+
+        function isLikelyRawImportUrlTitle(value) {
+            const title = String(value || '').trim();
+            if (!/^https?:\/\//i.test(title) || /\s/.test(title)) return false;
+
+            try {
+                const parsedUrl = new URL(title);
+                return Boolean(
+                    ['http:', 'https:'].includes(parsedUrl.protocol) &&
+                    parsedUrl.hostname &&
+                    parsedUrl.hostname.includes('.')
+                );
+            } catch (error) {
+                return false;
+            }
+        }
+
+        function markTransientRawUrlImportSources(currentSources, sourceLookup, previousSourceRecordsByKey) {
+            if (
+                !Array.isArray(currentSources) ||
+                !previousSourceRecordsByKey ||
+                typeof previousSourceRecordsByKey.forEach !== 'function' ||
+                previousSourceRecordsByKey.size === 0
+            ) {
+                return 0;
+            }
+
+            let markedCount = 0;
+            currentSources.forEach((source) => {
+                if (
+                    !source ||
+                    source.isLoading ||
+                    !source.key ||
+                    hasPreviousRecordForCurrentSource(source, sourceLookup, previousSourceRecordsByKey) ||
+                    !isLikelyRawImportUrlTitle(source.title)
+                ) {
+                    return;
+                }
+
+                source.isLoading = true;
+                source.isDisabled = true;
+                source.isFailed = false;
+                markedCount += 1;
+            });
+
+            return markedCount;
+        }
+
+        function mergeVisibleLoadingSourcesDuringPartialSync(currentSources, sourceLookup, previousSourceRecordsByKey, keyByElement) {
+            const loadingSources = (Array.isArray(currentSources) ? currentSources : [])
+                .filter((source) => (
+                    source?.isLoading &&
+                    source.key &&
+                    !hasPreviousRecordForCurrentSource(source, sourceLookup, previousSourceRecordsByKey)
+                ));
+            if (loadingSources.length === 0) return 0;
+
+            const sourcesByKey = getSourcesByKey();
+            const state = getState();
+            const groupsById = getGroupsById();
+            const knownSourceRefs = collectGroupedSourceRefs(groupsById);
+            if (!Array.isArray(state.ungrouped)) {
+                state.ungrouped = [];
+            }
+            state.ungrouped.forEach((sourceKey) => {
+                if (sourceKey) knownSourceRefs.add(sourceKey);
+            });
+
+            let mergedCount = 0;
+            loadingSources.forEach((source) => {
+                const hydratedSource = {
+                    ...source,
+                    enabled: getNativeSourceCheckboxState(source, true),
+                    nativeLabelTitle: source.nativeLabelTitle || ''
+                };
+
+                sourcesByKey.set(source.key, hydratedSource);
+                setSourceTagIds(source.key, []);
+                if (source.element && keyByElement && typeof keyByElement.set === 'function') {
+                    keyByElement.set(source.element, source.key);
+                }
+                if (!knownSourceRefs.has(source.key)) {
+                    state.ungrouped.push(source.key);
+                    knownSourceRefs.add(source.key);
+                }
+                syncSourceToPage(hydratedSource, isSourceEffectivelyEnabled(hydratedSource), {
+                    currentSourceViewKind: runtime.sourceViewKind || SOURCE_VIEW_KIND_UNKNOWN,
+                    preferStoredCheckbox: true
+                });
+                mergedCount += 1;
+            });
+
+            if (mergedCount > 0) {
+                runtime.keyByElement = keyByElement;
+                buildParentMap();
+            }
+            return mergedCount;
+        }
+
+        function getRecentNativeDeletedSourceKeys() {
+            return runtime.recentNativeDeletedSourceKeys instanceof Set
+                ? runtime.recentNativeDeletedSourceKeys
+                : null;
+        }
+
+        function getRecentNativeDeletedSourceIdentityKeys() {
+            return runtime.recentNativeDeletedSourceIdentityKeys instanceof Set
+                ? runtime.recentNativeDeletedSourceIdentityKeys
+                : null;
+        }
+
+        function isRecentlyNativeDeletedSource(source) {
+            if (!source) return false;
+
+            const recentSourceKeys = getRecentNativeDeletedSourceKeys();
+            if (recentSourceKeys && source.key && recentSourceKeys.has(source.key)) {
+                return true;
+            }
+
+            const recentIdentityKeys = getRecentNativeDeletedSourceIdentityKeys();
+            if (!recentIdentityKeys) return false;
+            if (source.stableToken && recentIdentityKeys.has(`stable:${source.stableToken}`)) {
+                return true;
+            }
+            if (source.fingerprint && recentIdentityKeys.has(`fingerprint:${source.fingerprint}`)) {
+                return true;
+            }
+
+            return false;
+        }
+
+        function scanAndSyncSources(loadedState, isFirstLoad = false, options = {}) {
             const sourcesByKey = getSourcesByKey();
             const sourceTagsById = getSourceTagsById();
             const groupsById = getGroupsById();
@@ -1684,7 +2202,13 @@
 
             const sourcePanel = findSourcePanel();
             const sourceRoot = sourcePanel || getDocument();
-            const sourceEntries = getSourceEntries(sourceRoot);
+            const sourceEntries = getSourceEntries(sourceRoot, options);
+            developerLog('debug', 'source_sync', 'scan_started', {
+                isFirstLoad,
+                sourceViewKind: runtime.sourceViewKind || SOURCE_VIEW_KIND_UNKNOWN,
+                rowCount: sourceEntries.length,
+                includeHiddenNativeLabelRows: Boolean(options.includeHiddenNativeLabelRows)
+            });
             const nativeLabelGroupSelections = (runtime.sourceViewKind === SOURCE_VIEW_KIND_LABEL)
                 ? getNativeLabelGroupSelectionMap(sourceRoot)
                 : new Map();
@@ -1704,8 +2228,16 @@
                         nativeLabelTitle: entry.nativeLabelTitle || ''
                     });
                 })
-                .filter(Boolean);
+                .filter((source) => source && !isRecentlyNativeDeletedSource(source));
             const sourceLookup = buildSourceLookup(currentSources);
+            const transientRawUrlSourceCount = !isFirstLoad
+                ? markTransientRawUrlImportSources(currentSources, sourceLookup, previousSourceRecordsByKey)
+                : 0;
+            if (transientRawUrlSourceCount > 0) {
+                developerLog('debug', 'source_sync', 'raw_url_import_rows_marked_loading', {
+                    count: transientRawUrlSourceCount
+                });
+            }
             if (!isFirstLoad && nativeLabelGroupSelections.size > 0 && applyNativeLabelGroupSelectionsToExistingSources(nativeLabelGroupSelections)) {
                 oldSourcesMap.clear();
                 sourcesByKey.forEach((source, key) => {
@@ -1716,11 +2248,24 @@
                 });
             }
             if (!isFirstLoad && shouldPreserveExistingSourcesDuringPartialSync(currentSources, sourceLookup, previousSourceRecordsByKey)) {
+                const transientLoadingSourceCount = mergeVisibleLoadingSourcesDuringPartialSync(
+                    currentSources,
+                    sourceLookup,
+                    previousSourceRecordsByKey,
+                    keyByElement
+                );
                 runtime.lastSkippedPartialSourceSync = {
                     previousCount: previousSourceRecordsByKey.size,
                     currentCount: currentSources.length,
+                    transientLoadingSourceCount,
                     skippedAt: new Date().toISOString()
                 };
+                developerLog('warn', 'source_sync', 'scan_skipped_partial_sync', {
+                    previousCount: previousSourceRecordsByKey.size,
+                    currentCount: currentSources.length,
+                    transientLoadingSourceCount,
+                    reason: 'partial_source_sync'
+                });
                 return false;
             }
 
@@ -1761,6 +2306,11 @@
                     sourceTagsById: oldSourceTags
                 });
                 if (shouldPreserveExistingTreeDuringUnsafeRemap(remappedState, previousSourceRecordsByKey, sourceLookup)) {
+                    developerLog('warn', 'source_sync', 'scan_skipped_unsafe_remap', {
+                        previousCount: previousSourceRecordsByKey.size,
+                        currentCount: currentSources.length,
+                        reason: 'unsafe_remap'
+                    });
                     return false;
                 }
                 state.groups = remappedState.groups;
@@ -1838,7 +2388,14 @@
                 });
             });
 
-            return isFirstLoad && getPendingStorageUpgrade();
+            const pendingStorageUpgrade = isFirstLoad && getPendingStorageUpgrade();
+            developerLog('debug', 'source_sync', 'scan_finished', {
+                isFirstLoad,
+                sourceCount: sourcesByKey.size,
+                groupCount: groupsById.size,
+                pendingStorageUpgrade
+            });
+            return pendingStorageUpgrade;
         }
 
         const createDebounced = typeof debounceFn === 'function'
@@ -1932,6 +2489,21 @@
             });
         }
 
+        function hasManageableSourceDescendant(element) {
+            if (!element || element.nodeType !== 1 || typeof element.querySelector !== 'function') return false;
+            return getListSourceRowSelectors().some((selector) => {
+                try {
+                    const candidate = element.querySelector(selector);
+                    return Boolean(
+                        candidate &&
+                        isManageableSourceIdentity(extractSourceIdentitySnapshot(candidate))
+                    );
+                } catch (error) {
+                    return false;
+                }
+            });
+        }
+
         function isCheckboxLikeMutationTarget(element) {
             if (!element || element.nodeType !== 1) return false;
             const tagName = String(element.tagName || '').toLowerCase();
@@ -1991,6 +2563,10 @@
                 return isCurrentNativeLabelView() && isNativeLabelMutationTarget(targetElement);
             }
 
+            if (SOURCE_STATUS_ATTRIBUTE_NAMES.has(attributeName)) {
+                return isElementWithinSourceRow(targetElement) || hasManageableSourceDescendant(targetElement);
+            }
+
             return false;
         }
 
@@ -2004,7 +2580,8 @@
                 node.hasAttribute?.('data-testid') ||
                 node.classList?.contains('single-source-container') ||
                 node.querySelector?.('.single-source-container') ||
-                isElementWithinSourceRow(node)
+                isElementWithinSourceRow(node) ||
+                hasManageableSourceDescendant(node)
             );
         }
 
@@ -2080,7 +2657,10 @@
             detectSourceView,
             getSourceEntries,
             getCollapsedNativeLabelViewControls,
+            getCollapsedNativeLabelGroupSummaries,
+            getCollapsedNativeLabelGroupTitles,
             expandCollapsedNativeLabelGroups,
+            restoreNativeLabelExpansionControls,
             getSourceElements,
             getManageableSourceElements,
             hasRenderableSourceRows,

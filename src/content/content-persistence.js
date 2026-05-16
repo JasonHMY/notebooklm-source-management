@@ -32,6 +32,7 @@
         const render = typeof ctx.render === 'function' ? ctx.render : () => {};
         const getMessage = typeof ctx.getMessage === 'function' ? ctx.getMessage : (key) => key;
         const showToast = typeof ctx.showToast === 'function' ? ctx.showToast : () => {};
+        const developerLog = typeof ctx.developerLog === 'function' ? ctx.developerLog : () => false;
         const onSaveStatusChange = typeof ctx.onSaveStatusChange === 'function'
             ? ctx.onSaveStatusChange
             : () => {};
@@ -285,9 +286,15 @@
                     recoveryAvailable: true,
                     recoveryCreatedAt: payload.createdAt
                 });
+                developerLog('info', 'persistence', 'recovery_snapshot_written', {
+                    reason: payload.reason,
+                    baseRevision: payload.baseRevision,
+                    failed: payload.failed
+                });
                 return payload;
             } catch (error) {
                 console.warn('NotebookLM Source Management: Recovery snapshot write failed:', error);
+                developerLog('error', 'persistence', 'recovery_snapshot_write_failed', { error });
                 return false;
             }
         }
@@ -636,6 +643,13 @@
                 saveRevision: getSnapshotSaveRevision(payloadSnapshot),
                 snapshot: payloadSnapshot
             };
+            developerLog('info', 'persistence', 'history_snapshot_append_requested', {
+                reason,
+                sourceCount: counts.sourceCount,
+                groupCount: counts.groupCount,
+                tagCount: counts.tagCount,
+                saveRevision: entry.saveRevision
+            });
 
             const appendLocally = () => new Promise((resolve) => {
                 if (!chromeApi?.storage?.local?.get || !chromeApi?.storage?.local?.set) {
@@ -962,6 +976,16 @@
         function enqueueStateSave(key, rawSnapshot, options = {}) {
             const clientSaveId = createClientSaveId();
             const snapshot = prepareRuntimeSaveSnapshot(rawSnapshot);
+            const counts = getPersistableStateCounts(snapshot);
+            developerLog('debug', 'persistence', 'state_save_requested', {
+                clientSaveId,
+                critical: Boolean(options.critical),
+                immediate: Boolean(options.immediate),
+                reason: options.reason || '',
+                sourceCount: counts.sourceCount,
+                groupCount: counts.groupCount,
+                tagCount: counts.tagCount
+            });
             if (options.critical) {
                 writeRecoverySnapshot(snapshot, {
                     reason: options.reason || 'critical_save',
@@ -1015,6 +1039,13 @@
                             if (options.critical) {
                                 clearRecoverySnapshot();
                             }
+                            developerLog('info', 'persistence', 'state_save_succeeded', {
+                                clientSaveId,
+                                saveRevision,
+                                storageWarning: Boolean(storageMetadata.storageWarning),
+                                storageUsageBytes: storageMetadata.storageUsageBytes,
+                                storageQuotaBytes: storageMetadata.storageQuotaBytes
+                            });
                         } else {
                             const lastStorageError = result.reason === 'storage_quota_exceeded'
                                 ? 'storage_quota_exceeded'
@@ -1050,6 +1081,15 @@
                                     failed: true
                                 });
                             }
+                            developerLog('warn', 'persistence', 'state_save_failed', {
+                                clientSaveId,
+                                reason: result.reason || 'save_failed',
+                                staleLocalRevision,
+                                staleRemoteRevision,
+                                storageWarning: Boolean(storageMetadata.storageWarning),
+                                storageUsageBytes: storageMetadata.storageUsageBytes,
+                                storageQuotaBytes: storageMetadata.storageQuotaBytes
+                            });
                         }
                         if (options.critical) {
                             notifyCriticalSaveFailure(result);

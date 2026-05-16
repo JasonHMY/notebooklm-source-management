@@ -271,6 +271,45 @@
     "ui_settings_diagnostics_copy_failed": {
         "message": "无法复制诊断信息"
     },
+    "ui_settings_developer_mode_title": {
+        "message": "开发者模式"
+    },
+    "ui_settings_developer_mode_toggle": {
+        "message": "记录调试日志"
+    },
+    "ui_settings_developer_mode_body": {
+        "message": "开启后会记录脱敏的状态变更、错误和操作日志，便于排查问题。"
+    },
+    "ui_settings_copy_developer_logs": {
+        "message": "复制开发者日志"
+    },
+    "ui_settings_download_developer_logs": {
+        "message": "下载开发者日志"
+    },
+    "ui_settings_clear_developer_logs": {
+        "message": "清空开发者日志"
+    },
+    "ui_settings_developer_mode_enabled": {
+        "message": "开发者模式已开启"
+    },
+    "ui_settings_developer_mode_disabled": {
+        "message": "开发者模式已关闭"
+    },
+    "ui_settings_developer_mode_failed": {
+        "message": "无法更新开发者模式"
+    },
+    "ui_settings_developer_logs_copied": {
+        "message": "开发者日志已复制"
+    },
+    "ui_settings_developer_logs_copy_failed": {
+        "message": "无法复制开发者日志"
+    },
+    "ui_settings_developer_logs_cleared": {
+        "message": "开发者日志已清空"
+    },
+    "ui_settings_developer_logs_clear_failed": {
+        "message": "无法清空开发者日志"
+    },
     "ui_settings_feedback_title": {
         "message": "问题反馈"
     },
@@ -409,6 +448,12 @@
     },
     "ui_diagnostics_import_backup": {
         "message": "导入前备份"
+    },
+    "ui_diagnostics_developer_log_count": {
+        "message": "开发者日志数量"
+    },
+    "ui_diagnostics_latest_developer_log": {
+        "message": "最新开发者日志"
     },
     "ui_diagnostics_native_failure": {
         "message": "原生操作失败"
@@ -678,6 +723,9 @@
     "ui_batch_add_to_folder": {
         "message": "批量加入文件夹"
     },
+    "ui_batch_add": {
+        "message": "加入"
+    },
     "ui_batch_add_count": {
         "message": "加入 ($1)",
         "placeholders": {
@@ -805,6 +853,9 @@
     },
     "ui_delete_source": {
         "message": "删除来源"
+    },
+    "ui_delete_failed_source": {
+        "message": "删除失败来源"
     },
     "ui_delete_source_unavailable": {
         "message": "当前无法删除该来源"

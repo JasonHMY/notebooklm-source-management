@@ -13,7 +13,14 @@ const CONTENT_HELPER_GLOBALS = [
     'NSM_CREATE_CONTENT_SOURCE_ACTIONS',
     'NSM_CREATE_CONTENT_TAGS',
     'NSM_CREATE_CONTENT_STATE_RECONCILE',
+    'NSM_CREATE_CONTENT_DEVELOPER_LOGGER',
+    'NSM_CREATE_CONTENT_RUNTIME_STATE',
+    'NSM_CREATE_CONTENT_MESSAGE_ROUTER',
     'NSM_CREATE_CONTENT_PERSISTENCE',
+    'NSM_CREATE_CONTENT_SOURCE_LIST_SCAN',
+    'NSM_CREATE_CONTENT_NATIVE_LABEL_SCAN',
+    'NSM_CREATE_CONTENT_NATIVE_LABEL_IMPORT',
+    'NSM_CREATE_CONTENT_NATIVE_LABEL_IMPORT_MODAL',
     'NSM_CREATE_CONTENT_MODALS',
     'NSM_CREATE_CONTENT_RENDER',
     'NSM_CREATE_CONTENT_VIEW_STATE',
@@ -211,6 +218,26 @@ const setupGlobalMocks = () => {
                 }
                 if (message?.type === 'LOAD_STATE_HISTORY' && typeof cb === 'function') {
                     cb({ success: true, history: [] });
+                    return;
+                }
+                if (message?.type === 'LOAD_PREFERENCES' && typeof cb === 'function') {
+                    cb({ success: true, preferences: { developerModeEnabled: false } });
+                    return;
+                }
+                if (message?.type === 'SAVE_PREFERENCES' && typeof cb === 'function') {
+                    cb({ success: true, preferences: message.preferences || {} });
+                    return;
+                }
+                if (message?.type === 'LOAD_DEVELOPER_LOGS' && typeof cb === 'function') {
+                    cb({ success: true, logs: [] });
+                    return;
+                }
+                if (message?.type === 'APPEND_DEVELOPER_LOG' && typeof cb === 'function') {
+                    cb({ success: true, logs: message.entry ? [message.entry] : [] });
+                    return;
+                }
+                if (message?.type === 'CLEAR_DEVELOPER_LOGS' && typeof cb === 'function') {
+                    cb({ success: true, logs: [] });
                 }
             }),
             lastError: null,

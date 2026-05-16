@@ -1,5 +1,7 @@
 const { defineConfig } = require('@playwright/test');
 
+const runHeaded = process.env.PLAYWRIGHT_HEADLESS === 'false';
+
 module.exports = defineConfig({
     testDir: './tests/smoke',
     outputDir: './output/playwright',
@@ -11,7 +13,7 @@ module.exports = defineConfig({
         timeout: 15_000
     },
     use: {
-        headless: process.env.CI === 'true',
+        headless: !runHeaded,
         viewport: {
             width: 1440,
             height: 1024

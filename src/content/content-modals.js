@@ -41,6 +41,16 @@
         const el = typeof deps.el === 'function'
             ? deps.el
             : (typeof globalThis.el === 'function' ? globalThis.el : null);
+        const createContentNativeLabelImportModal = typeof deps.createContentNativeLabelImportModal === 'function'
+            ? deps.createContentNativeLabelImportModal
+            : (
+                globalThis.NSM_CREATE_CONTENT_NATIVE_LABEL_IMPORT_MODAL ||
+                (
+                    typeof require === 'function'
+                        ? require('./content-native-label-import-modal.js')
+                        : null
+                )
+            );
         const closeSourceActionMenu = typeof deps.closeSourceActionMenu === 'function'
             ? deps.closeSourceActionMenu
             : () => {};
@@ -107,6 +117,18 @@
         const getDiagnosticsText = typeof deps.getDiagnosticsText === 'function'
             ? deps.getDiagnosticsText
             : () => JSON.stringify(getDiagnosticsInfo(), null, 2);
+        const getDeveloperModeEnabled = typeof deps.getDeveloperModeEnabled === 'function'
+            ? deps.getDeveloperModeEnabled
+            : () => false;
+        const setDeveloperModeEnabled = typeof deps.setDeveloperModeEnabled === 'function'
+            ? deps.setDeveloperModeEnabled
+            : () => Promise.resolve(false);
+        const getDeveloperLogExportText = typeof deps.getDeveloperLogExportText === 'function'
+            ? deps.getDeveloperLogExportText
+            : () => JSON.stringify({ logs: [] }, null, 2);
+        const clearDeveloperLogs = typeof deps.clearDeveloperLogs === 'function'
+            ? deps.clearDeveloperLogs
+            : () => Promise.resolve(false);
         const renderSaveStatus = typeof deps.renderSaveStatus === 'function'
             ? deps.renderSaveStatus
             : () => null;
@@ -141,6 +163,15 @@
             const motionStyle = `--sp-modal-item-index:${getCappedModalMotionIndex(index)};`;
             return [baseStyle, motionStyle].filter(Boolean).join('');
         }
+
+        const nativeLabelImportModal = typeof createContentNativeLabelImportModal === 'function'
+            ? createContentNativeLabelImportModal({
+                el,
+                getMessage,
+                createModalItemStaggerStyle
+            })
+            : null;
+        const createNativeLabelImportPreviewNodes = nativeLabelImportModal?.createPreviewNodes || (() => []);
 
         function getTagColorRgb(color) {
             const normalizedColor = normalizeTagColor(color);
@@ -480,13 +511,14 @@
             return false;
         }
 
-        function getSettingsExportFileName() {
+        function getSettingsExportFileName(kind = 'config') {
             const date = new Date();
             const dateText = Number.isFinite(date.getTime()) ? date.toISOString().slice(0, 10) : 'export';
-            return `notebooklm-source-management-config-${dateText}.json`;
+            const suffix = kind === 'developer-logs' ? 'developer-logs' : 'config';
+            return `notebooklm-source-management-${suffix}-${dateText}.json`;
         }
 
-        function downloadSettingsExportText(text) {
+        function downloadSettingsExportText(text, kind = 'config') {
             const documentObj = getDocument();
             const windowObj = getWindow() || globalThis;
             const BlobCtor = windowObj.Blob || globalThis.Blob;
@@ -500,7 +532,7 @@
             const url = URLObj.createObjectURL(blob);
             const anchor = documentObj.createElement('a');
             anchor.href = url;
-            anchor.download = getSettingsExportFileName();
+            anchor.download = getSettingsExportFileName(kind);
             anchor.style.display = 'none';
             documentObj.body?.appendChild?.(anchor);
             anchor.click?.();
@@ -580,6 +612,8 @@
                 ['ui_diagnostics_history_entries', String(diagnostics.historyEntryCount ?? 0)],
                 ['ui_diagnostics_recovery', diagnostics.recoveryAvailable ? getMessage('ui_yes') : getMessage('ui_no')],
                 ['ui_diagnostics_import_backup', diagnostics.importBackupAvailable ? getMessage('ui_yes') : getMessage('ui_no')],
+                ['ui_diagnostics_developer_log_count', String(diagnostics.developerLogCount ?? 0)],
+                ['ui_diagnostics_latest_developer_log', diagnostics.latestDeveloperLogAt || '-'],
                 ['ui_diagnostics_native_failure_history', nativeFailureSummary]
             ];
         }
@@ -702,6 +736,19 @@
                 'ui_settings_diagnostics_copied',
                 'ui_settings_diagnostics_copy_failed'
             );
+        }
+
+        function copyDeveloperLogsTextToClipboard() {
+            return copySettingsTextToClipboard(
+                getDeveloperLogExportText(),
+                null,
+                'ui_settings_developer_logs_copied',
+                'ui_settings_developer_logs_copy_failed'
+            );
+        }
+
+        function downloadDeveloperLogsText() {
+            return downloadSettingsExportText(getDeveloperLogExportText(), 'developer-logs');
         }
 
         function openWebStoreFeedback() {
@@ -849,6 +896,36 @@
                 ])
             ]));
 
+            const developerModeToggle = el('input', {
+                type: 'checkbox',
+                className: 'sp-settings-developer-mode-toggle',
+                checked: getDeveloperModeEnabled(),
+                'aria-label': getMessage('ui_settings_developer_mode_title')
+            });
+            content.appendChild(el('section', { className: 'sp-settings-section sp-settings-developer-section' }, [
+                el('div', { className: 'sp-settings-section-header' }, [
+                    el('h4', { className: 'sp-settings-section-title' }, [getMessage('ui_settings_developer_mode_title')]),
+                    el('label', { className: 'sp-settings-action-row sp-settings-developer-toggle-row' }, [
+                        developerModeToggle,
+                        el('span', { className: 'sp-settings-helper-text' }, [getMessage('ui_settings_developer_mode_toggle')])
+                    ])
+                ]),
+                el('p', { className: 'sp-settings-helper-text sp-settings-developer-body' }, [
+                    getMessage('ui_settings_developer_mode_body')
+                ]),
+                el('div', { className: 'sp-settings-action-row sp-settings-developer-actions' }, [
+                    el('button', { type: 'button', className: 'sp-button sp-settings-copy-developer-logs-btn sp-glare-hover' }, [
+                        getMessage('ui_settings_copy_developer_logs')
+                    ]),
+                    el('button', { type: 'button', className: 'sp-button sp-settings-download-developer-logs-btn sp-glare-hover' }, [
+                        getMessage('ui_settings_download_developer_logs')
+                    ]),
+                    el('button', { type: 'button', className: 'sp-button sp-settings-clear-developer-logs-btn sp-glare-hover' }, [
+                        getMessage('ui_settings_clear_developer_logs')
+                    ])
+                ])
+            ]));
+
             const exportSection = createCollapsibleSettingsSection({
                 className: 'sp-settings-export-section',
                 titleKey: 'ui_settings_export_title',
@@ -976,6 +1053,33 @@
             content.querySelector('.sp-settings-open-web-store-feedback-btn')?.addEventListener('click', () => {
                 openWebStoreFeedback();
             });
+            content.querySelector('.sp-settings-developer-mode-toggle')?.addEventListener('change', (event) => {
+                const enabled = Boolean(event?.target?.checked ?? content.querySelector('.sp-settings-developer-mode-toggle')?.checked);
+                Promise.resolve(setDeveloperModeEnabled(enabled))
+                    .then(() => {
+                        showToast(getMessage(enabled ? 'ui_settings_developer_mode_enabled' : 'ui_settings_developer_mode_disabled'), { variant: 'success' });
+                    })
+                    .catch(() => {
+                        showToast(getMessage('ui_settings_developer_mode_failed'), { variant: 'error' });
+                    });
+            });
+            content.querySelector('.sp-settings-copy-developer-logs-btn')?.addEventListener('click', () => {
+                copyDeveloperLogsTextToClipboard();
+            });
+            content.querySelector('.sp-settings-download-developer-logs-btn')?.addEventListener('click', () => {
+                downloadDeveloperLogsText();
+            });
+            content.querySelector('.sp-settings-clear-developer-logs-btn')?.addEventListener('click', () => {
+                Promise.resolve(clearDeveloperLogs())
+                    .then((ok) => {
+                        showToast(getMessage(ok ? 'ui_settings_developer_logs_cleared' : 'ui_settings_developer_logs_clear_failed'), {
+                            variant: ok ? 'success' : 'error'
+                        });
+                    })
+                    .catch(() => {
+                        showToast(getMessage('ui_settings_developer_logs_clear_failed'), { variant: 'error' });
+                    });
+            });
             content.querySelector('.sp-settings-choose-import-btn')?.addEventListener('click', () => {
                 importFileInput.click?.();
             });
@@ -1078,75 +1182,6 @@
                 acc.push(key);
                 return acc;
             }, []);
-        }
-
-        function getNativeLabelImportActionKey(label) {
-            return label?.action === 'reuse'
-                ? 'ui_import_native_labels_preview_reuse'
-                : 'ui_import_native_labels_preview_create';
-        }
-
-        function createNativeLabelImportPreviewNodes(preview = {}) {
-            if (!preview.ok) {
-                return [
-                    el('div', { className: 'sp-native-label-import-empty' }, [
-                        getMessage('ui_import_native_labels_preview_empty')
-                    ])
-                ];
-            }
-
-            const labels = Array.isArray(preview.labels) ? preview.labels : [];
-            const nodes = [
-                el('p', { className: 'sp-native-label-import-summary' }, [
-                    getMessage('ui_import_native_labels_preview_summary', [
-                        String(preview.labelCount || labels.length || 0),
-                        String(preview.sourceCount || 0)
-                    ])
-                ])
-            ];
-
-            labels.forEach((label, index) => {
-                const sourceTitles = Array.isArray(label.sourceTitles) ? label.sourceTitles : [];
-                const visibleSourceTitles = sourceTitles.slice(0, 4);
-                const remainingCount = Math.max(0, sourceTitles.length - visibleSourceTitles.length);
-                nodes.push(el('div', {
-                    className: 'sp-native-label-import-item',
-                    style: createModalItemStaggerStyle(index)
-                }, [
-                    el('div', { className: 'sp-native-label-import-item-header' }, [
-                        el('span', { className: 'google-symbols' }, [
-                            label.action === 'reuse' ? 'folder_open' : 'create_new_folder'
-                        ]),
-                        el('span', { className: 'sp-native-label-import-title' }, [
-                            label.title || getMessage('ui_group_untitled')
-                        ]),
-                        el('span', { className: 'sp-native-label-import-count' }, [
-                            getMessage('ui_import_native_labels_preview_source_count', [
-                                String(label.sourceCount || sourceTitles.length || 0)
-                            ])
-                        ])
-                    ]),
-                    el('div', { className: 'sp-native-label-import-action' }, [
-                        getMessage(getNativeLabelImportActionKey(label))
-                    ]),
-                    visibleSourceTitles.length > 0
-                        ? el('ul', { className: 'sp-native-label-import-source-list' }, [
-                            ...visibleSourceTitles.map((title) => el('li', {}, [
-                                title || getMessage('ui_source_untitled')
-                            ])),
-                            ...(remainingCount > 0
-                                ? [el('li', { className: 'sp-native-label-import-more' }, [
-                                    getMessage('ui_import_native_labels_preview_more', [String(remainingCount)])
-                                ])]
-                                : [])
-                        ])
-                        : el('div', { className: 'sp-native-label-import-source-list sp-native-label-import-source-list-empty' }, [
-                            getMessage('ui_import_native_labels_preview_no_sources')
-                        ])
-                ]));
-            });
-
-            return nodes;
         }
 
         function renderNativeLabelImportModal(preview = {}) {
@@ -2015,7 +2050,9 @@
             createNativeLabelImportPreviewNodes,
             createImportPreviewDetailNodes,
             copySettingsTextToClipboard,
+            copyDeveloperLogsTextToClipboard,
             downloadSettingsExportText,
+            downloadDeveloperLogsText,
             readSettingsImportFile,
             executeMoveToFolder,
             collectMoveFolderOptions,

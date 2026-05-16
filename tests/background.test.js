@@ -428,6 +428,110 @@ describe('background.js message listener', () => {
         expect(result).toBe(true);
     });
 
+    it('saves and loads global developer preferences', () => {
+        listener({
+            type: 'SAVE_PREFERENCES',
+            preferences: { developerModeEnabled: true, unknown: 'ignored' }
+        }, {}, mockSendResponse);
+
+        expect(global.chrome.storage.local.set).toHaveBeenCalledWith(
+            { sourcesPlusPreferences: { developerModeEnabled: true } },
+            expect.any(Function)
+        );
+        expect(mockSendResponse).toHaveBeenCalledWith({
+            success: true,
+            preferences: { developerModeEnabled: true }
+        });
+
+        mockSendResponse.mockClear();
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({ sourcesPlusPreferences: { developerModeEnabled: true } });
+        });
+
+        listener({ type: 'LOAD_PREFERENCES' }, {}, mockSendResponse);
+
+        expect(global.chrome.storage.local.get).toHaveBeenCalledWith(
+            ['sourcesPlusPreferences'],
+            expect.any(Function)
+        );
+        expect(mockSendResponse).toHaveBeenCalledWith({
+            success: true,
+            preferences: { developerModeEnabled: true }
+        });
+    });
+
+    it('rejects developer log writes from unauthorized senders', () => {
+        const invalidSender = {
+            tab: { url: 'https://example.com/notebook/123' }
+        };
+
+        listener({
+            type: 'APPEND_DEVELOPER_LOG',
+            key: 'sourcesPlusDeveloperLogs_123',
+            entry: { event: 'delete_failed' }
+        }, invalidSender, mockSendResponse);
+
+        expect(global.chrome.storage.local.get).not.toHaveBeenCalled();
+        expect(global.chrome.storage.local.set).not.toHaveBeenCalled();
+        expect(mockSendResponse).toHaveBeenCalledWith({
+            success: false,
+            errorCode: 'unauthorized_sender'
+        });
+    });
+
+    it('rejects invalid developer log storage keys', () => {
+        listener({
+            type: 'APPEND_DEVELOPER_LOG',
+            key: 'sourcesPlusState_123',
+            entry: { event: 'delete_failed' }
+        }, validSender, mockSendResponse);
+
+        expect(global.chrome.storage.local.get).not.toHaveBeenCalled();
+        expect(global.chrome.storage.local.set).not.toHaveBeenCalled();
+        expect(mockSendResponse).toHaveBeenCalledWith({
+            success: false,
+            errorCode: 'invalid_storage_key'
+        });
+    });
+
+    it('appends developer logs with bounded history', () => {
+        const existingLogs = Array.from({ length: 500 }, (_, index) => ({
+            id: `old-${index}`,
+            timestamp: '2026-05-15T00:00:00.000Z',
+            level: 'debug',
+            category: 'ui',
+            event: 'old_event',
+            notebookId: '123',
+            details: { index }
+        }));
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({ sourcesPlusDeveloperLogs_123: existingLogs });
+        });
+
+        listener({
+            type: 'APPEND_DEVELOPER_LOG',
+            key: 'sourcesPlusDeveloperLogs_123',
+            entry: {
+                id: 'new',
+                timestamp: '2026-05-15T00:01:00.000Z',
+                level: 'warn',
+                category: 'native_action',
+                event: 'delete_failed',
+                notebookId: '123',
+                details: { reason: 'confirm_dialog_missing' }
+            }
+        }, validSender, mockSendResponse);
+
+        const savedPayload = global.chrome.storage.local.set.mock.calls[0][0];
+        expect(savedPayload.sourcesPlusDeveloperLogs_123).toHaveLength(500);
+        expect(savedPayload.sourcesPlusDeveloperLogs_123[0].id).toBe('old-1');
+        expect(savedPayload.sourcesPlusDeveloperLogs_123[499].id).toBe('new');
+        expect(mockSendResponse).toHaveBeenCalledWith({
+            success: true,
+            logs: savedPayload.sourcesPlusDeveloperLogs_123
+        });
+    });
+
     it('should handle SAVE_STATE write error case', () => {
         const request = {
             type: 'SAVE_STATE',

@@ -1171,7 +1171,7 @@
                     countedSearchResultKeys.add(source.key);
                 }
                 const isGated = !areAllAncestorsEnabled(source.key) || !isSourceWithinActiveIsolation(source.key);
-                const isFailed = source.isDisabled && !source.isLoading;
+                const isFailed = Boolean(source.isFailed || (source.isDisabled && !source.isLoading));
                 const isLoading = source.isLoading;
                 const showSourceActionButton = !state.isBatchMode;
                 const canOpenActions = canOpenSourceActionMenu(source);
@@ -1216,9 +1216,17 @@
                         }, [
                             el('span', { className: 'google-symbols' }, ['more_horiz'])
                         ])
-                    ]) : '',
+                    ]) : el('div', {
+                        className: 'sp-source-actions-anchor sp-source-actions-placeholder',
+                        'aria-hidden': 'true'
+                    }),
                     el('div', { className: 'title-container' }, [
                         el('div', { className: 'source-title-text' }, createHighlightedTextChildren(source.title, sourceTitleHighlightTerms)),
+                        isLoading ? el('div', {
+                            className: 'source-loading-status',
+                            role: 'status',
+                            'aria-live': 'polite'
+                        }, [getMessage('ui_source_parsing')]) : '',
                         orderedSourceTags.length > 0 ? el('div', { className: 'source-tag-list' }, orderedSourceTags.map((tag) => (
                             el('button', {
                                 className: 'sp-tag-pill' + (state.activeTagId === tag.id ? ' is-active' : ''),
@@ -1380,19 +1388,19 @@
 	                        el('button', {
 	                            className: 'sp-button sp-glare-hover sp-batch-add-folder-btn',
 	                            disabled: pendingBatchKeys.size === 0 || getIsDeletingSources()
-	                        }, createBatchCountMessageChildren('ui_batch_add_count', pendingBatchKeys.size, 'batch-add')),
+	                        }, [getMessage('ui_batch_add')]),
 	                        el('button', {
 	                            className: 'sp-button sp-glare-hover sp-batch-add-tags-btn',
 	                            disabled: pendingBatchKeys.size === 0 || getIsDeletingSources()
-	                        }, createBatchCountMessageChildren('ui_batch_add_tags_count', pendingBatchKeys.size, 'batch-add-tags')),
+	                        }, [getMessage('ui_batch_add_tags_title')]),
 	                        el('button', {
 	                            className: 'sp-button sp-glare-hover sp-batch-remove-tags-btn',
 	                            disabled: pendingBatchKeys.size === 0 || getIsDeletingSources()
-	                        }, createBatchCountMessageChildren('ui_batch_remove_tags_count', pendingBatchKeys.size, 'batch-remove-tags')),
+	                        }, [getMessage('ui_batch_remove_tags_title')]),
 	                        el('button', {
 	                            className: 'sp-button sp-glare-hover sp-batch-ungroup-btn',
 	                            disabled: pendingBatchKeys.size === 0 || getIsDeletingSources()
-	                        }, createBatchCountMessageChildren('ui_batch_ungroup_count', pendingBatchKeys.size, 'batch-ungroup')),
+	                        }, [getMessage('ui_move_to_ungrouped')]),
 	                        el('button', {
                             className: 'sp-button sp-glare-hover sp-confirm-delete-btn',
                             disabled: pendingBatchKeys.size === 0 || getIsDeletingSources()

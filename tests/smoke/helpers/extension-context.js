@@ -85,9 +85,8 @@ function ensurePlaywrightArtifactDirs() {
 }
 
 function shouldRunHeadless() {
-    if (process.env.PLAYWRIGHT_HEADLESS === 'true') return true;
     if (process.env.PLAYWRIGHT_HEADLESS === 'false') return false;
-    return process.env.CI === 'true';
+    return true;
 }
 
 function readExtensionIdFromPreferences(userDataDir, repoRoot) {
@@ -166,10 +165,10 @@ async function launchExtensionContext(repoRoot) {
         ]
     };
 
-    if (headless && !process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH) {
-        launchOptions.channel = 'chromium';
-    } else if (executablePath) {
+    if (executablePath) {
         launchOptions.executablePath = executablePath;
+    } else if (headless && !process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH) {
+        launchOptions.channel = 'chromium';
     }
 
     const context = await chromium.launchPersistentContext(userDataDir, launchOptions);

@@ -271,6 +271,45 @@
     "ui_settings_diagnostics_copy_failed": {
         "message": "No se pudo copiar el diagnóstico"
     },
+    "ui_settings_developer_mode_title": {
+        "message": "Modo de desarrollador"
+    },
+    "ui_settings_developer_mode_toggle": {
+        "message": "Registrar logs de depuración"
+    },
+    "ui_settings_developer_mode_body": {
+        "message": "Al activarlo, la extensión registra cambios de estado, errores y acciones depurados para diagnosticar problemas."
+    },
+    "ui_settings_copy_developer_logs": {
+        "message": "Copiar logs de desarrollador"
+    },
+    "ui_settings_download_developer_logs": {
+        "message": "Descargar logs de desarrollador"
+    },
+    "ui_settings_clear_developer_logs": {
+        "message": "Borrar logs de desarrollador"
+    },
+    "ui_settings_developer_mode_enabled": {
+        "message": "Modo de desarrollador activado"
+    },
+    "ui_settings_developer_mode_disabled": {
+        "message": "Modo de desarrollador desactivado"
+    },
+    "ui_settings_developer_mode_failed": {
+        "message": "No se pudo actualizar el modo de desarrollador"
+    },
+    "ui_settings_developer_logs_copied": {
+        "message": "Logs de desarrollador copiados"
+    },
+    "ui_settings_developer_logs_copy_failed": {
+        "message": "No se pudieron copiar los logs de desarrollador"
+    },
+    "ui_settings_developer_logs_cleared": {
+        "message": "Logs de desarrollador borrados"
+    },
+    "ui_settings_developer_logs_clear_failed": {
+        "message": "No se pudieron borrar los logs de desarrollador"
+    },
     "ui_settings_feedback_title": {
         "message": "Comentarios"
     },
@@ -409,6 +448,12 @@
     },
     "ui_diagnostics_import_backup": {
         "message": "Copia previa a la importación"
+    },
+    "ui_diagnostics_developer_log_count": {
+        "message": "Cantidad de logs de desarrollador"
+    },
+    "ui_diagnostics_latest_developer_log": {
+        "message": "Último log de desarrollador"
     },
     "ui_diagnostics_native_failure": {
         "message": "Fallo nativo"
@@ -678,6 +723,9 @@
     "ui_batch_add_to_folder": {
         "message": "Agregar a carpeta por lotes"
     },
+    "ui_batch_add": {
+        "message": "Agregar"
+    },
     "ui_batch_add_count": {
         "message": "Agregar ($1)",
         "placeholders": {
@@ -805,6 +853,9 @@
     },
     "ui_delete_source": {
         "message": "Eliminar fuente"
+    },
+    "ui_delete_failed_source": {
+        "message": "Eliminar fuente fallida"
     },
     "ui_delete_source_unavailable": {
         "message": "No se pudo eliminar la fuente ahora mismo"

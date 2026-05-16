@@ -33,6 +33,20 @@ test.describe.serial('extension smoke', () => {
         }, projectId);
     }
 
+    async function readDeveloperLogs(projectId, bridgePage) {
+        return bridgePage.evaluate(async (targetProjectId) => {
+            const key = `sourcesPlusDeveloperLogs_${targetProjectId}`;
+            return new Promise((resolve) => {
+                chrome.storage.local.get([key, 'sourcesPlusPreferences'], (data) => {
+                    resolve({
+                        preferences: data?.sourcesPlusPreferences || null,
+                        logs: data?.[key] || []
+                    });
+                });
+            });
+        }, projectId);
+    }
+
     async function resolveExtensionIdAfterBootstrap(targetPath = '/notebook/bootstrap') {
         const bootstrapPage = await env.context.newPage();
         await bootstrapPage.goto(`https://notebooklm.google.com${targetPath}`);
@@ -135,6 +149,85 @@ test.describe.serial('extension smoke', () => {
             document.querySelector('#sources-plus-root')?.shadowRoot?.querySelector('.sp-focus-ring')
         ))).toBeTruthy();
         expect(pageErrors).toEqual([]);
+    });
+
+    test('developer mode records sanitized logs only while enabled', async () => {
+        const projectId = 'developer-logs';
+        const notebookPage = await env.context.newPage();
+
+        await notebookPage.goto(`https://notebooklm.google.com/notebook/${projectId}`);
+        env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
+        await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
+
+        const bridgePage = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
+        await notebookPage.evaluate(() => {
+            const root = document.querySelector('#sources-plus-root')?.shadowRoot;
+            const settingsButton = root?.getElementById('sp-settings-btn');
+            if (!settingsButton) throw new Error('Settings button missing.');
+            settingsButton.click();
+        });
+        await expect.poll(async () => notebookPage.evaluate(() => Boolean(
+            document.querySelector('#sources-plus-root')?.shadowRoot?.querySelector('.sp-settings-developer-mode-toggle')
+        )), { timeout: 10_000 }).toBeTruthy();
+        await notebookPage.evaluate(() => {
+            const root = document.querySelector('#sources-plus-root')?.shadowRoot;
+            const toggle = root.querySelector('.sp-settings-developer-mode-toggle');
+            if (!toggle) throw new Error('Developer mode toggle missing.');
+            toggle.checked = true;
+            toggle.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+
+        await expect.poll(async () => {
+            const state = await readDeveloperLogs(projectId, bridgePage);
+            return Boolean(state.preferences?.developerModeEnabled);
+        }, { timeout: 10_000 }).toBeTruthy();
+
+        await sendNotebookMessage(projectId, { type: 'SWITCH_SOURCE_VIEW', viewKind: 'label' });
+
+        await expect.poll(async () => {
+            const state = await readDeveloperLogs(projectId, bridgePage);
+            return state.logs.some((entry) => (
+                entry.category === 'view_switch' &&
+                (entry.event === 'source_view_switch_succeeded' || entry.event === 'source_view_switch_failed')
+            ));
+        }, { timeout: 10_000 }).toBeTruthy();
+
+        const enabledState = await readDeveloperLogs(projectId, bridgePage);
+        expect(JSON.stringify(enabledState.logs)).not.toContain('Academic Research Notes');
+
+        await bridgePage.evaluate(async () => {
+            await chrome.runtime.sendMessage({
+                type: 'SAVE_PREFERENCES',
+                preferences: { developerModeEnabled: false }
+            });
+        });
+        await notebookPage.reload();
+        await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
+        await notebookPage.evaluate(() => {
+            const root = document.querySelector('#sources-plus-root')?.shadowRoot;
+            const settingsButton = root?.getElementById('sp-settings-btn');
+            if (!settingsButton) throw new Error('Settings button missing after reload.');
+            settingsButton.click();
+        });
+        await expect.poll(async () => notebookPage.evaluate(() => {
+            const toggle = document.querySelector('#sources-plus-root')?.shadowRoot?.querySelector('.sp-settings-developer-mode-toggle');
+            return toggle ? toggle.checked : null;
+        }), { timeout: 10_000 }).toBe(false);
+
+        await expect.poll(async () => {
+            const state = await readDeveloperLogs(projectId, bridgePage);
+            return state.preferences?.developerModeEnabled === false;
+        }, { timeout: 10_000 }).toBeTruthy();
+        const disabledBaseline = (await readDeveloperLogs(projectId, bridgePage)).logs.length;
+
+        await sendNotebookMessage(projectId, { type: 'SWITCH_SOURCE_VIEW', viewKind: 'list' });
+
+        await expect.poll(async () => {
+            const state = await readDeveloperLogs(projectId, bridgePage);
+            return state.logs.length;
+        }, { timeout: 2_000 }).toBe(disabledBaseline);
+
+        await bridgePage.close();
     });
 
     test('switches NotebookLM source views from the popup controls', async () => {

@@ -271,6 +271,45 @@
     "ui_settings_diagnostics_copy_failed": {
         "message": "Could not copy diagnostics"
     },
+    "ui_settings_developer_mode_title": {
+        "message": "Developer mode"
+    },
+    "ui_settings_developer_mode_toggle": {
+        "message": "Record debug logs"
+    },
+    "ui_settings_developer_mode_body": {
+        "message": "When enabled, the extension records sanitized state changes, errors, and action logs for debugging."
+    },
+    "ui_settings_copy_developer_logs": {
+        "message": "Copy developer logs"
+    },
+    "ui_settings_download_developer_logs": {
+        "message": "Download developer logs"
+    },
+    "ui_settings_clear_developer_logs": {
+        "message": "Clear developer logs"
+    },
+    "ui_settings_developer_mode_enabled": {
+        "message": "Developer mode enabled"
+    },
+    "ui_settings_developer_mode_disabled": {
+        "message": "Developer mode disabled"
+    },
+    "ui_settings_developer_mode_failed": {
+        "message": "Could not update developer mode"
+    },
+    "ui_settings_developer_logs_copied": {
+        "message": "Developer logs copied"
+    },
+    "ui_settings_developer_logs_copy_failed": {
+        "message": "Could not copy developer logs"
+    },
+    "ui_settings_developer_logs_cleared": {
+        "message": "Developer logs cleared"
+    },
+    "ui_settings_developer_logs_clear_failed": {
+        "message": "Could not clear developer logs"
+    },
     "ui_settings_feedback_title": {
         "message": "Feedback"
     },
@@ -409,6 +448,12 @@
     },
     "ui_diagnostics_import_backup": {
         "message": "Import backup"
+    },
+    "ui_diagnostics_developer_log_count": {
+        "message": "Developer log count"
+    },
+    "ui_diagnostics_latest_developer_log": {
+        "message": "Latest developer log"
     },
     "ui_diagnostics_native_failure": {
         "message": "Native failure"
@@ -678,6 +723,9 @@
     "ui_batch_add_to_folder": {
         "message": "Batch Add to Folder"
     },
+    "ui_batch_add": {
+        "message": "Add"
+    },
     "ui_batch_add_count": {
         "message": "Add ($1)",
         "placeholders": {
@@ -805,6 +853,9 @@
     },
     "ui_delete_source": {
         "message": "Delete source"
+    },
+    "ui_delete_failed_source": {
+        "message": "Delete failed source"
     },
     "ui_delete_source_unavailable": {
         "message": "Source could not be deleted right now"

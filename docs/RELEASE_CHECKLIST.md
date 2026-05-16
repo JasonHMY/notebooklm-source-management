@@ -4,7 +4,7 @@ Use this checklist before publishing a new Chrome Web Store build.
 
 1. Update the version in `manifest.json` and `package.json`.
 2. Run `npm run test:unit`.
-3. Run `npm run test:smoke`.
+3. Run `npm run test:smoke` (headless by default; use `PLAYWRIGHT_HEADLESS=false npm run test:smoke` only for interactive debugging).
 4. Run `git diff --check`.
 5. Run `npm run package`.
 6. Confirm the zip is named `notebooklm-source-management-<version>.zip`.
