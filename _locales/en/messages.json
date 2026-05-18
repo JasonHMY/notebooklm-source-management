@@ -152,6 +152,84 @@
     "ui_filter_sources_v2": {
         "message": "Search sources, tags, folders"
     },
+    "ui_quick_view_all": {
+        "message": "All"
+    },
+    "ui_quick_view_ungrouped": {
+        "message": "Ungrouped"
+    },
+    "ui_quick_view_disabled": {
+        "message": "Disabled"
+    },
+    "ui_quick_view_tag": {
+        "message": "Tag"
+    },
+    "ui_quick_view_recent": {
+        "message": "Recent"
+    },
+    "ui_quick_view_issues": {
+        "message": "Issues"
+    },
+    "ui_tag_filter_title": {
+        "message": "Filter by tag"
+    },
+    "ui_command_palette": {
+        "message": "Command palette"
+    },
+    "ui_command_palette_placeholder": {
+        "message": "Type a command or search"
+    },
+    "ui_command_palette_empty": {
+        "message": "No commands found"
+    },
+    "ui_command_search_sources": {
+        "message": "Search sources"
+    },
+    "ui_command_search_sources_for": {
+        "message": "Search \"$1\"",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_command_search_sources_subtitle": {
+        "message": "Filter the current source list"
+    },
+    "ui_command_quick_view_subtitle": {
+        "message": "Switch quick view"
+    },
+    "ui_command_switch_list_view": {
+        "message": "Switch to list view"
+    },
+    "ui_command_switch_label_view": {
+        "message": "Switch to label view"
+    },
+    "ui_command_batch_move_folder": {
+        "message": "Move selected to folder"
+    },
+    "ui_command_batch_add_tags": {
+        "message": "Add tags to selected"
+    },
+    "ui_command_batch_remove_tags": {
+        "message": "Remove tags from selected"
+    },
+    "ui_command_batch_move_ungrouped": {
+        "message": "Move selected to ungrouped"
+    },
+    "ui_command_batch_count": {
+        "message": "$1 selected",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_command_disabled_batch_hint": {
+        "message": "Select sources in batch mode first"
+    },
+    "ui_command_manage_tags": {
+        "message": "Manage tags"
+    },
+    "ui_command_open_settings": {
+        "message": "Open settings"
+    },
     "ui_search_results_count": {
         "message": "$1 result(s)",
         "placeholders": {
@@ -162,6 +240,15 @@
     },
     "ui_settings": {
         "message": "Settings"
+    },
+    "ui_settings_backup_restore_title": {
+        "message": "Backup & Restore"
+    },
+    "ui_settings_help_feedback_title": {
+        "message": "Help & Feedback"
+    },
+    "ui_settings_troubleshooting_title": {
+        "message": "Troubleshooting"
     },
     "ui_settings_save_status_title": {
         "message": "Save status"
@@ -220,6 +307,43 @@
             "1": { "content": "$1" }
         }
     },
+    "ui_settings_import_preview_replace_warning": {
+        "message": "This preview still restores/replaces the current manager configuration. It is not an incremental merge."
+    },
+    "ui_settings_import_diff_sources": {
+        "message": "Source changes"
+    },
+    "ui_settings_import_diff_source_state": {
+        "message": "$1 will be enabled · $2 will be disabled · $3 unchanged",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" },
+            "3": { "content": "$3" }
+        }
+    },
+    "ui_settings_import_diff_folders": {
+        "message": "$1 folder(s) in import · $2 same-name · $3 currently missing from import",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" },
+            "3": { "content": "$3" }
+        }
+    },
+    "ui_settings_import_diff_tags": {
+        "message": "$1 tag(s) in import · $2 same-name · $3 currently missing from import · $4 id normalized",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" },
+            "3": { "content": "$3" },
+            "4": { "content": "$4" }
+        }
+    },
+    "ui_settings_import_diff_settings_changed": {
+        "message": "Panel settings will change."
+    },
+    "ui_settings_import_diff_settings_unchanged": {
+        "message": "Panel settings are unchanged."
+    },
     "ui_settings_import_empty": {
         "message": "Paste a configuration JSON first."
     },
@@ -259,6 +383,33 @@
     "ui_settings_import_file_invalid": {
         "message": "Could not read that JSON file"
     },
+    "ui_settings_preferences_title": {
+        "message": "Preferences"
+    },
+    "ui_settings_language_title": {
+        "message": "Language"
+    },
+    "ui_settings_language_body": {
+        "message": "Choose the language used by this extension UI."
+    },
+    "ui_settings_language_auto": {
+        "message": "Auto"
+    },
+    "ui_settings_language_english": {
+        "message": "English"
+    },
+    "ui_settings_language_spanish": {
+        "message": "Español"
+    },
+    "ui_settings_language_chinese": {
+        "message": "简体中文"
+    },
+    "ui_settings_language_updated": {
+        "message": "Language updated"
+    },
+    "ui_settings_language_update_failed": {
+        "message": "Could not update language"
+    },
     "ui_settings_diagnostics_title": {
         "message": "Diagnostics"
     },
@@ -270,6 +421,15 @@
     },
     "ui_settings_diagnostics_copy_failed": {
         "message": "Could not copy diagnostics"
+    },
+    "ui_settings_developer_features": {
+        "message": "Developer features"
+    },
+    "ui_settings_developer_password_prompt": {
+        "message": "Enter developer password"
+    },
+    "ui_settings_developer_password_failed": {
+        "message": "Developer password is incorrect"
     },
     "ui_settings_developer_mode_title": {
         "message": "Developer mode"
@@ -288,6 +448,12 @@
     },
     "ui_settings_clear_developer_logs": {
         "message": "Clear developer logs"
+    },
+    "ui_settings_test_welcome_modal": {
+        "message": "Test welcome modal"
+    },
+    "ui_settings_test_whats_new_modal": {
+        "message": "Test What's New modal"
     },
     "ui_settings_developer_mode_enabled": {
         "message": "Developer mode enabled"
@@ -314,13 +480,76 @@
         "message": "Feedback"
     },
     "ui_settings_feedback_body": {
-        "message": "Share bugs and suggestions on the Chrome Web Store."
+        "message": "Found a problem or want to suggest an improvement? Send feedback or copy diagnostics for a bug report."
     },
     "ui_settings_open_web_store_feedback": {
         "message": "Open Chrome Web Store feedback"
     },
     "ui_settings_feedback_open_failed": {
         "message": "Could not open Chrome Web Store feedback"
+    },
+    "ui_welcome_title": {
+        "message": "Welcome to NotebookLM Source Management"
+    },
+    "ui_welcome_subtitle": {
+        "message": "Organize, search, and back up your sources more easily inside NotebookLM."
+    },
+    "ui_welcome_feature_organize_title": {
+        "message": "Organize sources"
+    },
+    "ui_welcome_feature_organize_body": {
+        "message": "Manage materials with folders and tags."
+    },
+    "ui_welcome_feature_find_title": {
+        "message": "Find things faster"
+    },
+    "ui_welcome_feature_find_body": {
+        "message": "Search sources, tags, and folders."
+    },
+    "ui_welcome_feature_backup_title": {
+        "message": "Export and recover"
+    },
+    "ui_welcome_feature_backup_body": {
+        "message": "Save your configuration so problems are easier to recover from."
+    },
+    "ui_welcome_feedback_body": {
+        "message": "Found a problem or have a suggestion? Feedback is welcome."
+    },
+    "ui_welcome_get_started": {
+        "message": "Get started"
+    },
+    "ui_welcome_feedback": {
+        "message": "Feedback"
+    },
+    "ui_welcome_close": {
+        "message": "Close welcome"
+    },
+    "ui_whats_new_title": {
+        "message": "What's new"
+    },
+    "ui_whats_new_subtitle": {
+        "message": "A quick look at the latest source management improvements."
+    },
+    "ui_whats_new_quick_views_title": {
+        "message": "Quick filter views"
+    },
+    "ui_whats_new_quick_views_body": {
+        "message": "Jump to ungrouped, disabled, recent, tagged, or issue sources faster."
+    },
+    "ui_whats_new_restore_points_title": {
+        "message": "Restore points"
+    },
+    "ui_whats_new_restore_points_body": {
+        "message": "Keep more local history and create named snapshots before risky changes."
+    },
+    "ui_whats_new_language_title": {
+        "message": "Manual language choice"
+    },
+    "ui_whats_new_language_body": {
+        "message": "Switch extension UI language without changing Chrome."
+    },
+    "ui_whats_new_primary": {
+        "message": "Got it"
     },
     "ui_source_repair_title": {
         "message": "Source Repair"
@@ -369,6 +598,46 @@
     },
     "ui_history_empty": {
         "message": "No version history yet."
+    },
+    "ui_history_retention_label": {
+        "message": "Keep history"
+    },
+    "ui_history_retention_body": {
+        "message": "Choose how many local snapshots to keep for each notebook."
+    },
+    "ui_history_retention_option": {
+        "message": "$1 snapshots",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_history_retention_updated": {
+        "message": "History retention updated"
+    },
+    "ui_history_retention_update_failed": {
+        "message": "Could not update history retention"
+    },
+    "ui_history_create_restore_point": {
+        "message": "Create restore point"
+    },
+    "ui_history_restore_point_prompt": {
+        "message": "Name this restore point"
+    },
+    "ui_history_restore_point_created": {
+        "message": "Restore point created"
+    },
+    "ui_history_restore_point_failed": {
+        "message": "Could not create restore point"
+    },
+    "ui_history_restore_point_summary": {
+        "message": "$1 · $2 · $3 source(s) · $4 folder(s) · $5 tag(s)",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" },
+            "3": { "content": "$3" },
+            "4": { "content": "$4" },
+            "5": { "content": "$5" }
+        }
     },
     "ui_history_entry_summary": {
         "message": "$1 · $2 source(s) · $3 folder(s) · $4 tag(s) · $5",

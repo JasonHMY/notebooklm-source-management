@@ -2,13 +2,15 @@ const createContentDeveloperLogger = require('../../src/content/content-develope
 
 function createRuntimeMock() {
     const storedLogs = new Map();
+    let preferences = { developerModeEnabled: false, welcomeOnboardingSeenVersion: 0 };
     const sendMessage = jest.fn((message, cb) => {
         if (message?.type === 'LOAD_PREFERENCES') {
-            cb?.({ success: true, preferences: { developerModeEnabled: false } });
+            cb?.({ success: true, preferences });
             return;
         }
         if (message?.type === 'SAVE_PREFERENCES') {
-            cb?.({ success: true, preferences: message.preferences });
+            preferences = Object.assign({}, preferences, message.preferences || {});
+            cb?.({ success: true, preferences });
             return;
         }
         if (message?.type === 'LOAD_DEVELOPER_LOGS') {
@@ -31,7 +33,8 @@ function createRuntimeMock() {
     return {
         chromeApi: { runtime: { sendMessage, lastError: null } },
         sendMessage,
-        storedLogs
+        storedLogs,
+        getPreferences: () => preferences
     };
 }
 
@@ -159,5 +162,49 @@ describe('content developer logger', () => {
             })]
         });
         expect(JSON.stringify(exportPayload)).not.toContain('Sensitive Source Title');
+    });
+
+    it('loads and saves the welcome onboarding version through global preferences', async () => {
+        const { chromeApi, sendMessage } = createRuntimeMock();
+        const logger = createContentDeveloperLogger({
+            chrome: chromeApi,
+            getProjectId: () => 'project-dev'
+        });
+
+        await logger.loadDeveloperPreferences();
+        expect(logger.getWelcomeOnboardingSeenVersion()).toBe(0);
+
+        await logger.setWelcomeOnboardingSeenVersion(1);
+
+        expect(logger.getWelcomeOnboardingSeenVersion()).toBe(1);
+        expect(logger.getDeveloperModeEnabled()).toBe(false);
+        expect(sendMessage).toHaveBeenCalledWith(
+            {
+                type: 'SAVE_PREFERENCES',
+                preferences: { welcomeOnboardingSeenVersion: 1 }
+            },
+            expect.any(Function)
+        );
+    });
+
+    it('loads and saves whats new, history retention, and language preferences', async () => {
+        const { chromeApi, getPreferences } = createRuntimeMock();
+        const logger = createContentDeveloperLogger({
+            chrome: chromeApi,
+            getProjectId: () => 'project-dev'
+        });
+
+        await logger.setWhatsNewSeenVersion(1);
+        await logger.setHistoryRetentionLimit(50);
+        await logger.setLanguageOverride('zh_CN');
+
+        expect(logger.getWhatsNewSeenVersion()).toBe(1);
+        expect(logger.getHistoryRetentionLimit()).toBe(50);
+        expect(logger.getLanguageOverride()).toBe('zh_CN');
+        expect(getPreferences()).toMatchObject({
+            whatsNewSeenVersion: 1,
+            historyRetentionLimit: 50,
+            languageOverride: 'zh_CN'
+        });
     });
 });

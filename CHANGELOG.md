@@ -25,7 +25,34 @@
 
 ## [Unreleased] (未发布)
 
+### Added
+- **快速筛选视图 (Quick Filter Views)**: 在来源管理器工具栏下方新增 All、Ungrouped、Disabled、Tag、Recent 和 Issues 快速视图，支持与搜索词叠加筛选，并为新识别来源保存 `addedAt` 以支持最近新增视图。
+- **导入差异预览 (Import Diff Preview)**: 导入配置预览新增来源启用状态、文件夹、标签和面板设置差异摘要，并明确提示当前导入仍是恢复/替换当前管理配置而非增量合并。
+- **命令面板入口 (Command Palette Entry)**: 新增工具栏命令面板按钮，支持搜索来源、切换快速视图、切换来源视图、打开设置/标签管理，并在批量模式下执行移动和标签批量命令。
+- **更新后介绍弹窗 (What's New Modal)**: 新增按功能版本显示一次的更新介绍弹窗，并在开发者功能区提供测试入口，便于大功能发布时向用户说明变化。
+- **本地快照策略 (Local Snapshot Policy)**: 设置页新增历史快照保留数量选择和手动命名恢复点，支持按每个 notebook 保留更多本地版本历史。
+- **手动语言切换 (Manual Language Selection)**: 设置页新增 Auto、English、Español、简体中文语言选择，允许扩展 UI 独立于 Chrome UI 语言切换。
+
 ### Changed
+- **设置页信息架构收敛 (Settings Information Architecture Consolidation)**: 将设置页的导出、导入和版本历史合并到“备份与恢复”，将反馈与诊断信息合并到“帮助与反馈”，保存状态移动到标题栏，并仅在导入预览有效时显示“应用导入”按钮；来源修复仅在检测到匹配问题时独立突出显示。
+
+## [2026-05-17] [2.7.4]
+
+### Added
+- **首次欢迎弹窗 (First-Run Welcome Modal)**: 在用户首次进入 NotebookLM 并成功加载来源管理器后显示一次欢迎弹窗，提供功能简介和 Chrome Web Store 反馈入口，并支持浅色/深色模式及 English、Español、简体中文三语言文案。
+- **欢迎弹窗测试入口 (Welcome Modal Test Entry)**: 在设置页开发者功能区新增“测试欢迎弹窗”按钮，方便重复预览首次欢迎弹窗而无需清理偏好状态。
+- **来源视图状态记忆 (Source View State Memory)**: 每个 notebook 会记住上次使用的来源列表/标签视图，并在下次打开时自动恢复对应视图。
+
+### Changed
+- **反馈入口文案精简 (Feedback Entry Copy Simplification)**: 移除设置页反馈区里 Chrome Web Store 说明小字，仅保留反馈标题和打开反馈入口按钮。
+- **欢迎反馈入口轻量化 (Welcome Feedback Entry Simplification)**: 将首次欢迎弹窗底部反馈区域从卡片和按钮改为小字提示与文字链接，降低与功能介绍卡片的视觉重复。
+- **开发者模式解锁记忆 (Developer Mode Unlock Memory)**: 当 Developer Mode 已开启时，设置页会直接显示开发者功能区，刷新或重新进入 notebook 后无需再次输入开发者密码。
+- **保存状态横向排列 (Horizontal Save Status Layout)**: 将设置页“保存状态”标题和状态徽标改为同一行横向排列，避免状态内容在宽面板中垂直堆叠。
+- **开发者功能隐藏入口 (Developer Features Hidden Entry)**: 设置页不再直接展示开发者模式、日志和欢迎弹窗测试按钮，改为底部“开发者功能”小入口，输入开发者密码 `developer_mode` 后才显示这些工具。
+- **UI 规范同步 (UI Guidelines Alignment)**: 将 `UI_GUIDELINES.md` 同步为当前实现事实，覆盖 popup 宽度与暗色主题、source row grid 布局、长来源标题换行策略、motion token 三曲线体系和最新 UI helper 文件入口，并在项目目录索引中补充 UI 规范排障入口。
+- **项目文档一致性 (Project Documentation Consistency)**: 统一项目目录中的 state backup key 为实际使用的 `sourcesPlusState_<projectId>__backup`，更新 README smoke 覆盖说明，补齐 release checklist 的 `package-lock.json`、README badge 和 changelog 发布步骤，并把 `UI_GUIDELINES.md` 纳入 UI 变更入口规则。
+- **Agent 项目规则强化 (Agent Project Rules Hardening)**: 在 `AGENTS.md` 中固定启动检查、content helper 装配、验证矩阵、NotebookLM 原生自动化安全、开发者日志脱敏、headless smoke 默认值和只读检查无需 changelog 的规则，并同步更新目录索引。
+- **Content Helper 边界拆分 (Content Helper Boundary Split)**: 新增 toast/status、diagnostics、source view switch、native label import、partial sync guard、source action menu 和 modal focus helper/controller，并补充对应 focused 单测；`index.js`、source sync、source actions 和 modal 模块继续保留原入口行为。
 - **Modal 子模块边界 (Modal Helper Boundary)**: 新增原生标签导入 modal helper，把导入 preview 节点生成逻辑从 `content-modals.js` 抽离，保留原 modal facade 和交互入口不变。
 - **Source Sync 子模块边界 (Source Sync Helper Boundaries)**: 新增来源列表扫描、原生标签扫描和原生标签导入 helper，先抽离 checkbox 状态读取、标签头数量解析和导入预览完整性判断，为后续继续拆分 `content-source-sync.js` 建立可测试边界。
 - **Content 消息路由边界 (Content Message Router Boundary)**: 新增 content message router helper，把 popup/background 到 content 的消息分发机制从总入口抽离，并保持 `GET_MANAGER_STATUS`、`FOCUS_MANAGER`、`SWITCH_SOURCE_VIEW`、启用和禁用响应形状不变。
@@ -37,6 +64,10 @@
 - **项目目录索引 (Project Directory Guide)**: 新增 `docs/PROJECT_DIRECTORY.md`，用树状结构按目录结构、运行入口、功能域、存储 key、测试入口、发布流程和 agent 快速定位路径整理仓库维护地图，并标明清理后可重新生成的 ignored 输出目录，方便后续人工或 AI agent 快速定位相关代码与验证路径。
 
 ### Fixed
+- **原生视图切换前状态同步 (Native View Switch Pre-Sync)**: 修复在 NotebookLM 原生标签视图中修改折叠标签组勾选状态后，直接点击原生列表视图按钮会丢失最新勾选状态的问题。
+- **原生标签菜单切换防护 (Native Label Menu Switch Guard)**: 修复 List View 切到 Label View 时真实 header `label_auto` 入口被误判为来源行按钮、以及 Label View 切回 List View 时 NotebookLM 只在 `label_auto` 菜单中提供返回入口的问题；现在允许明确的 header `label_auto` 进入标签视图，并仅通过 `label_auto` -> `Return to list view` 返回列表，同时继续避免误点来源行或普通菜单项。
+- **来源指纹稳定性 (Source Fingerprint Stability)**: 修复来源 hydrate 后新增与标题重复的 ARIA label 会改变 stable-token 来源 fingerprint、导致硬刷新后产生无意义额外保存的问题。
+- **设置弹窗字体继承修复 (Settings Modal Font Inheritance Fix)**: 为内容脚本 modal 外壳固定与来源管理器一致的系统字体栈，避免设置和欢迎弹窗继承 NotebookLM 页面字体导致字体不匹配。
 - **原生标签导入确认 (Native Label Import Confirmation)**: 修复只读导入预览已列出 NotebookLM 原生标签，但确认导入时因来源尚未进入插件状态而导入结果为 0 个分组 / 0 个来源的问题；现在仅在确认阶段补齐 preview 中的来源记录。
 
 ### Removed

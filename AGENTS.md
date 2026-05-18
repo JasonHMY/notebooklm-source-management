@@ -10,6 +10,36 @@ Before starting work, read the relevant project instructions, repository guidanc
 - Every repository structure, feature area, storage key, test entrypoint, release flow, or maintenance workflow change must also update `docs/PROJECT_DIRECTORY.md`.
 - If a change adds, removes, renames, archives, or substantially changes any file, module, directory, command, storage key, test file, or agent workflow, check whether `docs/PROJECT_DIRECTORY.md` needs to change and update it in the same turn.
 - For docs-only changes, at minimum run `git diff --check` on the changed files and verify any new links or paths exist.
+- Pure read-only inspection, status reporting, or analysis with no file changes does not require a changelog entry.
+
+## Project-Specific Workflow Rules
+
+- Start every code, test, docs, config, packaging, or workflow task by checking:
+  - `AGENTS.md`
+  - `docs/PROJECT_DIRECTORY.md`
+  - the `Changelog Writing Guidelines` section at the top of `CHANGELOG.md`
+  - `git status --short`
+- This project has no content-script bundler. `manifest.json` content script order is the runtime dependency order. When adding or moving a content helper:
+  - update `manifest.json`
+  - update `tests/helpers/load-content-module.js`
+  - update `tests/helpers/content-test-harness.js`
+  - keep the existing helper pattern: expose `globalThis.NSM_CREATE_*` for Chrome runtime loading and `module.exports` for Jest.
+- Use this minimum verification matrix:
+  - docs-only changes: run `git diff --check` and verify new links or paths exist.
+  - content helper changes: run the relevant focused Jest test plus `npm run test:unit`.
+  - runtime, manifest, storage, message, or automation changes: run `npm run test:unit`, `npm run test:smoke`, `npm run package`, and `git diff --check`.
+  - release/version changes: verify `manifest.json`, `package.json`, `package-lock.json`, README version badge, release zip filename, and `CHANGELOG.md` all match.
+- Treat NotebookLM native DOM automation as high-risk:
+  - before native delete or rename, re-resolve a fresh row and verify it still matches the intended source.
+  - fail closed if a native dialog has multiple plausible candidates, no clear candidate, or an obvious title/identity mismatch.
+  - do not treat hidden or collapsed DOM as deletion without source-sync evidence.
+  - do not hardcode NotebookLM generated CSS classes; prefer aria, role, data attributes, stable text signals, and relative structure.
+- Follow `docs/DEVELOPER_LOGGING.md` for developer-mode logs. Logs must stay structured and sanitized:
+  - do not record source titles, source bodies, tag labels, group names, full private URLs, raw import/export JSON, long DOM `textContent`, or full stacks.
+  - prefer counts, booleans, stable event names, reasons, result codes, source keys, and hashes.
+- For UI, layout, style-token, motion, popup, or in-page manager visual changes, read `UI_GUIDELINES.md` before editing and reuse the documented `.sp-*` component patterns instead of adding one-off styling.
+- Avoid visible browser tests unless explicitly requested. `npm run test:smoke` is the default headless smoke path; only use `PLAYWRIGHT_HEADLESS=false npm run test:smoke` for intentional interactive debugging.
+- Before finalizing a change, report whether the working tree still has uncommitted changes and do not create commits or push unless the user explicitly asks for that.
 
 ## Changelog Rules
 

@@ -160,6 +160,8 @@ describe('popup launcher', () => {
         delete global.window;
         delete global.chrome;
         delete global.getMessage;
+        delete global.NSM_SET_MESSAGE_LOCALE_OVERRIDE;
+        delete global.NSM_GET_EFFECTIVE_MESSAGE_LOCALE;
     });
 
     it('keeps the popup html ids that popup/index.js binds to', () => {
@@ -251,8 +253,7 @@ describe('popup launcher', () => {
 
         await popupDocument.elements['popup-primary-btn'].onclick();
 
-        expect(global.chrome.runtime.sendMessage).toHaveBeenNthCalledWith(
-            1,
+        expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(
             { type: 'GET_EXTENSION_ENABLED' },
             expect.any(Function)
         );
@@ -360,6 +361,30 @@ describe('popup launcher', () => {
 
         expect(popupDocument.title).toBe('extName');
         expect(popupDocument.documentElement.lang).toBe(uiLanguage);
+    });
+
+    it('applies the saved manual extension language before rendering the popup', async () => {
+        global.NSM_SET_MESSAGE_LOCALE_OVERRIDE = jest.fn(() => Promise.resolve('zh_CN'));
+        global.NSM_GET_EFFECTIVE_MESSAGE_LOCALE = jest.fn(() => 'zh-CN');
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message.type === 'LOAD_PREFERENCES') {
+                cb({ success: true, preferences: { languageOverride: 'zh_CN' } });
+                return;
+            }
+            if (message.type === 'GET_EXTENSION_ENABLED') {
+                cb({ success: true, enabled: true });
+                return;
+            }
+            cb({ success: true });
+        });
+
+        await popup.initializePopup(popupDocument);
+
+        expect(global.NSM_SET_MESSAGE_LOCALE_OVERRIDE).toHaveBeenCalledWith('zh_CN');
+        expect(popupDocument.documentElement.lang).toBe('zh-CN');
+
+        delete global.NSM_SET_MESSAGE_LOCALE_OVERRIDE;
+        delete global.NSM_GET_EFFECTIVE_MESSAGE_LOCALE;
     });
 
     it('renders a refresh action when the manager is unavailable in a notebook', async () => {

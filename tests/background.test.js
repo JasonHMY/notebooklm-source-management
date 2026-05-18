@@ -165,6 +165,43 @@ describe('background.js message listener', () => {
         expect(mockSendResponse).toHaveBeenCalledWith({ success: true, stale: true, currentRevision: 5 });
     });
 
+    it('should skip equivalent SAVE_STATE writes without assigning a new revision', () => {
+        const currentState = {
+            _saveRevision: 5,
+            _savedAt: '2026-05-17T00:00:00.000Z',
+            groups: ['same'],
+            groupsById: { same: { id: 'same', children: [] } },
+            sourceStateById: { source_1: { enabled: true } },
+            sourceViewDisplayKind: 'list'
+        };
+        const request = {
+            type: 'SAVE_STATE',
+            key: 'sourcesPlusState_123',
+            baseRevision: 5,
+            data: {
+                groups: ['same'],
+                groupsById: { same: { id: 'same', children: [] } },
+                sourceStateById: { source_1: { enabled: true } },
+                sourceViewDisplayKind: 'list'
+            }
+        };
+
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({ sourcesPlusState_123: currentState });
+        });
+
+        listener(request, validSender, mockSendResponse);
+
+        expect(global.chrome.storage.local.set).not.toHaveBeenCalled();
+        expect(mockSendResponse).toHaveBeenCalledWith({
+            success: true,
+            saveRevision: 5,
+            savedAt: '2026-05-17T00:00:00.000Z',
+            skipped: true,
+            noChanges: true
+        });
+    });
+
     it('should reject explicit stale SAVE_STATE base revisions without overwriting newer state', () => {
         const newerState = {
             _saveRevision: 5,
@@ -434,13 +471,31 @@ describe('background.js message listener', () => {
             preferences: { developerModeEnabled: true, unknown: 'ignored' }
         }, {}, mockSendResponse);
 
+        expect(global.chrome.storage.local.get).toHaveBeenCalledWith(
+            ['sourcesPlusPreferences'],
+            expect.any(Function)
+        );
         expect(global.chrome.storage.local.set).toHaveBeenCalledWith(
-            { sourcesPlusPreferences: { developerModeEnabled: true } },
+            {
+                sourcesPlusPreferences: {
+                    developerModeEnabled: true,
+                    welcomeOnboardingSeenVersion: 0,
+                    whatsNewSeenVersion: 0,
+                    historyRetentionLimit: 20,
+                    languageOverride: 'auto'
+                }
+            },
             expect.any(Function)
         );
         expect(mockSendResponse).toHaveBeenCalledWith({
             success: true,
-            preferences: { developerModeEnabled: true }
+            preferences: {
+                developerModeEnabled: true,
+                welcomeOnboardingSeenVersion: 0,
+                whatsNewSeenVersion: 0,
+                historyRetentionLimit: 20,
+                languageOverride: 'auto'
+            }
         });
 
         mockSendResponse.mockClear();
@@ -456,8 +511,88 @@ describe('background.js message listener', () => {
         );
         expect(mockSendResponse).toHaveBeenCalledWith({
             success: true,
-            preferences: { developerModeEnabled: true }
+            preferences: {
+                developerModeEnabled: true,
+                welcomeOnboardingSeenVersion: 0,
+                whatsNewSeenVersion: 0,
+                historyRetentionLimit: 20,
+                languageOverride: 'auto'
+            }
         });
+    });
+
+    it('merges welcome onboarding preference updates without clearing developer mode', () => {
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({ sourcesPlusPreferences: { developerModeEnabled: true, welcomeOnboardingSeenVersion: 0 } });
+        });
+
+        listener({
+            type: 'SAVE_PREFERENCES',
+            preferences: { welcomeOnboardingSeenVersion: 1 }
+        }, {}, mockSendResponse);
+
+        expect(global.chrome.storage.local.get).toHaveBeenCalledWith(
+            ['sourcesPlusPreferences'],
+            expect.any(Function)
+        );
+        expect(global.chrome.storage.local.set).toHaveBeenCalledWith(
+            {
+                sourcesPlusPreferences: {
+                    developerModeEnabled: true,
+                    welcomeOnboardingSeenVersion: 1,
+                    whatsNewSeenVersion: 0,
+                    historyRetentionLimit: 20,
+                    languageOverride: 'auto'
+                }
+            },
+            expect.any(Function)
+        );
+        expect(mockSendResponse).toHaveBeenCalledWith({
+            success: true,
+            preferences: {
+                developerModeEnabled: true,
+                welcomeOnboardingSeenVersion: 1,
+                whatsNewSeenVersion: 0,
+                historyRetentionLimit: 20,
+                languageOverride: 'auto'
+            }
+        });
+    });
+
+    it('saves whats new, history retention, and language preferences without clearing existing fields', () => {
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({
+                sourcesPlusPreferences: {
+                    developerModeEnabled: true,
+                    welcomeOnboardingSeenVersion: 1,
+                    whatsNewSeenVersion: 0,
+                    historyRetentionLimit: 20,
+                    languageOverride: 'auto'
+                }
+            });
+        });
+
+        listener({
+            type: 'SAVE_PREFERENCES',
+            preferences: {
+                whatsNewSeenVersion: 1,
+                historyRetentionLimit: 50,
+                languageOverride: 'zh_CN'
+            }
+        }, {}, mockSendResponse);
+
+        expect(global.chrome.storage.local.set).toHaveBeenCalledWith(
+            {
+                sourcesPlusPreferences: {
+                    developerModeEnabled: true,
+                    welcomeOnboardingSeenVersion: 1,
+                    whatsNewSeenVersion: 1,
+                    historyRetentionLimit: 50,
+                    languageOverride: 'zh_CN'
+                }
+            },
+            expect.any(Function)
+        );
     });
 
     it('rejects developer log writes from unauthorized senders', () => {
@@ -826,16 +961,20 @@ describe('background.js message listener', () => {
         listener({ type: 'LOAD_STATE_HISTORY', key: 'sourcesPlusHistory_123' }, validSender, mockSendResponse);
 
         expect(global.chrome.storage.local.get).toHaveBeenCalledWith(
-            ['sourcesPlusHistory_123'],
+            ['sourcesPlusHistory_123', 'sourcesPlusPreferences'],
             expect.any(Function)
         );
         expect(mockSendResponse).toHaveBeenCalledWith({
             success: true,
-            history
+            history: [expect.objectContaining({
+                id: 'entry-1',
+                label: '',
+                manual: false
+            })]
         });
     });
 
-    it('appends state history entries with de-duplication and a five entry limit', () => {
+    it('appends state history entries with de-duplication and the default twenty entry limit', () => {
         const makeEntry = (index) => ({
             id: `entry-${index}`,
             createdAt: `2026-04-22T00:0${index}:00.000Z`,
@@ -846,7 +985,7 @@ describe('background.js message listener', () => {
                 sourceStateById: {}
             }
         });
-        const existing = [1, 2, 3, 4, 5].map(makeEntry);
+        const existing = Array.from({ length: 20 }, (_, index) => makeEntry(index + 1));
         global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
             cb({ sourcesPlusHistory_123: existing });
         });
@@ -858,18 +997,52 @@ describe('background.js message listener', () => {
         }, validSender, mockSendResponse);
 
         const savedHistory = global.chrome.storage.local.set.mock.calls[0][0].sourcesPlusHistory_123;
-        expect(savedHistory).toHaveLength(5);
+        expect(savedHistory).toHaveLength(20);
         expect(savedHistory.map((entry) => entry.id)).toEqual([
             'entry-6',
-            'entry-1',
-            'entry-2',
-            'entry-3',
-            'entry-4'
+            ...Array.from({ length: 20 }, (_, index) => `entry-${index + 1}`).filter((id) => id !== 'entry-6')
         ]);
         expect(mockSendResponse).toHaveBeenCalledWith(expect.objectContaining({
             success: true,
             history: savedHistory
         }));
+    });
+
+    it('uses configured history retention and preserves manual restore points during trimming', () => {
+        const makeEntry = (index, manual = false) => ({
+            id: `entry-${index}`,
+            createdAt: `2026-04-22T00:${String(index).padStart(2, '0')}:00.000Z`,
+            reason: manual ? 'manual_restore_point' : 'save',
+            manual,
+            label: manual ? `Restore ${index}` : '',
+            snapshot: {
+                groups: [`group-${index}`],
+                groupsById: { [`group-${index}`]: { id: `group-${index}`, children: [] } },
+                sourceStateById: {}
+            }
+        });
+        const existing = [
+            ...Array.from({ length: 25 }, (_, index) => makeEntry(index + 1)),
+            makeEntry(101, true)
+        ];
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({
+                sourcesPlusPreferences: { historyRetentionLimit: 20 },
+                sourcesPlusHistory_123: existing
+            });
+        });
+
+        listener({
+            type: 'APPEND_STATE_HISTORY',
+            key: 'sourcesPlusHistory_123',
+            entry: makeEntry(26)
+        }, validSender, mockSendResponse);
+
+        const savedHistory = global.chrome.storage.local.set.mock.calls[0][0].sourcesPlusHistory_123;
+        expect(savedHistory).toHaveLength(20);
+        expect(savedHistory.some((entry) => entry.id === 'entry-101' && entry.manual)).toBe(true);
+        expect(savedHistory.map((entry) => entry.id)).toContain('entry-26');
+        expect(savedHistory.map((entry) => entry.id)).not.toContain('entry-20');
     });
 
     it('serializes concurrent state history appends for the same key', async () => {

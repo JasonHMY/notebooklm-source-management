@@ -115,6 +115,35 @@ describe('scanAndSyncSources', () => {
         });
     });
 
+    it('assigns addedAt only to newly discovered sources during sync', () => {
+        const existing = createMockSourceRow({ title: 'Existing Source', stableToken: 'existing-doc', checked: true });
+        const incoming = createMockSourceRow({ title: 'New Source', stableToken: 'new-doc', checked: true });
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+
+        panel.querySelectorAll = jest.fn((selector) => {
+            if (mod.DEPS.row.includes(selector)) return [existing.row, incoming.row];
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        const existingDescriptor = mod.createSourceDescriptor(existing.row, new Map(), new Map());
+        mod.sourcesByKey.set(existingDescriptor.key, {
+            ...existingDescriptor,
+            enabled: true,
+            addedAt: ''
+        });
+        mod.state.ungrouped = [existingDescriptor.key];
+
+        mod.scanAndSyncSources({}, false);
+
+        const existingRecord = Array.from(mod.sourcesByKey.values()).find((source) => source.title === 'Existing Source');
+        const newRecord = Array.from(mod.sourcesByKey.values()).find((source) => source.title === 'New Source');
+        expect(existingRecord.addedAt || '').toBe('');
+        expect(newRecord.addedAt).toEqual(expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/));
+    });
+
     it('keeps source row buttons in the traditional list source view', () => {
         const source = createMockSourceRow({ title: 'List Source Button', stableToken: 'list-button-doc', checked: true });
         const { panel } = createMockPanel({ visible: true, contentVisible: true });
@@ -506,6 +535,53 @@ describe('scanAndSyncSources', () => {
         mod.scanAndSyncSources({}, false);
 
         expect(mod.sourcesByKey.get(descriptor.key).enabled).toBe(false);
+    });
+
+    it('re-enables existing native label sources from a checked collapsed native label group', () => {
+        const existing = createMockSourceRow({ title: 'Imported Source', stableToken: 'imported-doc', checked: false });
+        const descriptor = mod.createSourceDescriptor(existing.row, new Map(), new Map());
+        mod.sourcesByKey.set(descriptor.key, { ...descriptor, enabled: false, nativeLabelTitle: 'AI Group' });
+
+        const groupCheckbox = {
+            checked: true,
+            parentElement: null,
+            parentNode: null,
+            style: {},
+            getAttribute: jest.fn(() => null),
+            matches: jest.fn(() => false)
+        };
+        const collapsedLabelGroup = {
+            textContent: 'AI Group',
+            parentElement: null,
+            parentNode: null,
+            style: {},
+            __computedStyle: {},
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return 'AI Group label';
+                if (attr === 'data-testid') return 'source-label-group';
+                return null;
+            }),
+            matches: jest.fn((selector) => selector.includes('source-label') || selector.includes('label-group')),
+            querySelector: jest.fn((selector) => (String(selector).includes('checkbox') ? groupCheckbox : null)),
+            querySelectorAll: jest.fn((selector) => (String(selector).includes('checkbox') ? [groupCheckbox] : []))
+        };
+        groupCheckbox.parentElement = collapsedLabelGroup;
+        groupCheckbox.parentNode = collapsedLabelGroup;
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        collapsedLabelGroup.parentElement = panel;
+        collapsedLabelGroup.parentNode = panel;
+        panel.querySelectorAll = jest.fn((selector) => {
+            const value = String(selector);
+            if (value.includes('source-label') || value.includes('label-group')) return [collapsedLabelGroup];
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        mod.scanAndSyncSources({}, false);
+
+        expect(mod.sourcesByKey.get(descriptor.key).enabled).toBe(true);
     });
 
     it('does not apply collapsed native label selections to ordinary same-title plugin groups', () => {
@@ -2823,6 +2899,27 @@ describe('scanAndSyncSources', () => {
         expect(descriptor).toBeTruthy();
         expect(descriptor.title).toBe('Visible aria source');
         expect(descriptor.normalizedTitle).toBe('visible aria source');
+    });
+
+    it('keeps stable-token fingerprints unchanged when hydration adds a duplicate aria label', () => {
+        const initial = createMockSourceRow({
+            title: 'Notebook persist source A',
+            stableToken: 'persist-source-a',
+            iconName: 'description',
+            checked: true
+        });
+        const hydrated = createMockSourceRow({
+            title: 'Notebook persist source A',
+            ariaLabel: 'Notebook persist source A',
+            stableToken: 'persist-source-a',
+            iconName: 'description',
+            checked: true
+        });
+
+        const initialDescriptor = mod.createSourceDescriptor(initial.row, new Map(), new Map());
+        const hydratedDescriptor = mod.createSourceDescriptor(hydrated.row, new Map(), new Map());
+
+        expect(hydratedDescriptor.fingerprint).toBe(initialDescriptor.fingerprint);
     });
 
     it('keeps sources visible when NotebookLM checkbox selectors change but source rows still have actions', () => {

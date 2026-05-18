@@ -7,7 +7,8 @@ const PREFERENCES_KEY = 'sourcesPlusPreferences';
 const STATE_KEY_PREFIX = 'sourcesPlusState_';
 const STATE_HISTORY_KEY_PREFIX = 'sourcesPlusHistory_';
 const DEVELOPER_LOG_KEY_PREFIX = 'sourcesPlusDeveloperLogs_';
-const STATE_HISTORY_LIMIT = 5;
+const STATE_HISTORY_LIMIT = 20;
+const HISTORY_RETENTION_LIMIT_OPTIONS = [20, 50, 100];
 const DEVELOPER_LOG_LIMIT = 500;
 const DEVELOPER_LOG_MAX_BYTES = 512 * 1024;
 const DEFAULT_STORAGE_QUOTA_BYTES = 10 * 1024 * 1024;
@@ -260,8 +261,50 @@ function setExtensionEnabled(request, sendResponse) {
 
 function normalizePreferences(preferences = {}) {
     return {
-        developerModeEnabled: Boolean(preferences?.developerModeEnabled)
+        developerModeEnabled: Boolean(preferences?.developerModeEnabled),
+        welcomeOnboardingSeenVersion: normalizePreferenceVersion(preferences?.welcomeOnboardingSeenVersion),
+        whatsNewSeenVersion: normalizePreferenceVersion(preferences?.whatsNewSeenVersion),
+        historyRetentionLimit: normalizeHistoryRetentionLimit(preferences?.historyRetentionLimit),
+        languageOverride: normalizeLanguageOverride(preferences?.languageOverride)
     };
+}
+
+function normalizePreferenceVersion(value) {
+    const version = Number(value);
+    if (!Number.isFinite(version) || version < 0) return 0;
+    return Math.floor(version);
+}
+
+function normalizeHistoryRetentionLimit(value) {
+    const limit = Number(value);
+    return HISTORY_RETENTION_LIMIT_OPTIONS.includes(limit) ? limit : STATE_HISTORY_LIMIT;
+}
+
+function normalizeLanguageOverride(value) {
+    const normalized = String(value || 'auto').trim();
+    return normalized === 'auto' || normalized === 'en' || normalized === 'es' || normalized === 'zh_CN'
+        ? normalized
+        : 'auto';
+}
+
+function mergePreferences(existingPreferences = {}, nextPreferences = {}) {
+    const merged = normalizePreferences(existingPreferences);
+    if (Object.prototype.hasOwnProperty.call(nextPreferences || {}, 'developerModeEnabled')) {
+        merged.developerModeEnabled = Boolean(nextPreferences.developerModeEnabled);
+    }
+    if (Object.prototype.hasOwnProperty.call(nextPreferences || {}, 'welcomeOnboardingSeenVersion')) {
+        merged.welcomeOnboardingSeenVersion = normalizePreferenceVersion(nextPreferences.welcomeOnboardingSeenVersion);
+    }
+    if (Object.prototype.hasOwnProperty.call(nextPreferences || {}, 'whatsNewSeenVersion')) {
+        merged.whatsNewSeenVersion = normalizePreferenceVersion(nextPreferences.whatsNewSeenVersion);
+    }
+    if (Object.prototype.hasOwnProperty.call(nextPreferences || {}, 'historyRetentionLimit')) {
+        merged.historyRetentionLimit = normalizeHistoryRetentionLimit(nextPreferences.historyRetentionLimit);
+    }
+    if (Object.prototype.hasOwnProperty.call(nextPreferences || {}, 'languageOverride')) {
+        merged.languageOverride = normalizeLanguageOverride(nextPreferences.languageOverride);
+    }
+    return normalizePreferences(merged);
 }
 
 function getPreferences(sendResponse) {
@@ -279,14 +322,21 @@ function getPreferences(sendResponse) {
 }
 
 function setPreferences(request, sendResponse) {
-    const preferences = normalizePreferences(request?.preferences);
-    chrome.storage.local.set({ [PREFERENCES_KEY]: preferences }, () => {
+    chrome.storage.local.get([PREFERENCES_KEY], (data) => {
         if (chrome.runtime.lastError) {
             sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
             return;
         }
 
-        sendResponse({ success: true, preferences });
+        const preferences = mergePreferences(data?.[PREFERENCES_KEY], request?.preferences);
+        chrome.storage.local.set({ [PREFERENCES_KEY]: preferences }, () => {
+            if (chrome.runtime.lastError) {
+                sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
+                return;
+            }
+
+            sendResponse({ success: true, preferences });
+        });
     });
 }
 
@@ -482,6 +532,12 @@ function getHistorySnapshotSignature(snapshot) {
     }
 }
 
+function areStateSnapshotsEquivalent(leftSnapshot, rightSnapshot) {
+    const leftSignature = getHistorySnapshotSignature(leftSnapshot);
+    const rightSignature = getHistorySnapshotSignature(rightSnapshot);
+    return Boolean(leftSignature && rightSignature && leftSignature === rightSignature);
+}
+
 function getPersistableStateCounts(snapshot) {
     return {
         sourceCount: Object.keys(snapshot?.sourceStateById || {}).length,
@@ -506,30 +562,51 @@ function normalizeHistoryEntry(entry, fallbackReason = 'save') {
         groupCount: Number(entry.groupCount) || counts.groupCount,
         tagCount: Number(entry.tagCount) || counts.tagCount,
         saveRevision: Number(entry.saveRevision) || getSnapshotSaveRevision(entry.snapshot),
+        label: typeof entry.label === 'string' ? entry.label.slice(0, 48) : '',
+        manual: Boolean(entry.manual),
         snapshot: cloneSerializableData(entry.snapshot)
     };
 }
 
-function normalizeStateHistoryEntries(entries) {
-    return (Array.isArray(entries) ? entries : [])
-        .map((entry) => normalizeHistoryEntry(entry))
-        .filter(Boolean)
-        .slice(0, STATE_HISTORY_LIMIT);
+function trimStateHistoryEntries(entries, historyLimit = STATE_HISTORY_LIMIT) {
+    const limit = normalizeHistoryRetentionLimit(historyLimit);
+    const normalizedEntries = Array.isArray(entries) ? entries : [];
+    if (normalizedEntries.length <= limit) return normalizedEntries;
+
+    const manualEntries = normalizedEntries.filter((entry) => entry?.manual);
+    if (manualEntries.length >= limit) {
+        return manualEntries.slice(0, limit);
+    }
+
+    let automaticCount = 0;
+    const automaticLimit = limit - manualEntries.length;
+    return normalizedEntries.filter((entry) => {
+        if (entry?.manual) return true;
+        if (automaticCount >= automaticLimit) return false;
+        automaticCount += 1;
+        return true;
+    });
 }
 
-function appendHistoryEntry(existingEntries, entry) {
+function normalizeStateHistoryEntries(entries, historyLimit = STATE_HISTORY_LIMIT) {
+    return trimStateHistoryEntries((Array.isArray(entries) ? entries : [])
+        .map((entry) => normalizeHistoryEntry(entry))
+        .filter(Boolean), historyLimit);
+}
+
+function appendHistoryEntry(existingEntries, entry, historyLimit = STATE_HISTORY_LIMIT) {
     const normalizedEntry = normalizeHistoryEntry(entry);
     if (!normalizedEntry) {
-        return normalizeStateHistoryEntries(existingEntries);
+        return normalizeStateHistoryEntries(existingEntries, historyLimit);
     }
 
     const nextSignature = getHistorySnapshotSignature(normalizedEntry.snapshot);
-    return [
+    return trimStateHistoryEntries([
         normalizedEntry,
-        ...normalizeStateHistoryEntries(existingEntries).filter((existingEntry) => (
+        ...normalizeStateHistoryEntries(existingEntries, historyLimit).filter((existingEntry) => (
             getHistorySnapshotSignature(existingEntry.snapshot) !== nextSignature
         ))
-    ].slice(0, STATE_HISTORY_LIMIT);
+    ], historyLimit);
 }
 
 function createHistoryEntryFromSnapshot(snapshot, reason = 'save') {
@@ -591,8 +668,9 @@ function createStateStoragePayload({
         storagePayload[backupKey] = savedState;
         history = appendHistoryEntry(
             existingHistory,
-            createHistoryEntryFromSnapshot(savedState, reason)
-        ).slice(0, historyLimit);
+            createHistoryEntryFromSnapshot(savedState, reason),
+            historyLimit
+        );
         storagePayload[historyKey] = history;
     }
 
@@ -661,7 +739,7 @@ function writeStateWithRevisionGuard(request, sendResponse) {
     const backupKey = getStateBackupKey(key);
     const historyKey = getStateHistoryKey(key);
     const baseRevision = getRequestBaseRevision(request);
-    chrome.storage.local.get([key, backupKey, historyKey], (existingData) => {
+    chrome.storage.local.get([key, backupKey, historyKey, PREFERENCES_KEY], (existingData) => {
         if (chrome.runtime.lastError) {
             console.error('NotebookLM Source Management background save error:', chrome.runtime.lastError);
             sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
@@ -688,15 +766,28 @@ function writeStateWithRevisionGuard(request, sendResponse) {
             return;
         }
 
+        if (currentState && areStateSnapshotsEquivalent(data, currentState)) {
+            sendResponse({
+                success: true,
+                saveRevision: currentRevision,
+                savedAt: currentState._savedAt || '',
+                skipped: true,
+                noChanges: true
+            });
+            return;
+        }
+
         const savedState = createSavedStateSnapshot(data, currentRevision, baseRevision);
         const existingHistory = existingData && typeof existingData === 'object' ? existingData[historyKey] : [];
+        const historyLimit = normalizePreferences(existingData?.[PREFERENCES_KEY]).historyRetentionLimit;
         const initialPayloadInfo = createStateStoragePayload({
             key,
             backupKey,
             historyKey,
             savedState,
             existingHistory,
-            reason: request.critical ? 'critical_save' : 'save'
+            reason: request.critical ? 'critical_save' : 'save',
+            historyLimit
         });
         const payloadInfo = prepareStateStoragePayloadForQuota(initialPayloadInfo, historyKey);
         if (isStorageCritical(payloadInfo.usageInfo)) {
@@ -747,30 +838,33 @@ function writeStateWithRevisionGuard(request, sendResponse) {
 
 function loadStateHistoryNow(request, sendResponse) {
     const key = request.key;
-    chrome.storage.local.get([key], (data) => {
+    chrome.storage.local.get([key, PREFERENCES_KEY], (data) => {
         if (chrome.runtime.lastError) {
             sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
             return;
         }
+        const historyLimit = normalizePreferences(data?.[PREFERENCES_KEY]).historyRetentionLimit;
 
         sendResponse({
             success: true,
-            history: normalizeStateHistoryEntries(data && typeof data === 'object' ? data[key] : [])
+            history: normalizeStateHistoryEntries(data && typeof data === 'object' ? data[key] : [], historyLimit)
         });
     });
 }
 
 function appendStateHistoryNow(request, sendResponse) {
     const key = request.key;
-    chrome.storage.local.get([key], (data) => {
+    chrome.storage.local.get([key, PREFERENCES_KEY], (data) => {
         if (chrome.runtime.lastError) {
             sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
             return;
         }
+        const historyLimit = normalizePreferences(data?.[PREFERENCES_KEY]).historyRetentionLimit;
 
         const history = appendHistoryEntry(
             data && typeof data === 'object' ? data[key] : [],
-            request.entry
+            request.entry,
+            historyLimit
         );
         const initialPayload = { [key]: history };
         let nextHistory = history;
@@ -1007,6 +1101,7 @@ if (typeof module !== 'undefined' && module.exports) {
         STATE_HISTORY_KEY_PREFIX,
         DEVELOPER_LOG_KEY_PREFIX,
         STATE_HISTORY_LIMIT,
+        HISTORY_RETENTION_LIMIT_OPTIONS,
         DEVELOPER_LOG_LIMIT,
         DEVELOPER_LOG_MAX_BYTES,
         DEFAULT_STORAGE_QUOTA_BYTES,
@@ -1020,10 +1115,13 @@ if (typeof module !== 'undefined' && module.exports) {
         isStorageCritical,
         isStorageQuotaError,
         createStorageResponseFields,
+        normalizeHistoryRetentionLimit,
+        normalizeLanguageOverride,
         getStateBackupKey,
         getStateHistoryKey,
         getSnapshotSaveRevision,
         normalizeStateHistoryEntries,
+        trimStateHistoryEntries,
         appendHistoryEntry,
         createHistoryEntryFromSnapshot,
         getRequestBaseRevision,

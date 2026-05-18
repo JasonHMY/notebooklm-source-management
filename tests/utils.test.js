@@ -67,7 +67,15 @@ global.document = {
     createTextNode: (text) => new TextNode(text)
 };
 
-const { el, isDescendant } = require('../src/utils/index');
+const {
+    el,
+    isDescendant,
+    getMessage,
+    setMessageLocaleOverride,
+    getMessageLocaleOverride,
+    getEffectiveMessageLocale,
+    _localeMessageCacheForTest
+} = require('../src/utils/index');
 
 describe('el function', () => {
     test('creates an element with tag name', () => {
@@ -195,5 +203,66 @@ describe('isDescendant function', () => {
         groupsById.get('group3').children.push({ type: 'group', id: 'group1' });
 
         expect(isDescendant(groupsById.get('group4'), groupsById.get('group1'), groupsById)).toBe(false);
+    });
+});
+
+describe('manual locale message override', () => {
+    beforeEach(() => {
+        _localeMessageCacheForTest.clear();
+        global.chrome = {
+            i18n: {
+                getMessage: jest.fn((key, substitutions = []) => {
+                    const values = Array.isArray(substitutions) ? substitutions : [substitutions];
+                    return values.length ? `chrome:${key}:${values.join(',')}` : `chrome:${key}`;
+                }),
+                getUILanguage: jest.fn(() => 'es-ES')
+            },
+            runtime: {
+                getURL: jest.fn((path) => `chrome-extension://test/${path}`)
+            }
+        };
+    });
+
+    afterEach(async () => {
+        await setMessageLocaleOverride('auto');
+        delete global.chrome;
+        delete global.fetch;
+        _localeMessageCacheForTest.clear();
+    });
+
+    test('uses cached manual locale messages with substitutions', async () => {
+        global.fetch = jest.fn(() => Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({
+                greeting: { message: 'Hola $1' }
+            })
+        }));
+
+        await setMessageLocaleOverride('es');
+
+        expect(getMessageLocaleOverride()).toBe('es');
+        expect(getEffectiveMessageLocale()).toBe('es');
+        expect(getMessage('greeting', ['Ana'])).toBe('Hola Ana');
+        expect(global.chrome.i18n.getMessage).not.toHaveBeenCalledWith('greeting', ['Ana']);
+    });
+
+    test('falls back to chrome i18n when a manual key is missing', async () => {
+        global.fetch = jest.fn(() => Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({})
+        }));
+
+        await setMessageLocaleOverride('zh_CN');
+
+        expect(getEffectiveMessageLocale()).toBe('zh-CN');
+        expect(getMessage('missing_key')).toBe('chrome:missing_key');
+    });
+
+    test('auto mode follows Chrome UI language', async () => {
+        await setMessageLocaleOverride('auto');
+
+        expect(getMessageLocaleOverride()).toBe('auto');
+        expect(getEffectiveMessageLocale()).toBe('es-ES');
+        expect(getMessage('popup_title_ready')).toBe('chrome:popup_title_ready');
     });
 });

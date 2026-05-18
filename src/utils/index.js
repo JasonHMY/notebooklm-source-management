@@ -116,17 +116,147 @@ function isDescendant(possibleChild, possibleParent, groupsById) {
     return false;
 }
 
+const SUPPORTED_MANUAL_MESSAGE_LOCALES = new Set(['en', 'es', 'zh_CN']);
+const DEFAULT_MESSAGE_LOCALE = 'en';
+let messageLocaleOverride = 'auto';
+const localeMessageCache = new Map();
+const localeMessageLoadPromises = new Map();
+
+function normalizeMessageLocaleOverride(locale) {
+    const normalized = String(locale || 'auto').trim();
+    return normalized === 'auto' || SUPPORTED_MANUAL_MESSAGE_LOCALES.has(normalized)
+        ? normalized
+        : 'auto';
+}
+
+function getChromeApi() {
+    return typeof globalThis !== 'undefined' && globalThis.chrome ? globalThis.chrome : null;
+}
+
+function normalizeHtmlLanguage(locale) {
+    return String(locale || DEFAULT_MESSAGE_LOCALE).replace('_', '-');
+}
+
+function getUiLanguage() {
+    const chromeApi = getChromeApi();
+    if (chromeApi?.i18n && typeof chromeApi.i18n.getUILanguage === 'function') {
+        return chromeApi.i18n.getUILanguage() || DEFAULT_MESSAGE_LOCALE;
+    }
+    return DEFAULT_MESSAGE_LOCALE;
+}
+
+function getEffectiveMessageLocale() {
+    return messageLocaleOverride === 'auto'
+        ? getUiLanguage()
+        : normalizeHtmlLanguage(messageLocaleOverride);
+}
+
+function getLocaleMessagesPath(locale) {
+    return `_locales/${locale}/messages.json`;
+}
+
+function loadLocaleMessages(locale) {
+    const normalizedLocale = SUPPORTED_MANUAL_MESSAGE_LOCALES.has(locale) ? locale : DEFAULT_MESSAGE_LOCALE;
+    if (localeMessageCache.has(normalizedLocale)) {
+        return Promise.resolve(localeMessageCache.get(normalizedLocale));
+    }
+    if (localeMessageLoadPromises.has(normalizedLocale)) {
+        return localeMessageLoadPromises.get(normalizedLocale);
+    }
+
+    const chromeApi = getChromeApi();
+    const runtime = chromeApi?.runtime || null;
+    const fetchFn = typeof globalThis !== 'undefined' && typeof globalThis.fetch === 'function'
+        ? globalThis.fetch.bind(globalThis)
+        : null;
+    if (!runtime || typeof runtime.getURL !== 'function' || !fetchFn) {
+        localeMessageCache.set(normalizedLocale, null);
+        return Promise.resolve(null);
+    }
+
+    const loadPromise = fetchFn(runtime.getURL(getLocaleMessagesPath(normalizedLocale)))
+        .then((response) => (response && response.ok && typeof response.json === 'function' ? response.json() : null))
+        .then((messages) => {
+            const catalog = messages && typeof messages === 'object' ? messages : null;
+            localeMessageCache.set(normalizedLocale, catalog);
+            return catalog;
+        })
+        .catch(() => {
+            localeMessageCache.set(normalizedLocale, null);
+            return null;
+        })
+        .finally(() => {
+            localeMessageLoadPromises.delete(normalizedLocale);
+        });
+    localeMessageLoadPromises.set(normalizedLocale, loadPromise);
+    return loadPromise;
+}
+
+function setMessageLocaleOverride(locale) {
+    messageLocaleOverride = normalizeMessageLocaleOverride(locale);
+    if (messageLocaleOverride === 'auto') {
+        return Promise.resolve(messageLocaleOverride);
+    }
+    return loadLocaleMessages(messageLocaleOverride).then(() => messageLocaleOverride);
+}
+
+function getMessageLocaleOverride() {
+    return messageLocaleOverride;
+}
+
+function getSubstitutionList(substitutions) {
+    if (Array.isArray(substitutions)) return substitutions.map((item) => String(item));
+    if (substitutions == null) return [];
+    return [String(substitutions)];
+}
+
+function applyMessageSubstitutions(message, substitutions) {
+    const values = getSubstitutionList(substitutions);
+    return String(message || '').replace(/\$(\d+)/g, (match, indexText) => {
+        const index = Number(indexText) - 1;
+        return Object.prototype.hasOwnProperty.call(values, index) ? values[index] : match;
+    });
+}
+
+function getManualLocaleMessage(key, substitutions) {
+    if (messageLocaleOverride === 'auto') return '';
+    const catalog = localeMessageCache.get(messageLocaleOverride);
+    const entry = catalog && catalog[key];
+    if (!entry || typeof entry.message !== 'string') return '';
+    return applyMessageSubstitutions(entry.message, substitutions);
+}
+
 /**
- * Retrieve an i18n message from chrome.i18n, falling back to the key itself.
+ * Retrieve an i18n message from the selected extension locale, falling back to chrome.i18n and then the key.
  * @param {string} key - The message key.
  * @param {string|string[]} [substitutions] - Optional substitution strings.
  * @returns {string} The localized message or the key as fallback.
  */
 function getMessage(key, substitutions) {
-    if (!chrome?.i18n?.getMessage) return key;
-    return chrome.i18n.getMessage(key, substitutions) || key;
+    const manualMessage = getManualLocaleMessage(key, substitutions);
+    if (manualMessage) return manualMessage;
+
+    const chromeApi = getChromeApi();
+    if (!chromeApi?.i18n?.getMessage) return key;
+    return chromeApi.i18n.getMessage(key, substitutions) || key;
 }
 
+globalThis.NSM_SET_MESSAGE_LOCALE_OVERRIDE = setMessageLocaleOverride;
+globalThis.NSM_GET_MESSAGE_LOCALE_OVERRIDE = getMessageLocaleOverride;
+globalThis.NSM_GET_EFFECTIVE_MESSAGE_LOCALE = getEffectiveMessageLocale;
+
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { el, debounce, isDescendant, getMessage };
+    module.exports = {
+        el,
+        debounce,
+        isDescendant,
+        getMessage,
+        setMessageLocaleOverride,
+        getMessageLocaleOverride,
+        getEffectiveMessageLocale,
+        normalizeMessageLocaleOverride,
+        loadLocaleMessages,
+        _applyMessageSubstitutionsForTest: applyMessageSubstitutions,
+        _localeMessageCacheForTest: localeMessageCache
+    };
 }

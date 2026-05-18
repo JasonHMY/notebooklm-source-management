@@ -14,6 +14,8 @@ const {
 } = require('./helpers/notebooklm-fixture');
 
 const repoRoot = path.resolve(__dirname, '../..');
+const SMOKE_WELCOME_ONBOARDING_SEEN_VERSION = 1;
+const SMOKE_WHATS_NEW_SEEN_VERSION = 1;
 
 test.describe.serial('extension smoke', () => {
     let env;
@@ -47,11 +49,47 @@ test.describe.serial('extension smoke', () => {
         }, projectId);
     }
 
+    async function unlockDeveloperSettings(notebookPage) {
+        const acceptPasswordPrompt = notebookPage.waitForEvent('dialog')
+            .then((dialog) => dialog.accept('developer_mode'));
+        await notebookPage.evaluate(() => {
+            const root = document.querySelector('#sources-plus-root')?.shadowRoot;
+            const unlockButton = root?.querySelector('.sp-settings-developer-unlock-btn');
+            if (!unlockButton) throw new Error('Developer features unlock button missing.');
+            unlockButton.click();
+        });
+        await acceptPasswordPrompt;
+        await expect.poll(async () => notebookPage.evaluate(() => Boolean(
+            document.querySelector('#sources-plus-root')?.shadowRoot?.querySelector('.sp-settings-developer-mode-toggle')
+        )), { timeout: 10_000 }).toBeTruthy();
+    }
+
     async function resolveExtensionIdAfterBootstrap(targetPath = '/notebook/bootstrap') {
         const bootstrapPage = await env.context.newPage();
         await bootstrapPage.goto(`https://notebooklm.google.com${targetPath}`);
         env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
         await bootstrapPage.close();
+    }
+
+    async function seedSmokePreferences() {
+        const bridgePage = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
+        try {
+            const response = await bridgePage.evaluate(async ({ welcomeOnboardingSeenVersion, whatsNewSeenVersion }) => (
+                chrome.runtime.sendMessage({
+                    type: 'SAVE_PREFERENCES',
+                    preferences: { welcomeOnboardingSeenVersion, whatsNewSeenVersion }
+                })
+            ), {
+                welcomeOnboardingSeenVersion: SMOKE_WELCOME_ONBOARDING_SEEN_VERSION,
+                whatsNewSeenVersion: SMOKE_WHATS_NEW_SEEN_VERSION
+            });
+
+            if (!response?.success) {
+                throw new Error(`Failed to seed smoke preferences: ${response?.errorCode || 'unknown_error'}`);
+            }
+        } finally {
+            await bridgePage.close();
+        }
     }
 
     async function sendNotebookMessage(urlFragment, message) {
@@ -75,6 +113,8 @@ test.describe.serial('extension smoke', () => {
     test.beforeEach(async () => {
         env = await launchExtensionContext(repoRoot);
         await installNotebookFixture(env.context);
+        env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
+        await seedSmokePreferences();
     });
 
     test.afterEach(async () => {
@@ -166,9 +206,7 @@ test.describe.serial('extension smoke', () => {
             if (!settingsButton) throw new Error('Settings button missing.');
             settingsButton.click();
         });
-        await expect.poll(async () => notebookPage.evaluate(() => Boolean(
-            document.querySelector('#sources-plus-root')?.shadowRoot?.querySelector('.sp-settings-developer-mode-toggle')
-        )), { timeout: 10_000 }).toBeTruthy();
+        await unlockDeveloperSettings(notebookPage);
         await notebookPage.evaluate(() => {
             const root = document.querySelector('#sources-plus-root')?.shadowRoot;
             const toggle = root.querySelector('.sp-settings-developer-mode-toggle');
@@ -181,6 +219,20 @@ test.describe.serial('extension smoke', () => {
             const state = await readDeveloperLogs(projectId, bridgePage);
             return Boolean(state.preferences?.developerModeEnabled);
         }, { timeout: 10_000 }).toBeTruthy();
+
+        await notebookPage.reload();
+        await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
+        await notebookPage.evaluate(() => {
+            const root = document.querySelector('#sources-plus-root')?.shadowRoot;
+            const settingsButton = root?.getElementById('sp-settings-btn');
+            if (!settingsButton) throw new Error('Settings button missing after developer reload.');
+            settingsButton.click();
+        });
+        await expect.poll(async () => notebookPage.evaluate(() => {
+            const root = document.querySelector('#sources-plus-root')?.shadowRoot || null;
+            const toggle = root?.querySelector('.sp-settings-developer-mode-toggle') || null;
+            return toggle ? toggle.checked : null;
+        }), { timeout: 10_000 }).toBe(true);
 
         await sendNotebookMessage(projectId, { type: 'SWITCH_SOURCE_VIEW', viewKind: 'label' });
 
@@ -209,6 +261,7 @@ test.describe.serial('extension smoke', () => {
             if (!settingsButton) throw new Error('Settings button missing after reload.');
             settingsButton.click();
         });
+        await unlockDeveloperSettings(notebookPage);
         await expect.poll(async () => notebookPage.evaluate(() => {
             const toggle = document.querySelector('#sources-plus-root')?.shadowRoot?.querySelector('.sp-settings-developer-mode-toggle');
             return toggle ? toggle.checked : null;
@@ -1015,7 +1068,7 @@ test.describe.serial('extension smoke', () => {
                 const root = getRoot();
                 const preview = root?.querySelector('.sp-settings-import-preview.is-invalid');
                 const applyButton = root?.querySelector('.sp-settings-apply-import-btn');
-                return preview && applyButton?.disabled ? true : null;
+                return preview && (!applyButton || applyButton.disabled) ? true : null;
             }, 'Cyclic import preview was not rejected.');
 
             await previewImportText(JSON.stringify({

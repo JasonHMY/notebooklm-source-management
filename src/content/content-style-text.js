@@ -215,6 +215,7 @@
             }
             .sp-container.is-native-label-view .sp-toolbar-actions > button:not(.sp-toolbar-settings),
             .sp-container.is-native-label-view .sp-search-cluster,
+            .sp-container.is-native-label-view .sp-quick-view-rail,
             .sp-container.is-native-label-view #sources-list {
                 display: none;
             }
@@ -333,6 +334,9 @@
             }
             .sp-toolbar-actions > button:nth-child(4) {
                 transition-delay: 0.09s;
+            }
+            .sp-toolbar-actions > button:nth-child(5) {
+                transition-delay: 0.12s;
             }
             .sp-save-status {
                 display: inline-flex;
@@ -456,6 +460,48 @@
             }
             .sp-view-state[hidden] {
                 display: none;
+            }
+            .sp-quick-view-rail {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                min-width: 0;
+                overflow-x: auto;
+                padding: 6px 0 4px;
+                scrollbar-width: none;
+            }
+            .sp-quick-view-rail::-webkit-scrollbar {
+                display: none;
+            }
+            .sp-quick-view-btn {
+                flex: 0 0 auto;
+                min-height: 28px;
+                border: 1px solid var(--sp-border-light);
+                border-radius: 999px;
+                padding: 5px 10px;
+                background: var(--sp-bg-button);
+                color: var(--sp-text-secondary);
+                font-size: 11px;
+                font-weight: 700;
+                line-height: 1.2;
+                cursor: pointer;
+                white-space: nowrap;
+                transition:
+                    background-color var(--sp-motion-base) var(--sp-ease-standard),
+                    border-color var(--sp-motion-base) var(--sp-ease-standard),
+                    color var(--sp-motion-base) var(--sp-ease-standard),
+                    box-shadow var(--sp-motion-base) var(--sp-ease-standard);
+            }
+            .sp-quick-view-btn:hover,
+            .sp-quick-view-btn:focus-visible,
+            .sp-quick-view-btn.is-active {
+                color: var(--sp-accent);
+                border-color: var(--sp-search-focus-border);
+                background: var(--sp-tag-active-bg);
+            }
+            .sp-quick-view-btn:focus-visible {
+                outline: none;
+                box-shadow: var(--sp-search-focus-ring);
             }
             .sp-view-banner {
                 display: grid;
@@ -1469,6 +1515,7 @@
                 width: 320px;
                 max-height: 80vh;
                 transform: translate(-50%, -50%);
+                font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
                 background: var(--sp-modal-bg);
                 backdrop-filter: blur(24px);
                 -webkit-backdrop-filter: blur(24px);
@@ -1836,6 +1883,260 @@
             .sp-settings-modal {
                 width: min(560px, calc(100vw - 32px));
             }
+            .sp-settings-modal-header {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 12px;
+            }
+            .sp-settings-save-status-header {
+                flex: 0 1 auto;
+                min-width: 0;
+                margin-left: auto;
+            }
+            .sp-settings-save-status-header[hidden] {
+                display: none;
+            }
+            .sp-settings-save-status-header .sp-save-status {
+                max-width: 240px;
+            }
+            .sp-welcome-modal {
+                width: min(520px, calc(100vw - 32px));
+            }
+            .sp-welcome-header {
+                display: grid;
+                grid-template-columns: auto minmax(0, 1fr) auto;
+                gap: 12px;
+                align-items: start;
+                padding: 18px 18px 8px;
+            }
+            .sp-welcome-brand-icon {
+                width: 42px;
+                height: 42px;
+                border-radius: 14px;
+                display: grid;
+                place-items: center;
+                color: var(--sp-accent);
+                background: var(--sp-tag-active-bg);
+                border: 1px solid var(--sp-tag-active-border);
+                box-shadow: var(--sp-shadow-button);
+            }
+            .sp-welcome-brand-symbol {
+                font-size: 22px;
+            }
+            .sp-welcome-heading {
+                min-width: 0;
+                display: grid;
+                gap: 4px;
+            }
+            .sp-welcome-title {
+                line-height: 1.25;
+                overflow-wrap: anywhere;
+            }
+            .sp-welcome-subtitle {
+                margin: 0;
+                color: var(--sp-text-secondary);
+                font-size: 13px;
+                line-height: 1.45;
+            }
+            .sp-welcome-close-btn {
+                margin-top: -2px;
+            }
+            .sp-welcome-content {
+                padding: 10px 18px 0;
+                gap: 14px;
+            }
+            .sp-welcome-feature-list {
+                display: grid;
+                gap: 10px;
+            }
+            .sp-welcome-feature-row {
+                display: grid;
+                grid-template-columns: auto minmax(0, 1fr);
+                gap: 10px;
+                align-items: start;
+                padding: 10px;
+                border-radius: 12px;
+                background: var(--sp-bg-secondary);
+                border: 1px solid var(--sp-border-light);
+            }
+            .sp-welcome-feature-icon {
+                width: 28px;
+                height: 28px;
+                border-radius: 10px;
+                display: grid;
+                place-items: center;
+                color: var(--sp-accent);
+                background: var(--sp-bg-button);
+                border: 1px solid var(--sp-border-light);
+                font-size: 17px;
+            }
+            .sp-welcome-feature-copy {
+                min-width: 0;
+                display: grid;
+                gap: 2px;
+            }
+            .sp-welcome-feature-title {
+                margin: 0;
+                font-size: 13px;
+                font-weight: 700;
+                color: var(--sp-text-primary);
+            }
+            .sp-welcome-feature-body {
+                margin: 0;
+                color: var(--sp-text-secondary);
+                font-size: 12px;
+                line-height: 1.45;
+            }
+            .sp-welcome-feedback-inline {
+                display: flex;
+                align-items: baseline;
+                justify-content: flex-start;
+                gap: 4px;
+                flex-wrap: wrap;
+                padding: 0 2px 2px;
+            }
+            .sp-welcome-feedback-copy {
+                margin: 0;
+                color: var(--sp-text-tertiary);
+                font-size: 11px;
+                line-height: 1.4;
+            }
+            .sp-welcome-feedback-link {
+                appearance: none;
+                border: 0;
+                border-radius: 4px;
+                padding: 0;
+                background: transparent;
+                color: var(--sp-accent);
+                font: inherit;
+                font-size: 11px;
+                line-height: 1.4;
+                cursor: pointer;
+                text-decoration: underline;
+                text-underline-offset: 2px;
+                transition:
+                    color var(--sp-motion-base) var(--sp-ease-standard),
+                    box-shadow var(--sp-motion-base) var(--sp-ease-standard);
+            }
+            .sp-welcome-feedback-link:hover,
+            .sp-welcome-feedback-link:focus-visible {
+                color: var(--sp-accent);
+            }
+            .sp-welcome-feedback-link:focus-visible {
+                outline: none;
+                box-shadow: var(--sp-search-focus-ring);
+            }
+            .sp-welcome-footer {
+                justify-content: flex-end;
+            }
+            .sp-welcome-primary-btn {
+                background-color: var(--sp-accent);
+                color: var(--sp-text-toast);
+                border-color: transparent;
+            }
+            .sp-command-palette-modal {
+                width: min(560px, calc(100vw - 32px));
+            }
+            .sp-command-palette-content {
+                gap: 10px;
+            }
+            .sp-command-palette-input {
+                width: 100%;
+                box-sizing: border-box;
+                border: 1px solid var(--sp-border-light);
+                border-radius: 12px;
+                padding: 10px 12px;
+                background: var(--sp-bg-button);
+                color: var(--sp-text-primary);
+                font: inherit;
+                font-size: 13px;
+                outline: none;
+                transition:
+                    border-color var(--sp-motion-base) var(--sp-ease-standard),
+                    box-shadow var(--sp-motion-base) var(--sp-ease-standard);
+            }
+            .sp-command-palette-input:focus {
+                border-color: var(--sp-search-focus-border);
+                box-shadow: var(--sp-search-focus-ring);
+            }
+            .sp-command-palette-list,
+            .sp-tag-filter-list {
+                display: grid;
+                gap: 6px;
+            }
+            .sp-command-palette-item,
+            .sp-tag-filter-option {
+                width: 100%;
+                border: 1px solid var(--sp-border-light);
+                border-radius: 10px;
+                padding: 9px 10px;
+                background: var(--sp-bg-button);
+                color: var(--sp-text-primary);
+                cursor: pointer;
+                text-align: left;
+                transition:
+                    background-color var(--sp-motion-base) var(--sp-ease-standard),
+                    border-color var(--sp-motion-base) var(--sp-ease-standard),
+                    color var(--sp-motion-base) var(--sp-ease-standard),
+                    box-shadow var(--sp-motion-base) var(--sp-ease-standard);
+            }
+            .sp-command-palette-item {
+                display: grid;
+                grid-template-columns: 24px minmax(0, 1fr);
+                align-items: center;
+                gap: 10px;
+            }
+            .sp-command-palette-item:hover,
+            .sp-command-palette-item:focus-visible,
+            .sp-command-palette-item.is-active,
+            .sp-tag-filter-option:hover,
+            .sp-tag-filter-option:focus-visible {
+                border-color: var(--sp-search-focus-border);
+                background: var(--sp-tag-active-bg);
+            }
+            .sp-command-palette-item:disabled {
+                cursor: not-allowed;
+                opacity: 0.55;
+            }
+            .sp-command-palette-item:focus-visible,
+            .sp-tag-filter-option:focus-visible {
+                outline: none;
+                box-shadow: var(--sp-search-focus-ring);
+            }
+            .sp-command-palette-copy {
+                min-width: 0;
+                display: grid;
+                gap: 2px;
+            }
+            .sp-command-palette-title {
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                font-size: 13px;
+                font-weight: 700;
+            }
+            .sp-command-palette-subtitle,
+            .sp-command-palette-empty,
+            .sp-settings-preview-diff-row,
+            .sp-settings-import-warning {
+                color: var(--sp-text-secondary);
+                font-size: 12px;
+                line-height: 1.4;
+            }
+            .sp-command-palette-icon {
+                color: var(--sp-accent);
+            }
+            .sp-settings-import-warning {
+                border: 1px solid var(--sp-border-light);
+                border-radius: 10px;
+                padding: 8px 10px;
+                background: var(--sp-bg-secondary);
+            }
+            .sp-settings-preview-diff {
+                display: grid;
+                gap: 4px;
+            }
             .sp-settings-modal-content {
                 padding: 12px;
                 gap: 12px;
@@ -1868,11 +2169,86 @@
                 font-weight: 700;
                 color: var(--sp-text-primary);
             }
-            .sp-settings-feedback-body {
+            .sp-settings-subsection {
+                display: grid;
+                gap: 8px;
+                padding: 0;
+            }
+            .sp-settings-subsection + .sp-settings-subsection {
+                padding-top: 10px;
+                border-top: 1px solid var(--sp-modal-divider);
+            }
+            .sp-settings-subsection-title {
                 margin: 0;
-                color: var(--sp-text-secondary);
                 font-size: 12px;
-                line-height: 1.45;
+                font-weight: 700;
+                color: var(--sp-text-primary);
+            }
+            .sp-settings-preference-row {
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) minmax(132px, auto);
+                gap: 10px;
+                align-items: center;
+            }
+            .sp-settings-preference-copy {
+                min-width: 0;
+                display: grid;
+                gap: 2px;
+            }
+            .sp-settings-preference-title {
+                color: var(--sp-text-primary);
+                font-size: 12px;
+                font-weight: 700;
+                line-height: 1.35;
+            }
+            .sp-settings-select {
+                min-width: 132px;
+                max-width: 220px;
+                border: 1px solid var(--sp-border-light);
+                border-radius: 8px;
+                background: var(--sp-bg-button);
+                color: var(--sp-text-primary);
+                font: inherit;
+                font-size: 12px;
+                padding: 6px 8px;
+                outline: none;
+                transition:
+                    border-color var(--sp-motion-base) var(--sp-ease-standard),
+                    box-shadow var(--sp-motion-base) var(--sp-ease-standard),
+                    background-color var(--sp-motion-base) var(--sp-ease-standard);
+            }
+            .sp-settings-select:focus {
+                border-color: var(--sp-search-focus-border);
+                box-shadow: var(--sp-search-focus-ring);
+            }
+            .sp-settings-developer-unlock-row {
+                display: flex;
+                justify-content: center;
+                padding: 2px 0 0;
+            }
+            .sp-settings-developer-unlock-btn {
+                border: 0;
+                border-radius: 6px;
+                padding: 2px 6px;
+                background: transparent;
+                color: var(--sp-text-tertiary);
+                font: inherit;
+                font-size: 11px;
+                line-height: 1.4;
+                cursor: pointer;
+                transition:
+                    color var(--sp-motion-base) var(--sp-ease-standard),
+                    background-color var(--sp-motion-base) var(--sp-ease-standard),
+                    box-shadow var(--sp-motion-base) var(--sp-ease-standard);
+            }
+            .sp-settings-developer-unlock-btn:hover,
+            .sp-settings-developer-unlock-btn:focus-visible {
+                color: var(--sp-accent);
+                background: var(--sp-bg-hover);
+            }
+            .sp-settings-developer-unlock-btn:focus-visible {
+                outline: none;
+                box-shadow: var(--sp-search-focus-ring);
             }
             .sp-settings-collapsible-section {
                 gap: 0;
@@ -2078,10 +2454,6 @@
                 color: var(--sp-text-primary);
                 font-size: 12px;
                 padding: 6px 8px;
-            }
-            .sp-settings-save-status-section .sp-save-status {
-                width: fit-content;
-                max-width: 100%;
             }
             .sp-settings-diagnostics-grid {
                 display: grid;

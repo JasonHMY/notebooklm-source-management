@@ -29,8 +29,28 @@ describe('manager launcher messaging', () => {
 
     afterEach(teardownGlobalMocks);
 
+    function resolveNativeLabelSwitchResponseDelayTimer() {
+        let timerId = 0;
+        const timer = jest.fn((callback, delayMs) => {
+            timerId += 1;
+            if (delayMs === 180 && typeof callback === 'function') {
+                callback();
+            }
+            return timerId;
+        });
+        global.setTimeout = timer;
+        if (global.window) {
+            global.window.setTimeout = timer;
+        }
+    }
+
+    async function flushAsyncMessageResponse() {
+        await Promise.resolve();
+        await Promise.resolve();
+    }
+
     it('reports source_panel_missing when the notebook UI is unavailable', () => {
-        mod._setProjectId('test-project');
+        mod._setProjectId('testproject');
         global.document.querySelector = jest.fn(() => null);
 
         expect(mod.getManagerStatus()).toEqual({
@@ -57,7 +77,7 @@ describe('manager launcher messaging', () => {
             querySelector: jest.fn((selector) => selector === '.sp-container' ? mockContainer : null)
         };
 
-        mod._setProjectId('test-project');
+        mod._setProjectId('testproject');
         mod._setShadowRootForTest(mockShadowRoot);
         mod._setAttachedSourcePanelForTest(panel);
         global.document.querySelector = jest.fn(() => panel);
@@ -108,9 +128,77 @@ describe('manager launcher messaging', () => {
         });
     });
 
-    it('routes popup source view switch requests to NotebookLM native controls', () => {
+    it('renders the first-run welcome onboarding when the stored version is unseen', async () => {
+        const originalRequestAnimationFrame = global.requestAnimationFrame;
+        const appendedNodes = [];
+        const shadowRoot = {
+            host: { isConnected: true, remove: jest.fn() },
+            activeElement: null,
+            appendChild: jest.fn((node) => {
+                appendedNodes.push(node);
+                node.parentNode = {
+                    removeChild: jest.fn((child) => {
+                        const index = appendedNodes.indexOf(child);
+                        if (index >= 0) appendedNodes.splice(index, 1);
+                        return child;
+                    })
+                };
+                return node;
+            }),
+            getElementById: jest.fn((id) => appendedNodes.find((node) => node?.id === id) || null),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+
+        global.requestAnimationFrame = jest.fn((callback) => {
+            callback?.();
+            return 1;
+        });
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'LOAD_PREFERENCES' && typeof cb === 'function') {
+                cb({
+                    success: true,
+                    preferences: {
+                        developerModeEnabled: false,
+                        welcomeOnboardingSeenVersion: 0
+                    }
+                });
+            }
+        });
+
+        try {
+            mod._setShadowRootForTest(shadowRoot);
+
+            await expect(mod.maybeRenderWelcomeOnboarding()).resolves.toBe(true);
+
+            expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(
+                { type: 'LOAD_PREFERENCES' },
+                expect.any(Function)
+            );
+            expect(shadowRoot.getElementById('sp-welcome-backdrop')).toBeTruthy();
+            expect(shadowRoot.getElementById('sp-welcome-modal')).toBeTruthy();
+
+            const appendCount = shadowRoot.appendChild.mock.calls.length;
+            await expect(mod.maybeRenderWelcomeOnboarding()).resolves.toBe(false);
+            expect(shadowRoot.appendChild).toHaveBeenCalledTimes(appendCount);
+        } finally {
+            if (originalRequestAnimationFrame) {
+                global.requestAnimationFrame = originalRequestAnimationFrame;
+            } else {
+                delete global.requestAnimationFrame;
+            }
+        }
+    });
+
+    it('routes popup source view switch requests to NotebookLM native controls', async () => {
         const sendResponse = jest.fn();
+        resolveNativeLabelSwitchResponseDelayTimer();
         let phase = 'list';
+        const listSource = createMockSourceRow({
+            title: 'Native List Source',
+            stableToken: 'native-list-source',
+            checked: true
+        });
         const labelGroup = {
             textContent: 'AI Group',
             parentElement: null,
@@ -162,6 +250,7 @@ describe('manager launcher messaging', () => {
         ));
 
         mod.handleManagerMessage({ type: 'SWITCH_SOURCE_VIEW', viewKind: 'label' }, {}, sendResponse);
+        await flushAsyncMessageResponse();
 
         expect(labelButton.click).toHaveBeenCalledTimes(1);
         expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({
@@ -171,8 +260,119 @@ describe('manager launcher messaging', () => {
         }));
     });
 
-    it('clicks NotebookLM icon-only label view controls from popup requests', () => {
+    it('restores the persisted source view display kind after initial state load', () => {
+        let phase = 'list';
+        const { panel, header } = createMockPanel({ visible: true, contentVisible: true });
+        const initHarness = createInitShadowRoot();
+        const labelGroup = {
+            textContent: 'AI Group',
+            parentElement: panel,
+            parentNode: panel,
+            style: {},
+            __computedStyle: {},
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return 'AI Group label';
+                if (attr === 'data-testid') return 'source-label-group';
+                return null;
+            }),
+            matches: jest.fn((selector) => selector.includes('source-label') || selector.includes('label-group')),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const labelButton = {
+            textContent: 'Label view',
+            disabled: false,
+            style: {},
+            click: jest.fn(() => {
+                phase = 'label';
+            }),
+            getAttribute: jest.fn((attr) => (attr === 'aria-label' ? 'Label view' : null)),
+            matches: jest.fn(() => false),
+            closest: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const listButton = {
+            textContent: 'List view',
+            disabled: false,
+            style: {},
+            click: jest.fn(),
+            getAttribute: jest.fn((attr) => (attr === 'aria-label' ? 'List view' : null)),
+            matches: jest.fn(() => false),
+            closest: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const loadedState = {
+            schemaVersion: 3,
+            groups: [],
+            groupsById: {},
+            ungrouped: [],
+            sourceStateById: {},
+            customHeight: null,
+            sourceViewDisplayKind: 'label',
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {}
+        };
+        let firstDiv = true;
+
+        panel.querySelectorAll = jest.fn((selector) => {
+            const value = String(selector);
+            if (value.includes('button') || value.includes('[role="button"]')) return [labelButton, listButton];
+            if (phase === 'label' && (value.includes('source-label') || value.includes('label-group'))) return [labelGroup];
+            return [];
+        });
+        mod._setProjectId('test-project');
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+        global.document.querySelectorAll = jest.fn((selector) => panel.querySelectorAll(selector));
+        global.chrome.storage.local.get.mockImplementation((keys, cb) => {
+            if (typeof cb === 'function') {
+                cb({ ['sourcesPlusState_test-project']: loadedState });
+            }
+        });
+        global.document.createElement = jest.fn((tag) => {
+            if (tag === 'div' && firstDiv) {
+                firstDiv = false;
+                return {
+                    id: '',
+                    attachShadow: jest.fn(() => initHarness.shadowRoot),
+                    remove: jest.fn(),
+                    isConnected: true
+                };
+            }
+
+            return {
+                textContent: '',
+                appendChild: jest.fn(),
+                cloneNode: jest.fn(function cloneNode() { return this; }),
+                setAttribute: jest.fn(),
+                getAttribute: jest.fn(() => null),
+                addEventListener: jest.fn(),
+                remove: jest.fn(),
+                matches: jest.fn(() => false),
+                closest: jest.fn(() => null),
+                querySelector: jest.fn(() => null),
+                querySelectorAll: jest.fn(() => []),
+                dataset: {},
+                style: {},
+                classList: { add: jest.fn(), remove: jest.fn() }
+            };
+        });
+
+        mod.syncManagerWithPanelLifecycle();
+
+        expect(header.insertAdjacentElement).toHaveBeenCalledTimes(1);
+        expect(labelButton.click).toHaveBeenCalledTimes(1);
+        expect(mod.getManagerStatus()).toMatchObject({
+            sourceViewKind: 'label',
+            sourceViewDisplayKind: 'label'
+        });
+    });
+
+    it('clicks NotebookLM icon-only label view controls from popup requests', async () => {
         const sendResponse = jest.fn();
+        resolveNativeLabelSwitchResponseDelayTimer();
         let phase = 'list';
         const labelGroup = {
             textContent: 'AI Group',
@@ -223,6 +423,7 @@ describe('manager launcher messaging', () => {
         ));
 
         mod.handleManagerMessage({ type: 'SWITCH_SOURCE_VIEW', viewKind: 'label' }, {}, sendResponse);
+        await flushAsyncMessageResponse();
 
         expect(labelButton.click).toHaveBeenCalledTimes(1);
         expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({
@@ -232,8 +433,9 @@ describe('manager launcher messaging', () => {
         }));
     });
 
-    it('clicks the hidden native label-view entry point before showing plugin label mode', () => {
+    it('clicks the hidden native label-view entry point before showing plugin label mode', async () => {
         const sendResponse = jest.fn();
+        resolveNativeLabelSwitchResponseDelayTimer();
         let phase = 'list';
         const labelGroup = {
             textContent: 'AI Group',
@@ -281,6 +483,7 @@ describe('manager launcher messaging', () => {
         ));
 
         mod.handleManagerMessage({ type: 'SWITCH_SOURCE_VIEW', viewKind: 'label' }, {}, sendResponse);
+        await flushAsyncMessageResponse();
 
         expect(labelButton.click).toHaveBeenCalledTimes(1);
         expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({
@@ -288,6 +491,98 @@ describe('manager launcher messaging', () => {
             viewKind: 'label',
             nativeClicked: true,
             nativeSwitchReason: 'clicked_hidden'
+        }));
+        expect(global.document.documentElement.classList.remove).toHaveBeenCalledWith('sources-plus-manager-active');
+    });
+
+    it('clicks the native label_auto header entry point when switching from plugin list display to label view', async () => {
+        const sendResponse = jest.fn();
+        resolveNativeLabelSwitchResponseDelayTimer();
+        let phase = 'list';
+        const labelGroup = {
+            textContent: 'AI Group',
+            parentElement: null,
+            parentNode: null,
+            style: {},
+            __computedStyle: {},
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return 'AI Group label';
+                if (attr === 'data-testid') return 'source-label-group';
+                return null;
+            }),
+            matches: jest.fn((selector) => selector.includes('source-label') || selector.includes('label-group')),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const labelRow = {
+            tagName: 'DIV',
+            textContent: 'label_auto Select all',
+            parentElement: null,
+            parentNode: null,
+            style: {},
+            __computedStyle: {},
+            getAttribute: jest.fn((attr) => (attr === 'class' ? 'row label-row' : null)),
+            matches: jest.fn(() => false),
+            closest: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const labelButton = {
+            tagName: 'BUTTON',
+            textContent: 'label_auto',
+            disabled: false,
+            parentElement: labelRow,
+            parentNode: labelRow,
+            style: {
+                visibility: 'hidden'
+            },
+            __computedStyle: {
+                visibility: 'hidden'
+            },
+            click: jest.fn(() => {
+                phase = 'label';
+            }),
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return 'Auto-label your sources by topic';
+                if (attr === 'aria-haspopup') return 'menu';
+                if (attr === 'class') return 'mat-mdc-menu-trigger label-auto-button source-item-more-button';
+                return null;
+            }),
+            matches: jest.fn((selector) => selector === 'button'),
+            closest: jest.fn((selector) => (String(selector).includes('#sources-plus-root') ? null : null)),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        labelGroup.parentElement = panel;
+        labelGroup.parentNode = panel;
+        labelRow.parentElement = panel;
+        labelRow.parentNode = panel;
+        panel.querySelectorAll = jest.fn((selector) => {
+            const value = String(selector);
+            if (value.includes('button') || value.includes('[role="button"]')) {
+                return [labelButton];
+            }
+            if (phase === 'label' && (value.includes('source-label') || value.includes('label-group'))) {
+                return [labelGroup];
+            }
+            if (mod.DEPS.row.includes(selector) || value.includes('source-row') || value.includes('source-item')) {
+                return phase === 'list' ? [listSource.row] : [];
+            }
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        mod.handleManagerMessage({ type: 'SWITCH_SOURCE_VIEW', viewKind: 'label' }, {}, sendResponse);
+        await flushAsyncMessageResponse();
+
+        expect(labelButton.click).toHaveBeenCalledTimes(1);
+        expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: true,
+            viewKind: 'label',
+            nativeClicked: true,
+            nativeSwitchReason: 'clicked_hidden',
+            sourceViewDisplayKind: 'label'
         }));
         expect(global.document.documentElement.classList.remove).toHaveBeenCalledWith('sources-plus-manager-active');
     });
@@ -311,6 +606,63 @@ describe('manager launcher messaging', () => {
             sourceViewDisplayKind: 'list'
         }));
         expect(global.document.documentElement.classList.remove).not.toHaveBeenCalledWith('sources-plus-manager-active');
+    });
+
+    it('does not click source title rows that contain label-view keywords when switching to label view', () => {
+        const sendResponse = jest.fn();
+        const listSource = createMockSourceRow({
+            title: 'AI theme report',
+            stableToken: 'ai-theme-report',
+            checked: true
+        });
+        const sourceTitleButton = {
+            tagName: 'BUTTON',
+            textContent: '',
+            disabled: false,
+            parentElement: null,
+            parentNode: null,
+            style: {},
+            __computedStyle: {},
+            click: jest.fn(),
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return 'AI theme report';
+                if (attr === 'class') return 'source-stretched-button ng-star-inserted';
+                return null;
+            }),
+            matches: jest.fn((selector) => selector === 'button'),
+            closest: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        sourceTitleButton.parentElement = panel;
+        sourceTitleButton.parentNode = panel;
+        panel.querySelectorAll = jest.fn((selector) => {
+            const value = String(selector);
+            if (value.includes('button') || value.includes('[role="button"]')) return [sourceTitleButton];
+            if (
+                mod.DEPS.row.includes(selector) ||
+                value.includes('source-row') ||
+                value.includes('source-item') ||
+                value.includes('data-source-id')
+            ) {
+                return [listSource.row];
+            }
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        mod.handleManagerMessage({ type: 'SWITCH_SOURCE_VIEW', viewKind: 'label' }, {}, sendResponse);
+
+        expect(sourceTitleButton.click).not.toHaveBeenCalled();
+        expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: false,
+            viewKind: 'label',
+            nativeClicked: false,
+            nativeSwitchReason: 'source_view_switch_control_missing',
+            sourceViewDisplayKind: 'list'
+        }));
     });
 
     it('falls back to plugin list display when the native label DOM does not expose a reliable list switch', async () => {
@@ -426,6 +778,293 @@ describe('manager launcher messaging', () => {
             displayOverride: true
         }));
         expect(global.document.documentElement.classList.add).toHaveBeenCalledWith('sources-plus-manager-active');
+    });
+
+    it('does not click native label menu items when switching to plugin list display', () => {
+        const sendResponse = jest.fn();
+        const labelGroup = {
+            textContent: 'AI Group',
+            parentElement: null,
+            parentNode: null,
+            style: {},
+            __computedStyle: {},
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return 'AI Group label';
+                if (attr === 'data-testid') return 'source-label-group';
+                return null;
+            }),
+            matches: jest.fn((selector) => selector.includes('source-label') || selector.includes('label-group')),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const menuPanel = {
+            tagName: 'DIV',
+            textContent: 'Add new label Re-organise Return to list view',
+            parentElement: null,
+            parentNode: null,
+            style: {},
+            __computedStyle: {},
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'role') return 'menu';
+                if (attr === 'class') return 'mat-mdc-menu-panel cdk-overlay-pane';
+                return null;
+            }),
+            matches: jest.fn(() => false),
+            closest: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const returnToListMenuItem = {
+            tagName: 'BUTTON',
+            textContent: 'Return to list view',
+            disabled: false,
+            parentElement: menuPanel,
+            parentNode: menuPanel,
+            style: {},
+            __computedStyle: {},
+            click: jest.fn(),
+            getAttribute: jest.fn((attr) => (attr === 'aria-label' ? 'Return to list view' : null)),
+            matches: jest.fn((selector) => selector === 'button'),
+            closest: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        labelGroup.parentElement = panel;
+        labelGroup.parentNode = panel;
+        menuPanel.parentElement = panel;
+        menuPanel.parentNode = panel;
+        panel.querySelectorAll = jest.fn((selector) => {
+            const value = String(selector);
+            if (value.includes('button') || value.includes('[role="button"]')) return [returnToListMenuItem];
+            if (value.includes('source-label') || value.includes('label-group')) return [labelGroup];
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        mod.handleManagerMessage({ type: 'SWITCH_SOURCE_VIEW', viewKind: 'list' }, {}, sendResponse);
+
+        expect(returnToListMenuItem.click).not.toHaveBeenCalled();
+        expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: true,
+            viewKind: 'list',
+            nativeClicked: false,
+            nativeSwitchReason: 'source_view_switch_control_missing',
+            detectedSourceViewKind: 'label',
+            confirmedSourceViewKind: 'list',
+            sourceViewDisplayKind: 'list',
+            displayOverride: true
+        }));
+    });
+
+    it('does not click native label menu launchers when switching to plugin list display', () => {
+        const sendResponse = jest.fn();
+        const labelGroup = {
+            textContent: 'AI Group',
+            parentElement: null,
+            parentNode: null,
+            style: {},
+            __computedStyle: {},
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return 'AI Group label';
+                if (attr === 'data-testid') return 'source-label-group';
+                return null;
+            }),
+            matches: jest.fn((selector) => selector.includes('source-label') || selector.includes('label-group')),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const menuLauncher = {
+            tagName: 'BUTTON',
+            textContent: 'Add new label Re-organise Return to list view',
+            disabled: false,
+            parentElement: null,
+            parentNode: null,
+            style: {},
+            __computedStyle: {},
+            click: jest.fn(),
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return 'Source label actions';
+                if (attr === 'aria-haspopup') return 'menu';
+                if (attr === 'class') return 'mat-mdc-menu-trigger';
+                return null;
+            }),
+            matches: jest.fn((selector) => selector === 'button'),
+            closest: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        labelGroup.parentElement = panel;
+        labelGroup.parentNode = panel;
+        menuLauncher.parentElement = panel;
+        menuLauncher.parentNode = panel;
+        panel.querySelectorAll = jest.fn((selector) => {
+            const value = String(selector);
+            if (value.includes('button') || value.includes('[role="button"]')) return [menuLauncher];
+            if (value.includes('source-label') || value.includes('label-group')) return [labelGroup];
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        mod.handleManagerMessage({ type: 'SWITCH_SOURCE_VIEW', viewKind: 'list' }, {}, sendResponse);
+
+        expect(menuLauncher.click).not.toHaveBeenCalled();
+        expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: true,
+            viewKind: 'list',
+            nativeClicked: false,
+            nativeSwitchReason: 'source_view_switch_control_missing',
+            detectedSourceViewKind: 'label',
+            confirmedSourceViewKind: 'list',
+            sourceViewDisplayKind: 'list',
+            displayOverride: true
+        }));
+    });
+
+    it('uses the native label action menu return item when NotebookLM exposes list switch inside that menu', async () => {
+        const sendResponse = jest.fn();
+        const timers = [];
+        global.setTimeout = jest.fn((callback) => {
+            timers.push(callback);
+            return timers.length;
+        });
+        if (global.window) {
+            global.window.setTimeout = global.setTimeout;
+        }
+
+        let phase = 'label';
+        let menuOpen = false;
+        const listSource = createMockSourceRow({
+            title: 'Returned List Source',
+            stableToken: 'returned-list-doc',
+            checked: true
+        });
+        const labelGroup = {
+            textContent: 'AI Group',
+            parentElement: null,
+            parentNode: null,
+            style: {},
+            __computedStyle: {},
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return 'AI Group label';
+                if (attr === 'data-testid') return 'source-label-group';
+                return null;
+            }),
+            matches: jest.fn((selector) => selector.includes('source-label') || selector.includes('label-group')),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const labelRow = {
+            tagName: 'DIV',
+            textContent: 'label_auto',
+            parentElement: null,
+            parentNode: null,
+            style: {},
+            __computedStyle: {},
+            getAttribute: jest.fn((attr) => (attr === 'class' ? 'row label-row' : null)),
+            matches: jest.fn(() => false),
+            closest: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const labelActionButton = {
+            tagName: 'BUTTON',
+            textContent: 'label_auto',
+            disabled: false,
+            parentElement: labelRow,
+            parentNode: labelRow,
+            style: {},
+            __computedStyle: {},
+            click: jest.fn(() => {
+                menuOpen = true;
+            }),
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return 'Auto-label your sources by topic';
+                if (attr === 'aria-haspopup') return 'menu';
+                if (attr === 'class') return 'mat-mdc-menu-trigger label-auto-button source-item-more-button';
+                return null;
+            }),
+            matches: jest.fn((selector) => selector === 'button'),
+            closest: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const menuPanel = {
+            tagName: 'DIV',
+            textContent: 'Add new label Re-organise Return to list view',
+            parentElement: null,
+            parentNode: null,
+            style: {},
+            __computedStyle: {},
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'role') return 'menu';
+                if (attr === 'class') return 'mat-mdc-menu-panel cdk-overlay-pane';
+                return null;
+            }),
+            matches: jest.fn(() => false),
+            closest: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const returnToListMenuItem = {
+            tagName: 'BUTTON',
+            textContent: 'Return to list view',
+            disabled: false,
+            parentElement: menuPanel,
+            parentNode: menuPanel,
+            style: {},
+            __computedStyle: {},
+            click: jest.fn(() => {
+                phase = 'list';
+            }),
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return 'Return to list view';
+                if (attr === 'role') return 'menuitem';
+                if (attr === 'class') return 'mat-mdc-menu-item';
+                return null;
+            }),
+            matches: jest.fn((selector) => selector === 'button' || selector.includes('menuitem')),
+            closest: jest.fn((selector) => (
+                String(selector).includes('#sources-plus-root') ? null : menuPanel
+            )),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        labelGroup.parentElement = panel;
+        labelGroup.parentNode = panel;
+        labelRow.parentElement = panel;
+        labelRow.parentNode = panel;
+        panel.querySelectorAll = jest.fn((selector) => {
+            const value = String(selector);
+            if (value.includes('button') || value.includes('[role="button"]') || value.includes('[aria-label]')) {
+                return phase === 'label' ? [labelActionButton] : [];
+            }
+            if (value.includes('source-label') || value.includes('label-group')) {
+                return phase === 'label' ? [labelGroup] : [];
+            }
+            if (mod.DEPS.row.includes(selector) || value.includes('source')) {
+                return phase === 'list' ? [listSource.row] : [];
+            }
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+        global.document.querySelectorAll = jest.fn(() => (menuOpen ? [returnToListMenuItem] : []));
+
+        mod.handleManagerMessage({ type: 'SWITCH_SOURCE_VIEW', viewKind: 'list' }, {}, sendResponse);
+        await flushAsyncMessageResponse();
+
+        expect(labelActionButton.click).toHaveBeenCalledTimes(1);
+        expect(returnToListMenuItem.click).toHaveBeenCalledTimes(1);
+        expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: true,
+            viewKind: 'list',
+            nativeClicked: true,
+            nativeSwitchReason: 'clicked_label_menu_return_to_list',
+            detectedSourceViewKind: 'list',
+            confirmedSourceViewKind: 'list',
+            sourceViewDisplayKind: 'list'
+        }));
     });
 
     it('waits for NotebookLM async DOM changes before confirming a popup list-view switch', async () => {
@@ -843,6 +1482,113 @@ describe('manager launcher messaging', () => {
             expect(mod.sourcesByKey.get(sourceKey).enabled).toBe(false);
         });
         expect(listFirst.checkbox.click).toHaveBeenCalledTimes(1);
+    });
+
+    it('captures collapsed label group selection before direct native list clicks while a view switch is in progress', () => {
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const first = createMockSourceRow({ title: 'First Paper', stableToken: 'doc-1', checked: false });
+        const second = createMockSourceRow({ title: 'Second Paper', stableToken: 'doc-2', checked: false });
+        first.row.__nativeLabelTitle = 'AI Group';
+        second.row.__nativeLabelTitle = 'AI Group';
+        const expandedLabelGroup = {
+            textContent: 'AI Group',
+            parentElement: panel,
+            parentNode: panel,
+            style: {},
+            __computedStyle: {},
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return 'AI Group label';
+                if (attr === 'data-testid') return 'source-label-group';
+                return null;
+            }),
+            matches: jest.fn((selector) => selector.includes('source-label') || selector.includes('label-group')),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        first.row.parentElement = expandedLabelGroup;
+        first.row.parentNode = expandedLabelGroup;
+        second.row.parentElement = expandedLabelGroup;
+        second.row.parentNode = expandedLabelGroup;
+
+        const groupCheckbox = {
+            tagName: 'INPUT',
+            type: 'checkbox',
+            checked: true,
+            parentElement: null,
+            parentNode: null,
+            style: {},
+            getAttribute: jest.fn((attr) => (attr === 'type' ? 'checkbox' : null)),
+            matches: jest.fn((selector) => String(selector).includes('checkbox')),
+            closest: jest.fn(() => null)
+        };
+        const collapsedLabelGroup = {
+            textContent: 'AI Group',
+            parentElement: panel,
+            parentNode: panel,
+            style: {},
+            __computedStyle: {},
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return 'AI Group label';
+                if (attr === 'data-testid') return 'source-label-group';
+                return null;
+            }),
+            matches: jest.fn((selector) => selector.includes('source-label') || selector.includes('label-group')),
+            querySelector: jest.fn((selector) => (String(selector).includes('checkbox') ? groupCheckbox : null)),
+            querySelectorAll: jest.fn((selector) => (String(selector).includes('checkbox') ? [groupCheckbox] : []))
+        };
+        groupCheckbox.parentElement = collapsedLabelGroup;
+        groupCheckbox.parentNode = collapsedLabelGroup;
+
+        const listButton = {
+            tagName: 'BUTTON',
+            textContent: 'view_list',
+            disabled: false,
+            parentElement: panel,
+            parentNode: panel,
+            style: {},
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return 'List view';
+                if (attr === 'data-testid') return 'source-view-list-button';
+                return null;
+            }),
+            matches: jest.fn((selector) => selector === 'button'),
+            closest: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+
+        let phase = 'expanded-label';
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+        panel.querySelectorAll = jest.fn((selector) => {
+            const value = String(selector);
+            if (value.includes('source-label') || value.includes('label-group')) {
+                return phase === 'expanded-label' ? [expandedLabelGroup] : [collapsedLabelGroup];
+            }
+            if (
+                mod.DEPS.row.includes(selector) ||
+                value.includes('source-row') ||
+                value.includes('source-item') ||
+                value.includes('data-source-id')
+            ) {
+                return phase === 'expanded-label' ? [first.row, second.row] : [];
+            }
+            return [];
+        });
+
+        mod.scanAndSyncSources({}, true);
+        const sourceKeys = Array.from(mod.sourcesByKey.keys());
+        sourceKeys.forEach((sourceKey) => {
+            expect(mod.sourcesByKey.get(sourceKey).enabled).toBe(false);
+        });
+
+        phase = 'collapsed-label';
+        mod._setViewSwitchInProgressForTest(true);
+        mod._handleNativeSourceViewSwitchClickForTest({ target: listButton });
+
+        sourceKeys.forEach((sourceKey) => {
+            expect(mod.sourcesByKey.get(sourceKey).enabled).toBe(true);
+        });
     });
 
     it('keeps collapsed label group changes made while initial restore is deferred', () => {

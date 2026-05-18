@@ -219,9 +219,18 @@ const createModalMotionTestRuntime = ({
     getDiagnosticsText = jest.fn(() => '{"notebookId":"notebook-test"}'),
     getDeveloperModeEnabled = jest.fn(() => false),
     setDeveloperModeEnabled = jest.fn(() => Promise.resolve(false)),
+    markWelcomeOnboardingSeen = jest.fn(() => Promise.resolve(true)),
+    markWhatsNewSeen = jest.fn(() => Promise.resolve(true)),
+    getHistoryRetentionLimit = jest.fn(() => 20),
+    setHistoryRetentionLimit = jest.fn(() => Promise.resolve(20)),
+    createManualRestorePoint = jest.fn(() => Promise.resolve(true)),
+    getLanguageOverride = jest.fn(() => 'auto'),
+    setLanguageOverride = jest.fn(() => Promise.resolve('auto')),
     getDeveloperLogExportText = jest.fn(() => '{"logs":[]}'),
     clearDeveloperLogs = jest.fn(() => Promise.resolve(true)),
-    renderSaveStatus = jest.fn()
+    renderSaveStatus = jest.fn(),
+    getCommandPaletteCommands = jest.fn(() => []),
+    executeCommandPaletteCommand = jest.fn(() => false)
 } = {}) => {
     const createContentModals = require('../../src/content/content-modals.js');
     const shadowRoot = createModalTestShadowRoot();
@@ -259,9 +268,18 @@ const createModalMotionTestRuntime = ({
         getDiagnosticsText,
         getDeveloperModeEnabled,
         setDeveloperModeEnabled,
+        markWelcomeOnboardingSeen,
+        markWhatsNewSeen,
+        getHistoryRetentionLimit,
+        setHistoryRetentionLimit,
+        createManualRestorePoint,
+        getLanguageOverride,
+        setLanguageOverride,
         getDeveloperLogExportText,
         clearDeveloperLogs,
         renderSaveStatus,
+        getCommandPaletteCommands,
+        executeCommandPaletteCommand,
         updateTag: jest.fn(() => null),
         deleteTag: jest.fn(),
         showToast,
@@ -272,7 +290,16 @@ const createModalMotionTestRuntime = ({
         getTagColorPreviewStyle: (color) => (color ? `--tag-color:${color};` : '')
     });
 
-    return { modals, shadowRoot, renderSaveStatus };
+    return {
+        modals,
+        shadowRoot,
+        renderSaveStatus,
+        markWelcomeOnboardingSeen,
+        markWhatsNewSeen,
+        setHistoryRetentionLimit,
+        createManualRestorePoint,
+        setLanguageOverride
+    };
 };
 
 describe('move-to-folder options', () => {
@@ -653,6 +680,28 @@ describe('modal option motion', () => {
             totalSources: 3,
             groupCount: 1,
             tagCount: 4,
+            diff: {
+                source: {
+                    enableCount: 1,
+                    disableCount: 1,
+                    unchangedCount: 1
+                },
+                folders: {
+                    incomingCount: 1,
+                    sameNameCount: 1,
+                    removedCount: 0
+                },
+                tags: {
+                    incomingCount: 4,
+                    sameNameCount: 2,
+                    removedCount: 1,
+                    normalizedIdCount: 1
+                },
+                settings: {
+                    changesCustomHeight: true,
+                    changesSourceViewDisplayKind: true
+                }
+            },
             matchedSourceDetails: [
                 { storedKey: 'source-1', resolvedKey: 'source-1', title: 'Matched Source' }
             ],
@@ -709,54 +758,57 @@ describe('modal option motion', () => {
         const modal = shadowRoot.getElementById('sp-settings-modal');
         expect(modal).toBeTruthy();
         const settingsContent = shadowRoot.querySelector('.sp-settings-modal-content');
-        expect(settingsContent.children[0].classList.contains('sp-settings-feedback-section')).toBe(true);
+        expect(settingsContent.children[0].classList.contains('sp-settings-backup-section')).toBe(true);
         expect(shadowRoot.querySelector('.sp-settings-export-textarea').value).toContain('notebooklm-source-management-config');
         expect(shadowRoot.querySelector('.sp-settings-import-preview').textContent).toContain('ui_settings_import_preview_summary:2,3,1,4');
         expect(shadowRoot.querySelector('.sp-settings-import-preview').textContent).toContain('ui_settings_import_preview_matched:1');
         expect(shadowRoot.querySelector('.sp-settings-import-preview').textContent).toContain('Matched Source');
         expect(shadowRoot.querySelector('.sp-settings-import-preview').textContent).toContain('ui_settings_import_preview_unmatched:1');
         expect(shadowRoot.querySelector('.sp-settings-import-preview').textContent).toContain('Missing Source');
+        expect(shadowRoot.querySelector('.sp-settings-import-preview').textContent).toContain('ui_settings_import_preview_replace_warning');
+        expect(shadowRoot.querySelector('.sp-settings-import-preview').textContent).toContain('ui_settings_import_diff_sources');
+        expect(shadowRoot.querySelector('.sp-settings-import-preview').textContent).toContain('ui_settings_import_diff_source_state:1,1,1');
+        expect(shadowRoot.querySelector('.sp-settings-import-preview').textContent).toContain('ui_settings_import_diff_folders:1,1,0');
+        expect(shadowRoot.querySelector('.sp-settings-import-preview').textContent).toContain('ui_settings_import_diff_tags:4,2,1,1');
+        expect(shadowRoot.querySelector('.sp-settings-import-preview').textContent).toContain('ui_settings_import_diff_settings_changed');
         expect(shadowRoot.querySelector('.sp-settings-apply-import-btn').disabled).toBe(false);
         expect(shadowRoot.querySelector('.sp-settings-download-export-btn')).toBeTruthy();
         expect(shadowRoot.querySelector('.sp-settings-choose-import-btn')).toBeTruthy();
-        const exportSection = shadowRoot.querySelector('.sp-settings-export-section');
-        const exportToggle = exportSection.querySelector('.sp-settings-collapsible-toggle');
-        const exportBody = exportSection.querySelector('.sp-settings-collapsible-body');
-        expect(exportSection.classList.contains('is-collapsed')).toBe(true);
-        expect(exportToggle.getAttribute('aria-expanded')).toBe('false');
-        expect(exportBody.getAttribute('aria-hidden')).toBe('true');
-        expect(exportBody.inert).toBe(true);
-        const importSection = shadowRoot.querySelector('.sp-settings-import-section');
-        const importToggle = importSection.querySelector('.sp-settings-collapsible-toggle');
-        const importBody = importSection.querySelector('.sp-settings-collapsible-body');
-        expect(importSection.classList.contains('is-expanded')).toBe(true);
-        expect(importToggle.getAttribute('aria-expanded')).toBe('true');
-        expect(importBody.getAttribute('aria-hidden')).toBe('false');
-        expect(importBody.inert).toBe(false);
-        expect(shadowRoot.querySelector('.sp-settings-source-repair-section')).toBeTruthy();
-        expect(shadowRoot.querySelector('.sp-source-repair-empty').textContent).toContain('ui_source_repair_healthy');
+        const backupSection = shadowRoot.querySelector('.sp-settings-backup-section');
+        const backupToggle = backupSection.querySelector('.sp-settings-collapsible-toggle');
+        const backupBody = backupSection.querySelector('.sp-settings-collapsible-body');
+        expect(backupSection.classList.contains('is-expanded')).toBe(true);
+        expect(backupToggle.textContent).toContain('ui_settings_backup_restore_title');
+        expect(backupToggle.getAttribute('aria-expanded')).toBe('true');
+        expect(backupBody.getAttribute('aria-hidden')).toBe('false');
+        expect(backupBody.inert).toBe(false);
+        expect(shadowRoot.querySelector('.sp-settings-export-section .sp-settings-subsection-title').textContent).toContain('ui_settings_export_title');
+        expect(shadowRoot.querySelector('.sp-settings-import-section .sp-settings-subsection-title').textContent).toContain('ui_settings_import_title');
+        expect(shadowRoot.querySelector('.sp-settings-source-repair-section')).toBeFalsy();
+        expect(shadowRoot.querySelector('.sp-settings-source-repair-inline')).toBeTruthy();
+        expect(shadowRoot.querySelector('.sp-settings-source-repair-inline .sp-source-repair-empty').textContent).toContain('ui_source_repair_healthy');
         expect(shadowRoot.querySelector('.sp-settings-history-section')).toBeTruthy();
         expect(shadowRoot.querySelector('.sp-history-empty').textContent).toContain('ui_history_empty');
-        expect(shadowRoot.querySelector('.sp-settings-save-status-section')).toBeTruthy();
+        expect(shadowRoot.querySelector('.sp-settings-save-status-header')).toBeTruthy();
         expect(shadowRoot.getElementById('sp-settings-save-status')).toBeTruthy();
         expect(renderSaveStatus).toHaveBeenCalled();
-        const feedbackSection = shadowRoot.querySelector('.sp-settings-feedback-section');
-        expect(feedbackSection).toBeTruthy();
-        expect(feedbackSection.textContent).toContain('ui_settings_feedback_title');
-        expect(feedbackSection.textContent).toContain('ui_settings_feedback_body');
-        expect(feedbackSection.querySelector('.sp-settings-copy-diagnostics-btn')).toBeFalsy();
+        const helpSection = shadowRoot.querySelector('.sp-settings-help-section');
+        expect(helpSection).toBeTruthy();
+        expect(helpSection.textContent).toContain('ui_settings_help_feedback_title');
+        expect(helpSection.textContent).toContain('ui_settings_feedback_body');
+        expect(helpSection.querySelector('.sp-settings-feedback-body')).toBeTruthy();
         expect(shadowRoot.querySelector('.sp-settings-open-web-store-feedback-btn')).toBeTruthy();
         const diagnosticsSection = shadowRoot.querySelector('.sp-settings-diagnostics-section');
-        const diagnosticsToggle = diagnosticsSection.querySelector('.sp-settings-collapsible-toggle');
-        const diagnosticsBody = diagnosticsSection.querySelector('.sp-settings-collapsible-body');
+        const helpToggle = helpSection.querySelector('.sp-settings-collapsible-toggle');
+        const helpBody = helpSection.querySelector('.sp-settings-collapsible-body');
         const diagnosticsCopyButton = shadowRoot.querySelector('.sp-settings-copy-diagnostics-btn');
         expect(diagnosticsSection).toBeTruthy();
-        expect(diagnosticsToggle).toBeTruthy();
-        expect(diagnosticsBody).toBeTruthy();
-        expect(diagnosticsSection.classList.contains('is-collapsed')).toBe(true);
-        expect(diagnosticsToggle.getAttribute('aria-expanded')).toBe('false');
-        expect(diagnosticsBody.getAttribute('aria-hidden')).toBe('true');
-        expect(diagnosticsBody.inert).toBe(true);
+        expect(helpToggle).toBeTruthy();
+        expect(helpBody).toBeTruthy();
+        expect(helpSection.classList.contains('is-collapsed')).toBe(true);
+        expect(helpToggle.getAttribute('aria-expanded')).toBe('false');
+        expect(helpBody.getAttribute('aria-hidden')).toBe('true');
+        expect(helpBody.inert).toBe(true);
         expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('ui_diagnostics_notebook_id');
         expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('diagnostic-test');
         expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('ui_diagnostics_import_backup');
@@ -775,11 +827,11 @@ describe('modal option motion', () => {
         expect(shadowRoot.querySelector('.sp-settings-diagnostics-grid').textContent).toContain('(+1)');
         expect(diagnosticsCopyButton).toBeTruthy();
 
-        diagnosticsToggle.dispatchEvent({ type: 'click' });
-        expect(diagnosticsSection.classList.contains('is-expanded')).toBe(true);
-        expect(diagnosticsToggle.getAttribute('aria-expanded')).toBe('true');
-        expect(diagnosticsBody.getAttribute('aria-hidden')).toBe('false');
-        expect(diagnosticsBody.inert).toBe(false);
+        helpToggle.dispatchEvent({ type: 'click' });
+        expect(helpSection.classList.contains('is-expanded')).toBe(true);
+        expect(helpToggle.getAttribute('aria-expanded')).toBe('true');
+        expect(helpBody.getAttribute('aria-hidden')).toBe('false');
+        expect(helpBody.inert).toBe(false);
 
         shadowRoot.querySelector('.sp-settings-apply-import-btn').dispatchEvent({ type: 'click' });
         expect(applyImportConfig).toHaveBeenCalledWith('{"data":{}}');
@@ -793,6 +845,62 @@ describe('modal option motion', () => {
             { type: 'OPEN_WEB_STORE_FEEDBACK' },
             expect.any(Function)
         );
+    });
+
+    it('renders a keyboard-driven command palette and executes the focused command', () => {
+        const executeCommandPaletteCommand = jest.fn(() => true);
+        const getCommandPaletteCommands = jest.fn((query) => [
+            {
+                id: 'search',
+                title: query ? `Search ${query}` : 'Search sources',
+                subtitle: 'Search source titles',
+                keywords: ['search', 'source'],
+                action: 'search-sources',
+                payload: { query }
+            },
+            {
+                id: 'quick-recent',
+                title: 'Recent',
+                subtitle: 'Show recent sources',
+                keywords: ['recent'],
+                action: 'quick-view',
+                payload: { kind: 'recent' }
+            }
+        ]);
+        const { modals, shadowRoot } = createModalMotionTestRuntime({
+            getCommandPaletteCommands,
+            executeCommandPaletteCommand
+        });
+
+        expect(modals.renderCommandPaletteModal()).toBe(true);
+
+        const modal = shadowRoot.getElementById('sp-command-palette-modal');
+        const input = shadowRoot.querySelector('.sp-command-palette-input');
+        expect(modal).toBeTruthy();
+        expect(input).toBeTruthy();
+        expect(shadowRoot.querySelectorAll('.sp-command-palette-item')).toHaveLength(2);
+
+        input.value = 'ai';
+        input.dispatchEvent({ type: 'input', target: input });
+        expect(getCommandPaletteCommands).toHaveBeenLastCalledWith('ai');
+        expect(shadowRoot.querySelector('.sp-command-palette-list').textContent).toContain('Search ai');
+
+        input.dispatchEvent({
+            type: 'keydown',
+            key: 'ArrowDown',
+            preventDefault: jest.fn()
+        });
+        input.dispatchEvent({
+            type: 'keydown',
+            key: 'Enter',
+            preventDefault: jest.fn()
+        });
+
+        expect(executeCommandPaletteCommand).toHaveBeenCalledWith('quick-view', expect.objectContaining({
+            id: 'quick-recent',
+            payload: { kind: 'recent' }
+        }));
+        expect(shadowRoot.getElementById('sp-command-palette-modal')).toBeNull();
     });
 
     it('renders source repair and history actions in settings', async () => {
@@ -847,9 +955,10 @@ describe('modal option motion', () => {
         expect(restoreStateHistoryEntry).toHaveBeenCalledWith('history-1');
     });
 
-    it('renders developer mode controls in settings and wires log actions', async () => {
+    it('hides developer controls behind a password-protected settings entry', async () => {
         const writeText = jest.fn(() => Promise.resolve());
         global.window.navigator = { clipboard: { writeText } };
+        global.window.prompt = jest.fn(() => 'wrong-password');
         const setDeveloperModeEnabled = jest.fn(() => Promise.resolve(true));
         const getDeveloperLogExportText = jest.fn(() => '{"developerModeEnabled":true,"logs":[]}');
         const clearDeveloperLogs = jest.fn(() => Promise.resolve(true));
@@ -864,10 +973,25 @@ describe('modal option motion', () => {
 
         expect(modals.renderSettingsModal()).toBe(true);
 
+        expect(shadowRoot.querySelector('.sp-settings-developer-section')).toBeFalsy();
+        expect(shadowRoot.querySelector('.sp-settings-apply-import-btn')).toBeFalsy();
+        const unlockButton = shadowRoot.querySelector('.sp-settings-developer-unlock-btn');
+        expect(unlockButton).toBeTruthy();
+        expect(unlockButton.textContent).toContain('ui_settings_developer_features');
+
+        unlockButton.dispatchEvent({ type: 'click' });
+        expect(global.window.prompt).toHaveBeenCalledWith('ui_settings_developer_password_prompt');
+        expect(shadowRoot.querySelector('.sp-settings-developer-section')).toBeFalsy();
+        expect(showToast).toHaveBeenCalledWith('ui_settings_developer_password_failed', { variant: 'error' });
+
+        global.window.prompt.mockReturnValue('developer_mode');
+        unlockButton.dispatchEvent({ type: 'click' });
+
         const developerSection = shadowRoot.querySelector('.sp-settings-developer-section');
         expect(developerSection).toBeTruthy();
-        expect(developerSection.textContent).toContain('ui_settings_developer_mode_title');
+        expect(developerSection.textContent).toContain('ui_settings_developer_features');
         expect(developerSection.textContent).toContain('ui_settings_developer_mode_body');
+        expect(shadowRoot.querySelector('.sp-settings-developer-unlock-btn')).toBeFalsy();
 
         const toggle = shadowRoot.querySelector('.sp-settings-developer-mode-toggle');
         expect(toggle).toBeTruthy();
@@ -884,6 +1008,33 @@ describe('modal option motion', () => {
         shadowRoot.querySelector('.sp-settings-clear-developer-logs-btn').dispatchEvent({ type: 'click' });
         await Promise.resolve();
         expect(clearDeveloperLogs).toHaveBeenCalled();
+
+        const testWelcomeButton = shadowRoot.querySelector('.sp-settings-test-welcome-btn');
+        expect(testWelcomeButton).toBeTruthy();
+        expect(developerSection.textContent).toContain('ui_settings_test_welcome_modal');
+
+        testWelcomeButton.dispatchEvent({ type: 'click' });
+        expect(shadowRoot.getElementById('sp-settings-modal')).toBeFalsy();
+        expect(shadowRoot.getElementById('sp-welcome-modal')).toBeTruthy();
+    });
+
+    it('keeps developer controls unlocked when developer mode is already enabled', () => {
+        global.window.prompt = jest.fn();
+        const { modals, shadowRoot } = createModalMotionTestRuntime({
+            getDeveloperModeEnabled: () => true
+        });
+
+        expect(modals.renderSettingsModal()).toBe(true);
+
+        const developerSection = shadowRoot.querySelector('.sp-settings-developer-section');
+        expect(developerSection).toBeTruthy();
+        expect(developerSection.textContent).toContain('ui_settings_developer_features');
+        expect(shadowRoot.querySelector('.sp-settings-developer-unlock-btn')).toBeFalsy();
+        expect(global.window.prompt).not.toHaveBeenCalled();
+
+        const toggle = shadowRoot.querySelector('.sp-settings-developer-mode-toggle');
+        expect(toggle).toBeTruthy();
+        expect(toggle.checked).toBe(true);
     });
 
     it('shows a localized toast when Chrome Web Store feedback cannot open', () => {
@@ -899,6 +1050,115 @@ describe('modal option motion', () => {
         shadowRoot.querySelector('.sp-settings-open-web-store-feedback-btn').dispatchEvent({ type: 'click' });
 
         expect(showToast).toHaveBeenCalledWith('ui_settings_feedback_open_failed', { variant: 'error' });
+    });
+
+    it('renders the welcome onboarding modal with accessible close and feedback actions', () => {
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'OPEN_WEB_STORE_FEEDBACK' && typeof cb === 'function') {
+                cb({ success: true });
+            }
+        });
+        const markWelcomeOnboardingSeen = jest.fn(() => Promise.resolve(true));
+        const { modals, shadowRoot } = createModalMotionTestRuntime({ markWelcomeOnboardingSeen });
+
+        expect(modals.renderWelcomeModal()).toBe(true);
+
+        const modal = shadowRoot.getElementById('sp-welcome-modal');
+        expect(modal).toBeTruthy();
+        expect(modal.getAttribute('role')).toBe('dialog');
+        expect(modal.getAttribute('aria-modal')).toBe('true');
+        expect(modal.getAttribute('aria-labelledby')).toBe('sp-welcome-modal-title');
+        expect(modal.textContent).toContain('ui_welcome_title');
+        expect(modal.textContent).toContain('ui_welcome_feature_organize_title');
+        expect(modal.textContent).toContain('ui_welcome_feature_find_title');
+        expect(modal.textContent).toContain('ui_welcome_feature_backup_title');
+        expect(modal.querySelector('.sp-welcome-feedback-strip')).toBeFalsy();
+        const feedbackInline = modal.querySelector('.sp-welcome-feedback-inline');
+        expect(feedbackInline).toBeTruthy();
+        expect(feedbackInline.textContent).toContain('ui_welcome_feedback_body');
+        const feedbackLink = modal.querySelector('.sp-welcome-feedback-link');
+        expect(feedbackLink).toBeTruthy();
+        expect(feedbackLink.className).not.toContain('sp-button');
+        expect(feedbackLink.textContent).toContain('ui_welcome_feedback');
+
+        const closeButton = shadowRoot.querySelector('.sp-welcome-close-btn');
+        expect(closeButton).toBeTruthy();
+        expect(closeButton.getAttribute('aria-label')).toBe('ui_welcome_close');
+
+        shadowRoot.querySelector('.sp-welcome-primary-btn').dispatchEvent({ type: 'click' });
+        expect(markWelcomeOnboardingSeen).toHaveBeenCalledTimes(1);
+    });
+
+    it('marks welcome onboarding as seen before opening feedback', () => {
+        const markWelcomeOnboardingSeen = jest.fn(() => Promise.resolve(true));
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'OPEN_WEB_STORE_FEEDBACK' && typeof cb === 'function') {
+                cb({ success: true });
+            }
+        });
+        const { modals, shadowRoot } = createModalMotionTestRuntime({ markWelcomeOnboardingSeen });
+
+        expect(modals.renderWelcomeModal()).toBe(true);
+        shadowRoot.querySelector('.sp-welcome-feedback-link').dispatchEvent({ type: 'click' });
+
+        expect(markWelcomeOnboardingSeen).toHaveBeenCalledTimes(1);
+        expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(
+            { type: 'OPEN_WEB_STORE_FEEDBACK' },
+            expect.any(Function)
+        );
+    });
+
+    it('renders the whats new modal and can preview it without marking it seen', () => {
+        const markWhatsNewSeen = jest.fn(() => Promise.resolve(true));
+        const { modals, shadowRoot } = createModalMotionTestRuntime({ markWhatsNewSeen });
+
+        expect(modals.renderWhatsNewModal({ markSeenOnClose: false })).toBe(true);
+
+        const modal = shadowRoot.getElementById('sp-whats-new-modal');
+        expect(modal).toBeTruthy();
+        expect(modal.getAttribute('role')).toBe('dialog');
+        expect(modal.getAttribute('aria-modal')).toBe('true');
+        expect(modal.getAttribute('aria-labelledby')).toBe('sp-whats-new-modal-title');
+        expect(modal.textContent).toContain('ui_whats_new_title');
+        expect(modal.textContent).toContain('ui_whats_new_quick_views_title');
+        expect(modal.textContent).toContain('ui_whats_new_restore_points_title');
+        expect(modal.textContent).toContain('ui_whats_new_language_title');
+
+        shadowRoot.querySelector('.sp-whats-new-primary-btn').dispatchEvent({ type: 'click' });
+        expect(markWhatsNewSeen).not.toHaveBeenCalled();
+    });
+
+    it('renders and saves history retention, restore point, and language preferences in settings', async () => {
+        const setHistoryRetentionLimit = jest.fn(() => Promise.resolve(50));
+        const createManualRestorePoint = jest.fn(() => Promise.resolve(true));
+        const setLanguageOverride = jest.fn(() => Promise.resolve('zh_CN'));
+        const { modals, shadowRoot } = createModalMotionTestRuntime({
+            getStateHistoryEntries: () => [],
+            getHistoryRetentionLimit: () => 20,
+            setHistoryRetentionLimit,
+            createManualRestorePoint,
+            getLanguageOverride: () => 'auto',
+            setLanguageOverride
+        });
+        global.window.prompt = jest.fn(() => 'Before import');
+
+        expect(modals.renderSettingsModal()).toBe(true);
+
+        const retentionSelect = shadowRoot.querySelector('.sp-history-retention-select');
+        retentionSelect.value = '50';
+        retentionSelect.dispatchEvent({ type: 'change', target: retentionSelect });
+        await Promise.resolve();
+        expect(setHistoryRetentionLimit).toHaveBeenCalledWith(50);
+
+        shadowRoot.querySelector('.sp-history-create-restore-point-btn').dispatchEvent({ type: 'click' });
+        await Promise.resolve();
+        expect(createManualRestorePoint).toHaveBeenCalledWith('Before import');
+
+        const languageSelect = shadowRoot.querySelector('.sp-settings-language-select');
+        languageSelect.value = 'zh_CN';
+        languageSelect.dispatchEvent({ type: 'change', target: languageSelect });
+        await Promise.resolve();
+        expect(setLanguageOverride).toHaveBeenCalledWith('zh_CN');
     });
 
     it('uses the undoable toast hook for batch tag success messages', () => {
@@ -1198,7 +1458,7 @@ describe('tag persistence and filtering', () => {
         mod.setSourceTagIds('source1', [researchTagId, priorityTagId]);
 
         expect(mod.buildPersistableState()).toMatchObject({
-            schemaVersion: 3,
+            schemaVersion: 4,
             tagOrder: [researchTagId, priorityTagId],
             sourceTagsById: {
                 source1: [researchTagId, priorityTagId]

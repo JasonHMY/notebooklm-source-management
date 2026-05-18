@@ -14,6 +14,9 @@
     };
 
     function getUiLanguage() {
+        if (typeof globalThis !== 'undefined' && typeof globalThis.NSM_GET_EFFECTIVE_MESSAGE_LOCALE === 'function') {
+            return globalThis.NSM_GET_EFFECTIVE_MESSAGE_LOCALE() || 'en';
+        }
         if (typeof chrome !== 'undefined' && chrome.i18n && typeof chrome.i18n.getUILanguage === 'function') {
             return chrome.i18n.getUILanguage() || 'en';
         }
@@ -331,6 +334,24 @@
         });
     }
 
+    async function loadPopupPreferences() {
+        if (typeof chrome === 'undefined' || !chrome?.runtime?.sendMessage) return null;
+        try {
+            const response = await sendRuntimeMessage({ type: 'LOAD_PREFERENCES' });
+            const preferences = response?.success ? response.preferences || null : null;
+            if (
+                preferences &&
+                typeof globalThis !== 'undefined' &&
+                typeof globalThis.NSM_SET_MESSAGE_LOCALE_OVERRIDE === 'function'
+            ) {
+                await globalThis.NSM_SET_MESSAGE_LOCALE_OVERRIDE(preferences.languageOverride || 'auto');
+            }
+            return preferences;
+        } catch (error) {
+            return null;
+        }
+    }
+
     function reloadTab(tabId) {
         return new Promise((resolve, reject) => {
             chrome.tabs.reload(tabId, {}, () => {
@@ -627,6 +648,7 @@
     }
 
     async function initializePopup(doc = document) {
+        await loadPopupPreferences();
         applyDocumentLocalization(doc);
         let activeTab = null;
         let activeTabQueryFailed = false;

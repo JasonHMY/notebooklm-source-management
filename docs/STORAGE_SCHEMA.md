@@ -15,20 +15,40 @@ chrome.storage.local
 ├── sourcesPlusHistory_<projectId>
 │   └── Per-notebook bounded history snapshots.
 ├── sourcesPlusPreferences
-│   └── Global preferences, currently developerModeEnabled.
+│   └── Global preferences: developer mode, onboarding/update dismissal, history retention, and language override.
 └── sourcesPlusDeveloperLogs_<projectId>
     └── Per-notebook bounded developer logs.
 ```
 
 `<projectId>` is derived from the NotebookLM notebook URL. Notebook-scoped writes normally go through the background service worker, which validates the sender and key prefix before touching storage.
 
-## Current state schema
+## Global preferences schema
 
-Current `sourcesPlusState_<projectId>` payloads use `schemaVersion: 3`.
+`sourcesPlusPreferences` is not included in notebook import/export JSON.
 
 ```json
 {
-  "schemaVersion": 3,
+  "developerModeEnabled": false,
+  "welcomeOnboardingSeenVersion": 1,
+  "whatsNewSeenVersion": 1,
+  "historyRetentionLimit": 20,
+  "languageOverride": "auto"
+}
+```
+
+- `developerModeEnabled` controls sanitized developer log collection.
+- `welcomeOnboardingSeenVersion` records the latest first-run welcome modal version the user has dismissed. Missing or `0` means the current welcome modal can be shown once.
+- `whatsNewSeenVersion` records the latest update-introduction modal version the user has dismissed. Missing or `0` means the current enabled What's New modal can be shown once.
+- `historyRetentionLimit` controls how many `sourcesPlusHistory_<projectId>` entries are retained. Valid values are `20`, `50`, and `100`; invalid or missing values fall back to `20`.
+- `languageOverride` controls extension UI language. Valid values are `auto`, `en`, `es`, and `zh_CN`; `auto` follows Chrome UI language.
+
+## Current state schema
+
+Current `sourcesPlusState_<projectId>` payloads use `schemaVersion: 4`.
+
+```json
+{
+  "schemaVersion": 4,
   "groups": ["group-id"],
   "groupsById": {
     "group-id": {
@@ -48,10 +68,12 @@ Current `sourcesPlusState_<projectId>` payloads use `schemaVersion: 3`.
       "stableToken": "optional token",
       "fingerprint": "optional fingerprint",
       "identityType": "fingerprint",
-      "nativeLabelTitle": "optional native label title"
+      "nativeLabelTitle": "optional native label title",
+      "addedAt": "optional ISO timestamp"
     }
   },
   "customHeight": null,
+  "sourceViewDisplayKind": "list",
   "tagsById": {
     "tag-id": {
       "id": "tag-id",
@@ -72,7 +94,9 @@ Field notes:
 - `groupsById` is the full group map. Group `children` must be treated defensively as an array; legacy or imported data can omit it.
 - `ungrouped` is the source order outside plugin folders.
 - `sourceStateById` stores metadata needed to remap sources after NotebookLM DOM changes.
+- `sourceStateById[sourceKey].addedAt` stores when the extension first recognized a source. It is optional for legacy sources and powers the built-in Recent quick view; missing values must not be backfilled as recent during migration.
 - `nativeLabelTitle` marks sources or groups that came from NotebookLM native label import. Ordinary user folders with the same visible name must not be treated as native labels unless this field is present.
+- `sourceViewDisplayKind` stores the last list/label view used in this notebook. Missing or invalid values are ignored so legacy state does not force a view switch.
 - `tagsById`, `tagOrder`, and `sourceTagsById` are optional in legacy data and must be normalized on load.
 
 ## Migrations
@@ -85,7 +109,10 @@ schemaVersion 2
 └── Adds sourceStateById but no tag fields.
 
 schemaVersion 3
-└── Adds tagsById, tagOrder, sourceTagsById, and current source identity metadata.
+└── Adds tagsById, tagOrder, sourceTagsById, current source identity metadata, and optional sourceViewDisplayKind view memory.
+
+schemaVersion 4
+└── Adds optional sourceStateById[sourceKey].addedAt for Recent quick view filtering.
 ```
 
 Load paths normalize older schemas to the current runtime shape and mark `pendingStorageUpgrade` so a later safe save rewrites current schema data.
@@ -94,7 +121,8 @@ Load paths normalize older schemas to the current runtime shape and mark `pendin
 
 - Primary saves write both `sourcesPlusState_<projectId>` and `sourcesPlusState_<projectId>__backup`.
 - Background save logic chooses the preferred stored state from primary/backup by revision metadata and content quality.
-- `sourcesPlusHistory_<projectId>` is bounded and used for version history and repair recovery.
+- `sourcesPlusHistory_<projectId>` is bounded by `sourcesPlusPreferences.historyRetentionLimit` and used for version history and repair recovery.
+- History entries can include `label?: string` and `manual?: boolean` for named restore points. Automatic trimming preserves manual restore points before older automatic snapshots; if manual entries alone exceed the selected limit, the oldest manual entries are trimmed.
 - Page lifecycle recovery can write a session/local fallback snapshot, but normal primary writes should go through background `SAVE_STATE`.
 
 ## Privacy boundary

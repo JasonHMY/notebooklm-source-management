@@ -39,12 +39,16 @@ NotebookLM Source Management
 │   │   │   └── 来源扫描、列表/标签视图识别、折叠标签组、MutationObserver 同步
 │   │   ├── content-source-actions.js
 │   │   │   └── 来源三点菜单、详情、重命名、删除、原生 menu/dialog 自动化
+│   │   ├── content-source-action-menu.js
+│   │   │   └── 来源三点菜单和 submenu item 生成 helper；失败来源菜单收口
 │   │   ├── content-tree-interactions.js
 │   │   │   └── 分组树、拖拽、checkbox、批量模式交互
 │   │   ├── content-render.js
 │   │   │   └── Shadow DOM manager 渲染、列表行、批量条、菜单层
 │   │   ├── content-modals.js
-│   │   │   └── 设置、导入预览、标签、移动文件夹、批量标签 modal
+│   │   │   └── 首次欢迎、更新介绍、设置、导入预览、标签、移动文件夹、批量标签 modal
+│   │   ├── content-modal-focus.js
+│   │   │   └── modal 初始聚焦、Tab trap、Escape 关闭和焦点恢复 helper
 │   │   ├── content-persistence.js
 │   │   │   └── save/load/history/recovery/import-export 持久化 helper
 │   │   ├── content-source-list-scan.js
@@ -53,8 +57,12 @@ NotebookLM Source Management
 │   │   │   └── 原生标签组扫描 helper；标签头来源数量解析
 │   │   ├── content-native-label-import.js
 │   │   │   └── 原生标签导入 preview 完整性判断 helper
+│   │   ├── content-native-label-import-controller.js
+│   │   │   └── 原生标签导入确认阶段来源补齐、分组复用和 group id helper
 │   │   ├── content-native-label-import-modal.js
 │   │   │   └── 原生标签导入 modal preview 节点生成 helper
+│   │   ├── content-source-partial-sync-guard.js
+│   │   │   └── partial sync 旧来源保护和 raw URL loading 标记 helper
 │   │   ├── content-state-reconcile.js
 │   │   │   └── 旧状态到当前来源的 remap、repair、tree reconcile
 │   │   ├── content-tags.js
@@ -69,6 +77,12 @@ NotebookLM Source Management
 │   │   │   └── runtimeContext getter/setter 绑定 helper
 │   │   ├── content-message-router.js
 │   │   │   └── popup/background 到 content 的消息分发表
+│   │   ├── content-toast-status.js
+│   │   │   └── toast 参数归一、保存状态文案 key 和 DOM 清空 helper
+│   │   ├── content-diagnostics.js
+│   │   │   └── diagnostics JSON 序列化、Error/unhandled rejection 脱敏摘要 helper
+│   │   ├── content-source-view-switch-controller.js
+│   │   │   └── 来源视图切换目标归一、状态字段和 attempt 记录 helper
 │   │   ├── content-style-text.js
 │   │   │   └── manager 和 overlay 的 CSS 文本
 │   │   └── content-template.js
@@ -121,6 +135,8 @@ NotebookLM Source Management
 ├── AGENTS.md
 │   └── 仓库级 agent 指令；每次变更前应读取，要求同步维护 CHANGELOG、本目录文件和 changelog 写作规范
 ├── PRIVACY.md
+├── UI_GUIDELINES.md
+│   └── 当前 UI 实现事实与后续 UI 变更规范；覆盖 content manager、popup、样式 token、动效和 `.sp-*`/`.popup-*` 组件模式
 ├── CHANGELOG.md
 │   └── 更新日志和写作规范；未发布改动写入顶部 Unreleased，发布时移动到正式版本段
 ├── node_modules/   # 忽略目录；本地依赖，发布包禁止包含
@@ -163,17 +179,24 @@ manifest.json
     ├── src/content/content-style-text.js
     ├── src/content/content-template.js
     ├── src/content/content-panel-dom.js
+    ├── src/content/content-source-action-menu.js
     ├── src/content/content-source-actions.js
     ├── src/content/content-tags.js
     ├── src/content/content-state-reconcile.js
     ├── src/content/content-developer-logger.js
     ├── src/content/content-runtime-state.js
     ├── src/content/content-message-router.js
+    ├── src/content/content-toast-status.js
+    ├── src/content/content-diagnostics.js
+    ├── src/content/content-source-view-switch-controller.js
     ├── src/content/content-persistence.js
     ├── src/content/content-source-list-scan.js
     ├── src/content/content-native-label-scan.js
     ├── src/content/content-native-label-import.js
+    ├── src/content/content-native-label-import-controller.js
     ├── src/content/content-native-label-import-modal.js
+    ├── src/content/content-source-partial-sync-guard.js
+    ├── src/content/content-modal-focus.js
     ├── src/content/content-modals.js
     ├── src/content/content-render.js
     ├── src/content/content-view-state.js
@@ -203,10 +226,16 @@ manifest.json
 │   │   ├── src/content/index.js
 │   │   ├── src/content/content-runtime-state.js
 │   │   ├── src/content/content-message-router.js
+│   │   ├── src/content/content-toast-status.js
+│   │   ├── src/content/content-diagnostics.js
+│   │   ├── src/content/content-source-view-switch-controller.js
 │   │   └── src/content/content-panel-dom.js
 │   └── 测试
 │       ├── tests/content/content-runtime-state.test.js
 │       ├── tests/content/content-message-router.test.js
+│       ├── tests/content/content-toast-status.test.js
+│       ├── tests/content/content-diagnostics.test.js
+│       ├── tests/content/content-source-view-switch-controller.test.js
 │       ├── tests/content/content-lifecycle.test.js
 │       ├── tests/content/content-module.test.js
 │       └── tests/smoke/extension-smoke.spec.js
@@ -228,18 +257,23 @@ manifest.json
 │   │   ├── 判断原生 list/label view
 │   │   ├── 读取 native checkbox / aria-checked
 │   │   ├── 切回列表前同步标签组选择
+│   │   ├── 持久化并恢复上次 list/label view
 │   │   ├── 折叠标签组隐藏 rows 读取
 │   │   └── partial sync 保护旧状态
 │   ├── 先看
 │   │   ├── src/content/content-source-sync.js
 │   │   ├── src/content/content-native-label-scan.js
 │   │   ├── src/content/content-native-label-import.js
+│   │   ├── src/content/content-source-partial-sync-guard.js
+│   │   ├── src/content/content-source-view-switch-controller.js
 │   │   ├── src/content/index.js
 │   │   └── src/popup/index.js
 │   └── 测试
 │       ├── tests/content/content-source-sync.test.js
 │       ├── tests/content/content-native-label-scan.test.js
 │       ├── tests/content/content-native-label-import.test.js
+│       ├── tests/content/content-source-partial-sync-guard.test.js
+│       ├── tests/content/content-source-view-switch-controller.test.js
 │       ├── tests/content/content-lifecycle.test.js
 │       └── tests/popup.test.js
 ├── 分组树 / 拖拽 / 批量模式
@@ -277,6 +311,8 @@ manifest.json
 │   ├── 负责
 │   │   ├── title/tag/folder 搜索
 │   │   ├── `tag:` / `folder:` filters
+│   │   ├── quick view rail: All / Ungrouped / Disabled / Tag / Recent / Issues
+│   │   ├── activeQuickViewKind session-only runtime state
 │   │   ├── 搜索时自动展开匹配分组
 │   │   ├── active isolation group
 │   │   └── effective enabled source 计算
@@ -284,6 +320,7 @@ manifest.json
 │   │   ├── src/content/content-view-state.js
 │   │   └── src/content/content-render.js
 │   └── 测试
+│       ├── tests/content/content-view-state.test.js
 │       └── tests/content/content-render.test.js
 ├── 原生来源操作
 │   ├── 负责
@@ -294,20 +331,27 @@ manifest.json
 │   │   ├── 失败来源删除入口
 │   │   └── 删除确认弹窗歧义防护
 │   ├── 先看
-│   │   └── src/content/content-source-actions.js
+│   │   ├── src/content/content-source-actions.js
+│   │   └── src/content/content-source-action-menu.js
 │   └── 测试
-│       └── tests/content/content-source-actions.test.js
-├── 设置弹窗 / 导入导出 / 原生标签导入
+│       ├── tests/content/content-source-actions.test.js
+│       └── tests/content/content-source-action-menu.test.js
+├── 欢迎弹窗 / 设置弹窗 / 导入导出 / 原生标签导入
 │   ├── 负责
-│   │   ├── 设置 modal
-│   │   ├── export/import config JSON
+│   │   ├── 首次欢迎 modal、更新介绍 modal 和反馈入口
+│   │   ├── 设置 modal；按“备份与恢复”“偏好设置”“帮助与反馈”组织，保存状态在标题栏显示
+│   │   ├── export/import config JSON 与版本历史恢复入口
+│   │   ├── import diff preview；说明替换语义、来源启用变化、文件夹/tag 差异和设置变化
 │   │   ├── import size/count/depth/cycle 校验
 │   │   ├── source remap preview
-│   │   ├── 版本历史恢复入口
+│   │   ├── toolbar command palette modal；无全局快捷键，复用现有搜索、视图、设置、标签和批量操作入口
+│   │   ├── 仅在检测到来源匹配问题时独立突出显示 Source Repair，否则收进帮助/排查区域
 │   │   ├── 原生 NotebookLM 标签导入 preview
-│   │   └── 开发者模式 UI
+│   │   └── 密码入口控制的开发者功能 UI；已开启 Developer Mode 时免密码显示
 │   ├── 先看
 │   │   ├── src/content/content-modals.js
+│   │   ├── src/content/content-modal-focus.js
+│   │   ├── src/content/content-native-label-import-controller.js
 │   │   ├── src/content/content-native-label-import-modal.js
 │   │   ├── src/content/index.js
 │   │   ├── src/content/content-persistence.js
@@ -315,6 +359,8 @@ manifest.json
 │   │   └── src/content/content-source-sync.js
 │   └── 测试
 │       ├── tests/content/content-modals-tags.test.js
+│       ├── tests/content/content-modal-focus.test.js
+│       ├── tests/content/content-native-label-import-controller.test.js
 │       ├── tests/content/content-native-label-import-modal.test.js
 │       ├── tests/content/content-persistence.test.js
 │       ├── tests/content/content-state-reconcile.test.js
@@ -323,6 +369,7 @@ manifest.json
 │   ├── 负责
 │   │   ├── buildPersistableState
 │   │   ├── save/load
+│   │   ├── schemaVersion 4 和 sourceStateById[sourceKey].addedAt
 │   │   ├── revision guard
 │   │   ├── backup/history
 │   │   ├── session recovery
@@ -339,11 +386,13 @@ manifest.json
 │       └── tests/background.test.js
 ├── 开发者日志
 │   ├── 负责
-│   │   ├── Developer Mode 偏好
+│   │   ├── Developer Mode 偏好和已开启免密码解锁
 │   │   ├── 脱敏结构化日志
 │   │   ├── 500 条 / 约 512 KB 裁剪
+│   │   ├── 设置页底部密码入口
 │   │   ├── 复制/下载日志
-│   │   └── 清空日志
+│   │   ├── 清空日志
+│   │   └── 从开发者功能区测试欢迎弹窗
 │   ├── 先看
 │   │   ├── src/content/content-developer-logger.js
 │   │   ├── src/background/index.js
@@ -351,6 +400,7 @@ manifest.json
 │   │   └── docs/DEVELOPER_LOGGING.md
 │   └── 测试
 │       ├── tests/content/content-developer-logger.test.js
+│       ├── tests/content/content-modals-tags.test.js
 │       └── tests/background.test.js
 ├── Popup launcher
 │   ├── 负责
@@ -369,12 +419,14 @@ manifest.json
 ├── i18n
 │   ├── 负责
 │   │   ├── Chrome `chrome.i18n` 文案
+│   │   ├── 设置页 Auto / English / Español / 简体中文手动语言覆盖
 │   │   ├── manifest 文案
 │   │   └── en / es / zh_CN key 对齐
 │   ├── 先看
 │   │   ├── _locales/en/messages.json
 │   │   ├── _locales/es/messages.json
 │   │   ├── _locales/zh_CN/messages.json
+│   │   ├── manifest.json web_accessible_resources for locale JSON used by content script manual language override
 │   │   └── src/utils/index.js
 │   └── 测试
 │       └── tests/locales.test.js
@@ -407,17 +459,17 @@ chrome.storage.local
 │   ├── 内容: groups, ungrouped, groupsById, sourceStateById, tagsById, sourceTagsById, tagOrder
 │   ├── 写入: content -> background SAVE_STATE
 │   └── 排障: src/content/content-persistence.js, src/background/index.js
-├── sourcesPlusState_<projectId>_backup
+├── sourcesPlusState_<projectId>__backup
 │   ├── 用途: 主状态备份，load 时择优恢复
 │   ├── 写入: background save state
 │   └── 排障: src/background/index.js
 ├── sourcesPlusHistory_<projectId>
-│   ├── 用途: 最近历史快照，支持版本历史和恢复
+│   ├── 用途: 最近历史快照和手动命名恢复点，支持版本历史和恢复
 │   ├── 写入: background SAVE_STATE / APPEND_STATE_HISTORY
 │   └── 排障: src/background/index.js, src/content/content-persistence.js
 ├── sourcesPlusPreferences
-│   ├── 用途: 全局偏好，目前包含 developerModeEnabled
-│   ├── 写入: settings -> background SAVE_PREFERENCES
+│   ├── 用途: 全局偏好，包含 developerModeEnabled、welcomeOnboardingSeenVersion、whatsNewSeenVersion、historyRetentionLimit、languageOverride
+│   ├── 写入: settings / welcome onboarding / what’s new -> background SAVE_PREFERENCES
 │   └── 排障: src/content/content-developer-logger.js, src/background/index.js
 └── sourcesPlusDeveloperLogs_<projectId>
     ├── 用途: 每个 notebook 的脱敏开发者日志
@@ -437,8 +489,8 @@ sessionStorage
     └── 排障: src/content/content-persistence.js
 
 content runtime memory
-├── sourceViewKind / sourceViewInfo
-│   ├── 用途: 当前 NotebookLM 来源视图识别结果
+├── sourceViewKind / sourceViewInfo / sourceViewDisplayKind
+│   ├── 用途: 当前 NotebookLM 来源视图识别结果、插件显示视图和持久化恢复目标
 │   └── 排障: src/content/content-source-sync.js, src/content/index.js
 ├── pendingInitialLoadedState
 │   ├── 用途: 初始 load 延迟恢复时暂存已加载状态
@@ -452,7 +504,7 @@ content runtime memory
 
 ```json
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "groups": ["group-id"],
   "ungrouped": ["source-key"],
   "groupsById": {
@@ -469,7 +521,8 @@ content runtime memory
       "enabled": true,
       "stableToken": "optional",
       "fingerprint": "optional",
-      "nativeLabelTitle": "optional"
+      "nativeLabelTitle": "optional",
+      "addedAt": "optional ISO timestamp"
     }
   },
   "tagsById": {},
@@ -489,22 +542,28 @@ content runtime memory
 │   └── 覆盖: tests/**/*.test.js，排除 tests/smoke
 ├── 来源扫描 / 标签视图 / loading / failed
 │   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-source-sync.test.js
-│   └── 文件: tests/content/content-source-sync.test.js
+│   └── 文件: tests/content/content-source-sync.test.js, tests/content/content-source-partial-sync-guard.test.js
 ├── 持久化 / history / import-export / background storage
 │   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-persistence.test.js tests/background.test.js
 │   └── 文件: tests/content/content-persistence.test.js, tests/background.test.js
 ├── 原生删除 / 重命名 / 详情
-│   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-source-actions.test.js
-│   └── 文件: tests/content/content-source-actions.test.js
+│   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-source-actions.test.js tests/content/content-source-action-menu.test.js
+│   └── 文件: tests/content/content-source-actions.test.js, tests/content/content-source-action-menu.test.js
 ├── 分组树 / checkbox
 │   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-tree.test.js
 │   └── 文件: tests/content/content-tree.test.js
 ├── 渲染 / 批量操作条
-│   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-render.test.js
-│   └── 文件: tests/content/content-render.test.js
-├── 设置弹窗 / 标签 modal
-│   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-modals-tags.test.js
-│   └── 文件: tests/content/content-modals-tags.test.js
+│   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-render.test.js tests/content/content-view-state.test.js
+│   └── 文件: tests/content/content-render.test.js, tests/content/content-view-state.test.js
+├── 欢迎 / 设置弹窗 / 标签 modal / 命令面板
+│   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-modals-tags.test.js tests/content/content-modal-focus.test.js
+│   └── 文件: tests/content/content-modals-tags.test.js, tests/content/content-modal-focus.test.js
+├── 原生标签导入确认
+│   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-native-label-import-controller.test.js tests/content/content-native-label-import-modal.test.js
+│   └── 文件: tests/content/content-native-label-import-controller.test.js, tests/content/content-native-label-import-modal.test.js
+├── content runtime helper
+│   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-toast-status.test.js tests/content/content-diagnostics.test.js tests/content/content-source-view-switch-controller.test.js
+│   └── 文件: tests/content/content-toast-status.test.js, tests/content/content-diagnostics.test.js, tests/content/content-source-view-switch-controller.test.js
 ├── 开发者日志
 │   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-developer-logger.test.js tests/background.test.js
 │   └── 文件: tests/content/content-developer-logger.test.js, tests/background.test.js
@@ -597,8 +656,8 @@ CI: .github/workflows/ci.yml
 │   └── 注意: 小心 partial sync 保护旧状态，不要把不可见 label view 当删除
 ├── 标签视图切列表状态错
 │   ├── 先看: src/content/content-source-sync.js
-│   ├── 然后看: src/content/index.js 的 view switch helpers
-│   ├── 测试: content-source-sync.test.js, content-lifecycle.test.js
+│   ├── 然后看: src/content/content-source-view-switch-controller.js, src/content/content-source-partial-sync-guard.js, src/content/index.js
+│   ├── 测试: content-source-sync.test.js, content-source-view-switch-controller.test.js, content-source-partial-sync-guard.test.js, content-lifecycle.test.js
 │   └── 注意: aria-checked、折叠标签组、pending initial load 都要考虑
 ├── 新来源导入中不显示
 │   ├── 先看: src/content/source-descriptor-helpers.js
@@ -611,6 +670,12 @@ CI: .github/workflows/ci.yml
 │   ├── 测试: content-source-sync.test.js, content-source-actions.test.js
 │   └── 注意: 失败来源可能 disabled，但仍需要允许删除入口
 ├── 三点菜单定位/内容错
+│   ├── 先看: src/content/content-source-action-menu.js
+│   ├── 然后看: src/content/content-source-actions.js
+│   ├── 继续看: src/content/content-render.js
+│   ├── 测试: content-source-action-menu.test.js, content-source-actions.test.js
+│   └── 注意: 菜单 item 生成逻辑和原生 action 执行逻辑分开排查
+├── 三点菜单定位层错
 │   ├── 先看: src/content/content-source-actions.js
 │   ├── 然后看: src/content/content-render.js
 │   ├── 测试: content-source-actions.test.js
@@ -642,9 +707,9 @@ CI: .github/workflows/ci.yml
 │   └── 注意: 先看 size/count/depth/cycle 限制，再看 source remap
 ├── 原生标签导入不完整
 │   ├── 先看: src/content/content-native-label-import.js
-│   ├── 然后看: src/content/content-source-sync.js
-│   ├── 继续看: src/content/index.js, src/content/content-modals.js
-│   ├── 测试: content-source-sync.test.js, content-native-label-import.test.js, content-native-label-import-modal.test.js
+│   ├── 然后看: src/content/content-native-label-import-controller.js, src/content/content-source-sync.js
+│   ├── 继续看: src/content/index.js, src/content/content-modals.js, src/content/content-native-label-import-modal.js
+│   ├── 测试: content-source-sync.test.js, content-native-label-import.test.js, content-native-label-import-controller.test.js, content-native-label-import-modal.test.js
 │   └── 注意: preview 应尽量只读 DOM，必要展开后尝试恢复
 ├── 保存失败 / stale revision / quota
 │   ├── 先看: src/content/content-persistence.js
@@ -653,14 +718,19 @@ CI: .github/workflows/ci.yml
 │   └── 注意: 正常写入走 background；直接 storage 写只用于测试/降级路径
 ├── 开发者日志没记录
 │   ├── 先看: src/content/content-developer-logger.js
-│   ├── 然后看: src/background/index.js, src/content/content-modals.js
-│   ├── 测试: content-developer-logger.test.js
+│   ├── 然后看: src/content/content-diagnostics.js, src/background/index.js, src/content/content-modals.js
+│   ├── 测试: content-developer-logger.test.js, content-diagnostics.test.js
 │   └── 注意: 开关是全局 preference，日志是 per-notebook key
 ├── popup 按钮行为不对
 │   ├── 先看: src/popup/index.js
 │   ├── 然后看: src/background/index.js, src/content/content-message-router.js, src/content/index.js message handlers
 │   ├── 测试: popup.test.js, smoke
 │   └── 注意: popup 不是主 UI，只负责 launcher/control
+├── UI 规范和当前界面不一致
+│   ├── 先看: UI_GUIDELINES.md
+│   ├── 然后看: src/content/content-style-text.js, src/popup/styles.css, src/popup/popup.html
+│   ├── 测试: docs-only 时至少 git diff --check；若改运行 UI 再跑对应 unit/smoke
+│   └── 注意: UI_GUIDELINES.md 应描述当前实现事实；如果刻意改变视觉，再同步更新本目录和 changelog
 ├── 文案缺失
 │   ├── 先看: _locales/*/messages.json
 │   ├── 然后看: src/utils/index.js 的 getMessage 使用点
@@ -716,12 +786,20 @@ CI: .github/workflows/ci.yml
 │   └── 不记录来源标题、标签名、分组名、完整 URL、导入 JSON 原文或长 DOM text
 └── 变更流程
     ├── AGENTS.md 是仓库级 agent 指令入口；开始改动前应先读取
+    ├── 开工检查固定为 AGENTS.md、docs/PROJECT_DIRECTORY.md、CHANGELOG.md 顶部规范和 git status --short
     ├── CHANGELOG.md 是跟踪文件；项目规范要求每次有意义变更都同步更新
+    ├── 纯只读检查、状态报告或分析且没有文件改动时，不需要 changelog 条目
     ├── changelog 新改动默认写入顶部 Unreleased，发布时再移动到正式版本段
     ├── 每次更改都要检查 docs/PROJECT_DIRECTORY.md 是否需要同步更新
     ├── 结构、功能域、存储 key、测试入口、发布流程或维护规则变化时必须更新本文件
+    ├── 新增或移动 content helper 时同步 manifest.json、tests/helpers/load-content-module.js 和 tests/helpers/content-test-harness.js
+    ├── UI、布局、动效、popup 或 manager 视觉变更前必须读取 UI_GUIDELINES.md
     ├── docs-only 变更通常只需要 git diff --check 和链接检查
-    └── runtime 变更按风险跑对应 Jest，发布前跑完整验证
+    ├── content helper 变更至少跑 focused Jest 和 npm run test:unit
+    ├── runtime/manifest/storage/message/native automation 变更跑 npm run test:unit、npm run test:smoke、npm run package 和 git diff --check
+    ├── smoke 默认使用 headless 的 npm run test:smoke，只有明确交互调试时才使用 PLAYWRIGHT_HEADLESS=false
+    ├── 结束时说明工作区是否仍有未提交改动
+    └── 不在用户未明确要求时自动 commit 或 push
 ```
 
 ## 9. 相关文档树
@@ -729,11 +807,13 @@ CI: .github/workflows/ci.yml
 ```text
 文档入口
 ├── AGENTS.md
-│   └── 仓库级 agent 指令；要求每次变更同步检查 CHANGELOG、docs/PROJECT_DIRECTORY.md 和 changelog 写入规则
+│   └── 仓库级 agent 指令；要求每次变更同步检查 CHANGELOG、docs/PROJECT_DIRECTORY.md、content helper 装配、验证矩阵、NotebookLM 原生自动化安全和开发者日志脱敏规则
 ├── README.md
 │   └── 用户和开发者入口说明
 ├── PRIVACY.md
 │   └── 隐私说明
+├── UI_GUIDELINES.md
+│   └── 当前 UI 实现事实、UI 架构、样式 token、组件命名、动效和视觉约束；改 UI 前先读，改 UI 事实后同步更新
 ├── docs/SECURITY_THREAT_MODEL.md
 │   └── 威胁模型和安全边界
 ├── docs/DEVELOPER_LOGGING.md

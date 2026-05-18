@@ -120,11 +120,19 @@
         const createContentNativeLabelScan = typeof deps.createContentNativeLabelScan === 'function'
             ? deps.createContentNativeLabelScan
             : globalThis.NSM_CREATE_CONTENT_NATIVE_LABEL_SCAN;
+        const createContentSourcePartialSyncGuard = typeof deps.createContentSourcePartialSyncGuard === 'function'
+            ? deps.createContentSourcePartialSyncGuard
+            : globalThis.NSM_CREATE_CONTENT_SOURCE_PARTIAL_SYNC_GUARD;
         const sourceListScan = typeof createContentSourceListScan === 'function'
             ? createContentSourceListScan()
             : {};
         const nativeLabelScan = typeof createContentNativeLabelScan === 'function'
             ? createContentNativeLabelScan()
+            : {};
+        const sourcePartialSyncGuard = typeof createContentSourcePartialSyncGuard === 'function'
+            ? createContentSourcePartialSyncGuard({
+                resolveStoredSourceKeyWithReason
+            })
             : {};
         const getNativeCheckboxState = typeof sourceListScan.getNativeCheckboxState === 'function'
             ? sourceListScan.getNativeCheckboxState
@@ -135,6 +143,15 @@
         const parseNativeLabelSourceCount = typeof nativeLabelScan.parseNativeLabelSourceCount === 'function'
             ? nativeLabelScan.parseNativeLabelSourceCount
             : () => null;
+        const partialSyncHasPreviousRecord = typeof sourcePartialSyncGuard.hasPreviousRecordForCurrentSource === 'function'
+            ? sourcePartialSyncGuard.hasPreviousRecordForCurrentSource
+            : () => false;
+        const partialSyncShouldPreserveExistingSources = typeof sourcePartialSyncGuard.shouldPreserveExistingSourcesDuringPartialSync === 'function'
+            ? sourcePartialSyncGuard.shouldPreserveExistingSourcesDuringPartialSync
+            : () => false;
+        const partialSyncMarkTransientRawUrlImportSources = typeof sourcePartialSyncGuard.markTransientRawUrlImportSources === 'function'
+            ? sourcePartialSyncGuard.markTransientRawUrlImportSources
+            : () => 0;
 
         const ensureMap = (name) => {
             const current = runtime[name];
@@ -1997,102 +2014,17 @@
         }
 
         function shouldPreserveExistingSourcesDuringPartialSync(currentSources, sourceLookup, previousSourceRecordsByKey) {
-            if (!previousSourceRecordsByKey || typeof previousSourceRecordsByKey.forEach !== 'function') return false;
-            const previousCount = previousSourceRecordsByKey.size;
-            const currentCount = Array.isArray(currentSources) ? currentSources.length : 0;
-            if (previousCount === 0 || currentCount >= previousCount) return false;
-            if (currentCount === 0) return true;
-
-            const currentKeys = new Set((currentSources || []).map((source) => source.key).filter(Boolean));
-            if (currentKeys.size === 0) return true;
-
-            const missingPreviousKeys = [];
-            previousSourceRecordsByKey.forEach((sourceRecord, storedKey) => {
-                const resolution = resolveStoredSourceKeyWithReason(storedKey, sourceLookup, sourceRecord);
-                if (!resolution?.key || !currentKeys.has(resolution.key)) {
-                    missingPreviousKeys.push(resolution?.key || storedKey);
-                }
+            return partialSyncShouldPreserveExistingSources(currentSources, sourceLookup, previousSourceRecordsByKey, {
+                recentNativeDeletedSourceKeys: runtime.recentNativeDeletedSourceKeys
             });
-
-            if (missingPreviousKeys.length === 0) return false;
-
-            const recentNativeDeletedSourceKeys = runtime.recentNativeDeletedSourceKeys instanceof Set
-                ? runtime.recentNativeDeletedSourceKeys
-                : null;
-            if (
-                recentNativeDeletedSourceKeys &&
-                missingPreviousKeys.every((key) => recentNativeDeletedSourceKeys.has(key))
-            ) {
-                missingPreviousKeys.forEach((key) => recentNativeDeletedSourceKeys.delete(key));
-                return false;
-            }
-
-            return true;
         }
 
         function hasPreviousRecordForCurrentSource(source, sourceLookup, previousSourceRecordsByKey) {
-            if (!source?.key || !previousSourceRecordsByKey || typeof previousSourceRecordsByKey.forEach !== 'function') {
-                return false;
-            }
-            if (previousSourceRecordsByKey.has(source.key)) return true;
-
-            let matched = false;
-            previousSourceRecordsByKey.forEach((sourceRecord, storedKey) => {
-                if (matched) return;
-                const resolution = resolveStoredSourceKeyWithReason(storedKey, sourceLookup, sourceRecord);
-                if (resolution?.key === source.key) {
-                    matched = true;
-                }
-            });
-
-            return matched;
-        }
-
-        function isLikelyRawImportUrlTitle(value) {
-            const title = String(value || '').trim();
-            if (!/^https?:\/\//i.test(title) || /\s/.test(title)) return false;
-
-            try {
-                const parsedUrl = new URL(title);
-                return Boolean(
-                    ['http:', 'https:'].includes(parsedUrl.protocol) &&
-                    parsedUrl.hostname &&
-                    parsedUrl.hostname.includes('.')
-                );
-            } catch (error) {
-                return false;
-            }
+            return partialSyncHasPreviousRecord(source, sourceLookup, previousSourceRecordsByKey);
         }
 
         function markTransientRawUrlImportSources(currentSources, sourceLookup, previousSourceRecordsByKey) {
-            if (
-                !Array.isArray(currentSources) ||
-                !previousSourceRecordsByKey ||
-                typeof previousSourceRecordsByKey.forEach !== 'function' ||
-                previousSourceRecordsByKey.size === 0
-            ) {
-                return 0;
-            }
-
-            let markedCount = 0;
-            currentSources.forEach((source) => {
-                if (
-                    !source ||
-                    source.isLoading ||
-                    !source.key ||
-                    hasPreviousRecordForCurrentSource(source, sourceLookup, previousSourceRecordsByKey) ||
-                    !isLikelyRawImportUrlTitle(source.title)
-                ) {
-                    return;
-                }
-
-                source.isLoading = true;
-                source.isDisabled = true;
-                source.isFailed = false;
-                markedCount += 1;
-            });
-
-            return markedCount;
+            return partialSyncMarkTransientRawUrlImportSources(currentSources, sourceLookup, previousSourceRecordsByKey);
         }
 
         function mergeVisibleLoadingSourcesDuringPartialSync(currentSources, sourceLookup, previousSourceRecordsByKey, keyByElement) {
@@ -2178,6 +2110,83 @@
             return false;
         }
 
+        function collectRemovedNativeLabelSourceRows(node, rows, seenRows) {
+            if (!node || node.nodeType !== 1) return;
+            if (isLikelySourceRowElement(node) && !seenRows.has(node)) {
+                seenRows.add(node);
+                rows.push(node);
+            }
+            if (typeof node.querySelectorAll !== 'function') return;
+            LABEL_SOURCE_ROW_SELECTORS.forEach((selector) => {
+                try {
+                    node.querySelectorAll(selector).forEach((row) => {
+                        if (row && !seenRows.has(row)) {
+                            seenRows.add(row);
+                            rows.push(row);
+                        }
+                    });
+                } catch (error) {
+                    // Ignore selector failures from framework-owned detached nodes.
+                }
+            });
+        }
+
+        function captureRemovedNativeLabelSourceRows(mutations = []) {
+            if (runtime.sourceViewKind !== SOURCE_VIEW_KIND_LABEL && runtime.sourceViewInfo?.kind !== SOURCE_VIEW_KIND_LABEL) {
+                return false;
+            }
+            const sourcePanel = findSourcePanel();
+            if (!sourcePanel || !Array.isArray(mutations) || mutations.length === 0) return false;
+
+            const rows = [];
+            const seenRows = new Set();
+            mutations.forEach((mutation) => {
+                Array.from(mutation?.removedNodes || []).forEach((node) => {
+                    collectRemovedNativeLabelSourceRows(node, rows, seenRows);
+                });
+            });
+            if (rows.length === 0) return false;
+
+            const sourcesByKey = getSourcesByKey();
+            const state = getState();
+            const knownSourceRefs = new Set(Array.isArray(state.ungrouped) ? state.ungrouped : []);
+            getGroupsById().forEach((group) => {
+                collectSourceKeysFromGroup(group, getGroupsById(), knownSourceRefs);
+            });
+
+            let captured = false;
+            const seenSourceIds = new Map();
+            const seenLegacyKeys = new Map();
+            rows.forEach((row) => {
+                const nativeLabelTitle = findNativeLabelTitle(row, sourcePanel, {
+                    ignoreManagerSuppression: true,
+                    inferNativeLabelTitles: true
+                });
+                if (!nativeLabelTitle) return;
+                const descriptor = createSourceDescriptor(row, seenSourceIds, seenLegacyKeys);
+                if (!descriptor || isRecentlyNativeDeletedSource(descriptor)) return;
+
+                const previous = sourcesByKey.get(descriptor.key) || null;
+                const previousEnabled = previous ? Boolean(previous.enabled) : true;
+                const nativeCheckboxState = getNativeSourceCheckboxState(descriptor, previousEnabled);
+                sourcesByKey.set(descriptor.key, Object.assign({}, descriptor, {
+                    enabled: previous ? previousEnabled : nativeCheckboxState,
+                    nativeLabelTitle: previous?.nativeLabelTitle || nativeLabelTitle,
+                    sourceViewKind: SOURCE_VIEW_KIND_LABEL
+                }));
+                if (!knownSourceRefs.has(descriptor.key)) {
+                    state.ungrouped.push(descriptor.key);
+                    knownSourceRefs.add(descriptor.key);
+                }
+                captured = true;
+            });
+
+            if (captured) {
+                buildParentMap();
+            }
+            return captured;
+        }
+
         function scanAndSyncSources(loadedState, isFirstLoad = false, options = {}) {
             const sourcesByKey = getSourcesByKey();
             const sourceTagsById = getSourceTagsById();
@@ -2192,7 +2201,8 @@
                 sourcesByKey.forEach((source, key) => {
                     oldSourcesMap.set(key, {
                         enabled: source.enabled,
-                        nativeLabelTitle: source.nativeLabelTitle || ''
+                        nativeLabelTitle: source.nativeLabelTitle || '',
+                        addedAt: source.addedAt || ''
                     });
                 });
                 sourceTagsById.forEach((tagIds, key) => {
@@ -2243,7 +2253,8 @@
                 sourcesByKey.forEach((source, key) => {
                     oldSourcesMap.set(key, {
                         enabled: source.enabled,
-                        nativeLabelTitle: source.nativeLabelTitle || ''
+                        nativeLabelTitle: source.nativeLabelTitle || '',
+                        addedAt: source.addedAt || ''
                     });
                 });
             }
@@ -2324,7 +2335,8 @@
                     const existingSource = sourcesByKey.get(sourceKey);
                     oldSourcesMap.set(sourceKey, {
                         enabled: Boolean(sourceRecord.enabled),
-                        nativeLabelTitle: sourceRecord.nativeLabelTitle || existingSource?.nativeLabelTitle || ''
+                        nativeLabelTitle: sourceRecord.nativeLabelTitle || existingSource?.nativeLabelTitle || '',
+                        addedAt: sourceRecord.addedAt || existingSource?.addedAt || ''
                     });
                 });
                 oldSourceTags.clear();
@@ -2337,13 +2349,17 @@
             currentSources.forEach((source) => {
                 let enabled;
                 const previousSourceState = oldSourcesMap.get(source.key) || null;
+                const resolvedSourceState = isFirstLoad ? (resolvedSourceStateById.get(source.key) || null) : null;
                 const previousEnabled = previousSourceState ? Boolean(previousSourceState.enabled) : true;
                 const nativeCheckboxState = getNativeSourceCheckboxState(source, previousEnabled);
                 const nativeLabelTitle = source.nativeLabelTitle || previousSourceState?.nativeLabelTitle || '';
                 const nativeLabelGroupSelection = nativeLabelGroupSelections.get(getComparableNativeLabelTitle(nativeLabelTitle));
+                const addedAt = isFirstLoad
+                    ? (resolvedSourceStateById.has(source.key) ? (resolvedSourceState?.addedAt || '') : new Date().toISOString())
+                    : (oldSourcesMap.has(source.key) ? (previousSourceState?.addedAt || '') : new Date().toISOString());
                 if (isFirstLoad) {
                     enabled = resolvedSourceStateById.has(source.key)
-                        ? Boolean(resolvedSourceStateById.get(source.key).enabled)
+                        ? Boolean(resolvedSourceState.enabled)
                         : nativeCheckboxState;
                 } else if (source.sourceViewKind === SOURCE_VIEW_KIND_LABEL && nativeLabelGroupSelection) {
                     enabled = Boolean(nativeLabelGroupSelection.enabled);
@@ -2358,7 +2374,8 @@
                 const hydratedSource = {
                     ...source,
                     enabled,
-                    nativeLabelTitle
+                    nativeLabelTitle,
+                    addedAt
                 };
 
                 sourcesByKey.set(source.key, hydratedSource);
@@ -2629,6 +2646,7 @@
 
         function handleDomChanges(mutations) {
             try {
+                captureRemovedNativeLabelSourceRows(Array.from(mutations || []));
                 let needsReSync = false;
                 let needsCriticalSave = false;
                 for (const mutation of mutations) {

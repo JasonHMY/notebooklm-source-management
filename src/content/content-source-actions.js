@@ -69,6 +69,29 @@
         const recordNativeActionFailure = typeof deps.recordNativeActionFailure === 'function'
             ? deps.recordNativeActionFailure
             : () => {};
+        const createContentSourceActionMenu = typeof deps.createContentSourceActionMenu === 'function'
+            ? deps.createContentSourceActionMenu
+            : globalThis.NSM_CREATE_CONTENT_SOURCE_ACTION_MENU;
+        const sourceActionMenu = typeof createContentSourceActionMenu === 'function'
+            ? createContentSourceActionMenu({
+                getState,
+                getSourcesByKey,
+                getMessage,
+                canMoveSourceToUngrouped
+            })
+            : {};
+        const menuCanOpenSourceActionMenu = typeof sourceActionMenu.canOpenSourceActionMenu === 'function'
+            ? sourceActionMenu.canOpenSourceActionMenu
+            : null;
+        const menuCreateNativeActionResult = typeof sourceActionMenu.createNativeActionResult === 'function'
+            ? sourceActionMenu.createNativeActionResult
+            : null;
+        const menuGetSourceActionMenuItems = typeof sourceActionMenu.getSourceActionMenuItems === 'function'
+            ? sourceActionMenu.getSourceActionMenuItems
+            : null;
+        const menuGetSourceActionSubmenuItems = typeof sourceActionMenu.getSourceActionSubmenuItems === 'function'
+            ? sourceActionMenu.getSourceActionSubmenuItems
+            : null;
         const findElement = typeof deps.findElement === 'function'
             ? deps.findElement
             : (selectors, parent) => {
@@ -150,14 +173,14 @@
         };
 
         function canOpenSourceActionMenu(source) {
-            const state = getState() || {};
-            if (!source || state.isBatchMode || source.isLoading) return false;
-            if (source.isFailed) return true;
-            return !source.isDisabled;
+            if (menuCanOpenSourceActionMenu) return menuCanOpenSourceActionMenu(source);
+            return Boolean(source && !source.isDisabled && !source.isLoading);
         }
 
         function createNativeActionResult(ok, reason = '') {
-            return ok ? { ok: true } : { ok: false, reason: reason || 'native_action_error' };
+            return menuCreateNativeActionResult
+                ? menuCreateNativeActionResult(ok, reason)
+                : (ok ? { ok: true } : { ok: false, reason: reason || 'native_action_error' });
         }
 
         function markNativeSourceDeleted(sourceKey) {
@@ -231,66 +254,13 @@
         }
 
         function getSourceActionMenuItems(sourceKey) {
-            const source = sourceKey ? getSourcesByKey().get(sourceKey) : null;
-            if (!source || !canOpenSourceActionMenu(source)) return [];
-
-            if (source.isFailed) {
-                return [
-                    {
-                        action: 'delete-source',
-                        kind: 'action',
-                        icon: 'delete',
-                        label: getMessage('ui_delete_failed_source')
-                    }
-                ];
-            }
-
-            return [
-                {
-                    action: 'view-source-details',
-                    kind: 'action',
-                    icon: 'description',
-                    label: getMessage('ui_view_source_details')
-                },
-                {
-                    action: 'rename-source',
-                    kind: 'action',
-                    icon: 'edit',
-                    label: getMessage('ui_rename_source')
-                },
-                {
-                    action: 'tags',
-                    kind: 'action',
-                    icon: 'sell',
-                    label: getMessage('ui_edit_tags')
-                },
-                {
-                    action: 'move',
-                    kind: 'action',
-                    icon: 'drive_file_move',
-                    label: getMessage('ui_move_to_folder')
-                },
-                {
-                    action: 'move-ungrouped',
-                    kind: 'action',
-                    icon: 'drive_file_move_rtl',
-                    label: getMessage('ui_move_to_ungrouped'),
-                    disabled: !canMoveSourceToUngrouped(sourceKey)
-                },
-                {
-                    action: 'delete-source',
-                    kind: 'action',
-                    icon: 'delete',
-                    label: getMessage('ui_delete_source')
-                }
-            ];
+            return menuGetSourceActionMenuItems ? menuGetSourceActionMenuItems(sourceKey) : [];
         }
 
         function getSourceActionSubmenuItems(sourceKey, submenuAction) {
-            const parentItem = getSourceActionMenuItems(sourceKey).find((item) => (
-                item.kind === 'submenu' && item.action === submenuAction
-            ));
-            return Array.isArray(parentItem?.children) ? parentItem.children : [];
+            return menuGetSourceActionSubmenuItems
+                ? menuGetSourceActionSubmenuItems(sourceKey, submenuAction)
+                : [];
         }
 
         function getSourceActionMenuHeight(menuItemCount = 0) {

@@ -424,6 +424,7 @@
                     stableToken: source.stableToken || '',
                     fingerprint: source.fingerprint || '',
                     identityType: source.identityType || 'fingerprint',
+                    addedAt: source.addedAt || '',
                     element: source.element || null,
                     domIndex
                 });

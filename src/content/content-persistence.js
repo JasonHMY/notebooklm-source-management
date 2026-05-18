@@ -33,6 +33,9 @@
         const getMessage = typeof ctx.getMessage === 'function' ? ctx.getMessage : (key) => key;
         const showToast = typeof ctx.showToast === 'function' ? ctx.showToast : () => {};
         const developerLog = typeof ctx.developerLog === 'function' ? ctx.developerLog : () => false;
+        const getHistoryRetentionLimit = typeof ctx.getHistoryRetentionLimit === 'function'
+            ? ctx.getHistoryRetentionLimit
+            : () => 20;
         const onSaveStatusChange = typeof ctx.onSaveStatusChange === 'function'
             ? ctx.onSaveStatusChange
             : () => {};
@@ -81,6 +84,10 @@
             }
             return false;
         };
+
+        const normalizeSourceViewDisplayKind = (value) => (
+            value === 'label' || value === 'list' ? value : ''
+        );
 
         const ensureStorageState = () => {
             if (typeof ctx.pendingStorageUpgrade !== 'boolean') {
@@ -557,9 +564,8 @@
 
         function normalizeStateHistoryEntries(entries) {
             const list = Array.isArray(entries) ? entries : [];
-            return list
+            return trimStateHistoryEntries(list
                 .filter((entry) => entry && typeof entry === 'object' && entry.snapshot && hasPersistableManagerState(entry.snapshot))
-                .slice(0, 5)
                 .map((entry) => ({
                     id: typeof entry.id === 'string' && entry.id ? entry.id : `history-${Date.now()}-${Math.random()}`,
                     createdAt: typeof entry.createdAt === 'string' ? entry.createdAt : '',
@@ -568,8 +574,10 @@
                     groupCount: Number(entry.groupCount) || getPersistableStateCounts(entry.snapshot).groupCount,
                     tagCount: Number(entry.tagCount) || getPersistableStateCounts(entry.snapshot).tagCount,
                     saveRevision: getSnapshotSaveRevision(entry.snapshot) || Number(entry.saveRevision) || 0,
+                    label: typeof entry.label === 'string' ? entry.label.slice(0, 48) : '',
+                    manual: Boolean(entry.manual),
                     snapshot: cloneSerializableData(entry.snapshot)
-                }));
+                })));
         }
 
         function setStateHistoryEntries(entries) {
@@ -625,13 +633,35 @@
             });
         }
 
-        function appendStateHistorySnapshot(snapshot = buildPersistableState(), reason = 'manual') {
+        function normalizeHistoryRetentionLimit(value) {
+            const limit = Number(value);
+            return limit === 20 || limit === 50 || limit === 100 ? limit : 20;
+        }
+
+        function trimStateHistoryEntries(entries) {
+            const limit = normalizeHistoryRetentionLimit(getHistoryRetentionLimit());
+            const normalizedEntries = Array.isArray(entries) ? entries : [];
+            if (normalizedEntries.length <= limit) return normalizedEntries;
+            const manualEntries = normalizedEntries.filter((entry) => entry?.manual);
+            if (manualEntries.length >= limit) return manualEntries.slice(0, limit);
+            let automaticCount = 0;
+            const automaticLimit = limit - manualEntries.length;
+            return normalizedEntries.filter((entry) => {
+                if (entry?.manual) return true;
+                if (automaticCount >= automaticLimit) return false;
+                automaticCount += 1;
+                return true;
+            });
+        }
+
+        function appendStateHistorySnapshot(snapshot = buildPersistableState(), reason = 'manual', options = {}) {
             if (!ctx.projectId || !hasPersistableManagerState(snapshot)) {
                 return Promise.resolve(getStateHistoryEntries());
             }
 
             const key = getStateHistoryKey();
             const payloadSnapshot = cloneSerializableData(snapshot);
+            const normalizedOptions = options && typeof options === 'object' ? options : {};
             const counts = getPersistableStateCounts(payloadSnapshot);
             const entry = {
                 id: `${ctx.projectId}:${Date.now()}`,
@@ -641,6 +671,8 @@
                 groupCount: counts.groupCount,
                 tagCount: counts.tagCount,
                 saveRevision: getSnapshotSaveRevision(payloadSnapshot),
+                label: typeof normalizedOptions.label === 'string' ? normalizedOptions.label.slice(0, 48) : '',
+                manual: Boolean(normalizedOptions.manual),
                 snapshot: payloadSnapshot
             };
             developerLog('info', 'persistence', 'history_snapshot_append_requested', {
@@ -670,13 +702,14 @@
                             ...existingEntries.filter((item) => (
                                 getStateHistorySnapshotSignature(item.snapshot) !== nextSignature
                             ))
-                        ].slice(0, 5);
-                        chromeApi.storage.local.set({ [key]: nextEntries }, () => {
+                        ];
+                        const trimmedEntries = trimStateHistoryEntries(nextEntries);
+                        chromeApi.storage.local.set({ [key]: trimmedEntries }, () => {
                             if (chromeApi.runtime?.lastError) {
                                 resolve(getStateHistoryEntries());
                                 return;
                             }
-                            resolve(setStateHistoryEntries(nextEntries));
+                            resolve(setStateHistoryEntries(trimmedEntries));
                         });
                     });
                 } catch (error) {
@@ -1204,6 +1237,9 @@
                 if (source.nativeLabelTitle) {
                     sourceRecord.nativeLabelTitle = source.nativeLabelTitle;
                 }
+                if (source.addedAt) {
+                    sourceRecord.addedAt = source.addedAt;
+                }
                 sourceStateById[sourceKey] = sourceRecord;
 
                 const tagIds = getSourceTagIds(sourceKey);
@@ -1212,7 +1248,7 @@
                 }
             });
 
-            return {
+            const persistableState = {
                 schemaVersion: storageSchemaVersion,
                 groups: Array.isArray(state.groups) ? state.groups : [],
                 groupsById: Object.fromEntries(groupsById),
@@ -1227,6 +1263,9 @@
                 tagOrder: Array.isArray(state.tagOrder) ? state.tagOrder.filter((tagId) => hasMapLikeKey(tagsById, tagId)) : [],
                 sourceTagsById: persistedSourceTagsById
             };
+            const sourceViewDisplayKind = normalizeSourceViewDisplayKind(ctx.sourceViewDisplayKind) || 'list';
+            persistableState.sourceViewDisplayKind = sourceViewDisplayKind;
+            return persistableState;
         }
 
         function getBestPersistableSnapshot() {
@@ -1284,10 +1323,11 @@
         function normalizeLoadedState(stateData) {
             if (!stateData || typeof stateData !== 'object') return null;
             rememberSnapshotSaveRevision(stateData);
+            const sourceViewDisplayKind = normalizeSourceViewDisplayKind(stateData.sourceViewDisplayKind);
 
             if (stateData.schemaVersion === storageSchemaVersion) {
                 ctx.pendingStorageUpgrade = Boolean(ctx.pendingStructuralStateRepair);
-                return {
+                const normalizedState = {
                     schemaVersion: storageSchemaVersion,
                     groups: Array.isArray(stateData.groups) ? stateData.groups : [],
                     groupsById: stateData.groupsById || {},
@@ -1298,9 +1338,31 @@
                     tagOrder: Array.isArray(stateData.tagOrder) ? stateData.tagOrder : [],
                     sourceTagsById: stateData.sourceTagsById || {}
                 };
+                if (sourceViewDisplayKind) {
+                    normalizedState.sourceViewDisplayKind = sourceViewDisplayKind;
+                }
+                return normalizedState;
             }
 
             ctx.pendingStorageUpgrade = true;
+            if (stateData.schemaVersion === 3) {
+                const normalizedState = {
+                    schemaVersion: 3,
+                    groups: Array.isArray(stateData.groups) ? stateData.groups : [],
+                    groupsById: stateData.groupsById || {},
+                    ungrouped: Array.isArray(stateData.ungrouped) ? stateData.ungrouped : [],
+                    sourceStateById: stateData.sourceStateById || {},
+                    customHeight: stateData.customHeight ?? null,
+                    tagsById: stateData.tagsById || {},
+                    tagOrder: Array.isArray(stateData.tagOrder) ? stateData.tagOrder : [],
+                    sourceTagsById: stateData.sourceTagsById || {}
+                };
+                if (sourceViewDisplayKind) {
+                    normalizedState.sourceViewDisplayKind = sourceViewDisplayKind;
+                }
+                return normalizedState;
+            }
+
             if (stateData.schemaVersion === 2) {
                 return {
                     schemaVersion: 2,
@@ -1588,6 +1650,11 @@
         }
 
         function restoreInitialLoadedState(loadedState) {
+            if (!hasPersistableManagerState(loadedState) && hasPersistableManagerState(buildPersistableState())) {
+                ctx.pendingInitialLoadedState = null;
+                return { deferred: false, shouldUpgradeStorage: false };
+            }
+
             if (shouldDeferInitialRestore(loadedState)) {
                 ctx.pendingInitialLoadedState = loadedState;
                 restorePersistedSnapshotWithoutDom(loadedState);

@@ -779,9 +779,14 @@
         const stableToken = extractSourceStableToken(sourceElement);
         const hasProcessingSignal = hasSourceProcessingSignal(sourceElement);
         const hasFailureSignal = hasSourceFailureSignal(sourceElement);
+        const normalizedTitle = normalizeSourceText(title);
+        const normalizedAriaLabel = normalizeSourceText(ariaLabel);
+        const fingerprintAriaLabel = normalizedAriaLabel && normalizedAriaLabel !== normalizedTitle
+            ? normalizedAriaLabel
+            : '';
         const fingerprint = [
-            normalizeSourceText(title),
-            normalizeSourceText(ariaLabel),
+            normalizedTitle,
+            fingerprintAriaLabel,
             normalizeSourceText(iconName)
         ].join('|');
 
@@ -792,7 +797,7 @@
             iconEl,
             iconName,
             title,
-            normalizedTitle: normalizeSourceText(title),
+            normalizedTitle,
             ariaLabel,
             stableToken,
             fingerprint,

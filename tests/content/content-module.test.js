@@ -73,15 +73,24 @@ describe('content stylesheet native source list visibility', () => {
 });
 
 describe('manifest web accessible resources', () => {
-    it('exposes the local Google Symbols font only to NotebookLM pages', () => {
+    it('exposes the local Google Symbols font and locale catalogs only to NotebookLM pages', () => {
         const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '../../manifest.json'), 'utf8'));
         const fontPath = 'src/assets/fonts/google-symbols.woff2';
         const fontResource = (manifest.web_accessible_resources || [])
             .find((entry) => Array.isArray(entry.resources) && entry.resources.includes(fontPath));
+        const expectedResources = [
+            fontPath,
+            '_locales/en/messages.json',
+            '_locales/es/messages.json',
+            '_locales/zh_CN/messages.json',
+        ];
 
         expect(fs.existsSync(path.join(__dirname, '../../', fontPath))).toBe(true);
+        expectedResources.forEach((resourcePath) => {
+            expect(fs.existsSync(path.join(__dirname, '../../', resourcePath))).toBe(true);
+        });
         expect(fontResource).toBeTruthy();
-        expect(fontResource.resources).toEqual([fontPath]);
+        expect(fontResource.resources).toEqual(expectedResources);
         expect(fontResource.matches).toEqual(['https://notebooklm.google.com/*']);
         expect(manifest.permissions).toEqual(['storage', 'tabs']);
     });

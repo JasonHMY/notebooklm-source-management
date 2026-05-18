@@ -1,7 +1,7 @@
 # NotebookLM Source Management
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-2.7.2-green.svg)
+![Version](https://img.shields.io/badge/version-2.7.4-green.svg)
 
 A Chrome extension that makes source management inside Google NotebookLM less awkward.
 
@@ -19,10 +19,13 @@ It runs directly inside NotebookLM's source panel. The toolbar icon is only a la
 - Delete multiple sources at once through NotebookLM's native delete confirmation flow.
 - Open source details, rename sources, and delete sources from a single plugin menu.
 - Undo recent plugin-side organization changes with `Command+Z` on macOS or `Ctrl+Z` on Windows/Linux.
+- Show a one-time welcome panel with a feedback shortcut the first time the in-page manager loads.
+- Show a one-time What's New panel for larger feature updates.
 - Export and import a notebook's organization config from the settings panel.
+- Configure local version-history retention and create named restore points before risky changes.
 - Open the Chrome Web Store feedback page from settings, with an optional diagnostics copy step for bug reports.
 - Turn the in-page manager on or off from the toolbar popup without deleting saved data.
-- Switch between English, Spanish, and Simplified Chinese.
+- Switch manually between Auto, English, Spanish, and Simplified Chinese.
 - Use local icon font assets instead of depending on remote Google Symbols font loading.
 
 If one of your notebooks has started to fill up with PDFs, links, and uploads, this extension is meant to make that list easier to work with.
@@ -54,12 +57,13 @@ Use these commands when you want to verify the repository without doing a full m
 - `npm run playwright:install` installs the Chromium browser used by Playwright smoke.
 - `npm run package` creates the Chrome Web Store zip and validates its contents.
 
-The current Playwright smoke coverage is intentionally small:
+The Playwright smoke suite covers the core extension surfaces and the higher-risk NotebookLM DOM regressions, including:
 
-- extension popup shell renders without startup errors
-- unpacked extension loads and injects the manager into a NotebookLM-style fixture
-- `GET_MANAGER_STATUS` and `FOCUS_MANAGER` work across the extension message bridge
-- same-tab notebook route switches reattach the manager without a full reload
+- extension popup shell startup and manager injection into a NotebookLM-style fixture
+- content/background/popup message bridge paths such as `GET_MANAGER_STATUS`, `FOCUS_MANAGER`, and source-view switching
+- developer-mode log sanitization and disabled-mode behavior
+- label/list view state sync, collapsed native label import, and fallback source-view behavior
+- route reattachment, hard reload recovery, import backup restore, hostile metadata rendering, blocked third-party icons, and stale-save rejection
 
 ## Permissions
 

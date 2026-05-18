@@ -636,15 +636,18 @@
         }
 
         function patchChildren(target, sourceFragment) {
-            const targetChildren = Array.from(target.childNodes);
-            const sourceChildren = Array.from(sourceFragment.childNodes);
+            if (!target || !sourceFragment || typeof target.appendChild !== 'function') return;
+            const targetChildren = Array.from(target.childNodes || []);
+            const sourceChildren = Array.from(sourceFragment.childNodes || []);
             const maxLength = Math.max(targetChildren.length, sourceChildren.length);
 
             for (let i = 0; i < maxLength; i++) {
                 if (i >= targetChildren.length) {
                     target.appendChild(sourceChildren[i].cloneNode(true));
                 } else if (i >= sourceChildren.length) {
-                    target.removeChild(targetChildren[i]);
+                    if (typeof target.removeChild === 'function') {
+                        target.removeChild(targetChildren[i]);
+                    }
                 } else {
                     patchNode(targetChildren[i], sourceChildren[i]);
                 }
@@ -716,6 +719,41 @@
                     handleInteraction(event);
                 };
             }
+        }
+
+        function renderQuickViewRail() {
+            const shadowRoot = getShadowRoot();
+            const container = shadowRoot?.getElementById?.('sp-quick-view-rail');
+            if (!container) return;
+
+            const doc = getDocument();
+            const fragment = doc ? doc.createDocumentFragment() : null;
+            if (!fragment) return;
+
+            const state = getState() || {};
+            const activeQuickViewKind = String(state.activeQuickViewKind || '');
+            const hasActiveTag = Boolean(state.activeTagId);
+            [
+                ['all', 'ui_quick_view_all'],
+                ['ungrouped', 'ui_quick_view_ungrouped'],
+                ['disabled', 'ui_quick_view_disabled'],
+                ['tag', 'ui_quick_view_tag'],
+                ['recent', 'ui_quick_view_recent'],
+                ['issues', 'ui_quick_view_issues']
+            ].forEach(([kind, labelKey]) => {
+                const active = kind === 'all'
+                    ? !activeQuickViewKind && !hasActiveTag
+                    : (kind === 'tag' ? hasActiveTag : activeQuickViewKind === kind);
+                fragment.appendChild(el('button', {
+                    type: 'button',
+                    className: 'sp-quick-view-btn sp-glare-hover' + (active ? ' is-active' : ''),
+                    dataset: { quickViewKind: kind },
+                    'aria-pressed': active ? 'true' : 'false',
+                    title: getMessage(labelKey)
+                }, [getMessage(labelKey)]));
+            });
+
+            patchChildren(container, fragment);
         }
 
         function setContainerNativeLabelViewMode(container, enabled) {
@@ -1126,6 +1164,7 @@
             bindSpotlightPointerTracking(listContainer);
             syncActiveSourceActionMenuState();
             syncSearchUi();
+            renderQuickViewRail();
 
             const doc = getDocument();
             if (!doc) return;
@@ -1438,6 +1477,7 @@
             getGroupEffectiveState,
             patchNode,
             patchChildren,
+            renderQuickViewRail,
             renderViewStateBar,
             getSourceActionMenuLayer,
             renderSourceActionMenuLayer,

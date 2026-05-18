@@ -95,10 +95,12 @@ Relevant files:
 
 Popup characteristics:
 
-- Fixed-width launcher layout
+- Fixed-width launcher/status layout
 - One primary CTA
+- Enable/disable switch for the extension runtime state
+- Source view segmented control when a NotebookLM notebook tab is active
 - Status copy driven by current tab context
-- No dark mode-specific popup theme yet
+- Tokenized light and dark themes using `prefers-color-scheme`
 
 ## 3. Naming and Structure Rules
 
@@ -239,11 +241,12 @@ The current UI consistently uses a small set of radius values.
 Canonical radius scale:
 
 - `3px`: resizer bar
+- `4px`: source icon images copied from NotebookLM or extension assets
 - `6px`: checkbox, tree border tail
-- `8px`: source rows, small utility buttons, popup icon corner family starts higher
+- `8px`: source rows, small utility buttons, popup segmented-control container
 - `10px`: option rows, tag inputs, tag row buttons
-- `12px`: standard button, icon action button, badges, toasts
-- `14px`: banners, popup notes, popup CTA, action menus
+- `12px`: standard button, icon action button, badges, toasts, popup cards, popup CTA
+- `14px`: banners, action menus
 - `16px`: modal shell, batch action bar
 - `18px`: toggle track
 - `999px`: pills
@@ -265,10 +268,9 @@ Content panel typography:
 
 Popup typography:
 
-- `12px`: eyebrow
-- `13px`: note/detail
-- `14px`: body and button
-- `20px`: title
+- `12px`: eyebrow, popup labels, segmented source-view buttons, helper copy, note/detail
+- `13px`: body, toggle state, primary CTA
+- `18px`: title
 
 Rules:
 
@@ -292,34 +294,47 @@ Rules:
 
 ## 5.7 Motion system
 
-Primary easing:
+The current content panel and popup use a shared three-curve motion system.
 
-- `cubic-bezier(0.25, 1, 0.5, 1)`
+Easing tokens:
 
-Use this as the default for:
+- `--sp-ease-standard` / `--popup-ease-standard`: `cubic-bezier(0.2, 0.8, 0.2, 1)`
+- `--sp-ease-emphasized` / `--popup-ease-emphasized`: `cubic-bezier(0.2, 0.9, 0.25, 1)`
+- `--sp-ease-press` / `--popup-ease-press`: `cubic-bezier(0.25, 1, 0.5, 1)`
+
+Use `standard` for:
 
 - Hover transitions
+- Color and border changes
+- Small opacity changes
+
+Use `emphasized` for:
+
 - Collapse/expand
 - Reveal/hide
-- Scale feedback
 - Toast motion
 - Modal motion
+- List entry animation
 
-Current duration tiers:
+Use `press` for:
 
-- `160ms`: popup button hover/press
-- `0.18s` to `0.2s`: micro interactions and opacity
-- `0.25s` to `0.26s`: reveal/hide and search expand mechanics
-- `0.3s`: standard content-panel motion
-- `0.35s`: focus ring / container lift
-- `0.4s`: modal polish and folder-entry animation
+- Button press/release scale feedback
+- Checkbox checkmark drawing
+- Small tactile icon feedback
+
+Current duration tokens:
+
+- `120ms`: quick press and icon feedback
+- `180ms`: base hover, border, background, and opacity feedback
+- `240ms`: medium reveal, list entry, and checkbox feedback
+- `320ms`: slower modal, shell, and route-level transitions
 
 Rules:
 
-- Use `0.2s` for small control feedback.
-- Use `0.3s` for row, list, menu, and toast interactions.
-- Use `0.4s` only for modal or entry/exit emphasis.
-- Avoid mixing random easings like `ease-in-out`, `linear`, or spring-like curves unless the effect truly needs it.
+- Use the motion tokens instead of raw durations for new UI.
+- Use `standard` for most state changes, `emphasized` for reveal/entry, and `press` for tactile scale.
+- Avoid raw `ease-in-out` or ad hoc cubic curves.
+- `linear` is allowed for true continuous indicators such as spinners and progress loops.
 
 ## 5.8 Z-index layers
 
@@ -405,6 +420,26 @@ Rules:
 
 - Any future inline filter should visually integrate with this expandable-search model.
 - Do not add a second unrelated search field elsewhere in the panel.
+
+### 7.3 Quick view rail
+
+The compact quick view rail lives directly below the toolbar as `.sp-quick-view-rail`.
+
+Current built-in views:
+
+- All
+- Ungrouped
+- Disabled
+- Tag
+- Recent
+- Issues
+
+Rules:
+
+- Quick view pills use existing `--sp-*` tokens, small type, and accent active state.
+- Quick view state is session-only except for source metadata required to support it, such as `sourceStateById[sourceKey].addedAt`.
+- Choosing a quick view must not clear the search query; it may clear other view-level state such as folder isolation or tag quick filter to keep the result set understandable.
+- Do not turn this rail into user-defined saved views until a separate design handles naming, persistence, and conflict behavior.
 
 ## 8. Buttons
 
@@ -501,15 +536,17 @@ Rules:
 Popup uses a separate CTA style:
 
 - Full width
-- Radius `14px`
-- Blue gradient fill
-- Stronger shadow
-- Hover: `translateY(-1px)`
-- Disabled: lower opacity and flatter shadow
+- Min height `42px`
+- Radius `12px`
+- Solid accent fill from `--popup-accent`
+- Action shadow from `--popup-shadow-action`
+- Hover: accent hover color + `scale(1.02)`
+- Active: accent active color + `scale(0.98)`
+- Disabled: wait cursor, reduced opacity, no transform
 
 Rules:
 
-- Popup CTA is the only clearly promotional/branded button style in the project.
+- Popup CTA is the only strong branded button style in the project.
 - Do not reuse popup button styling inside the content panel.
 
 ## 9. Selection Controls
@@ -527,9 +564,8 @@ Canonical style:
 Feedback:
 
 - Hover: accent border + `scale(1.05)`
-- Active selection animation:
-  - spring on box
-  - delayed organic checkmark draw
+- Direct user selection can use the `.is-animating` organic checkmark draw.
+- Programmatic sync and batch selection should use the default state transition without replaying the pop animation.
 
 Rules:
 
@@ -564,8 +600,10 @@ Class: `.source-item`
 
 Canonical layout:
 
-- Horizontal flex row
+- CSS grid row
+- Columns: `18px 24px minmax(0, 1fr) auto`
 - Padding left `12px`
+- Column gap `8px`
 - Vertical rhythm with `2px` gaps between rows
 - Final radius `8px`
 - Border kept transparent until needed
@@ -573,14 +611,14 @@ Canonical layout:
 Structure:
 
 1. Icon
-2. Optional source action trigger
-3. Title and tags
-4. Right-side checkbox
+2. Source action trigger or stable placeholder
+3. Title, loading status, and tags
+4. Right-side checkbox or batch checkbox
 
 Feedback:
 
-- Hover: `scale(1.015)`, background hover tint, hover shadow, elevated z-index
-- Active: `scale(1.008)`
+- Hover: `scale(1.01)`, background hover tint, hover shadow, elevated z-index
+- Active: `scale(0.995)`
 - Hover should feel lifted, not shoved sideways
 
 State variants:
@@ -658,14 +696,16 @@ Classes:
 Canonical behavior:
 
 - Default text size `13px`
-- Tight letter spacing
-- Two-line clamp for title text
+- Compact letter spacing that matches the current row density
+- Flexible wrapping with `overflow-wrap: anywhere` and `word-break: break-word`
+- Long URL or importing-source titles may occupy more than two lines to preserve the real source identity
 - Keep metadata below or beside the title, not mixed into the same line
 
 Rules:
 
 - New source metadata should sit below the main title if it can wrap.
-- Do not exceed two lines for row titles without a very good reason.
+- Do not reintroduce layouts that force long source titles into one-character columns.
+- If a future design clamps titles again, it must preserve a reliable way to inspect the full title.
 
 ## 11.2 Tag pills
 
@@ -778,6 +818,7 @@ Canonical style:
 - Radius `16px`
 - Frosted glass effect
 - Dark-mode adjusted background and border
+- Same system font stack as `.sp-container`; modal nodes mount outside the container and must not inherit NotebookLM page typography.
 
 Motion:
 
@@ -790,6 +831,31 @@ Rules:
 - New panel-owned modal dialogs should reuse this shell.
 - Footer actions should be right-aligned.
 - Backdrop click may dismiss only when safe.
+
+Welcome onboarding:
+
+- `.sp-welcome-modal` is a first-run modal built on the same shell.
+- It uses existing `--sp-*` color, border, shadow, radius, and motion tokens so light and dark mode stay aligned with the panel.
+- The top-right close button, primary action, backdrop click, and Escape key should all dismiss the modal and mark the current onboarding version as seen.
+- The feedback button should reuse the existing Chrome Web Store feedback message path instead of adding another feedback destination.
+
+What's New:
+
+- `.sp-whats-new-modal` reuses the welcome modal layout and feature-row density.
+- It should appear only for intentionally enabled update-introduction versions, not for every release.
+- Developer preview entry points may open it without marking the current update version as seen.
+
+Settings preferences:
+
+- Lightweight preferences such as language and history retention should use `.sp-settings-preference-row` with a compact native `select`.
+- Keep preference copy short and functional; do not add explanatory cards inside settings sections.
+
+Command palette:
+
+- `.sp-command-palette-modal` uses the same modal shell and focus trap.
+- It is opened from the toolbar button only; no global keyboard shortcut is enabled in the first version.
+- Commands should bridge to existing manager actions instead of duplicating business logic.
+- Batch commands must remain disabled until batch mode has selected sources.
 
 ## 12.3 Option lists inside modals
 
@@ -892,18 +958,22 @@ The popup is intentionally simpler and more branded than the content panel.
 
 Canonical popup traits:
 
-- Width `340px`
-- Internal padding `20px`
-- Soft blue gradient page background
-- Icon with strong shadow
-- Uppercase eyebrow
+- Width `360px`
+- Internal padding `18px`
+- Neutral tokenized page background: `--popup-page-bg`
+- Tokenized light and dark theme surfaces
+- Pill eyebrow badge
 - Clear title/body/note hierarchy
 - One strong full-width CTA
+- Runtime enable/disable switch
+- Notebook source-view segmented control when applicable
 
 Popup status blocks:
 
 - `.popup-note`: neutral helper surface
 - `.popup-detail`: warning/detail surface
+- `.popup-toggle`: extension enabled/disabled state surface
+- `.popup-source-view`: list/label source-view segmented control
 
 Rules:
 
@@ -1068,7 +1138,7 @@ This section is not mandatory for feature work, but it is worth doing over time.
 2. Consolidate duplicate selectors in `src/content/content-style-text.js`.
 3. Introduce explicit token names for typography and spacing if the system grows.
 4. Consider replacing the inline folder emoji in group titles with a formal icon element for stricter consistency.
-5. Add a popup dark theme if popup usage grows.
+5. Keep popup and content-panel motion tokens aligned if either surface changes.
 
 ## 22. Canonical File Map
 
@@ -1078,14 +1148,25 @@ Use this map when updating UI.
 - `src/content/content-template.js`: shell structure
 - `src/content/content-panel-dom.js`: source panel lookup, renderability, lifecycle scheduling helpers
 - `src/content/content-source-actions.js`: source action menu state, menu models, native menu bridge
+- `src/content/content-source-action-menu.js`: source action menu item generation and failed-source menu variants
 - `src/content/content-tags.js`: tag normalization, serialization, CRUD helpers
 - `src/content/content-state-reconcile.js`: persisted source and tag reconciliation
 - `src/content/content-persistence.js`: state load/save, schema normalization, lifecycle persistence
-- `src/content/content-modals.js`: move-to-folder and tag management modals
+- `src/content/content-modals.js`: move-to-folder, tag management, command palette, settings, welcome, and import preview modals
+- `src/content/content-modal-focus.js`: modal focus trap, Escape handling, and focus restoration helpers
+- `src/content/content-native-label-import-modal.js`: native label import preview modal node generation
 - `src/content/content-render.js`: fragment patching, icons, menu layer, main render path
-- `src/content/content-view-state.js`: search/filter/isolation view-state helpers and effective-state sync
+- `src/content/content-view-state.js`: search/filter/quick-view/isolation view-state helpers and effective-state sync
 - `src/content/content-tree-interactions.js`: tree mutations, rename, batch interactions, drag-and-drop
+- `src/content/content-source-list-scan.js`: native source-list row scan and checkbox state extraction
+- `src/content/content-native-label-scan.js`: native label group scan and label header count parsing
+- `src/content/content-native-label-import.js`: native label import preview completeness helpers
+- `src/content/content-native-label-import-controller.js`: native label import confirmation, source completion, and group reuse helpers
+- `src/content/content-source-partial-sync-guard.js`: partial source-sync guard and importing-source merge helpers
 - `src/content/content-source-sync.js`: fresh row lookup, source panel classification, DOM-driven source sync
+- `src/content/content-toast-status.js`: toast parameter normalization and save-status message helpers
+- `src/content/content-diagnostics.js`: diagnostics and sanitized error summary helpers
+- `src/content/content-source-view-switch-controller.js`: popup/native source-view switch request state helpers
 - `src/content/index.js`: singleton state ownership, bootstrap, lifecycle, event binding, sidecar orchestration
 - `src/popup/styles.css`: popup styling
 - `src/popup/index.js`: popup state and copy logic

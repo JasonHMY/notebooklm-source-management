@@ -152,6 +152,84 @@
     "ui_filter_sources_v2": {
         "message": "Buscar fuentes, etiquetas y carpetas"
     },
+    "ui_quick_view_all": {
+        "message": "Todas"
+    },
+    "ui_quick_view_ungrouped": {
+        "message": "Sin grupo"
+    },
+    "ui_quick_view_disabled": {
+        "message": "Desactivadas"
+    },
+    "ui_quick_view_tag": {
+        "message": "Etiqueta"
+    },
+    "ui_quick_view_recent": {
+        "message": "Recientes"
+    },
+    "ui_quick_view_issues": {
+        "message": "Problemas"
+    },
+    "ui_tag_filter_title": {
+        "message": "Filtrar por etiqueta"
+    },
+    "ui_command_palette": {
+        "message": "Paleta de comandos"
+    },
+    "ui_command_palette_placeholder": {
+        "message": "Escribe un comando o búsqueda"
+    },
+    "ui_command_palette_empty": {
+        "message": "No se encontraron comandos"
+    },
+    "ui_command_search_sources": {
+        "message": "Buscar fuentes"
+    },
+    "ui_command_search_sources_for": {
+        "message": "Buscar \"$1\"",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_command_search_sources_subtitle": {
+        "message": "Filtra la lista de fuentes actual"
+    },
+    "ui_command_quick_view_subtitle": {
+        "message": "Cambiar vista rápida"
+    },
+    "ui_command_switch_list_view": {
+        "message": "Cambiar a vista de lista"
+    },
+    "ui_command_switch_label_view": {
+        "message": "Cambiar a vista de etiquetas"
+    },
+    "ui_command_batch_move_folder": {
+        "message": "Mover selección a carpeta"
+    },
+    "ui_command_batch_add_tags": {
+        "message": "Añadir etiquetas a la selección"
+    },
+    "ui_command_batch_remove_tags": {
+        "message": "Quitar etiquetas de la selección"
+    },
+    "ui_command_batch_move_ungrouped": {
+        "message": "Mover selección a sin grupo"
+    },
+    "ui_command_batch_count": {
+        "message": "$1 seleccionadas",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_command_disabled_batch_hint": {
+        "message": "Selecciona fuentes en modo por lotes primero"
+    },
+    "ui_command_manage_tags": {
+        "message": "Administrar etiquetas"
+    },
+    "ui_command_open_settings": {
+        "message": "Abrir configuración"
+    },
     "ui_search_results_count": {
         "message": "$1 resultado(s)",
         "placeholders": {
@@ -162,6 +240,15 @@
     },
     "ui_settings": {
         "message": "Configuración"
+    },
+    "ui_settings_backup_restore_title": {
+        "message": "Copia de seguridad y restauración"
+    },
+    "ui_settings_help_feedback_title": {
+        "message": "Ayuda y comentarios"
+    },
+    "ui_settings_troubleshooting_title": {
+        "message": "Solución de problemas"
     },
     "ui_settings_save_status_title": {
         "message": "Estado de guardado"
@@ -220,6 +307,43 @@
             "1": { "content": "$1" }
         }
     },
+    "ui_settings_import_preview_replace_warning": {
+        "message": "Esta vista previa todavía restaura/reemplaza la configuración actual del administrador. No es una fusión incremental."
+    },
+    "ui_settings_import_diff_sources": {
+        "message": "Cambios de fuentes"
+    },
+    "ui_settings_import_diff_source_state": {
+        "message": "$1 se activarán · $2 se desactivarán · $3 sin cambios",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" },
+            "3": { "content": "$3" }
+        }
+    },
+    "ui_settings_import_diff_folders": {
+        "message": "$1 carpeta(s) en la importación · $2 con el mismo nombre · $3 actuales no aparecen en la importación",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" },
+            "3": { "content": "$3" }
+        }
+    },
+    "ui_settings_import_diff_tags": {
+        "message": "$1 etiqueta(s) en la importación · $2 con el mismo nombre · $3 actuales no aparecen en la importación · $4 id normalizado(s)",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" },
+            "3": { "content": "$3" },
+            "4": { "content": "$4" }
+        }
+    },
+    "ui_settings_import_diff_settings_changed": {
+        "message": "La configuración del panel cambiará."
+    },
+    "ui_settings_import_diff_settings_unchanged": {
+        "message": "La configuración del panel no cambia."
+    },
     "ui_settings_import_empty": {
         "message": "Pega primero un JSON de configuración."
     },
@@ -259,6 +383,33 @@
     "ui_settings_import_file_invalid": {
         "message": "No se pudo leer ese archivo JSON"
     },
+    "ui_settings_preferences_title": {
+        "message": "Preferencias"
+    },
+    "ui_settings_language_title": {
+        "message": "Idioma"
+    },
+    "ui_settings_language_body": {
+        "message": "Elige el idioma de la interfaz de esta extensión."
+    },
+    "ui_settings_language_auto": {
+        "message": "Automático"
+    },
+    "ui_settings_language_english": {
+        "message": "English"
+    },
+    "ui_settings_language_spanish": {
+        "message": "Español"
+    },
+    "ui_settings_language_chinese": {
+        "message": "简体中文"
+    },
+    "ui_settings_language_updated": {
+        "message": "Idioma actualizado"
+    },
+    "ui_settings_language_update_failed": {
+        "message": "No se pudo actualizar el idioma"
+    },
     "ui_settings_diagnostics_title": {
         "message": "Diagnóstico"
     },
@@ -270,6 +421,15 @@
     },
     "ui_settings_diagnostics_copy_failed": {
         "message": "No se pudo copiar el diagnóstico"
+    },
+    "ui_settings_developer_features": {
+        "message": "Funciones de desarrollador"
+    },
+    "ui_settings_developer_password_prompt": {
+        "message": "Introduce la contraseña de desarrollador"
+    },
+    "ui_settings_developer_password_failed": {
+        "message": "La contraseña de desarrollador no es correcta"
     },
     "ui_settings_developer_mode_title": {
         "message": "Modo de desarrollador"
@@ -288,6 +448,12 @@
     },
     "ui_settings_clear_developer_logs": {
         "message": "Borrar logs de desarrollador"
+    },
+    "ui_settings_test_welcome_modal": {
+        "message": "Probar bienvenida"
+    },
+    "ui_settings_test_whats_new_modal": {
+        "message": "Probar novedades"
     },
     "ui_settings_developer_mode_enabled": {
         "message": "Modo de desarrollador activado"
@@ -314,13 +480,76 @@
         "message": "Comentarios"
     },
     "ui_settings_feedback_body": {
-        "message": "Comparte errores y sugerencias en Chrome Web Store."
+        "message": "¿Encontraste un problema o quieres sugerir una mejora? Envía comentarios o copia el diagnóstico para reportar un error."
     },
     "ui_settings_open_web_store_feedback": {
         "message": "Abrir comentarios de Chrome Web Store"
     },
     "ui_settings_feedback_open_failed": {
         "message": "No se pudieron abrir los comentarios de Chrome Web Store"
+    },
+    "ui_welcome_title": {
+        "message": "Te damos la bienvenida a NotebookLM Source Management"
+    },
+    "ui_welcome_subtitle": {
+        "message": "Organiza, busca y respalda tus fuentes con más facilidad dentro de NotebookLM."
+    },
+    "ui_welcome_feature_organize_title": {
+        "message": "Organiza fuentes"
+    },
+    "ui_welcome_feature_organize_body": {
+        "message": "Gestiona materiales con carpetas y etiquetas."
+    },
+    "ui_welcome_feature_find_title": {
+        "message": "Encuentra más rápido"
+    },
+    "ui_welcome_feature_find_body": {
+        "message": "Busca fuentes, etiquetas y carpetas."
+    },
+    "ui_welcome_feature_backup_title": {
+        "message": "Exporta y recupera"
+    },
+    "ui_welcome_feature_backup_body": {
+        "message": "Guarda tu configuración para recuperarla con más facilidad si hay problemas."
+    },
+    "ui_welcome_feedback_body": {
+        "message": "¿Encontraste un problema o tienes una sugerencia? Tus comentarios son bienvenidos."
+    },
+    "ui_welcome_get_started": {
+        "message": "Empezar"
+    },
+    "ui_welcome_feedback": {
+        "message": "Comentarios"
+    },
+    "ui_welcome_close": {
+        "message": "Cerrar bienvenida"
+    },
+    "ui_whats_new_title": {
+        "message": "Novedades"
+    },
+    "ui_whats_new_subtitle": {
+        "message": "Un vistazo rápido a las últimas mejoras de gestión de fuentes."
+    },
+    "ui_whats_new_quick_views_title": {
+        "message": "Vistas rápidas"
+    },
+    "ui_whats_new_quick_views_body": {
+        "message": "Ve más rápido a fuentes sin grupo, desactivadas, recientes, con etiquetas o con problemas."
+    },
+    "ui_whats_new_restore_points_title": {
+        "message": "Puntos de restauración"
+    },
+    "ui_whats_new_restore_points_body": {
+        "message": "Conserva más historial local y crea instantáneas con nombre antes de cambios delicados."
+    },
+    "ui_whats_new_language_title": {
+        "message": "Idioma manual"
+    },
+    "ui_whats_new_language_body": {
+        "message": "Cambia el idioma de la extensión sin cambiar Chrome."
+    },
+    "ui_whats_new_primary": {
+        "message": "Entendido"
     },
     "ui_source_repair_title": {
         "message": "Reparar fuentes"
@@ -369,6 +598,46 @@
     },
     "ui_history_empty": {
         "message": "Aún no hay historial de versiones."
+    },
+    "ui_history_retention_label": {
+        "message": "Conservar historial"
+    },
+    "ui_history_retention_body": {
+        "message": "Elige cuántas instantáneas locales guardar para cada notebook."
+    },
+    "ui_history_retention_option": {
+        "message": "$1 instantáneas",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_history_retention_updated": {
+        "message": "Retención de historial actualizada"
+    },
+    "ui_history_retention_update_failed": {
+        "message": "No se pudo actualizar la retención del historial"
+    },
+    "ui_history_create_restore_point": {
+        "message": "Crear punto de restauración"
+    },
+    "ui_history_restore_point_prompt": {
+        "message": "Ponle nombre a este punto de restauración"
+    },
+    "ui_history_restore_point_created": {
+        "message": "Punto de restauración creado"
+    },
+    "ui_history_restore_point_failed": {
+        "message": "No se pudo crear el punto de restauración"
+    },
+    "ui_history_restore_point_summary": {
+        "message": "$1 · $2 · $3 fuente(s) · $4 carpeta(s) · $5 etiqueta(s)",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" },
+            "3": { "content": "$3" },
+            "4": { "content": "$4" },
+            "5": { "content": "$5" }
+        }
     },
     "ui_history_entry_summary": {
         "message": "$1 · $2 fuente(s) · $3 carpeta(s) · $4 etiqueta(s) · $5",

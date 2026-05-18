@@ -25,6 +25,8 @@ Notebook-scoped storage messages require a sender tab whose URL starts with `htt
 
 Global messages that are not notebook-state writes, such as extension enable/disable, preferences, tab focus/open, and web store feedback, are not tied to one notebook state key.
 
+`LOAD_PREFERENCES` returns `sourcesPlusPreferences` fields such as `developerModeEnabled`, `welcomeOnboardingSeenVersion`, `whatsNewSeenVersion`, `historyRetentionLimit`, and `languageOverride`. `SAVE_PREFERENCES` accepts partial preference updates and merges them with the existing stored object so toggling one preference does not clear the other stored preference fields.
+
 ## Storage message key rules
 
 ```text
@@ -37,6 +39,8 @@ LOAD_STATE_HISTORY / APPEND_STATE_HISTORY
 APPEND_DEVELOPER_LOG / LOAD_DEVELOPER_LOGS / CLEAR_DEVELOPER_LOGS
 └── key must start with sourcesPlusDeveloperLogs_
 ```
+
+`APPEND_STATE_HISTORY` entries may include `label` and `manual` for user-created restore points. The message type is unchanged; the background worker applies the current `historyRetentionLimit` preference when saving or loading history.
 
 Invalid keys return:
 
@@ -101,7 +105,7 @@ Popup/background -> content
 
 ## Developer log messages
 
-Developer logging is controlled by `sourcesPlusPreferences.developerModeEnabled`. When disabled, content code should not append new logs.
+Developer logging is controlled by `sourcesPlusPreferences.developerModeEnabled`. When disabled, content code should not append new logs. First-run welcome onboarding is controlled by `sourcesPlusPreferences.welcomeOnboardingSeenVersion` and uses the same preference messages.
 
 Log payloads are structured and sanitized before storage:
 

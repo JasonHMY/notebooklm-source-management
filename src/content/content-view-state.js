@@ -26,6 +26,9 @@
         const getActiveIsolationGroupId = typeof ctx.getActiveIsolationGroupId === 'function'
             ? ctx.getActiveIsolationGroupId
             : () => runtime.activeIsolationGroupId || null;
+        const getNow = typeof ctx.getNow === 'function'
+            ? ctx.getNow
+            : () => new Date();
         const getIsSearchExpanded = typeof ctx.getIsSearchExpanded === 'function'
             ? ctx.getIsSearchExpanded
             : () => Boolean(runtime.isSearchExpanded);
@@ -63,6 +66,8 @@
         const isDescendant = typeof ctx.isDescendant === 'function'
             ? ctx.isDescendant
             : (typeof globalThis.isDescendant === 'function' ? globalThis.isDescendant : defaultIsDescendant);
+        const QUICK_VIEW_KINDS = new Set(['ungrouped', 'disabled', 'recent', 'issues']);
+        const RECENT_SOURCE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
         function defaultIsDescendant(possibleChild, possibleParent, groupsById) {
             if (!possibleChild || !possibleParent || possibleChild.id === possibleParent.id) return true;
@@ -310,12 +315,66 @@
                 parsedCriteria.tagTerms.length === 0;
         }
 
+        function normalizeQuickViewKind(value) {
+            const kind = String(value || '').trim().toLowerCase();
+            return QUICK_VIEW_KINDS.has(kind) ? kind : null;
+        }
+
+        function isSourceIssue(source) {
+            if (!source) return false;
+            return Boolean(
+                source.isLoading ||
+                source.isFailed ||
+                (source.isDisabled && !source.isLoading)
+            );
+        }
+
+        function isSourceRecentlyAdded(source) {
+            if (!source?.addedAt) return false;
+            const addedAtTime = Date.parse(source.addedAt);
+            if (!Number.isFinite(addedAtTime)) return false;
+            const now = getNow();
+            const nowTime = now instanceof Date ? now.getTime() : Date.parse(now);
+            if (!Number.isFinite(nowTime)) return false;
+            const ageMs = nowTime - addedAtTime;
+            return ageMs >= 0 && ageMs <= RECENT_SOURCE_WINDOW_MS;
+        }
+
+        function isSourceExplicitlyOrAncestorDisabled(source) {
+            if (!source || isSourceIssue(source)) return false;
+            return source.enabled === false || !areAllAncestorsEnabled(source.key);
+        }
+
+        function sourceMatchesQuickView(source, quickViewKind) {
+            const kind = normalizeQuickViewKind(quickViewKind);
+            if (!kind) return true;
+            const state = getState() || {};
+
+            if (kind === 'ungrouped') {
+                return (Array.isArray(state.ungrouped) ? state.ungrouped : []).includes(source?.key);
+            }
+            if (kind === 'disabled') {
+                return isSourceExplicitlyOrAncestorDisabled(source);
+            }
+            if (kind === 'recent') {
+                return isSourceRecentlyAdded(source);
+            }
+            if (kind === 'issues') {
+                return isSourceIssue(source);
+            }
+            return true;
+        }
+
         function sourceMatchesCurrentFilters(source) {
             if (!source) return false;
 
             const state = getState() || {};
             const searchCriteria = parseSearchQuery(state.filterQuery || '');
             if (searchCriteria.hasQuery && !sourceMatchesSearchCriteria(source, searchCriteria)) {
+                return false;
+            }
+
+            if (!sourceMatchesQuickView(source, state.activeQuickViewKind)) {
                 return false;
             }
 
@@ -328,7 +387,11 @@
 
         function hasActiveRenderFilters() {
             const state = getState() || {};
-            return Boolean(parseSearchQuery(state.filterQuery || '').hasQuery || state.activeTagId);
+            return Boolean(
+                parseSearchQuery(state.filterQuery || '').hasQuery ||
+                state.activeTagId ||
+                normalizeQuickViewKind(state.activeQuickViewKind)
+            );
         }
 
         function groupHasRenderableDescendant(group, ancestorGroupIds = new Set()) {
@@ -606,6 +669,10 @@
             parseSearchQuery,
             sourceMatchesSearchCriteria,
             groupMatchesSearchCriteria,
+            normalizeQuickViewKind,
+            sourceMatchesQuickView,
+            isSourceIssue,
+            isSourceRecentlyAdded,
             sourceMatchesCurrentFilters,
             hasActiveRenderFilters,
             groupHasRenderableDescendant,

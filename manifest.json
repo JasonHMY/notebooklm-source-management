@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "__MSG_extName__",
   "short_name": "__MSG_extShortName__",
-  "version": "2.7.2",
+  "version": "2.7.4",
   "description": "__MSG_extDesc__",
   "homepage_url": "https://chromewebstore.google.com/detail/notebooklm-source-managem/bhpgdibkpdcchkpaamfkbmdnhcmedkod",
   "default_locale": "en",
@@ -26,7 +26,10 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "src/assets/fonts/google-symbols.woff2"
+        "src/assets/fonts/google-symbols.woff2",
+        "_locales/en/messages.json",
+        "_locales/es/messages.json",
+        "_locales/zh_CN/messages.json"
       ],
       "matches": [
         "https://notebooklm.google.com/*"
@@ -45,17 +48,24 @@
         "src/content/content-style-text.js",
         "src/content/content-template.js",
         "src/content/content-panel-dom.js",
+        "src/content/content-source-action-menu.js",
         "src/content/content-source-actions.js",
         "src/content/content-tags.js",
         "src/content/content-state-reconcile.js",
         "src/content/content-developer-logger.js",
         "src/content/content-runtime-state.js",
         "src/content/content-message-router.js",
+        "src/content/content-toast-status.js",
+        "src/content/content-diagnostics.js",
+        "src/content/content-source-view-switch-controller.js",
         "src/content/content-persistence.js",
         "src/content/content-source-list-scan.js",
         "src/content/content-native-label-scan.js",
         "src/content/content-native-label-import.js",
+        "src/content/content-native-label-import-controller.js",
         "src/content/content-native-label-import-modal.js",
+        "src/content/content-source-partial-sync-guard.js",
+        "src/content/content-modal-focus.js",
         "src/content/content-modals.js",
         "src/content/content-render.js",
         "src/content/content-view-state.js",

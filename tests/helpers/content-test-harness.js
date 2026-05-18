@@ -10,17 +10,24 @@ const CONTENT_HELPER_GLOBALS = [
     'NSM_GLOBAL_OVERLAY_STYLE_TEXT',
     'NSM_CREATE_MANAGER_SHELL',
     'NSM_CREATE_CONTENT_PANEL_DOM',
+    'NSM_CREATE_CONTENT_SOURCE_ACTION_MENU',
     'NSM_CREATE_CONTENT_SOURCE_ACTIONS',
     'NSM_CREATE_CONTENT_TAGS',
     'NSM_CREATE_CONTENT_STATE_RECONCILE',
     'NSM_CREATE_CONTENT_DEVELOPER_LOGGER',
     'NSM_CREATE_CONTENT_RUNTIME_STATE',
     'NSM_CREATE_CONTENT_MESSAGE_ROUTER',
+    'NSM_CREATE_CONTENT_TOAST_STATUS',
+    'NSM_CREATE_CONTENT_DIAGNOSTICS',
+    'NSM_CREATE_CONTENT_SOURCE_VIEW_SWITCH_CONTROLLER',
     'NSM_CREATE_CONTENT_PERSISTENCE',
     'NSM_CREATE_CONTENT_SOURCE_LIST_SCAN',
     'NSM_CREATE_CONTENT_NATIVE_LABEL_SCAN',
     'NSM_CREATE_CONTENT_NATIVE_LABEL_IMPORT',
+    'NSM_CREATE_CONTENT_NATIVE_LABEL_IMPORT_CONTROLLER',
     'NSM_CREATE_CONTENT_NATIVE_LABEL_IMPORT_MODAL',
+    'NSM_CREATE_CONTENT_SOURCE_PARTIAL_SYNC_GUARD',
+    'NSM_CREATE_CONTENT_MODAL_FOCUS',
     'NSM_CREATE_CONTENT_MODALS',
     'NSM_CREATE_CONTENT_RENDER',
     'NSM_CREATE_CONTENT_VIEW_STATE',
@@ -221,11 +228,29 @@ const setupGlobalMocks = () => {
                     return;
                 }
                 if (message?.type === 'LOAD_PREFERENCES' && typeof cb === 'function') {
-                    cb({ success: true, preferences: { developerModeEnabled: false } });
+                    cb({
+                        success: true,
+                        preferences: {
+                            developerModeEnabled: false,
+                            welcomeOnboardingSeenVersion: 0,
+                            whatsNewSeenVersion: 0,
+                            historyRetentionLimit: 20,
+                            languageOverride: 'auto'
+                        }
+                    });
                     return;
                 }
                 if (message?.type === 'SAVE_PREFERENCES' && typeof cb === 'function') {
-                    cb({ success: true, preferences: message.preferences || {} });
+                    cb({
+                        success: true,
+                        preferences: Object.assign({
+                            developerModeEnabled: false,
+                            welcomeOnboardingSeenVersion: 0,
+                            whatsNewSeenVersion: 0,
+                            historyRetentionLimit: 20,
+                            languageOverride: 'auto'
+                        }, message.preferences || {})
+                    });
                     return;
                 }
                 if (message?.type === 'LOAD_DEVELOPER_LOGS' && typeof cb === 'function') {

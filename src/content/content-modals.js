@@ -51,6 +51,16 @@
                         : null
                 )
             );
+        const createContentModalFocus = typeof deps.createContentModalFocus === 'function'
+            ? deps.createContentModalFocus
+            : (
+                globalThis.NSM_CREATE_CONTENT_MODAL_FOCUS ||
+                (
+                    typeof require === 'function'
+                        ? require('./content-modal-focus.js')
+                        : null
+                )
+            );
         const closeSourceActionMenu = typeof deps.closeSourceActionMenu === 'function'
             ? deps.closeSourceActionMenu
             : () => {};
@@ -123,6 +133,27 @@
         const setDeveloperModeEnabled = typeof deps.setDeveloperModeEnabled === 'function'
             ? deps.setDeveloperModeEnabled
             : () => Promise.resolve(false);
+        const markWelcomeOnboardingSeen = typeof deps.markWelcomeOnboardingSeen === 'function'
+            ? deps.markWelcomeOnboardingSeen
+            : () => Promise.resolve(false);
+        const markWhatsNewSeen = typeof deps.markWhatsNewSeen === 'function'
+            ? deps.markWhatsNewSeen
+            : () => Promise.resolve(false);
+        const getHistoryRetentionLimit = typeof deps.getHistoryRetentionLimit === 'function'
+            ? deps.getHistoryRetentionLimit
+            : () => 20;
+        const setHistoryRetentionLimit = typeof deps.setHistoryRetentionLimit === 'function'
+            ? deps.setHistoryRetentionLimit
+            : () => Promise.resolve(20);
+        const createManualRestorePoint = typeof deps.createManualRestorePoint === 'function'
+            ? deps.createManualRestorePoint
+            : () => Promise.resolve(false);
+        const getLanguageOverride = typeof deps.getLanguageOverride === 'function'
+            ? deps.getLanguageOverride
+            : () => 'auto';
+        const setLanguageOverride = typeof deps.setLanguageOverride === 'function'
+            ? deps.setLanguageOverride
+            : () => Promise.resolve('auto');
         const getDeveloperLogExportText = typeof deps.getDeveloperLogExportText === 'function'
             ? deps.getDeveloperLogExportText
             : () => JSON.stringify({ logs: [] }, null, 2);
@@ -132,6 +163,21 @@
         const renderSaveStatus = typeof deps.renderSaveStatus === 'function'
             ? deps.renderSaveStatus
             : () => null;
+        const getCommandPaletteCommands = typeof deps.getCommandPaletteCommands === 'function'
+            ? deps.getCommandPaletteCommands
+            : () => [];
+        const executeCommandPaletteCommand = typeof deps.executeCommandPaletteCommand === 'function'
+            ? deps.executeCommandPaletteCommand
+            : () => false;
+        const applyTagQuickFilter = typeof deps.applyTagQuickFilter === 'function'
+            ? deps.applyTagQuickFilter
+            : (tagId) => {
+                const state = getState() || {};
+                state.activeQuickViewKind = null;
+                state.activeTagId = tagId;
+                render();
+                return true;
+            };
         const normalizeTagColor = typeof deps.normalizeTagColor === 'function'
             ? deps.normalizeTagColor
             : (value) => value || null;
@@ -150,6 +196,9 @@
             ? contentConfig.TAG_COLOR_PRESETS
             : ['#007AFF'];
         const MODAL_ITEM_STAGGER_MAX_INDEX = 10;
+        const SETTINGS_DEVELOPER_PASSWORD = typeof deps.settingsDeveloperPassword === 'string'
+            ? deps.settingsDeveloperPassword
+            : 'developer_mode';
         const IMPORT_CONFIG_MAX_FILE_BYTES = Number.isFinite(Number(contentConfig.IMPORT_CONFIG_MAX_FILE_BYTES))
             ? Number(contentConfig.IMPORT_CONFIG_MAX_FILE_BYTES)
             : 2 * 1024 * 1024;
@@ -194,164 +243,18 @@
             return [...TAG_COLOR_PRESETS];
         }
 
-        const MODAL_FOCUSABLE_SELECTOR = [
-            'button:not([disabled])',
-            '[href]',
-            'input:not([disabled])',
-            'select:not([disabled])',
-            'textarea:not([disabled])',
-            '[tabindex]:not([tabindex="-1"])'
-        ].join(', ');
-
-        function getModalFocusableElements(modal) {
-            if (!modal || typeof modal.querySelectorAll !== 'function') return [];
-
-            return Array.from(modal.querySelectorAll(MODAL_FOCUSABLE_SELECTOR))
-                .filter((element) => {
-                    if (!element || typeof element.focus !== 'function') return false;
-                    if (element.disabled || element.getAttribute?.('aria-hidden') === 'true') return false;
-                    if (String(element.getAttribute?.('tabindex') || '') === '-1') return false;
-                    return true;
-                });
-        }
-
-        function getModalActiveElement(modal) {
-            const root = typeof modal?.getRootNode === 'function' ? modal.getRootNode() : null;
-            return root?.activeElement || getDocument()?.activeElement || null;
-        }
-
-        function focusModalInitialElement(modal, preferredTarget = null) {
-            const target = typeof preferredTarget === 'function'
-                ? preferredTarget()
-                : preferredTarget;
-            if (target && typeof target.focus === 'function') {
-                target.focus();
-                return target;
-            }
-
-            const focusableElements = getModalFocusableElements(modal);
-            const fallbackTarget = focusableElements[0] || modal;
-            if (fallbackTarget && typeof fallbackTarget.focus === 'function') {
-                fallbackTarget.focus();
-                return fallbackTarget;
-            }
-
-            return null;
-        }
-
-        function handleModalKeyboardEvent(event, modal, closeModal) {
-            if (!event || !modal) return false;
-
-            if (event.key === 'Escape') {
-                event.preventDefault?.();
-                if (typeof closeModal === 'function') {
-                    closeModal();
-                }
-                return true;
-            }
-
-            if (event.key !== 'Tab') return false;
-
-            const focusableElements = getModalFocusableElements(modal);
-            if (focusableElements.length === 0) {
-                event.preventDefault?.();
-                if (typeof modal.focus === 'function') modal.focus();
-                return true;
-            }
-
-            const firstElement = focusableElements[0];
-            const lastElement = focusableElements[focusableElements.length - 1];
-            const activeElement = getModalActiveElement(modal);
-
-            if (event.shiftKey && (!activeElement || activeElement === firstElement)) {
-                event.preventDefault?.();
-                lastElement.focus();
-                return true;
-            }
-
-            if (!event.shiftKey && activeElement === lastElement) {
-                event.preventDefault?.();
-                firstElement.focus();
-                return true;
-            }
-
-            return false;
-        }
-
-        function bindModalKeyboardNavigation(modal, options = {}) {
-            if (!modal || typeof modal.addEventListener !== 'function') {
-                return {
-                    focusInitial: () => focusModalInitialElement(modal, options.initialFocusTarget),
-                    dispose: () => {}
-                };
-            }
-
-            if (typeof modal.setAttribute === 'function') {
-                modal.setAttribute('role', 'dialog');
-                modal.setAttribute('aria-modal', 'true');
-                modal.setAttribute('tabindex', '-1');
-            }
-
-            const closeModal = typeof options.closeModal === 'function' ? options.closeModal : () => {};
-            const handleKeydown = (event) => handleModalKeyboardEvent(event, modal, closeModal);
-            modal.addEventListener('keydown', handleKeydown);
-
-            return {
-                focusInitial: () => focusModalInitialElement(modal, options.initialFocusTarget),
-                dispose: () => {
-                    if (typeof modal.removeEventListener === 'function') {
-                        modal.removeEventListener('keydown', handleKeydown);
-                    }
-                }
-            };
-        }
-
-        const modalFocusRestoreTargets = new Map();
-
-        function getCurrentFocusElement() {
-            const shadowRoot = getShadowRoot();
-            if (shadowRoot?.activeElement) return shadowRoot.activeElement;
-            return getDocument()?.activeElement || null;
-        }
-
-        function resolveModalFocusRestoreTarget(activeElement) {
-            const shadowRoot = getShadowRoot();
-            if (!activeElement || !shadowRoot) return activeElement || null;
-
-            const menuItem = activeElement.closest?.('.sp-source-actions-menu-item');
-            const sourceKey = menuItem?.dataset?.sourceKey;
-            if (!sourceKey || typeof shadowRoot.querySelectorAll !== 'function') return activeElement;
-
-            return Array.from(shadowRoot.querySelectorAll('.sp-source-actions-button'))
-                .find((button) => button?.dataset?.sourceKey === sourceKey) || activeElement;
-        }
-
-        function rememberModalFocusRestoreTarget(modalId) {
-            if (!modalId || modalFocusRestoreTargets.has(modalId)) {
-                return modalFocusRestoreTargets.get(modalId) || null;
-            }
-
-            const activeElement = getCurrentFocusElement();
-            const restoreTarget = resolveModalFocusRestoreTarget(activeElement);
-            if (restoreTarget && typeof restoreTarget.focus === 'function') {
-                modalFocusRestoreTargets.set(modalId, restoreTarget);
-            }
-            return restoreTarget || null;
-        }
-
-        function restoreModalFocus(modalId) {
-            const restoreTarget = modalFocusRestoreTargets.get(modalId);
-            modalFocusRestoreTargets.delete(modalId);
-            if (
-                restoreTarget &&
-                restoreTarget.isConnected !== false &&
-                typeof restoreTarget.focus === 'function'
-            ) {
-                restoreTarget.focus();
-                return restoreTarget;
-            }
-            return null;
-        }
+        const modalFocus = typeof createContentModalFocus === 'function'
+            ? createContentModalFocus({ getDocument, getShadowRoot })
+            : {};
+        const bindModalKeyboardNavigation = modalFocus.bindModalKeyboardNavigation || (() => ({
+            focusInitial: () => null,
+            dispose: () => {}
+        }));
+        const getModalFocusableElements = modalFocus.getModalFocusableElements || (() => []);
+        const focusModalInitialElement = modalFocus.focusModalInitialElement || (() => null);
+        const handleModalKeyboardEvent = modalFocus.handleModalKeyboardEvent || (() => false);
+        const rememberModalFocusRestoreTarget = modalFocus.rememberModalFocusRestoreTarget || (() => null);
+        const restoreModalFocus = modalFocus.restoreModalFocus || (() => null);
 
         function removeModalNode(node) {
             if (!node) return;
@@ -423,8 +326,24 @@
             return closeManagedModal('sp-settings-modal', 'sp-settings-backdrop', options);
         }
 
+        function closeWelcomeModal(options = {}) {
+            return closeManagedModal('sp-welcome-modal', 'sp-welcome-backdrop', options);
+        }
+
+        function closeWhatsNewModal(options = {}) {
+            return closeManagedModal('sp-whats-new-modal', 'sp-whats-new-backdrop', options);
+        }
+
         function closeNativeLabelImportModal(options = {}) {
             return closeManagedModal('sp-native-label-import-modal', 'sp-native-label-import-backdrop', options);
+        }
+
+        function closeCommandPaletteModal(options = {}) {
+            return closeManagedModal('sp-command-palette-modal', 'sp-command-palette-backdrop', options);
+        }
+
+        function closeTagFilterModal(options = {}) {
+            return closeManagedModal('sp-tag-filter-modal', 'sp-tag-filter-backdrop', options);
         }
 
         function getImportPreviewMessage(preview) {
@@ -478,10 +397,57 @@
             return nodes;
         }
 
+        function createImportPreviewDiffNodes(preview) {
+            const diff = preview?.diff || null;
+            if (!diff) return [];
+            const settingsChanged = Boolean(
+                diff.settings?.changesCustomHeight ||
+                diff.settings?.changesSourceViewDisplayKind
+            );
+            return [
+                el('div', { className: 'sp-settings-import-warning' }, [
+                    getMessage('ui_settings_import_preview_replace_warning')
+                ]),
+                el('div', { className: 'sp-settings-preview-diff' }, [
+                    el('div', { className: 'sp-settings-preview-detail-title' }, [
+                        getMessage('ui_settings_import_diff_sources')
+                    ]),
+                    el('div', { className: 'sp-settings-preview-diff-row' }, [
+                        getMessage('ui_settings_import_diff_source_state', [
+                            String(diff.source?.enableCount || 0),
+                            String(diff.source?.disableCount || 0),
+                            String(diff.source?.unchangedCount || 0)
+                        ])
+                    ]),
+                    el('div', { className: 'sp-settings-preview-detail-title' }, [
+                        getMessage('ui_settings_import_diff_folders', [
+                            String(diff.folders?.incomingCount || 0),
+                            String(diff.folders?.sameNameCount || 0),
+                            String(diff.folders?.removedCount || 0)
+                        ])
+                    ]),
+                    el('div', { className: 'sp-settings-preview-detail-title' }, [
+                        getMessage('ui_settings_import_diff_tags', [
+                            String(diff.tags?.incomingCount || 0),
+                            String(diff.tags?.sameNameCount || 0),
+                            String(diff.tags?.removedCount || 0),
+                            String(diff.tags?.normalizedIdCount || 0)
+                        ])
+                    ]),
+                    el('div', { className: 'sp-settings-preview-diff-row' }, [
+                        getMessage(settingsChanged
+                            ? 'ui_settings_import_diff_settings_changed'
+                            : 'ui_settings_import_diff_settings_unchanged')
+                    ])
+                ])
+            ];
+        }
+
         function createImportPreviewDetailNodes(preview) {
             if (!preview?.ok) return [];
             return [
                 el('div', { className: 'sp-settings-preview-details' }, [
+                    ...createImportPreviewDiffNodes(preview),
                     ...createPreviewSourceList(
                         'ui_settings_import_preview_matched',
                         preview.matchedSourceDetails || []
@@ -686,6 +652,15 @@
         }
 
         function formatHistoryEntryLabel(entry) {
+            if (entry?.label) {
+                return getMessage('ui_history_restore_point_summary', [
+                    String(entry.label),
+                    entry?.createdAt ? String(entry.createdAt).replace('T', ' ').slice(0, 19) : '-',
+                    String(entry?.sourceCount ?? 0),
+                    String(entry?.groupCount ?? 0),
+                    String(entry?.tagCount ?? 0)
+                ]);
+            }
             const createdAt = entry?.createdAt ? String(entry.createdAt).replace('T', ' ').slice(0, 19) : '-';
             return getMessage('ui_history_entry_summary', [
                 createdAt,
@@ -693,6 +668,76 @@
                 String(entry?.groupCount ?? 0),
                 String(entry?.tagCount ?? 0),
                 entry?.reason || '-'
+            ]);
+        }
+
+        function createHistoryPreferenceNodes() {
+            const retentionSelect = el('select', {
+                className: 'sp-settings-select sp-history-retention-select',
+                'aria-label': getMessage('ui_history_retention_label')
+            }, [
+                ...[20, 50, 100].map((limit) => el('option', {
+                    value: String(limit),
+                    selected: getHistoryRetentionLimit() === limit
+                }, [
+                    getMessage('ui_history_retention_option', [String(limit)])
+                ]))
+            ]);
+            return [
+                el('div', { className: 'sp-settings-preference-row sp-history-retention-row' }, [
+                    el('div', { className: 'sp-settings-preference-copy' }, [
+                        el('div', { className: 'sp-settings-preference-title' }, [
+                            getMessage('ui_history_retention_label')
+                        ]),
+                        el('p', { className: 'sp-settings-helper-text' }, [
+                            getMessage('ui_history_retention_body')
+                        ])
+                    ]),
+                    retentionSelect
+                ]),
+                el('div', { className: 'sp-settings-action-row sp-settings-collapsible-actions' }, [
+                    el('button', {
+                        type: 'button',
+                        className: 'sp-button sp-history-create-restore-point-btn sp-glare-hover'
+                    }, [
+                        getMessage('ui_history_create_restore_point')
+                    ])
+                ])
+            ];
+        }
+
+        function createLanguagePreferenceSection() {
+            const languageOptions = [
+                ['auto', 'ui_settings_language_auto'],
+                ['en', 'ui_settings_language_english'],
+                ['es', 'ui_settings_language_spanish'],
+                ['zh_CN', 'ui_settings_language_chinese']
+            ];
+            const languageSelect = el('select', {
+                className: 'sp-settings-select sp-settings-language-select',
+                'aria-label': getMessage('ui_settings_language_title')
+            }, languageOptions.map(([value, key]) => el('option', {
+                value,
+                selected: getLanguageOverride() === value
+            }, [
+                getMessage(key)
+            ])));
+
+            return el('section', { className: 'sp-settings-section sp-settings-preferences-section' }, [
+                el('div', { className: 'sp-settings-section-header' }, [
+                    el('h4', { className: 'sp-settings-section-title' }, [getMessage('ui_settings_preferences_title')])
+                ]),
+                el('div', { className: 'sp-settings-preference-row' }, [
+                    el('div', { className: 'sp-settings-preference-copy' }, [
+                        el('div', { className: 'sp-settings-preference-title' }, [
+                            getMessage('ui_settings_language_title')
+                        ]),
+                        el('p', { className: 'sp-settings-helper-text' }, [
+                            getMessage('ui_settings_language_body')
+                        ])
+                    ]),
+                    languageSelect
+                ])
             ]);
         }
 
@@ -776,6 +821,510 @@
             });
         }
 
+        function createWelcomeFeatureRow(iconName, titleKey, bodyKey) {
+            return el('div', { className: 'sp-welcome-feature-row' }, [
+                el('span', { className: 'google-symbols sp-welcome-feature-icon', 'aria-hidden': 'true' }, [iconName]),
+                el('div', { className: 'sp-welcome-feature-copy' }, [
+                    el('h4', { className: 'sp-welcome-feature-title' }, [getMessage(titleKey)]),
+                    el('p', { className: 'sp-welcome-feature-body' }, [getMessage(bodyKey)])
+                ])
+            ]);
+        }
+
+        function renderWelcomeModal() {
+            const shadowRoot = getShadowRoot();
+            if (!shadowRoot || !el) return false;
+
+            let hasMarkedSeen = false;
+            const markSeenOnce = () => {
+                if (hasMarkedSeen) return Promise.resolve(true);
+                hasMarkedSeen = true;
+                return Promise.resolve(markWelcomeOnboardingSeen()).catch(() => false);
+            };
+            const closeAfterSeen = () => {
+                markSeenOnce();
+                closeWelcomeModal();
+            };
+
+            prepareModalOpen('sp-welcome-modal', 'sp-welcome-backdrop');
+
+            const backdrop = el('div', { className: 'sp-overlay-backdrop', id: 'sp-welcome-backdrop' });
+            const modal = el('div', {
+                className: 'sp-folder-modal sp-welcome-modal',
+                id: 'sp-welcome-modal',
+                role: 'dialog',
+                'aria-modal': 'true',
+                'aria-labelledby': 'sp-welcome-modal-title',
+                tabindex: '-1'
+            });
+            const closeButton = el('button', {
+                type: 'button',
+                className: 'sp-icon-button sp-welcome-close-btn',
+                'aria-label': getMessage('ui_welcome_close'),
+                title: getMessage('ui_welcome_close')
+            }, [
+                el('span', { className: 'google-symbols', 'aria-hidden': 'true' }, ['close'])
+            ]);
+            const header = el('div', { className: 'sp-welcome-header' }, [
+                el('div', { className: 'sp-welcome-brand-icon', 'aria-hidden': 'true' }, [
+                    el('span', { className: 'google-symbols sp-welcome-brand-symbol' }, ['library_books'])
+                ]),
+                el('div', { className: 'sp-welcome-heading' }, [
+                    el('h3', { className: 'sp-folder-modal-title sp-welcome-title', id: 'sp-welcome-modal-title' }, [
+                        getMessage('ui_welcome_title')
+                    ]),
+                    el('p', { className: 'sp-welcome-subtitle' }, [
+                        getMessage('ui_welcome_subtitle')
+                    ])
+                ]),
+                closeButton
+            ]);
+            const content = el('div', { className: 'sp-folder-modal-content sp-welcome-content' }, [
+                el('div', { className: 'sp-welcome-feature-list' }, [
+                    createWelcomeFeatureRow('folder', 'ui_welcome_feature_organize_title', 'ui_welcome_feature_organize_body'),
+                    createWelcomeFeatureRow('manage_search', 'ui_welcome_feature_find_title', 'ui_welcome_feature_find_body'),
+                    createWelcomeFeatureRow('history', 'ui_welcome_feature_backup_title', 'ui_welcome_feature_backup_body')
+                ]),
+                el('div', { className: 'sp-welcome-feedback-inline' }, [
+                    el('span', { className: 'sp-welcome-feedback-copy' }, [
+                        getMessage('ui_welcome_feedback_body')
+                    ]),
+                    el('button', { type: 'button', className: 'sp-welcome-feedback-link' }, [
+                        getMessage('ui_welcome_feedback')
+                    ])
+                ])
+            ]);
+            const footer = el('div', { className: 'sp-folder-modal-footer sp-welcome-footer' }, [
+                el('button', { type: 'button', className: 'sp-button sp-welcome-primary-btn sp-glare-hover' }, [
+                    getMessage('ui_welcome_get_started')
+                ])
+            ]);
+
+            modal.appendChild(header);
+            modal.appendChild(content);
+            modal.appendChild(footer);
+            shadowRoot.appendChild(backdrop);
+            shadowRoot.appendChild(modal);
+
+            closeButton.addEventListener('click', closeAfterSeen);
+            content.querySelector('.sp-welcome-feedback-link')?.addEventListener('click', () => {
+                markSeenOnce();
+                openWebStoreFeedback();
+                closeWelcomeModal();
+            });
+            footer.querySelector('.sp-welcome-primary-btn')?.addEventListener('click', closeAfterSeen);
+            backdrop.addEventListener('click', closeAfterSeen);
+
+            const modalKeyboard = bindModalKeyboardNavigation(modal, {
+                closeModal: closeAfterSeen,
+                initialFocusTarget: () => modal.querySelector('.sp-welcome-primary-btn') || closeButton
+            });
+            requestAnimationFrame(() => {
+                backdrop.classList.add('visible');
+                modal.classList.add('visible');
+                modalKeyboard.focusInitial();
+            });
+
+            return true;
+        }
+
+        function renderWhatsNewModal(options = {}) {
+            const shadowRoot = getShadowRoot();
+            if (!shadowRoot || !el) return false;
+            const shouldMarkSeenOnClose = options?.markSeenOnClose !== false;
+
+            let hasMarkedSeen = false;
+            const markSeenOnce = () => {
+                if (!shouldMarkSeenOnClose) return Promise.resolve(true);
+                if (hasMarkedSeen) return Promise.resolve(true);
+                hasMarkedSeen = true;
+                return Promise.resolve(markWhatsNewSeen()).catch(() => false);
+            };
+            const closeAfterSeen = () => {
+                markSeenOnce();
+                closeWhatsNewModal();
+            };
+
+            prepareModalOpen('sp-whats-new-modal', 'sp-whats-new-backdrop');
+
+            const backdrop = el('div', { className: 'sp-overlay-backdrop', id: 'sp-whats-new-backdrop' });
+            const modal = el('div', {
+                className: 'sp-folder-modal sp-welcome-modal sp-whats-new-modal',
+                id: 'sp-whats-new-modal',
+                role: 'dialog',
+                'aria-modal': 'true',
+                'aria-labelledby': 'sp-whats-new-modal-title',
+                tabindex: '-1'
+            });
+            const closeButton = el('button', {
+                type: 'button',
+                className: 'sp-icon-button sp-welcome-close-btn',
+                'aria-label': getMessage('ui_welcome_close'),
+                title: getMessage('ui_welcome_close')
+            }, [
+                el('span', { className: 'google-symbols', 'aria-hidden': 'true' }, ['close'])
+            ]);
+            const header = el('div', { className: 'sp-welcome-header' }, [
+                el('div', { className: 'sp-welcome-brand-icon', 'aria-hidden': 'true' }, [
+                    el('span', { className: 'google-symbols sp-welcome-brand-symbol' }, ['new_releases'])
+                ]),
+                el('div', { className: 'sp-welcome-heading' }, [
+                    el('h3', { className: 'sp-folder-modal-title sp-welcome-title', id: 'sp-whats-new-modal-title' }, [
+                        getMessage('ui_whats_new_title')
+                    ]),
+                    el('p', { className: 'sp-welcome-subtitle' }, [
+                        getMessage('ui_whats_new_subtitle')
+                    ])
+                ]),
+                closeButton
+            ]);
+            const content = el('div', { className: 'sp-folder-modal-content sp-welcome-content' }, [
+                el('div', { className: 'sp-welcome-feature-list' }, [
+                    createWelcomeFeatureRow('filter_alt', 'ui_whats_new_quick_views_title', 'ui_whats_new_quick_views_body'),
+                    createWelcomeFeatureRow('backup', 'ui_whats_new_restore_points_title', 'ui_whats_new_restore_points_body'),
+                    createWelcomeFeatureRow('translate', 'ui_whats_new_language_title', 'ui_whats_new_language_body')
+                ])
+            ]);
+            const footer = el('div', { className: 'sp-folder-modal-footer sp-welcome-footer' }, [
+                el('button', { type: 'button', className: 'sp-button sp-welcome-primary-btn sp-whats-new-primary-btn sp-glare-hover' }, [
+                    getMessage('ui_whats_new_primary')
+                ])
+            ]);
+
+            modal.appendChild(header);
+            modal.appendChild(content);
+            modal.appendChild(footer);
+            shadowRoot.appendChild(backdrop);
+            shadowRoot.appendChild(modal);
+
+            closeButton.addEventListener('click', closeAfterSeen);
+            footer.querySelector('.sp-whats-new-primary-btn')?.addEventListener('click', closeAfterSeen);
+            backdrop.addEventListener('click', closeAfterSeen);
+
+            const modalKeyboard = bindModalKeyboardNavigation(modal, {
+                closeModal: closeAfterSeen,
+                initialFocusTarget: () => modal.querySelector('.sp-whats-new-primary-btn') || closeButton
+            });
+            requestAnimationFrame(() => {
+                backdrop.classList.add('visible');
+                modal.classList.add('visible');
+                modalKeyboard.focusInitial();
+            });
+
+            return true;
+        }
+
+        function renderCommandPaletteModal() {
+            const shadowRoot = getShadowRoot();
+            const documentObj = getDocument();
+            if (!shadowRoot || !documentObj || !el) return false;
+
+            prepareModalOpen('sp-command-palette-modal', 'sp-command-palette-backdrop');
+
+            const backdrop = el('div', { className: 'sp-overlay-backdrop', id: 'sp-command-palette-backdrop' });
+            const modal = el('div', {
+                className: 'sp-folder-modal sp-command-palette-modal',
+                id: 'sp-command-palette-modal',
+                role: 'dialog',
+                'aria-modal': 'true',
+                'aria-labelledby': 'sp-command-palette-title',
+                tabindex: '-1'
+            });
+            const header = el('div', { className: 'sp-folder-modal-header sp-command-palette-header' }, [
+                el('h3', { className: 'sp-folder-modal-title', id: 'sp-command-palette-title' }, [
+                    getMessage('ui_command_palette')
+                ])
+            ]);
+            const input = el('input', {
+                type: 'text',
+                className: 'sp-command-palette-input',
+                placeholder: getMessage('ui_command_palette_placeholder'),
+                'aria-label': getMessage('ui_command_palette')
+            });
+            const list = el('div', {
+                className: 'sp-command-palette-list',
+                role: 'listbox'
+            });
+            const content = el('div', { className: 'sp-folder-modal-content sp-command-palette-content' }, [
+                input,
+                list
+            ]);
+            let commands = [];
+            let activeIndex = 0;
+
+            const clearList = () => {
+                Array.from(list.childNodes || []).forEach((child) => {
+                    if (typeof list.removeChild === 'function') list.removeChild(child);
+                });
+            };
+            const renderItems = () => {
+                commands = Array.isArray(getCommandPaletteCommands(input.value)) ? getCommandPaletteCommands(input.value) : [];
+                if (activeIndex >= commands.length) activeIndex = Math.max(0, commands.length - 1);
+                clearList();
+                if (commands.length === 0) {
+                    list.appendChild(el('div', { className: 'sp-command-palette-empty' }, [
+                        getMessage('ui_command_palette_empty')
+                    ]));
+                    return;
+                }
+                commands.forEach((command, index) => {
+                    const isActive = index === activeIndex;
+                    const item = el('button', {
+                        type: 'button',
+                        className: 'sp-command-palette-item' + (isActive ? ' is-active' : ''),
+                        role: 'option',
+                        'aria-selected': isActive ? 'true' : 'false',
+                        disabled: Boolean(command.disabled),
+                        dataset: { commandIndex: String(index) }
+                    }, [
+                        el('span', { className: 'google-symbols sp-command-palette-icon', 'aria-hidden': 'true' }, [
+                            command.icon || 'chevron_right'
+                        ]),
+                        el('span', { className: 'sp-command-palette-copy' }, [
+                            el('span', { className: 'sp-command-palette-title' }, [command.title || command.id || command.action || '']),
+                            command.subtitle
+                                ? el('span', { className: 'sp-command-palette-subtitle' }, [command.subtitle])
+                                : ''
+                        ])
+                    ]);
+                    item.addEventListener('mousemove', () => {
+                        activeIndex = index;
+                        renderItems();
+                    });
+                    item.addEventListener('click', () => {
+                        if (command.disabled) return;
+                        if (executeCommandPaletteCommand(command.action, command)) {
+                            closeCommandPaletteModal({ immediate: true });
+                        }
+                    });
+                    list.appendChild(item);
+                });
+            };
+            const moveActiveIndex = (delta) => {
+                if (commands.length === 0) return;
+                activeIndex = (activeIndex + delta + commands.length) % commands.length;
+                renderItems();
+            };
+            const executeActiveCommand = () => {
+                const command = commands[activeIndex];
+                if (!command || command.disabled) return false;
+                if (executeCommandPaletteCommand(command.action, command)) {
+                    closeCommandPaletteModal({ immediate: true });
+                    return true;
+                }
+                return false;
+            };
+
+            input.addEventListener('input', () => {
+                activeIndex = 0;
+                renderItems();
+            });
+            input.addEventListener('keydown', (event) => {
+                if (event.key === 'ArrowDown') {
+                    event.preventDefault();
+                    moveActiveIndex(1);
+                } else if (event.key === 'ArrowUp') {
+                    event.preventDefault();
+                    moveActiveIndex(-1);
+                } else if (event.key === 'Enter') {
+                    event.preventDefault();
+                    executeActiveCommand();
+                }
+            });
+            backdrop.addEventListener('click', () => closeCommandPaletteModal());
+
+            modal.appendChild(header);
+            modal.appendChild(content);
+            shadowRoot.appendChild(backdrop);
+            shadowRoot.appendChild(modal);
+            renderItems();
+
+            const modalKeyboard = bindModalKeyboardNavigation(modal, {
+                closeModal: closeCommandPaletteModal,
+                initialFocusTarget: () => input
+            });
+            requestAnimationFrame(() => {
+                backdrop.classList.add('visible');
+                modal.classList.add('visible');
+                modalKeyboard.focusInitial();
+            });
+            return true;
+        }
+
+        function renderTagFilterModal() {
+            const shadowRoot = getShadowRoot();
+            if (!shadowRoot || !el) return false;
+            const state = getState() || {};
+            const tagsById = getTagsById();
+            const orderedTagIds = [
+                ...(Array.isArray(state.tagOrder) ? state.tagOrder : []),
+                ...Array.from(tagsById.keys()).filter((tagId) => !(Array.isArray(state.tagOrder) ? state.tagOrder : []).includes(tagId))
+            ];
+            const tags = orderedTagIds
+                .map((tagId) => tagsById.get(tagId))
+                .filter(Boolean);
+
+            prepareModalOpen('sp-tag-filter-modal', 'sp-tag-filter-backdrop');
+
+            const backdrop = el('div', { className: 'sp-overlay-backdrop', id: 'sp-tag-filter-backdrop' });
+            const modal = el('div', {
+                className: 'sp-folder-modal sp-tag-filter-modal',
+                id: 'sp-tag-filter-modal',
+                role: 'dialog',
+                'aria-modal': 'true',
+                'aria-labelledby': 'sp-tag-filter-title',
+                tabindex: '-1'
+            });
+            const header = el('div', { className: 'sp-folder-modal-header' }, [
+                el('h3', { className: 'sp-folder-modal-title', id: 'sp-tag-filter-title' }, [
+                    getMessage('ui_tag_filter_title')
+                ])
+            ]);
+            const content = el('div', { className: 'sp-folder-modal-content sp-tag-filter-content' }, [
+                tags.length === 0
+                    ? el('div', { className: 'sp-settings-empty-state' }, [getMessage('ui_no_tags')])
+                    : el('div', { className: 'sp-tag-filter-list' }, tags.map((tag) => (
+                        el('button', {
+                            type: 'button',
+                            className: 'sp-tag-filter-option sp-glare-hover',
+                            dataset: { tagId: tag.id }
+                        }, [tag.label || tag.id])
+                    )))
+            ]);
+            const footer = el('div', { className: 'sp-folder-modal-footer' }, [
+                el('button', { type: 'button', className: 'sp-button sp-modal-cancel sp-glare-hover' }, [
+                    getMessage('ui_cancel')
+                ])
+            ]);
+
+            content.querySelectorAll?.('.sp-tag-filter-option')?.forEach((button) => {
+                button.addEventListener('click', () => {
+                    if (applyTagQuickFilter(button.dataset.tagId)) {
+                        closeTagFilterModal();
+                    }
+                });
+            });
+            footer.querySelector('.sp-modal-cancel')?.addEventListener('click', () => closeTagFilterModal());
+            backdrop.addEventListener('click', () => closeTagFilterModal());
+
+            modal.appendChild(header);
+            modal.appendChild(content);
+            modal.appendChild(footer);
+            shadowRoot.appendChild(backdrop);
+            shadowRoot.appendChild(modal);
+
+            const modalKeyboard = bindModalKeyboardNavigation(modal, {
+                closeModal: closeTagFilterModal,
+                initialFocusTarget: () => modal.querySelector('.sp-tag-filter-option') || modal.querySelector('.sp-modal-cancel')
+            });
+            requestAnimationFrame(() => {
+                backdrop.classList.add('visible');
+                modal.classList.add('visible');
+                modalKeyboard.focusInitial();
+            });
+            return true;
+        }
+
+        function createDeveloperSettingsSection() {
+            const developerModeToggle = el('input', {
+                type: 'checkbox',
+                className: 'sp-settings-developer-mode-toggle',
+                checked: getDeveloperModeEnabled(),
+                'aria-label': getMessage('ui_settings_developer_mode_title')
+            });
+
+            return el('section', { className: 'sp-settings-section sp-settings-developer-section' }, [
+                el('div', { className: 'sp-settings-section-header' }, [
+                    el('h4', { className: 'sp-settings-section-title' }, [getMessage('ui_settings_developer_features')]),
+                    el('label', { className: 'sp-settings-action-row sp-settings-developer-toggle-row' }, [
+                        developerModeToggle,
+                        el('span', { className: 'sp-settings-helper-text' }, [getMessage('ui_settings_developer_mode_toggle')])
+                    ])
+                ]),
+                el('p', { className: 'sp-settings-helper-text sp-settings-developer-body' }, [
+                    getMessage('ui_settings_developer_mode_body')
+                ]),
+                el('div', { className: 'sp-settings-action-row sp-settings-developer-actions' }, [
+                    el('button', { type: 'button', className: 'sp-button sp-settings-copy-developer-logs-btn sp-glare-hover' }, [
+                        getMessage('ui_settings_copy_developer_logs')
+                    ]),
+                    el('button', { type: 'button', className: 'sp-button sp-settings-download-developer-logs-btn sp-glare-hover' }, [
+                        getMessage('ui_settings_download_developer_logs')
+                    ]),
+                    el('button', { type: 'button', className: 'sp-button sp-settings-clear-developer-logs-btn sp-glare-hover' }, [
+                        getMessage('ui_settings_clear_developer_logs')
+                    ]),
+                    el('button', { type: 'button', className: 'sp-button sp-settings-test-welcome-btn sp-glare-hover' }, [
+                        getMessage('ui_settings_test_welcome_modal')
+                    ]),
+                    el('button', { type: 'button', className: 'sp-button sp-settings-test-whats-new-btn sp-glare-hover' }, [
+                        getMessage('ui_settings_test_whats_new_modal')
+                    ])
+                ])
+            ]);
+        }
+
+        function bindDeveloperSettingsActions(container) {
+            container.querySelector('.sp-settings-developer-mode-toggle')?.addEventListener('change', (event) => {
+                const enabled = Boolean(event?.target?.checked ?? container.querySelector('.sp-settings-developer-mode-toggle')?.checked);
+                Promise.resolve(setDeveloperModeEnabled(enabled))
+                    .then(() => {
+                        showToast(getMessage(enabled ? 'ui_settings_developer_mode_enabled' : 'ui_settings_developer_mode_disabled'), { variant: 'success' });
+                    })
+                    .catch(() => {
+                        showToast(getMessage('ui_settings_developer_mode_failed'), { variant: 'error' });
+                    });
+            });
+            container.querySelector('.sp-settings-copy-developer-logs-btn')?.addEventListener('click', () => {
+                copyDeveloperLogsTextToClipboard();
+            });
+            container.querySelector('.sp-settings-download-developer-logs-btn')?.addEventListener('click', () => {
+                downloadDeveloperLogsText();
+            });
+            container.querySelector('.sp-settings-test-welcome-btn')?.addEventListener('click', () => {
+                closeSettingsModal({ immediate: true, restoreFocus: false });
+                renderWelcomeModal();
+            });
+            container.querySelector('.sp-settings-test-whats-new-btn')?.addEventListener('click', () => {
+                closeSettingsModal({ immediate: true, restoreFocus: false });
+                renderWhatsNewModal({ markSeenOnClose: false });
+            });
+            container.querySelector('.sp-settings-clear-developer-logs-btn')?.addEventListener('click', () => {
+                Promise.resolve(clearDeveloperLogs())
+                    .then((ok) => {
+                        showToast(getMessage(ok ? 'ui_settings_developer_logs_cleared' : 'ui_settings_developer_logs_clear_failed'), {
+                            variant: ok ? 'success' : 'error'
+                        });
+                    })
+                    .catch(() => {
+                        showToast(getMessage('ui_settings_developer_logs_clear_failed'), { variant: 'error' });
+                    });
+            });
+        }
+
+        function unlockDeveloperSettings(content, unlockRow) {
+            const win = getWindow();
+            if (!win || typeof win.prompt !== 'function') {
+                showToast(getMessage('ui_settings_developer_password_failed'), { variant: 'error' });
+                return false;
+            }
+
+            const enteredPassword = win.prompt(getMessage('ui_settings_developer_password_prompt'));
+            if (enteredPassword === null || enteredPassword === undefined) {
+                return false;
+            }
+            if (enteredPassword !== SETTINGS_DEVELOPER_PASSWORD) {
+                showToast(getMessage('ui_settings_developer_password_failed'), { variant: 'error' });
+                return false;
+            }
+
+            const developerSection = createDeveloperSettingsSection();
+            removeModalNode(unlockRow);
+            content.appendChild(developerSection);
+            bindDeveloperSettingsActions(developerSection);
+            return true;
+        }
+
         function renderSettingsModal(modalState = {}) {
             const shadowRoot = getShadowRoot();
             if (!shadowRoot || !el) return false;
@@ -798,8 +1347,21 @@
                 'aria-labelledby': 'sp-settings-modal-title',
                 tabindex: '-1'
             });
-            const header = el('div', { className: 'sp-folder-modal-header' }, [
-                el('h3', { className: 'sp-folder-modal-title', id: 'sp-settings-modal-title' }, [getMessage('ui_settings')])
+            const header = el('div', { className: 'sp-folder-modal-header sp-settings-modal-header' }, [
+                el('h3', { className: 'sp-folder-modal-title', id: 'sp-settings-modal-title' }, [getMessage('ui_settings')]),
+                el('div', {
+                    id: 'sp-settings-save-status-section',
+                    className: 'sp-settings-save-status-header',
+                    hidden: true
+                }, [
+                    el('div', {
+                        id: 'sp-settings-save-status',
+                        className: 'sp-save-status sp-save-status-idle',
+                        role: 'status',
+                        'aria-live': 'polite',
+                        hidden: true
+                    })
+                ])
             ]);
             const content = el('div', { className: 'sp-folder-modal-content sp-settings-modal-content' });
             const exportTextarea = el('textarea', {
@@ -882,109 +1444,58 @@
                 return { body, section, setExpanded, toggle };
             };
 
-            content.appendChild(el('section', { className: 'sp-settings-section sp-settings-feedback-section' }, [
-                el('div', { className: 'sp-settings-section-header' }, [
-                    el('h4', { className: 'sp-settings-section-title' }, [getMessage('ui_settings_feedback_title')]),
-                    el('div', { className: 'sp-settings-action-row' }, [
-                        el('button', { type: 'button', className: 'sp-button sp-settings-open-web-store-feedback-btn sp-glare-hover' }, [
-                            getMessage('ui_settings_open_web_store_feedback')
-                        ])
-                    ])
-                ]),
-                el('p', { className: 'sp-settings-feedback-body' }, [
-                    getMessage('ui_settings_feedback_body')
+            const createSettingsSubsection = (className, titleKey, children = []) => (
+                el('div', { className: ['sp-settings-subsection', className].filter(Boolean).join(' ') }, [
+                    el('h5', { className: 'sp-settings-subsection-title' }, [getMessage(titleKey)]),
+                    ...children
                 ])
-            ]));
+            );
 
-            const developerModeToggle = el('input', {
-                type: 'checkbox',
-                className: 'sp-settings-developer-mode-toggle',
-                checked: getDeveloperModeEnabled(),
-                'aria-label': getMessage('ui_settings_developer_mode_title')
-            });
-            content.appendChild(el('section', { className: 'sp-settings-section sp-settings-developer-section' }, [
-                el('div', { className: 'sp-settings-section-header' }, [
-                    el('h4', { className: 'sp-settings-section-title' }, [getMessage('ui_settings_developer_mode_title')]),
-                    el('label', { className: 'sp-settings-action-row sp-settings-developer-toggle-row' }, [
-                        developerModeToggle,
-                        el('span', { className: 'sp-settings-helper-text' }, [getMessage('ui_settings_developer_mode_toggle')])
+            const exportSubsection = createSettingsSubsection('sp-settings-export-section', 'ui_settings_export_title', [
+                el('div', { className: 'sp-settings-action-row sp-settings-collapsible-actions' }, [
+                    el('button', { type: 'button', className: 'sp-button sp-settings-copy-export-btn sp-glare-hover' }, [
+                        getMessage('ui_settings_copy_json')
+                    ]),
+                    el('button', { type: 'button', className: 'sp-button sp-settings-download-export-btn sp-glare-hover' }, [
+                        getMessage('ui_settings_download_json')
                     ])
                 ]),
-                el('p', { className: 'sp-settings-helper-text sp-settings-developer-body' }, [
-                    getMessage('ui_settings_developer_mode_body')
-                ]),
-                el('div', { className: 'sp-settings-action-row sp-settings-developer-actions' }, [
-                    el('button', { type: 'button', className: 'sp-button sp-settings-copy-developer-logs-btn sp-glare-hover' }, [
-                        getMessage('ui_settings_copy_developer_logs')
+                exportTextarea
+            ]);
+
+            const importSubsection = createSettingsSubsection('sp-settings-import-section', 'ui_settings_import_title', [
+                el('div', { className: 'sp-settings-action-row sp-settings-collapsible-actions' }, [
+                    el('button', { type: 'button', className: 'sp-button sp-settings-choose-import-btn sp-glare-hover' }, [
+                        getMessage('ui_settings_choose_json')
                     ]),
-                    el('button', { type: 'button', className: 'sp-button sp-settings-download-developer-logs-btn sp-glare-hover' }, [
-                        getMessage('ui_settings_download_developer_logs')
-                    ]),
-                    el('button', { type: 'button', className: 'sp-button sp-settings-clear-developer-logs-btn sp-glare-hover' }, [
-                        getMessage('ui_settings_clear_developer_logs')
+                    el('button', { type: 'button', className: 'sp-button sp-settings-preview-import-btn sp-glare-hover' }, [
+                        getMessage('ui_settings_preview_import')
                     ])
+                ]),
+                importFileInput,
+                importTextarea,
+                el('div', { className: previewClassName, 'aria-live': 'polite' }, [
+                    previewMessage,
+                    ...createImportPreviewDetailNodes(preview)
                 ])
-            ]));
+            ]);
 
-            const exportSection = createCollapsibleSettingsSection({
-                className: 'sp-settings-export-section',
-                titleKey: 'ui_settings_export_title',
-                contentId: 'sp-settings-export-content',
-                children: [
-                    el('div', { className: 'sp-settings-action-row sp-settings-collapsible-actions' }, [
-                        el('button', { type: 'button', className: 'sp-button sp-settings-copy-export-btn sp-glare-hover' }, [
-                            getMessage('ui_settings_copy_json')
-                        ]),
-                        el('button', { type: 'button', className: 'sp-button sp-settings-download-export-btn sp-glare-hover' }, [
-                            getMessage('ui_settings_download_json')
-                        ])
-                    ]),
-                    exportTextarea
-                ]
-            });
-            content.appendChild(exportSection.section);
-
-            const importSection = createCollapsibleSettingsSection({
-                className: 'sp-settings-import-section',
-                titleKey: 'ui_settings_import_title',
-                contentId: 'sp-settings-import-content',
+            const historySubsection = createSettingsSubsection('sp-settings-history-section', 'ui_history_title', [
+                ...createHistoryPreferenceNodes(),
+                ...createHistoryNodes(getStateHistoryEntries())
+            ]);
+            const backupSection = createCollapsibleSettingsSection({
+                className: 'sp-settings-backup-section sp-settings-import-section',
+                titleKey: 'ui_settings_backup_restore_title',
+                contentId: 'sp-settings-backup-content',
                 initiallyExpanded: Boolean(importText.trim() || preview),
-                children: [
-                    el('div', { className: 'sp-settings-action-row sp-settings-collapsible-actions' }, [
-                        el('button', { type: 'button', className: 'sp-button sp-settings-choose-import-btn sp-glare-hover' }, [
-                            getMessage('ui_settings_choose_json')
-                        ]),
-                        el('button', { type: 'button', className: 'sp-button sp-settings-preview-import-btn sp-glare-hover' }, [
-                            getMessage('ui_settings_preview_import')
-                        ])
-                    ]),
-                    importFileInput,
-                    importTextarea,
-                    el('div', { className: previewClassName, 'aria-live': 'polite' }, [
-                        previewMessage,
-                        ...createImportPreviewDetailNodes(preview)
-                    ])
-                ]
+                children: [exportSubsection, importSubsection, historySubsection]
             });
-            content.appendChild(importSection.section);
+            content.appendChild(backupSection.section);
+            content.appendChild(createLanguagePreferenceSection());
 
             const sourceRepairReport = getSourceRepairReport();
-            const repairSection = createCollapsibleSettingsSection({
-                className: 'sp-settings-source-repair-section',
-                titleKey: 'ui_source_repair_title',
-                contentId: 'sp-settings-source-repair-content',
-                initiallyExpanded: Boolean((sourceRepairReport?.unmatchedSources || 0) + (sourceRepairReport?.ambiguousSources || 0)),
-                children: createSourceRepairNodes(sourceRepairReport)
-            });
-            content.appendChild(repairSection.section);
-
-            const historySection = createCollapsibleSettingsSection({
-                className: 'sp-settings-history-section',
-                titleKey: 'ui_history_title',
-                contentId: 'sp-settings-history-content',
-                children: createHistoryNodes(getStateHistoryEntries())
-            });
-            content.appendChild(historySection.section);
+            const sourceRepairIssueCount = (sourceRepairReport?.unmatchedSources || 0) + (sourceRepairReport?.ambiguousSources || 0);
 
             const diagnosticsCopyButton = el('button', {
                 type: 'button',
@@ -992,45 +1503,67 @@
             }, [
                 getMessage('ui_settings_copy_diagnostics')
             ]);
-            const diagnosticsSection = createCollapsibleSettingsSection({
-                className: 'sp-settings-diagnostics-section',
-                titleKey: 'ui_settings_diagnostics_title',
-                contentId: 'sp-settings-diagnostics-content',
-                children: [
-                    el('div', { className: 'sp-settings-action-row sp-settings-collapsible-actions' }, [
-                        diagnosticsCopyButton
-                    ]),
-                    createDiagnosticsGrid()
-                ]
-            });
-
-            content.appendChild(diagnosticsSection.section);
-
-            content.appendChild(el('section', {
-                id: 'sp-settings-save-status-section',
-                className: 'sp-settings-section sp-settings-save-status-section',
-                hidden: true
-            }, [
-                el('div', { className: 'sp-settings-section-header' }, [
-                    el('h4', { className: 'sp-settings-section-title' }, [getMessage('ui_settings_save_status_title')])
+            const helpChildren = [
+                el('p', { className: 'sp-settings-helper-text sp-settings-feedback-body' }, [
+                    getMessage('ui_settings_feedback_body')
                 ]),
-                el('div', {
-                    id: 'sp-settings-save-status',
-                    className: 'sp-save-status sp-save-status-idle',
-                    role: 'status',
-                    'aria-live': 'polite',
-                    hidden: true
-                })
-            ]));
+                el('div', { className: 'sp-settings-action-row sp-settings-collapsible-actions' }, [
+                    el('button', { type: 'button', className: 'sp-button sp-settings-open-web-store-feedback-btn sp-glare-hover' }, [
+                        getMessage('ui_settings_open_web_store_feedback')
+                    ]),
+                    diagnosticsCopyButton
+                ]),
+                createSettingsSubsection('sp-settings-diagnostics-section', 'ui_settings_diagnostics_title', [
+                    createDiagnosticsGrid()
+                ])
+            ];
+            if (!sourceRepairIssueCount) {
+                helpChildren.push(createSettingsSubsection('sp-settings-source-repair-inline', 'ui_settings_troubleshooting_title', createSourceRepairNodes(sourceRepairReport)));
+            }
+            const helpSection = createCollapsibleSettingsSection({
+                className: 'sp-settings-help-section',
+                titleKey: 'ui_settings_help_feedback_title',
+                contentId: 'sp-settings-help-content',
+                children: helpChildren
+            });
+            content.appendChild(helpSection.section);
 
-            const footer = el('div', { className: 'sp-folder-modal-footer' }, [
-                el('button', { type: 'button', className: 'sp-modal-cancel' }, [getMessage('ui_cancel')]),
-                el('button', {
+            if (sourceRepairIssueCount) {
+                const repairSection = createCollapsibleSettingsSection({
+                    className: 'sp-settings-source-repair-section',
+                    titleKey: 'ui_source_repair_title',
+                    contentId: 'sp-settings-source-repair-content',
+                    initiallyExpanded: true,
+                    children: createSourceRepairNodes(sourceRepairReport)
+                });
+                content.appendChild(repairSection.section);
+            }
+            let developerUnlockRow = null;
+            let developerSection = null;
+            if (getDeveloperModeEnabled()) {
+                developerSection = createDeveloperSettingsSection();
+                content.appendChild(developerSection);
+            } else {
+                developerUnlockRow = el('div', { className: 'sp-settings-developer-unlock-row' }, [
+                    el('button', {
+                        type: 'button',
+                        className: 'sp-settings-developer-unlock-btn',
+                        title: getMessage('ui_settings_developer_features')
+                    }, [getMessage('ui_settings_developer_features')])
+                ]);
+                content.appendChild(developerUnlockRow);
+            }
+
+            const footerButtons = [
+                el('button', { type: 'button', className: 'sp-modal-cancel' }, [getMessage('ui_cancel')])
+            ];
+            if (preview && preview.ok) {
+                footerButtons.push(el('button', {
                     type: 'button',
-                    className: 'sp-button sp-settings-apply-import-btn sp-glare-hover',
-                    disabled: !(preview && preview.ok)
-                }, [getMessage('ui_settings_apply_import')])
-            ]);
+                    className: 'sp-button sp-settings-apply-import-btn sp-glare-hover'
+                }, [getMessage('ui_settings_apply_import')]));
+            }
+            const footer = el('div', { className: 'sp-folder-modal-footer' }, footerButtons);
 
             modal.appendChild(header);
             modal.appendChild(content);
@@ -1053,32 +1586,42 @@
             content.querySelector('.sp-settings-open-web-store-feedback-btn')?.addEventListener('click', () => {
                 openWebStoreFeedback();
             });
-            content.querySelector('.sp-settings-developer-mode-toggle')?.addEventListener('change', (event) => {
-                const enabled = Boolean(event?.target?.checked ?? content.querySelector('.sp-settings-developer-mode-toggle')?.checked);
-                Promise.resolve(setDeveloperModeEnabled(enabled))
+            content.querySelector('.sp-settings-language-select')?.addEventListener('change', (event) => {
+                const nextLanguage = event?.target?.value || 'auto';
+                Promise.resolve(setLanguageOverride(nextLanguage)).then(() => {
+                    renderSettingsModal(normalizedModalState);
+                });
+            });
+            content.querySelector('.sp-history-retention-select')?.addEventListener('change', (event) => {
+                const nextLimit = Number(event?.target?.value) || 20;
+                Promise.resolve(setHistoryRetentionLimit(nextLimit))
                     .then(() => {
-                        showToast(getMessage(enabled ? 'ui_settings_developer_mode_enabled' : 'ui_settings_developer_mode_disabled'), { variant: 'success' });
+                        showToast(getMessage('ui_history_retention_updated'), { variant: 'success' });
+                        renderSettingsModal(normalizedModalState);
                     })
                     .catch(() => {
-                        showToast(getMessage('ui_settings_developer_mode_failed'), { variant: 'error' });
+                        showToast(getMessage('ui_history_retention_update_failed'), { variant: 'error' });
                     });
             });
-            content.querySelector('.sp-settings-copy-developer-logs-btn')?.addEventListener('click', () => {
-                copyDeveloperLogsTextToClipboard();
-            });
-            content.querySelector('.sp-settings-download-developer-logs-btn')?.addEventListener('click', () => {
-                downloadDeveloperLogsText();
-            });
-            content.querySelector('.sp-settings-clear-developer-logs-btn')?.addEventListener('click', () => {
-                Promise.resolve(clearDeveloperLogs())
+            content.querySelector('.sp-history-create-restore-point-btn')?.addEventListener('click', () => {
+                const win = getWindow();
+                const defaultLabel = new Date().toLocaleString();
+                const label = win && typeof win.prompt === 'function'
+                    ? win.prompt(getMessage('ui_history_restore_point_prompt'), defaultLabel)
+                    : defaultLabel;
+                if (label === null || label === undefined) return;
+                Promise.resolve(createManualRestorePoint(String(label || '').trim()))
                     .then((ok) => {
-                        showToast(getMessage(ok ? 'ui_settings_developer_logs_cleared' : 'ui_settings_developer_logs_clear_failed'), {
-                            variant: ok ? 'success' : 'error'
-                        });
-                    })
-                    .catch(() => {
-                        showToast(getMessage('ui_settings_developer_logs_clear_failed'), { variant: 'error' });
+                        if (ok) {
+                            renderSettingsModal(normalizedModalState);
+                        }
                     });
+            });
+            if (developerSection) {
+                bindDeveloperSettingsActions(developerSection);
+            }
+            developerUnlockRow?.querySelector('.sp-settings-developer-unlock-btn')?.addEventListener('click', () => {
+                unlockDeveloperSettings(content, developerUnlockRow);
             });
             content.querySelector('.sp-settings-choose-import-btn')?.addEventListener('click', () => {
                 importFileInput.click?.();
@@ -1160,7 +1703,7 @@
 
             const modalKeyboard = bindModalKeyboardNavigation(modal, {
                 closeModal: closeSettingsModal,
-                initialFocusTarget: () => modal.querySelector('.sp-settings-copy-export-btn') || modal.querySelector('.sp-modal-cancel')
+                initialFocusTarget: () => modal.querySelector('.sp-settings-backup-section .sp-settings-collapsible-toggle') || modal.querySelector('.sp-modal-cancel')
             });
             requestAnimationFrame(() => {
                 backdrop.classList.add('visible');
@@ -2044,6 +2587,14 @@
             closeMoveToFolderModal,
             closeNativeLabelImportModal,
             renderNativeLabelImportModal,
+            closeCommandPaletteModal,
+            renderCommandPaletteModal,
+            closeTagFilterModal,
+            renderTagFilterModal,
+            closeWelcomeModal,
+            renderWelcomeModal,
+            closeWhatsNewModal,
+            renderWhatsNewModal,
             closeSettingsModal,
             renderSettingsModal,
             getImportPreviewMessage,

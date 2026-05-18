@@ -27,6 +27,10 @@
         const HASH_SOURCE_KEYS = new Set(['stableToken', 'fingerprint']);
 
         let developerModeEnabled = false;
+        let welcomeOnboardingSeenVersion = 0;
+        let whatsNewSeenVersion = 0;
+        let historyRetentionLimit = 20;
+        let languageOverride = 'auto';
         let developerLogs = [];
         let nextLogSequence = 1;
 
@@ -164,7 +168,7 @@
         async function loadDeveloperPreferences() {
             const response = await sendRuntimeMessage({ type: 'LOAD_PREFERENCES' });
             if (response?.success) {
-                developerModeEnabled = Boolean(response.preferences?.developerModeEnabled);
+                applyLoadedPreferences(response.preferences);
                 if (developerModeEnabled) {
                     await loadDeveloperLogs();
                 }
@@ -172,19 +176,56 @@
             return developerModeEnabled;
         }
 
-        async function setDeveloperModeEnabled(enabled) {
-            developerModeEnabled = Boolean(enabled);
+        function applyLoadedPreferences(preferences = {}) {
+            developerModeEnabled = Boolean(preferences?.developerModeEnabled);
+            welcomeOnboardingSeenVersion = normalizePreferenceVersion(preferences?.welcomeOnboardingSeenVersion);
+            whatsNewSeenVersion = normalizePreferenceVersion(preferences?.whatsNewSeenVersion);
+            historyRetentionLimit = normalizeHistoryRetentionLimit(preferences?.historyRetentionLimit);
+            languageOverride = normalizeLanguageOverride(preferences?.languageOverride);
+        }
+
+        async function savePreferences(nextPreferences = {}) {
             const response = await sendRuntimeMessage({
                 type: 'SAVE_PREFERENCES',
-                preferences: { developerModeEnabled }
+                preferences: nextPreferences
             });
             if (response?.success && response.preferences) {
-                developerModeEnabled = Boolean(response.preferences.developerModeEnabled);
+                applyLoadedPreferences(response.preferences);
             }
+            return response;
+        }
+
+        async function setDeveloperModeEnabled(enabled) {
+            developerModeEnabled = Boolean(enabled);
+            await savePreferences({ developerModeEnabled });
             if (developerModeEnabled) {
                 await loadDeveloperLogs();
             }
             return developerModeEnabled;
+        }
+
+        async function setWelcomeOnboardingSeenVersion(version) {
+            welcomeOnboardingSeenVersion = normalizePreferenceVersion(version);
+            await savePreferences({ welcomeOnboardingSeenVersion });
+            return welcomeOnboardingSeenVersion;
+        }
+
+        async function setWhatsNewSeenVersion(version) {
+            whatsNewSeenVersion = normalizePreferenceVersion(version);
+            await savePreferences({ whatsNewSeenVersion });
+            return whatsNewSeenVersion;
+        }
+
+        async function setHistoryRetentionLimit(limit) {
+            historyRetentionLimit = normalizeHistoryRetentionLimit(limit);
+            await savePreferences({ historyRetentionLimit });
+            return historyRetentionLimit;
+        }
+
+        async function setLanguageOverride(locale) {
+            languageOverride = normalizeLanguageOverride(locale);
+            await savePreferences({ languageOverride });
+            return languageOverride;
         }
 
         async function loadDeveloperLogs() {
@@ -202,6 +243,40 @@
 
         function getDeveloperModeEnabled() {
             return developerModeEnabled;
+        }
+
+        function getWelcomeOnboardingSeenVersion() {
+            return welcomeOnboardingSeenVersion;
+        }
+
+        function getWhatsNewSeenVersion() {
+            return whatsNewSeenVersion;
+        }
+
+        function normalizePreferenceVersion(value) {
+            const version = Number(value);
+            if (!Number.isFinite(version) || version < 0) return 0;
+            return Math.floor(version);
+        }
+
+        function normalizeHistoryRetentionLimit(value) {
+            const limit = Number(value);
+            return limit === 20 || limit === 50 || limit === 100 ? limit : 20;
+        }
+
+        function normalizeLanguageOverride(value) {
+            const normalized = String(value || 'auto').trim();
+            return normalized === 'auto' || normalized === 'en' || normalized === 'es' || normalized === 'zh_CN'
+                ? normalized
+                : 'auto';
+        }
+
+        function getHistoryRetentionLimit() {
+            return historyRetentionLimit;
+        }
+
+        function getLanguageOverride() {
+            return languageOverride;
         }
 
         function getDeveloperLogs() {
@@ -262,6 +337,14 @@
             developerLog,
             getDeveloperModeEnabled,
             setDeveloperModeEnabled,
+            getWelcomeOnboardingSeenVersion,
+            setWelcomeOnboardingSeenVersion,
+            getWhatsNewSeenVersion,
+            setWhatsNewSeenVersion,
+            getHistoryRetentionLimit,
+            setHistoryRetentionLimit,
+            getLanguageOverride,
+            setLanguageOverride,
             loadDeveloperPreferences,
             loadDeveloperLogs,
             getDeveloperLogs,

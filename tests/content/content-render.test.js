@@ -355,6 +355,7 @@ describe('manager shell structure', () => {
 
         const controls = shell.children[0];
         const actionsGroup = controls.children[0];
+        const commandButton = actionsGroup.children[1];
         const searchRail = controls.children[1];
         const searchTrigger = searchRail.children[0];
         const searchSurface = searchRail.children[1];
@@ -362,19 +363,23 @@ describe('manager shell structure', () => {
 
         expect(controls.attrs.className).toBe('sp-controls');
         expect(actionsGroup.attrs.className).toBe('sp-toolbar-actions');
-        expect(actionsGroup.children).toHaveLength(4);
+        expect(actionsGroup.children).toHaveLength(5);
         expect(actionsGroup.children.map((child) => child.attrs.id)).toEqual([
             'sp-settings-btn',
+            'sp-command-palette-btn',
             'sp-new-group-btn',
             'sp-manage-tags-btn',
             'sp-batch-action-btn'
         ]);
+        expect(commandButton.children[0].children[0]).toBe('keyboard_command_key');
         expect(searchRail.attrs.className).toBe('sp-search-cluster');
         expect(searchTrigger.attrs.id).toBe('sp-search-btn');
         expect(searchSurface.attrs.className).toBe('sp-search-container');
         expect(searchSurface.children[0].attrs.id).toBe('sp-search');
         expect(searchSurface.children[1].attrs.id).toBe('sp-search-count');
         expect(searchClose.attrs.id).toBe('sp-search-close-btn');
+        expect(shell.children[1].attrs.id).toBe('sp-quick-view-rail');
+        expect(shell.children[1].attrs.className).toBe('sp-quick-view-rail');
     });
 
     it('keeps the toolbar controls defined as a single-row flex layout', () => {
@@ -570,6 +575,55 @@ describe('manager shell structure', () => {
         });
     });
 
+    it('keeps modal typography on the content panel system font stack', () => {
+        jest.resetModules();
+        require('../../src/content/content-style-text.js');
+
+        const modalBlock = extractCssBlock(global.NSM_CONTENT_STYLE_TEXT, '.sp-folder-modal {');
+        expect(modalBlock).toContain('font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;');
+    });
+
+    it('styles welcome onboarding with shared tokens instead of fixed theme colors', () => {
+        jest.resetModules();
+        require('../../src/content/content-style-text.js');
+
+        const modalBlock = extractCssBlock(global.NSM_CONTENT_STYLE_TEXT, '.sp-welcome-modal {');
+        const feedbackBlock = extractCssBlock(global.NSM_CONTENT_STYLE_TEXT, '.sp-welcome-feedback-inline {');
+        const feedbackNoteBlock = extractCssBlock(global.NSM_CONTENT_STYLE_TEXT, '.sp-welcome-feedback-copy {');
+        const feedbackLinkBlock = extractCssBlock(global.NSM_CONTENT_STYLE_TEXT, '.sp-welcome-feedback-link {');
+        const primaryBlock = extractCssBlock(global.NSM_CONTENT_STYLE_TEXT, '.sp-welcome-primary-btn {');
+        expect(modalBlock).toContain('width: min(520px, calc(100vw - 32px));');
+        expect(modalBlock).not.toContain('#');
+        expect(feedbackBlock).toContain('display: flex;');
+        expect(feedbackBlock).not.toContain('background');
+        expect(feedbackBlock).not.toContain('border:');
+        expect(feedbackNoteBlock).toContain('font-size: 11px;');
+        expect(feedbackNoteBlock).toContain('var(--sp-text-tertiary)');
+        expect(feedbackLinkBlock).toContain('font-size: 11px;');
+        expect(feedbackLinkBlock).toContain('color: var(--sp-accent)');
+        expect(feedbackLinkBlock).not.toContain('border: 1px');
+        expect(feedbackBlock).not.toContain('#');
+        expect(primaryBlock).toContain('background-color: var(--sp-accent)');
+        expect(primaryBlock).toContain('color: var(--sp-text-toast)');
+        expect(primaryBlock).not.toContain('#');
+        expect(primaryBlock).not.toContain('white');
+    });
+
+    it('places settings save status in the modal header', () => {
+        jest.resetModules();
+        require('../../src/content/content-style-text.js');
+
+        const headerBlock = extractCssBlock(global.NSM_CONTENT_STYLE_TEXT, '.sp-settings-modal-header {');
+        const statusWrapperBlock = extractCssBlock(global.NSM_CONTENT_STYLE_TEXT, '.sp-settings-save-status-header {');
+        const statusBlock = extractCssBlock(global.NSM_CONTENT_STYLE_TEXT, '.sp-settings-save-status-header .sp-save-status {');
+
+        expect(headerBlock).toContain('display: flex;');
+        expect(headerBlock).toContain('align-items: center;');
+        expect(headerBlock).toContain('justify-content: space-between;');
+        expect(statusWrapperBlock).toContain('margin-left: auto;');
+        expect(statusBlock).toContain('max-width: 240px;');
+    });
+
     it('keeps hover feedback as subtle scale without vertical lift', () => {
         jest.resetModules();
         require('../../src/content/content-style-text.js');
@@ -604,6 +658,53 @@ describe('batch count and source menu motion rendering', () => {
     });
 
     afterEach(teardownGlobalMocks);
+
+    it('renders quick view buttons with active state before source rows', () => {
+        const quickRail = createRenderTestElement('div', { id: 'sp-quick-view-rail' });
+        const listContainer = createRenderTestElement('div', { id: 'sources-list' });
+        const renderModule = createContentRender({
+            el: createRenderTestElement,
+            getDocument: () => ({
+                createDocumentFragment: createRenderTestFragment,
+                createElement: (tag) => createRenderTestElement(tag)
+            }),
+            getShadowRoot: () => ({
+                appendChild: jest.fn(),
+                querySelector: jest.fn((selector) => {
+                    if (selector === '#sources-list') return listContainer;
+                    if (selector === '.sp-container') return createRenderTestElement('div', { className: 'sp-container' });
+                    return null;
+                }),
+                getElementById: jest.fn((id) => {
+                    if (id === 'sources-list') return listContainer;
+                    if (id === 'sp-quick-view-rail') return quickRail;
+                    return null;
+                })
+            }),
+            getState: () => ({
+                groups: [],
+                ungrouped: [],
+                isBatchMode: false,
+                activeQuickViewKind: 'recent',
+                activeTagId: null
+            }),
+            getMessage: (key) => key
+        });
+
+        renderModule.render();
+
+        const buttons = findRenderTestNodesByClass(quickRail, 'sp-quick-view-btn');
+        expect(buttons.map((button) => button.dataset.quickViewKind)).toEqual([
+            'all',
+            'ungrouped',
+            'disabled',
+            'tag',
+            'recent',
+            'issues'
+        ]);
+        expect(buttons.find((button) => button.dataset.quickViewKind === 'recent').attrs['aria-pressed']).toBe('true');
+        expect(buttons.find((button) => button.dataset.quickViewKind === 'all').attrs['aria-pressed']).toBe('false');
+    });
 
     it('wraps localized batch counts without changing button text', () => {
         const renderModule = createContentRender({
@@ -2137,5 +2238,53 @@ describe('isolate runtime state', () => {
         expect(mod.isSourceEffectivelyEnabled(mod.sourcesByKey.get('sourceA'))).toBe(false);
         expect(mod.isSourceEffectivelyEnabled(mod.sourcesByKey.get('sourceB'))).toBe(true);
         expect(mod.isSourceEffectivelyEnabled(mod.sourcesByKey.get('sourceU'))).toBe(true);
+    });
+});
+
+describe('command palette commands', () => {
+    let mod;
+
+    beforeEach(() => {
+        jest.resetModules();
+        setupGlobalMocks();
+        mod = loadContentModule();
+        mod._resetState();
+    });
+
+    afterEach(teardownGlobalMocks);
+
+    it('offers search, quick view, view switch, management, and gated batch commands', () => {
+        mod.state.isBatchMode = true;
+        mod.pendingBatchKeys.add('source-1');
+
+        const commands = mod._getCommandPaletteCommandsForTest('ai');
+
+        expect(commands).toEqual(expect.arrayContaining([
+            expect.objectContaining({ action: 'search-sources', payload: { query: 'ai' } }),
+            expect.objectContaining({ action: 'quick-view', payload: { kind: 'recent' } }),
+            expect.objectContaining({ action: 'switch-source-view', payload: { kind: 'label' } }),
+            expect.objectContaining({ action: 'open-settings' }),
+            expect.objectContaining({ action: 'manage-tags' }),
+            expect.objectContaining({ action: 'batch-add-tags', disabled: false }),
+            expect.objectContaining({ action: 'batch-move-ungrouped', disabled: false })
+        ]));
+
+        mod.pendingBatchKeys.clear();
+        const disabledBatchCommands = mod._getCommandPaletteCommandsForTest('')
+            .filter((command) => String(command.action || '').startsWith('batch-'));
+        expect(disabledBatchCommands.every((command) => command.disabled === true)).toBe(true);
+    });
+
+    it('executes search and quick view commands without persisting the active view', () => {
+        mod._setActiveIsolationGroupId('group1');
+
+        expect(mod._executeCommandPaletteCommandForTest('search-sources', { payload: { query: 'report' } })).toBe(true);
+        expect(mod.state.filterQuery).toBe('report');
+
+        expect(mod._executeCommandPaletteCommandForTest('quick-view', { payload: { kind: 'issues' } })).toBe(true);
+        expect(mod.state.activeQuickViewKind).toBe('issues');
+        expect(mod.state.activeTagId).toBeNull();
+        expect(mod._getActiveIsolationGroupId()).toBeNull();
+        expect(mod.buildPersistableState()).not.toHaveProperty('activeQuickViewKind');
     });
 });

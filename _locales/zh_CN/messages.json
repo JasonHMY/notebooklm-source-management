@@ -152,6 +152,84 @@
     "ui_filter_sources_v2": {
         "message": "搜索来源、标签、文件夹"
     },
+    "ui_quick_view_all": {
+        "message": "全部"
+    },
+    "ui_quick_view_ungrouped": {
+        "message": "未分组"
+    },
+    "ui_quick_view_disabled": {
+        "message": "已停用"
+    },
+    "ui_quick_view_tag": {
+        "message": "标签"
+    },
+    "ui_quick_view_recent": {
+        "message": "最近"
+    },
+    "ui_quick_view_issues": {
+        "message": "问题"
+    },
+    "ui_tag_filter_title": {
+        "message": "按标签筛选"
+    },
+    "ui_command_palette": {
+        "message": "命令面板"
+    },
+    "ui_command_palette_placeholder": {
+        "message": "输入命令或搜索内容"
+    },
+    "ui_command_palette_empty": {
+        "message": "没有找到命令"
+    },
+    "ui_command_search_sources": {
+        "message": "搜索来源"
+    },
+    "ui_command_search_sources_for": {
+        "message": "搜索“$1”",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_command_search_sources_subtitle": {
+        "message": "过滤当前来源列表"
+    },
+    "ui_command_quick_view_subtitle": {
+        "message": "切换快速视图"
+    },
+    "ui_command_switch_list_view": {
+        "message": "切换到列表视图"
+    },
+    "ui_command_switch_label_view": {
+        "message": "切换到标签视图"
+    },
+    "ui_command_batch_move_folder": {
+        "message": "将选中来源移动到文件夹"
+    },
+    "ui_command_batch_add_tags": {
+        "message": "给选中来源添加标签"
+    },
+    "ui_command_batch_remove_tags": {
+        "message": "移除选中来源的标签"
+    },
+    "ui_command_batch_move_ungrouped": {
+        "message": "将选中来源移到未分组"
+    },
+    "ui_command_batch_count": {
+        "message": "已选 $1 个",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_command_disabled_batch_hint": {
+        "message": "请先在批量模式中选择来源"
+    },
+    "ui_command_manage_tags": {
+        "message": "管理标签"
+    },
+    "ui_command_open_settings": {
+        "message": "打开设置"
+    },
     "ui_search_results_count": {
         "message": "$1 个结果",
         "placeholders": {
@@ -162,6 +240,15 @@
     },
     "ui_settings": {
         "message": "设置"
+    },
+    "ui_settings_backup_restore_title": {
+        "message": "备份与恢复"
+    },
+    "ui_settings_help_feedback_title": {
+        "message": "帮助与反馈"
+    },
+    "ui_settings_troubleshooting_title": {
+        "message": "问题排查"
     },
     "ui_settings_save_status_title": {
         "message": "保存状态"
@@ -220,6 +307,43 @@
             "1": { "content": "$1" }
         }
     },
+    "ui_settings_import_preview_replace_warning": {
+        "message": "当前预览仍然会恢复/替换当前管理配置，不是增量合并。"
+    },
+    "ui_settings_import_diff_sources": {
+        "message": "来源变化"
+    },
+    "ui_settings_import_diff_source_state": {
+        "message": "$1 个会启用 · $2 个会停用 · $3 个不变",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" },
+            "3": { "content": "$3" }
+        }
+    },
+    "ui_settings_import_diff_folders": {
+        "message": "导入中有 $1 个文件夹 · $2 个同名 · $3 个当前文件夹不会出现在导入后",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" },
+            "3": { "content": "$3" }
+        }
+    },
+    "ui_settings_import_diff_tags": {
+        "message": "导入中有 $1 个标签 · $2 个同名 · $3 个当前标签不会出现在导入后 · $4 个 id 会规范化",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" },
+            "3": { "content": "$3" },
+            "4": { "content": "$4" }
+        }
+    },
+    "ui_settings_import_diff_settings_changed": {
+        "message": "面板设置会改变。"
+    },
+    "ui_settings_import_diff_settings_unchanged": {
+        "message": "面板设置不会改变。"
+    },
     "ui_settings_import_empty": {
         "message": "请先粘贴配置 JSON。"
     },
@@ -259,6 +383,33 @@
     "ui_settings_import_file_invalid": {
         "message": "无法读取该 JSON 文件"
     },
+    "ui_settings_preferences_title": {
+        "message": "偏好设置"
+    },
+    "ui_settings_language_title": {
+        "message": "语言"
+    },
+    "ui_settings_language_body": {
+        "message": "选择这个扩展界面使用的语言。"
+    },
+    "ui_settings_language_auto": {
+        "message": "自动"
+    },
+    "ui_settings_language_english": {
+        "message": "English"
+    },
+    "ui_settings_language_spanish": {
+        "message": "Español"
+    },
+    "ui_settings_language_chinese": {
+        "message": "简体中文"
+    },
+    "ui_settings_language_updated": {
+        "message": "语言已更新"
+    },
+    "ui_settings_language_update_failed": {
+        "message": "无法更新语言"
+    },
     "ui_settings_diagnostics_title": {
         "message": "诊断信息"
     },
@@ -270,6 +421,15 @@
     },
     "ui_settings_diagnostics_copy_failed": {
         "message": "无法复制诊断信息"
+    },
+    "ui_settings_developer_features": {
+        "message": "开发者功能"
+    },
+    "ui_settings_developer_password_prompt": {
+        "message": "请输入开发者密码"
+    },
+    "ui_settings_developer_password_failed": {
+        "message": "开发者密码不正确"
     },
     "ui_settings_developer_mode_title": {
         "message": "开发者模式"
@@ -288,6 +448,12 @@
     },
     "ui_settings_clear_developer_logs": {
         "message": "清空开发者日志"
+    },
+    "ui_settings_test_welcome_modal": {
+        "message": "测试欢迎弹窗"
+    },
+    "ui_settings_test_whats_new_modal": {
+        "message": "测试更新介绍弹窗"
     },
     "ui_settings_developer_mode_enabled": {
         "message": "开发者模式已开启"
@@ -314,13 +480,76 @@
         "message": "问题反馈"
     },
     "ui_settings_feedback_body": {
-        "message": "在 Chrome Web Store 留下问题反馈或建议。"
+        "message": "遇到问题或想提出改进建议？可以发送反馈，或复制诊断信息用于报告问题。"
     },
     "ui_settings_open_web_store_feedback": {
         "message": "打开 Chrome Web Store 反馈"
     },
     "ui_settings_feedback_open_failed": {
         "message": "无法打开 Chrome Web Store 反馈页面"
+    },
+    "ui_welcome_title": {
+        "message": "欢迎使用 NotebookLM Source Management"
+    },
+    "ui_welcome_subtitle": {
+        "message": "在 NotebookLM 里更轻松地整理、搜索和备份你的来源。"
+    },
+    "ui_welcome_feature_organize_title": {
+        "message": "整理来源"
+    },
+    "ui_welcome_feature_organize_body": {
+        "message": "用文件夹和标签管理资料。"
+    },
+    "ui_welcome_feature_find_title": {
+        "message": "快速定位"
+    },
+    "ui_welcome_feature_find_body": {
+        "message": "搜索来源、标签和文件夹。"
+    },
+    "ui_welcome_feature_backup_title": {
+        "message": "导出与恢复"
+    },
+    "ui_welcome_feature_backup_body": {
+        "message": "保存配置，出问题时更容易找回。"
+    },
+    "ui_welcome_feedback_body": {
+        "message": "遇到问题或有建议？欢迎反馈。"
+    },
+    "ui_welcome_get_started": {
+        "message": "开始使用"
+    },
+    "ui_welcome_feedback": {
+        "message": "反馈"
+    },
+    "ui_welcome_close": {
+        "message": "关闭欢迎弹窗"
+    },
+    "ui_whats_new_title": {
+        "message": "更新介绍"
+    },
+    "ui_whats_new_subtitle": {
+        "message": "快速了解这次来源管理的最新改进。"
+    },
+    "ui_whats_new_quick_views_title": {
+        "message": "快速筛选视图"
+    },
+    "ui_whats_new_quick_views_body": {
+        "message": "更快查看未分组、已停用、最近新增、标签或异常来源。"
+    },
+    "ui_whats_new_restore_points_title": {
+        "message": "恢复点"
+    },
+    "ui_whats_new_restore_points_body": {
+        "message": "保留更多本地历史，并在高风险操作前创建命名快照。"
+    },
+    "ui_whats_new_language_title": {
+        "message": "手动语言选择"
+    },
+    "ui_whats_new_language_body": {
+        "message": "不改变 Chrome 语言，也能切换扩展界面语言。"
+    },
+    "ui_whats_new_primary": {
+        "message": "知道了"
     },
     "ui_source_repair_title": {
         "message": "来源修复"
@@ -369,6 +598,46 @@
     },
     "ui_history_empty": {
         "message": "暂无版本历史。"
+    },
+    "ui_history_retention_label": {
+        "message": "保留历史"
+    },
+    "ui_history_retention_body": {
+        "message": "选择每个笔记本要保留多少个本地快照。"
+    },
+    "ui_history_retention_option": {
+        "message": "$1 个快照",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_history_retention_updated": {
+        "message": "历史保留策略已更新"
+    },
+    "ui_history_retention_update_failed": {
+        "message": "无法更新历史保留策略"
+    },
+    "ui_history_create_restore_point": {
+        "message": "创建恢复点"
+    },
+    "ui_history_restore_point_prompt": {
+        "message": "为这个恢复点命名"
+    },
+    "ui_history_restore_point_created": {
+        "message": "恢复点已创建"
+    },
+    "ui_history_restore_point_failed": {
+        "message": "无法创建恢复点"
+    },
+    "ui_history_restore_point_summary": {
+        "message": "$1 · $2 · $3 个来源 · $4 个文件夹 · $5 个标签",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" },
+            "3": { "content": "$3" },
+            "4": { "content": "$4" },
+            "5": { "content": "$5" }
+        }
     },
     "ui_history_entry_summary": {
         "message": "$1 · $2 个来源 · $3 个文件夹 · $4 个标签 · $5",

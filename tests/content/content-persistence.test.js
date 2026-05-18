@@ -30,14 +30,14 @@ describe('saveState', () => {
         mod.groupsById.set('group1', { id: 'group1', title: 'Group 1', children: [{ type: 'source', key: 'source1' }] });
         mod.groupsById.set('group2', { id: 'group2', title: 'Group 2', children: [{ type: 'source', key: 'source2' }] });
 
-        mod.sourcesByKey.set('source1', { enabled: true, title: 'Source 1', normalizedTitle: 'source 1', stableToken: 'doc-1', fingerprint: 'source 1||article', identityType: 'stable-token' });
+        mod.sourcesByKey.set('source1', { enabled: true, title: 'Source 1', normalizedTitle: 'source 1', stableToken: 'doc-1', fingerprint: 'source 1||article', identityType: 'stable-token', addedAt: '2026-05-18T00:00:00.000Z' });
         mod.sourcesByKey.set('source2', { enabled: false, title: 'Source 2', normalizedTitle: 'source 2', stableToken: 'doc-2', fingerprint: 'source 2||article', identityType: 'stable-token' });
         mod.sourcesByKey.set('source3', { enabled: true, title: 'Source 3', normalizedTitle: 'source 3', stableToken: '', fingerprint: 'source 3||article', identityType: 'fingerprint' });
 
         mod._setCustomHeight(500);
 
         expectedPersistableState = {
-            schemaVersion: 3,
+            schemaVersion: 4,
             groups: ['group1', 'group2'],
             groupsById: {
                 group1: { id: 'group1', title: 'Group 1', children: [{ type: 'source', key: 'source1' }] },
@@ -51,7 +51,8 @@ describe('saveState', () => {
                     normalizedTitle: 'source 1',
                     stableToken: 'doc-1',
                     fingerprint: 'source 1||article',
-                    identityType: 'stable-token'
+                    identityType: 'stable-token',
+                    addedAt: '2026-05-18T00:00:00.000Z'
                 },
                 source2: {
                     enabled: false,
@@ -71,6 +72,7 @@ describe('saveState', () => {
                 }
             },
             customHeight: 500,
+            sourceViewDisplayKind: 'list',
             tagsById: {},
             tagOrder: [],
             sourceTagsById: {}
@@ -132,6 +134,56 @@ describe('saveState', () => {
         const savedData = global.chrome.runtime.sendMessage.mock.calls[0][0].data;
         expect(savedData._saveRevision).toBeUndefined();
         expect(savedData._savedAt).toBeUndefined();
+    });
+
+    it('normalizes persisted source view display kind without forcing invalid legacy values', () => {
+        seedPersistedState();
+
+        expect(mod.normalizeLoadedState({
+            ...expectedPersistableState,
+            sourceViewDisplayKind: 'label'
+        })).toEqual(expect.objectContaining({
+            sourceViewDisplayKind: 'label'
+        }));
+
+        const legacyState = { ...expectedPersistableState };
+        delete legacyState.sourceViewDisplayKind;
+        expect(mod.normalizeLoadedState(legacyState)).not.toHaveProperty('sourceViewDisplayKind');
+
+        expect(mod.normalizeLoadedState({
+            ...expectedPersistableState,
+            sourceViewDisplayKind: 'grid'
+        })).not.toHaveProperty('sourceViewDisplayKind');
+    });
+
+    it('preserves source addedAt timestamps in schema 4 and leaves legacy sources unset', () => {
+        seedPersistedState();
+
+        expect(mod.buildPersistableState().sourceStateById.source1.addedAt).toBe('2026-05-18T00:00:00.000Z');
+
+        const normalizedCurrent = mod.normalizeLoadedState({
+            ...expectedPersistableState,
+            sourceStateById: {
+                source1: {
+                    ...expectedPersistableState.sourceStateById.source1,
+                    addedAt: '2026-05-17T00:00:00.000Z'
+                }
+            }
+        });
+        expect(normalizedCurrent.sourceStateById.source1.addedAt).toBe('2026-05-17T00:00:00.000Z');
+
+        const normalizedLegacy = mod.normalizeLoadedState({
+            ...expectedPersistableState,
+            schemaVersion: 3,
+            sourceStateById: {
+                legacy: {
+                    enabled: true,
+                    title: 'Legacy',
+                    normalizedTitle: 'legacy'
+                }
+            }
+        });
+        expect(normalizedLegacy.sourceStateById.legacy).not.toHaveProperty('addedAt');
     });
 
     it('serializes immediate saves and assigns increasing revisions', async () => {
@@ -1123,6 +1175,31 @@ describe('settings import/export configuration', () => {
                 }
             ],
             unmatchedSourceDetails: []
+        });
+        expect(preview.diff).toMatchObject({
+            source: {
+                totalSources: 1,
+                matchedSources: 1,
+                unmatchedSources: 0,
+                enableCount: 0,
+                disableCount: 1,
+                unchangedCount: 0
+            },
+            folders: {
+                incomingCount: 1,
+                sameNameCount: 0,
+                removedCount: 0
+            },
+            tags: {
+                incomingCount: 1,
+                sameNameCount: 0,
+                removedCount: 0,
+                normalizedIdCount: 0
+            },
+            settings: {
+                changesCustomHeight: false,
+                changesSourceViewDisplayKind: false
+            }
         });
     });
 

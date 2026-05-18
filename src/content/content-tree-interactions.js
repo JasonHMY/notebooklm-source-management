@@ -539,6 +539,7 @@
             if (target.closest('.sp-tag-pill')) {
                 const tagId = target.closest('.sp-tag-pill').dataset.tagId;
                 state.activeTagId = state.activeTagId === tagId ? null : tagId;
+                state.activeQuickViewKind = null;
                 render();
                 return;
             }
