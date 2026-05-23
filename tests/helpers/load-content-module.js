@@ -27,6 +27,8 @@ function clearContentGlobals() {
     delete globalThis.NSM_CREATE_CONTENT_MODAL_WELCOME;
     delete globalThis.NSM_CREATE_CONTENT_MODAL_WHATS_NEW;
     delete globalThis.NSM_CREATE_CONTENT_MODAL_TAG_FILTER;
+    delete globalThis.NSM_CREATE_CONTENT_MODAL_MOVE;
+    delete globalThis.NSM_CREATE_CONTENT_MODAL_COMMAND_PALETTE;
     delete globalThis.NSM_CREATE_CONTENT_MODALS;
     delete globalThis.NSM_CREATE_CONTENT_RENDER;
     delete globalThis.NSM_CREATE_CONTENT_VIEW_STATE;
@@ -63,6 +65,8 @@ function loadContentModule() {
     require('../../src/content/content-modal-welcome.js');
     require('../../src/content/content-modal-whats-new.js');
     require('../../src/content/content-modal-tag-filter.js');
+    require('../../src/content/content-modal-move.js');
+    require('../../src/content/content-modal-command-palette.js');
     require('../../src/content/content-modals.js');
     require('../../src/content/content-render.js');
     require('../../src/content/content-view-state.js');

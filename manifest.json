@@ -70,6 +70,8 @@
         "src/content/content-modal-welcome.js",
         "src/content/content-modal-whats-new.js",
         "src/content/content-modal-tag-filter.js",
+        "src/content/content-modal-move.js",
+        "src/content/content-modal-command-palette.js",
         "src/content/content-modals.js",
         "src/content/content-render.js",
         "src/content/content-view-state.js",
