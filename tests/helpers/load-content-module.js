@@ -13,6 +13,7 @@ function clearContentGlobals() {
     delete globalThis.NSM_CREATE_CONTENT_RUNTIME_STATE;
     delete globalThis.NSM_CREATE_CONTENT_MESSAGE_ROUTER;
     delete globalThis.NSM_CREATE_CONTENT_TOAST_STATUS;
+    delete globalThis.NSM_CREATE_CONTENT_TOAST;
     delete globalThis.NSM_CREATE_CONTENT_DIAGNOSTICS;
     delete globalThis.NSM_CREATE_CONTENT_SOURCE_VIEW_SWITCH_CONTROLLER;
     delete globalThis.NSM_CREATE_CONTENT_PERSISTENCE;
@@ -23,6 +24,9 @@ function clearContentGlobals() {
     delete globalThis.NSM_CREATE_CONTENT_NATIVE_LABEL_IMPORT_MODAL;
     delete globalThis.NSM_CREATE_CONTENT_SOURCE_PARTIAL_SYNC_GUARD;
     delete globalThis.NSM_CREATE_CONTENT_MODAL_FOCUS;
+    delete globalThis.NSM_CREATE_CONTENT_MODAL_WELCOME;
+    delete globalThis.NSM_CREATE_CONTENT_MODAL_WHATS_NEW;
+    delete globalThis.NSM_CREATE_CONTENT_MODAL_TAG_FILTER;
     delete globalThis.NSM_CREATE_CONTENT_MODALS;
     delete globalThis.NSM_CREATE_CONTENT_RENDER;
     delete globalThis.NSM_CREATE_CONTENT_VIEW_STATE;
@@ -45,6 +49,7 @@ function loadContentModule() {
     require('../../src/content/content-runtime-state.js');
     require('../../src/content/content-message-router.js');
     require('../../src/content/content-toast-status.js');
+    require('../../src/content/content-toast.js');
     require('../../src/content/content-diagnostics.js');
     require('../../src/content/content-source-view-switch-controller.js');
     require('../../src/content/content-persistence.js');
@@ -55,6 +60,9 @@ function loadContentModule() {
     require('../../src/content/content-native-label-import-modal.js');
     require('../../src/content/content-source-partial-sync-guard.js');
     require('../../src/content/content-modal-focus.js');
+    require('../../src/content/content-modal-welcome.js');
+    require('../../src/content/content-modal-whats-new.js');
+    require('../../src/content/content-modal-tag-filter.js');
     require('../../src/content/content-modals.js');
     require('../../src/content/content-render.js');
     require('../../src/content/content-view-state.js');

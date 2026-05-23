@@ -352,14 +352,6 @@
             return closeManagedModal('sp-settings-modal', 'sp-settings-backdrop', options);
         }
 
-        function closeWelcomeModal(options = {}) {
-            return closeManagedModal('sp-welcome-modal', 'sp-welcome-backdrop', options);
-        }
-
-        function closeWhatsNewModal(options = {}) {
-            return closeManagedModal('sp-whats-new-modal', 'sp-whats-new-backdrop', options);
-        }
-
         function closeNativeLabelImportModal(options = {}) {
             return closeManagedModal('sp-native-label-import-modal', 'sp-native-label-import-backdrop', options);
         }
@@ -368,9 +360,80 @@
             return closeManagedModal('sp-command-palette-modal', 'sp-command-palette-backdrop', options);
         }
 
-        function closeTagFilterModal(options = {}) {
-            return closeManagedModal('sp-tag-filter-modal', 'sp-tag-filter-backdrop', options);
-        }
+        const welcomeModalFactory = typeof deps.createContentModalWelcome === 'function'
+            ? deps.createContentModalWelcome
+            : (
+                globalThis.NSM_CREATE_CONTENT_MODAL_WELCOME
+                || (typeof require === 'function' ? require('./content-modal-welcome.js') : null)
+            );
+        const welcomeModalModule = typeof welcomeModalFactory === 'function'
+            ? welcomeModalFactory({
+                el,
+                getMessage,
+                getShadowRoot,
+                prepareModalOpen,
+                closeManagedModal,
+                bindModalKeyboardNavigation,
+                markWelcomeOnboardingSeen,
+                openWebStoreFeedback: (...args) => openWebStoreFeedback(...args)
+            })
+            : null;
+        const renderWelcomeModal = welcomeModalModule?.renderWelcomeModal || (() => false);
+        const closeWelcomeModal = welcomeModalModule?.closeWelcomeModal
+            || ((options = {}) => closeManagedModal('sp-welcome-modal', 'sp-welcome-backdrop', options));
+        const createWelcomeFeatureRow = welcomeModalModule?.createWelcomeFeatureRow
+            || ((iconName, titleKey, bodyKey) => el('div', { className: 'sp-welcome-feature-row' }, [
+                el('span', { className: 'google-symbols sp-welcome-feature-icon', 'aria-hidden': 'true' }, [iconName]),
+                el('div', { className: 'sp-welcome-feature-copy' }, [
+                    el('h4', { className: 'sp-welcome-feature-title' }, [getMessage(titleKey)]),
+                    el('p', { className: 'sp-welcome-feature-body' }, [getMessage(bodyKey)])
+                ])
+            ]));
+
+        const whatsNewModalFactory = typeof deps.createContentModalWhatsNew === 'function'
+            ? deps.createContentModalWhatsNew
+            : (
+                globalThis.NSM_CREATE_CONTENT_MODAL_WHATS_NEW
+                || (typeof require === 'function' ? require('./content-modal-whats-new.js') : null)
+            );
+        const whatsNewModalModule = typeof whatsNewModalFactory === 'function'
+            ? whatsNewModalFactory({
+                el,
+                getMessage,
+                getShadowRoot,
+                prepareModalOpen,
+                closeManagedModal,
+                bindModalKeyboardNavigation,
+                markWhatsNewSeen,
+                createWelcomeFeatureRow
+            })
+            : null;
+        const renderWhatsNewModal = whatsNewModalModule?.renderWhatsNewModal || (() => false);
+        const closeWhatsNewModal = whatsNewModalModule?.closeWhatsNewModal
+            || ((options = {}) => closeManagedModal('sp-whats-new-modal', 'sp-whats-new-backdrop', options));
+
+        const tagFilterModalFactory = typeof deps.createContentModalTagFilter === 'function'
+            ? deps.createContentModalTagFilter
+            : (
+                globalThis.NSM_CREATE_CONTENT_MODAL_TAG_FILTER
+                || (typeof require === 'function' ? require('./content-modal-tag-filter.js') : null)
+            );
+        const tagFilterModalModule = typeof tagFilterModalFactory === 'function'
+            ? tagFilterModalFactory({
+                el,
+                getMessage,
+                getShadowRoot,
+                getState,
+                getTagsById,
+                prepareModalOpen,
+                closeManagedModal,
+                bindModalKeyboardNavigation,
+                applyTagQuickFilter
+            })
+            : null;
+        const renderTagFilterModal = tagFilterModalModule?.renderTagFilterModal || (() => false);
+        const closeTagFilterModal = tagFilterModalModule?.closeTagFilterModal
+            || ((options = {}) => closeManagedModal('sp-tag-filter-modal', 'sp-tag-filter-backdrop', options));
 
         function getImportPreviewMessage(preview) {
             if (!preview) return '';
@@ -879,199 +942,6 @@
             });
         }
 
-        function createWelcomeFeatureRow(iconName, titleKey, bodyKey) {
-            return el('div', { className: 'sp-welcome-feature-row' }, [
-                el('span', { className: 'google-symbols sp-welcome-feature-icon', 'aria-hidden': 'true' }, [iconName]),
-                el('div', { className: 'sp-welcome-feature-copy' }, [
-                    el('h4', { className: 'sp-welcome-feature-title' }, [getMessage(titleKey)]),
-                    el('p', { className: 'sp-welcome-feature-body' }, [getMessage(bodyKey)])
-                ])
-            ]);
-        }
-
-        function renderWelcomeModal() {
-            const shadowRoot = getShadowRoot();
-            if (!shadowRoot || !el) return false;
-
-            let hasMarkedSeen = false;
-            const markSeenOnce = () => {
-                if (hasMarkedSeen) return Promise.resolve(true);
-                hasMarkedSeen = true;
-                return Promise.resolve(markWelcomeOnboardingSeen()).catch(() => false);
-            };
-            const closeAfterSeen = () => {
-                markSeenOnce();
-                closeWelcomeModal();
-            };
-
-            prepareModalOpen('sp-welcome-modal', 'sp-welcome-backdrop');
-
-            const backdrop = el('div', { className: 'sp-overlay-backdrop', id: 'sp-welcome-backdrop' });
-            const modal = el('div', {
-                className: 'sp-folder-modal sp-welcome-modal',
-                id: 'sp-welcome-modal',
-                role: 'dialog',
-                'aria-modal': 'true',
-                'aria-labelledby': 'sp-welcome-modal-title',
-                tabindex: '-1'
-            });
-            const closeButton = el('button', {
-                type: 'button',
-                className: 'sp-icon-button sp-welcome-close-btn',
-                'aria-label': getMessage('ui_welcome_close'),
-                title: getMessage('ui_welcome_close')
-            }, [
-                el('span', { className: 'google-symbols', 'aria-hidden': 'true' }, ['close'])
-            ]);
-            const header = el('div', { className: 'sp-welcome-header' }, [
-                el('div', { className: 'sp-welcome-brand-icon', 'aria-hidden': 'true' }, [
-                    el('span', { className: 'google-symbols sp-welcome-brand-symbol' }, ['library_books'])
-                ]),
-                el('div', { className: 'sp-welcome-heading' }, [
-                    el('h3', { className: 'sp-folder-modal-title sp-welcome-title', id: 'sp-welcome-modal-title' }, [
-                        getMessage('ui_welcome_title')
-                    ]),
-                    el('p', { className: 'sp-welcome-subtitle' }, [
-                        getMessage('ui_welcome_subtitle')
-                    ])
-                ]),
-                closeButton
-            ]);
-            const content = el('div', { className: 'sp-folder-modal-content sp-welcome-content' }, [
-                el('div', { className: 'sp-welcome-feature-list' }, [
-                    createWelcomeFeatureRow('folder', 'ui_welcome_feature_organize_title', 'ui_welcome_feature_organize_body'),
-                    createWelcomeFeatureRow('manage_search', 'ui_welcome_feature_find_title', 'ui_welcome_feature_find_body'),
-                    createWelcomeFeatureRow('history', 'ui_welcome_feature_backup_title', 'ui_welcome_feature_backup_body')
-                ]),
-                el('div', { className: 'sp-welcome-feedback-inline' }, [
-                    el('span', { className: 'sp-welcome-feedback-copy' }, [
-                        getMessage('ui_welcome_feedback_body')
-                    ]),
-                    el('button', { type: 'button', className: 'sp-welcome-feedback-link' }, [
-                        getMessage('ui_welcome_feedback')
-                    ])
-                ])
-            ]);
-            const footer = el('div', { className: 'sp-folder-modal-footer sp-welcome-footer' }, [
-                el('button', { type: 'button', className: 'sp-button sp-welcome-primary-btn sp-glare-hover' }, [
-                    getMessage('ui_welcome_get_started')
-                ])
-            ]);
-
-            modal.appendChild(header);
-            modal.appendChild(content);
-            modal.appendChild(footer);
-            shadowRoot.appendChild(backdrop);
-            shadowRoot.appendChild(modal);
-
-            closeButton.addEventListener('click', closeAfterSeen);
-            content.querySelector('.sp-welcome-feedback-link')?.addEventListener('click', () => {
-                markSeenOnce();
-                openWebStoreFeedback();
-                closeWelcomeModal();
-            });
-            footer.querySelector('.sp-welcome-primary-btn')?.addEventListener('click', closeAfterSeen);
-            backdrop.addEventListener('click', closeAfterSeen);
-
-            const modalKeyboard = bindModalKeyboardNavigation(modal, {
-                closeModal: closeAfterSeen,
-                initialFocusTarget: () => modal.querySelector('.sp-welcome-primary-btn') || closeButton
-            });
-            requestAnimationFrame(() => {
-                backdrop.classList.add('visible');
-                modal.classList.add('visible');
-                modalKeyboard.focusInitial();
-            });
-
-            return true;
-        }
-
-        function renderWhatsNewModal(options = {}) {
-            const shadowRoot = getShadowRoot();
-            if (!shadowRoot || !el) return false;
-            const shouldMarkSeenOnClose = options?.markSeenOnClose !== false;
-
-            let hasMarkedSeen = false;
-            const markSeenOnce = () => {
-                if (!shouldMarkSeenOnClose) return Promise.resolve(true);
-                if (hasMarkedSeen) return Promise.resolve(true);
-                hasMarkedSeen = true;
-                return Promise.resolve(markWhatsNewSeen()).catch(() => false);
-            };
-            const closeAfterSeen = () => {
-                markSeenOnce();
-                closeWhatsNewModal();
-            };
-
-            prepareModalOpen('sp-whats-new-modal', 'sp-whats-new-backdrop');
-
-            const backdrop = el('div', { className: 'sp-overlay-backdrop', id: 'sp-whats-new-backdrop' });
-            const modal = el('div', {
-                className: 'sp-folder-modal sp-welcome-modal sp-whats-new-modal',
-                id: 'sp-whats-new-modal',
-                role: 'dialog',
-                'aria-modal': 'true',
-                'aria-labelledby': 'sp-whats-new-modal-title',
-                tabindex: '-1'
-            });
-            const closeButton = el('button', {
-                type: 'button',
-                className: 'sp-icon-button sp-welcome-close-btn',
-                'aria-label': getMessage('ui_welcome_close'),
-                title: getMessage('ui_welcome_close')
-            }, [
-                el('span', { className: 'google-symbols', 'aria-hidden': 'true' }, ['close'])
-            ]);
-            const header = el('div', { className: 'sp-welcome-header' }, [
-                el('div', { className: 'sp-welcome-brand-icon', 'aria-hidden': 'true' }, [
-                    el('span', { className: 'google-symbols sp-welcome-brand-symbol' }, ['new_releases'])
-                ]),
-                el('div', { className: 'sp-welcome-heading' }, [
-                    el('h3', { className: 'sp-folder-modal-title sp-welcome-title', id: 'sp-whats-new-modal-title' }, [
-                        getMessage('ui_whats_new_title')
-                    ]),
-                    el('p', { className: 'sp-welcome-subtitle' }, [
-                        getMessage('ui_whats_new_subtitle')
-                    ])
-                ]),
-                closeButton
-            ]);
-            const content = el('div', { className: 'sp-folder-modal-content sp-welcome-content' }, [
-                el('div', { className: 'sp-welcome-feature-list' }, [
-                    createWelcomeFeatureRow('filter_alt', 'ui_whats_new_quick_views_title', 'ui_whats_new_quick_views_body'),
-                    createWelcomeFeatureRow('backup', 'ui_whats_new_restore_points_title', 'ui_whats_new_restore_points_body'),
-                    createWelcomeFeatureRow('translate', 'ui_whats_new_language_title', 'ui_whats_new_language_body')
-                ])
-            ]);
-            const footer = el('div', { className: 'sp-folder-modal-footer sp-welcome-footer' }, [
-                el('button', { type: 'button', className: 'sp-button sp-welcome-primary-btn sp-whats-new-primary-btn sp-glare-hover' }, [
-                    getMessage('ui_whats_new_primary')
-                ])
-            ]);
-
-            modal.appendChild(header);
-            modal.appendChild(content);
-            modal.appendChild(footer);
-            shadowRoot.appendChild(backdrop);
-            shadowRoot.appendChild(modal);
-
-            closeButton.addEventListener('click', closeAfterSeen);
-            footer.querySelector('.sp-whats-new-primary-btn')?.addEventListener('click', closeAfterSeen);
-            backdrop.addEventListener('click', closeAfterSeen);
-
-            const modalKeyboard = bindModalKeyboardNavigation(modal, {
-                closeModal: closeAfterSeen,
-                initialFocusTarget: () => modal.querySelector('.sp-whats-new-primary-btn') || closeButton
-            });
-            requestAnimationFrame(() => {
-                backdrop.classList.add('visible');
-                modal.classList.add('visible');
-                modalKeyboard.focusInitial();
-            });
-
-            return true;
-        }
-
         function renderCommandPaletteModal() {
             const shadowRoot = getShadowRoot();
             const documentObj = getDocument();
@@ -1360,80 +1230,6 @@
             const modalKeyboard = bindModalKeyboardNavigation(modal, {
                 closeModal: (options) => closeManagedModal('sp-quick-view-buttons-modal', 'sp-quick-view-buttons-backdrop', options),
                 initialFocusTarget: () => modal.querySelector('.sp-quick-view-visibility-checkbox') || modal.querySelector('.sp-quick-view-buttons-done-btn')
-            });
-            requestAnimationFrame(() => {
-                backdrop.classList.add('visible');
-                modal.classList.add('visible');
-                modalKeyboard.focusInitial();
-            });
-            return true;
-        }
-
-        function renderTagFilterModal() {
-            const shadowRoot = getShadowRoot();
-            if (!shadowRoot || !el) return false;
-            const state = getState() || {};
-            const tagsById = getTagsById();
-            const orderedTagIds = [
-                ...(Array.isArray(state.tagOrder) ? state.tagOrder : []),
-                ...Array.from(tagsById.keys()).filter((tagId) => !(Array.isArray(state.tagOrder) ? state.tagOrder : []).includes(tagId))
-            ];
-            const tags = orderedTagIds
-                .map((tagId) => tagsById.get(tagId))
-                .filter(Boolean);
-
-            prepareModalOpen('sp-tag-filter-modal', 'sp-tag-filter-backdrop');
-
-            const backdrop = el('div', { className: 'sp-overlay-backdrop', id: 'sp-tag-filter-backdrop' });
-            const modal = el('div', {
-                className: 'sp-folder-modal sp-tag-filter-modal',
-                id: 'sp-tag-filter-modal',
-                role: 'dialog',
-                'aria-modal': 'true',
-                'aria-labelledby': 'sp-tag-filter-title',
-                tabindex: '-1'
-            });
-            const header = el('div', { className: 'sp-folder-modal-header' }, [
-                el('h3', { className: 'sp-folder-modal-title', id: 'sp-tag-filter-title' }, [
-                    getMessage('ui_tag_filter_title')
-                ])
-            ]);
-            const content = el('div', { className: 'sp-folder-modal-content sp-tag-filter-content' }, [
-                tags.length === 0
-                    ? el('div', { className: 'sp-settings-empty-state' }, [getMessage('ui_no_tags')])
-                    : el('div', { className: 'sp-tag-filter-list' }, tags.map((tag) => (
-                        el('button', {
-                            type: 'button',
-                            className: 'sp-tag-filter-option sp-glare-hover',
-                            dataset: { tagId: tag.id }
-                        }, [tag.label || tag.id])
-                    )))
-            ]);
-            const footer = el('div', { className: 'sp-folder-modal-footer' }, [
-                el('button', { type: 'button', className: 'sp-button sp-modal-cancel sp-glare-hover' }, [
-                    getMessage('ui_cancel')
-                ])
-            ]);
-
-            content.querySelectorAll?.('.sp-tag-filter-option')?.forEach((button) => {
-                button.addEventListener('click', () => {
-                    if (applyTagQuickFilter(button.dataset.tagId)) {
-                        closeTagFilterModal();
-                    }
-                });
-            });
-            footer.querySelector('.sp-modal-cancel')?.addEventListener('click', () => closeTagFilterModal());
-            backdrop.addEventListener('click', () => closeTagFilterModal());
-
-            modal.appendChild(header);
-            modal.appendChild(content);
-            modal.appendChild(footer);
-            shadowRoot.appendChild(backdrop);
-            shadowRoot.appendChild(modal);
-
-            const modalKeyboard = bindModalKeyboardNavigation(modal, {
-                closeModal: closeTagFilterModal,
-                initialFocusTarget: () => modal.querySelector('.sp-tag-filter-option') || modal.querySelector('.sp-modal-cancel')
             });
             requestAnimationFrame(() => {
                 backdrop.classList.add('visible');

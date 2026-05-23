@@ -31,6 +31,7 @@
     const createContentRuntimeState = globalThis.NSM_CREATE_CONTENT_RUNTIME_STATE;
     const createContentMessageRouter = globalThis.NSM_CREATE_CONTENT_MESSAGE_ROUTER;
     const createContentToastStatus = globalThis.NSM_CREATE_CONTENT_TOAST_STATUS;
+    const createContentToast = globalThis.NSM_CREATE_CONTENT_TOAST;
     const createContentDiagnostics = globalThis.NSM_CREATE_CONTENT_DIAGNOSTICS;
     const createContentSourceViewSwitchController = globalThis.NSM_CREATE_CONTENT_SOURCE_VIEW_SWITCH_CONTROLLER;
     const createContentNativeLabelImport = globalThis.NSM_CREATE_CONTENT_NATIVE_LABEL_IMPORT;
@@ -56,6 +57,7 @@
         typeof createContentRuntimeState !== 'function' ||
         typeof createContentMessageRouter !== 'function' ||
         typeof createContentToastStatus !== 'function' ||
+        typeof createContentToast !== 'function' ||
         typeof createContentDiagnostics !== 'function' ||
         typeof createContentSourceViewSwitchController !== 'function' ||
         typeof createContentNativeLabelImport !== 'function' ||
@@ -318,6 +320,26 @@
     bindRuntimeProperty('lastStructuralStateRepair', () => lastStructuralStateRepair, (value) => { lastStructuralStateRepair = value && typeof value === 'object' ? value : null; });
     bindRuntimeProperty('debouncedPanelLifecycleSync', () => debouncedPanelLifecycleSync);
     bindRuntimeProperty('syncManagerWithPanelLifecycle', () => syncManagerWithPanelLifecycle);
+
+    const toastModule = createContentToast({
+        runtime: runtimeContext,
+        document,
+        setTimeout: (...args) => setTimeout(...args),
+        clearTimeout: (...args) => clearTimeout(...args),
+        normalizeToastOptions,
+        getToastDuration,
+        getMessage,
+        getUndoStack: () => undoStack,
+        runUndo: () => undoLastOperation()
+    });
+    const {
+        ensureToastElement,
+        clearToastTimeout,
+        hideActiveToast,
+        showNextToast,
+        showToast,
+        showUndoableToast
+    } = toastModule;
 
     const panelDomModule = createContentPanelDom({
         runtime: runtimeContext,
@@ -1536,110 +1558,6 @@
             return globalThis.location.href;
         }
         return '';
-    }
-
-    let toastTimeout = null;
-    let activeToastItem = null;
-    const toastQueue = [];
-
-    function ensureToastElement() {
-        if (!shadowRoot) return null;
-        let toast = shadowRoot.querySelector('.sp-toast');
-        if (!toast) {
-            toast = document.createElement('div');
-            toast.className = 'sp-toast sp-toast-info';
-            shadowRoot.appendChild(toast);
-        }
-        toast.setAttribute('role', 'status');
-        toast.setAttribute('aria-live', 'polite');
-        return toast;
-    }
-
-    function clearToastTimeout() {
-        if (toastTimeout) {
-            clearTimeout(toastTimeout);
-            toastTimeout = null;
-        }
-    }
-
-    function hideActiveToast(showNext = true) {
-        const toast = shadowRoot?.querySelector?.('.sp-toast');
-        if (toast) {
-            toast.classList.remove('show');
-        }
-        clearToastTimeout();
-        activeToastItem = null;
-        if (showNext && toastQueue.length > 0) {
-            toastTimeout = setTimeout(() => {
-                toastTimeout = null;
-                showNextToast();
-            }, 120);
-        }
-    }
-
-    function showNextToast() {
-        if (activeToastItem || toastQueue.length === 0) return;
-        const toast = ensureToastElement();
-        if (!toast) return;
-
-        const item = toastQueue.shift();
-        activeToastItem = item;
-        toast.className = `sp-toast sp-toast-${item.variant}`;
-        toast.setAttribute('role', 'status');
-        toast.setAttribute('aria-live', 'polite');
-
-        const messageNode = document.createElement('span');
-        messageNode.className = 'sp-toast-message';
-        messageNode.textContent = item.message;
-        const children = [messageNode];
-
-        if (item.actionLabel && item.onAction) {
-            const actionButton = document.createElement('button');
-            actionButton.type = 'button';
-            actionButton.className = 'sp-toast-action';
-            actionButton.textContent = item.actionLabel;
-            actionButton.addEventListener('click', () => {
-                try {
-                    item.onAction();
-                } finally {
-                    hideActiveToast(true);
-                }
-            });
-            children.push(actionButton);
-        }
-
-        toast.replaceChildren(...children);
-        toast.classList.remove('show');
-        void toast.offsetWidth;
-        toast.classList.add('show');
-
-        const duration = getToastDuration(item);
-        clearToastTimeout();
-        toastTimeout = setTimeout(() => hideActiveToast(true), duration);
-    }
-
-    function showToast(message, options = {}) {
-        const text = String(message || '').trim();
-        if (!text) return;
-        toastQueue.push(Object.assign({ message: text }, normalizeToastOptions(options)));
-        showNextToast();
-    }
-
-    function showUndoableToast(message, options = {}) {
-        const normalizedOptions = options && typeof options === 'object' ? options : {};
-        if (
-            undoStack.length === 0 ||
-            normalizedOptions.actionLabel ||
-            normalizedOptions.onAction
-        ) {
-            showToast(message, options);
-            return;
-        }
-
-        showToast(message, Object.assign({}, normalizedOptions, {
-            actionLabel: getMessage('ui_undo_action'),
-            onAction: undoLastOperation
-        }));
     }
 
     function appendSaveStatusAction(container, labelKey, handler, className) {
@@ -5172,8 +5090,8 @@
             _getIsSyncingState: () => isSyncingState,
             _showToastForTest: showToast,
             _showUndoableToastForTest: showUndoableToast,
-            _getToastQueueLengthForTest: () => toastQueue.length,
-            _getActiveToastItemForTest: () => activeToastItem,
+            _getToastQueueLengthForTest: () => toastModule.getToastQueueLength(),
+            _getActiveToastItemForTest: () => toastModule.getActiveToastItem(),
             _hideActiveToastForTest: hideActiveToast,
             _getUndoStackLengthForTest: () => undoStack.length,
             _resetUndoHistoryBaselineForTest: resetUndoHistoryBaseline,
@@ -5267,9 +5185,7 @@
                 state.isBatchMode = false;
                 state.activeQuickViewKind = null;
                 pendingBatchKeys.clear();
-                toastQueue.length = 0;
-                activeToastItem = null;
-                clearToastTimeout();
+                toastModule.resetToastState();
                 isDeletingSources = false;
                 nativeActionFailureHistory = [];
                 if (runtimeContext.recentNativeDeletedSourceKeys instanceof Set) {
