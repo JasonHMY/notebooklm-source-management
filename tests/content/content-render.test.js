@@ -355,7 +355,6 @@ describe('manager shell structure', () => {
 
         const controls = shell.children[0];
         const actionsGroup = controls.children[0];
-        const commandButton = actionsGroup.children[1];
         const searchRail = controls.children[1];
         const searchTrigger = searchRail.children[0];
         const searchSurface = searchRail.children[1];
@@ -363,15 +362,13 @@ describe('manager shell structure', () => {
 
         expect(controls.attrs.className).toBe('sp-controls');
         expect(actionsGroup.attrs.className).toBe('sp-toolbar-actions');
-        expect(actionsGroup.children).toHaveLength(5);
+        expect(actionsGroup.children).toHaveLength(4);
         expect(actionsGroup.children.map((child) => child.attrs.id)).toEqual([
             'sp-settings-btn',
-            'sp-command-palette-btn',
             'sp-new-group-btn',
             'sp-manage-tags-btn',
             'sp-batch-action-btn'
         ]);
-        expect(commandButton.children[0].children[0]).toBe('keyboard_command_key');
         expect(searchRail.attrs.className).toBe('sp-search-cluster');
         expect(searchTrigger.attrs.id).toBe('sp-search-btn');
         expect(searchSurface.attrs.className).toBe('sp-search-container');
@@ -519,25 +516,22 @@ describe('manager shell structure', () => {
         expect(global.NSM_CONTENT_STYLE_TEXT).toContain('.source-item.selected-for-batch,');
     });
 
-    it('defines lightweight spotlight, glare, and glow motion without vertical lift', () => {
+    it('defines spotlight and glow motion without decorative hover glare or vertical lift', () => {
         jest.resetModules();
         require('../../src/content/content-style-text.js');
 
         const spotlight = extractCssBlock(global.NSM_CONTENT_STYLE_TEXT, '.source-item.sp-spotlight-surface::before,');
-        const glare = extractCssBlock(global.NSM_CONTENT_STYLE_TEXT, '.sp-glare-hover::after {');
         const batchActionBar = extractCssBlock(global.NSM_CONTENT_STYLE_TEXT, '.sp-batch-action-bar {');
         const dangerDelete = extractCssBlock(global.NSM_CONTENT_STYLE_TEXT, '.sp-delete-button:hover {');
         const dangerConfirm = extractCssBlock(global.NSM_CONTENT_STYLE_TEXT, '.sp-confirm-delete-btn:hover {');
 
         expect(spotlight).toContain('radial-gradient(');
         expect(spotlight).toContain('circle at var(--sp-spotlight-x, 50%) var(--sp-spotlight-y, 50%)');
-        expect(glare).toContain('linear-gradient(');
-        expect(glare).toContain('background-position: -140% -140%;');
-        expect(global.NSM_CONTENT_STYLE_TEXT).toContain('.sp-glare-hover:hover::after,');
+        expect(extractCssBlock(global.NSM_CONTENT_STYLE_TEXT, '.sp-glare-hover::after {')).toBe('');
+        expect(global.NSM_CONTENT_STYLE_TEXT).not.toContain('.sp-glare-hover:hover::after');
         expect(batchActionBar).toContain('0 0 18px var(--sp-batch-glow)');
         expect(dangerDelete).toContain('var(--sp-danger-glow)');
         expect(dangerConfirm).toContain('var(--sp-danger-glow)');
-        expect(global.NSM_CONTENT_STYLE_TEXT).toContain('background-position: 50% 50% !important;');
         expect(global.NSM_CONTENT_STYLE_TEXT).not.toContain('translateY(-1px)');
     });
 
@@ -634,6 +628,8 @@ describe('manager shell structure', () => {
         expect(extractCssBlock(global.NSM_CONTENT_STYLE_TEXT, '.sp-folder-option:hover,')).toContain('transform: scale(1.02);');
         expect(extractCssBlock(global.NSM_CONTENT_STYLE_TEXT, '.sp-tag-option:hover,')).toContain('transform: scale(1.01);');
         expect(extractCssBlock(global.NSM_CONTENT_STYLE_TEXT, '.sp-modal-cancel:hover {')).toContain('transform: scale(1.02);');
+        expect(extractCssBlock(global.NSM_CONTENT_STYLE_TEXT, '.sp-button::after {')).toBe('');
+        expect(global.NSM_CONTENT_STYLE_TEXT).not.toContain('.sp-button:hover::after');
         expect(global.NSM_CONTENT_STYLE_TEXT).not.toContain('translateY(-1px)');
     });
 
@@ -645,6 +641,36 @@ describe('manager shell structure', () => {
         expect(global.NSM_CONTENT_STYLE_TEXT).toContain('.sp-container.is-native-label-view #sources-list');
         expect(global.NSM_CONTENT_STYLE_TEXT).toContain('.sp-container.is-native-label-view .sp-resizer');
         expect(global.NSM_CONTENT_STYLE_TEXT).not.toContain('.sp-container.is-native-label-view .sp-resizer {\n                display: none;');
+    });
+
+    it('keeps quick view pills and the final source row away from panel clipping edges', () => {
+        jest.resetModules();
+        require('../../src/content/content-style-text.js');
+
+        const quickViewRail = extractCssBlock(global.NSM_CONTENT_STYLE_TEXT, '.sp-quick-view-rail {');
+        const quickViewButton = extractCssBlock(global.NSM_CONTENT_STYLE_TEXT, '.sp-quick-view-btn {');
+        const sourceList = extractCssBlock(global.NSM_CONTENT_STYLE_TEXT, '\n            #sources-list {');
+
+        expect(quickViewRail).toContain('min-height: 44px;');
+        expect(quickViewRail).toContain('padding: 8px 8px 6px;');
+        expect(quickViewRail).toContain('scroll-padding-inline: 8px;');
+        expect(quickViewButton).toContain('appearance: none;');
+        expect(quickViewButton).toContain('-webkit-appearance: none;');
+        expect(quickViewButton).toContain('display: inline-flex;');
+        expect(quickViewButton).toContain('height: 30px;');
+        expect(quickViewButton).toContain('padding: 0 12px;');
+        expect(sourceList).toContain('--sp-source-list-bottom-safe-area: 28px;');
+        expect(sourceList).toContain('padding-bottom: var(--sp-source-list-bottom-safe-area);');
+        expect(sourceList).toContain('scroll-padding-bottom: var(--sp-source-list-bottom-safe-area);');
+    });
+
+    it('removes quick view rail layout space when every quick view button is hidden', () => {
+        jest.resetModules();
+        require('../../src/content/content-style-text.js');
+
+        const hiddenQuickViewRail = extractCssBlock(global.NSM_CONTENT_STYLE_TEXT, '.sp-quick-view-rail[hidden] {');
+
+        expect(hiddenQuickViewRail).toContain('display: none;');
     });
 });
 
@@ -704,6 +730,55 @@ describe('batch count and source menu motion rendering', () => {
         ]);
         expect(buttons.find((button) => button.dataset.quickViewKind === 'recent').attrs['aria-pressed']).toBe('true');
         expect(buttons.find((button) => button.dataset.quickViewKind === 'all').attrs['aria-pressed']).toBe('false');
+    });
+
+    it('renders only the configured quick view buttons and hides the rail when none are visible', () => {
+        const quickRail = createRenderTestElement('div', { id: 'sp-quick-view-rail' });
+        const listContainer = createRenderTestElement('div', { id: 'sources-list' });
+        let visibleQuickViewKinds = ['all', 'issues'];
+        const renderModule = createContentRender({
+            el: createRenderTestElement,
+            getDocument: () => ({
+                createDocumentFragment: createRenderTestFragment,
+                createElement: (tag) => createRenderTestElement(tag)
+            }),
+            getShadowRoot: () => ({
+                appendChild: jest.fn(),
+                querySelector: jest.fn((selector) => {
+                    if (selector === '#sources-list') return listContainer;
+                    if (selector === '.sp-container') return createRenderTestElement('div', { className: 'sp-container' });
+                    return null;
+                }),
+                getElementById: jest.fn((id) => {
+                    if (id === 'sources-list') return listContainer;
+                    if (id === 'sp-quick-view-rail') return quickRail;
+                    return null;
+                })
+            }),
+            getState: () => ({
+                groups: [],
+                ungrouped: [],
+                isBatchMode: false,
+                activeQuickViewKind: 'issues',
+                activeTagId: null
+            }),
+            getVisibleQuickViewKinds: () => visibleQuickViewKinds,
+            getMessage: (key) => key
+        });
+
+        renderModule.render();
+
+        expect(findRenderTestNodesByClass(quickRail, 'sp-quick-view-btn').map((button) => button.dataset.quickViewKind)).toEqual([
+            'all',
+            'issues'
+        ]);
+        expect(quickRail.hidden).toBe(false);
+
+        visibleQuickViewKinds = [];
+        renderModule.renderQuickViewRail();
+
+        expect(findRenderTestNodesByClass(quickRail, 'sp-quick-view-btn')).toHaveLength(0);
+        expect(quickRail.hidden).toBe(true);
     });
 
     it('wraps localized batch counts without changing button text', () => {
@@ -2257,10 +2332,10 @@ describe('command palette commands', () => {
         mod.state.isBatchMode = true;
         mod.pendingBatchKeys.add('source-1');
 
-        const commands = mod._getCommandPaletteCommandsForTest('ai');
+        const commands = mod._getCommandPaletteCommandsForTest('');
 
         expect(commands).toEqual(expect.arrayContaining([
-            expect.objectContaining({ action: 'search-sources', payload: { query: 'ai' } }),
+            expect.objectContaining({ action: 'search-sources', payload: { query: '' } }),
             expect.objectContaining({ action: 'quick-view', payload: { kind: 'recent' } }),
             expect.objectContaining({ action: 'switch-source-view', payload: { kind: 'label' } }),
             expect.objectContaining({ action: 'open-settings' }),
@@ -2275,6 +2350,34 @@ describe('command palette commands', () => {
         expect(disabledBatchCommands.every((command) => command.disabled === true)).toBe(true);
     });
 
+    it('keeps quick view commands available when all quick view rail buttons are hidden', async () => {
+        await mod._setVisibleQuickViewKindsForTest([]);
+
+        const commands = mod._getCommandPaletteCommandsForTest('');
+
+        expect(commands).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: 'quick-view-all', action: 'quick-view', payload: { kind: 'all' } }),
+            expect.objectContaining({ id: 'quick-view-recent', action: 'quick-view', payload: { kind: 'recent' } }),
+            expect.objectContaining({ id: 'quick-view-issues', action: 'quick-view', payload: { kind: 'issues' } })
+        ]));
+    });
+
+    it('filters command palette actions by title, subtitle, and keywords', () => {
+        const recentCommands = mod._getCommandPaletteCommandsForTest('recent');
+        expect(recentCommands).toEqual(expect.arrayContaining([
+            expect.objectContaining({ action: 'search-sources', payload: { query: 'recent' } }),
+            expect.objectContaining({ action: 'quick-view', payload: { kind: 'recent' } })
+        ]));
+        expect(recentCommands).not.toEqual(expect.arrayContaining([
+            expect.objectContaining({ action: 'quick-view', payload: { kind: 'disabled' } })
+        ]));
+
+        const unmatchedCommands = mod._getCommandPaletteCommandsForTest('zzzz-no-command');
+        expect(unmatchedCommands).toEqual([
+            expect.objectContaining({ action: 'search-sources', payload: { query: 'zzzz-no-command' } })
+        ]);
+    });
+
     it('executes search and quick view commands without persisting the active view', () => {
         mod._setActiveIsolationGroupId('group1');
 
@@ -2286,5 +2389,121 @@ describe('command palette commands', () => {
         expect(mod.state.activeTagId).toBeNull();
         expect(mod._getActiveIsolationGroupId()).toBeNull();
         expect(mod.buildPersistableState()).not.toHaveProperty('activeQuickViewKind');
+    });
+
+    it('toggles search and quick view shortcuts on repeated presses and ignores editable targets', async () => {
+        await mod._setCommandShortcutForTest('search-sources', 'Meta+Shift+F');
+        const searchShortcutEvent = {
+            key: 'f',
+            metaKey: true,
+            shiftKey: true,
+            ctrlKey: false,
+            altKey: false,
+            target: { tagName: 'DIV' },
+            preventDefault: jest.fn(),
+            stopPropagation: jest.fn()
+        };
+
+        expect(mod._handleCommandShortcutKeydownForTest(searchShortcutEvent)).toBe(true);
+        expect(mod._getIsSearchExpanded()).toBe(true);
+
+        mod.state.filterQuery = 'report';
+        const closeSearchShortcutEvent = Object.assign({}, searchShortcutEvent, {
+            preventDefault: jest.fn(),
+            stopPropagation: jest.fn()
+        });
+        expect(mod._handleCommandShortcutKeydownForTest(closeSearchShortcutEvent)).toBe(true);
+        expect(mod._getIsSearchExpanded()).toBe(false);
+        expect(mod.state.filterQuery).toBe('');
+
+        await mod._setCommandShortcutForTest('quick-view-recent', 'Meta+Shift+R');
+        expect(mod._getCommandShortcutsForTest()).toMatchObject({
+            'quick-view-recent': 'Meta+Shift+R'
+        });
+
+        const shortcutEvent = {
+            key: 'r',
+            metaKey: true,
+            shiftKey: true,
+            ctrlKey: false,
+            altKey: false,
+            target: { tagName: 'DIV' },
+            preventDefault: jest.fn(),
+            stopPropagation: jest.fn()
+        };
+        expect(mod._getCommandShortcutComboFromEventForTest(shortcutEvent)).toBe('Meta+Shift+R');
+        expect(mod._getCommandPaletteCommandForShortcutForTest('Meta+Shift+R')).toEqual(expect.objectContaining({
+            id: 'quick-view-recent'
+        }));
+        expect(mod._getExtensionEnabledForTest()).toBe(true);
+        expect(mod._hasCommandPaletteModalForTest()).toBe(false);
+        expect(mod._getCommandPaletteCommandsForTest('')).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: 'quick-view-recent', action: 'quick-view', payload: { kind: 'recent' } })
+        ]));
+
+        expect(mod._handleCommandShortcutKeydownForTest(shortcutEvent)).toBe(true);
+        expect(shortcutEvent.preventDefault).toHaveBeenCalled();
+        expect(mod.state.activeQuickViewKind).toBe('recent');
+
+        const repeatedShortcutEvent = Object.assign({}, shortcutEvent, {
+            preventDefault: jest.fn(),
+            stopPropagation: jest.fn()
+        });
+        expect(mod._handleCommandShortcutKeydownForTest(repeatedShortcutEvent)).toBe(true);
+        expect(mod.state.activeQuickViewKind).toBeNull();
+
+        const editableEvent = {
+            key: 'r',
+            metaKey: true,
+            shiftKey: true,
+            ctrlKey: false,
+            altKey: false,
+            target: { tagName: 'INPUT' },
+            preventDefault: jest.fn(),
+            stopPropagation: jest.fn()
+        };
+
+        expect(mod._handleCommandShortcutKeydownForTest(editableEvent)).toBe(false);
+        expect(mod.state.activeQuickViewKind).toBeNull();
+    });
+
+    it('closes an already-open modal command when its shortcut runs again', () => {
+        const removedNodeIds = [];
+        const modalParent = {
+            removeChild: jest.fn((node) => {
+                removedNodeIds.push(node.id);
+                return node;
+            })
+        };
+        const nodes = {
+            'sp-settings-modal': {
+                id: 'sp-settings-modal',
+                parentNode: modalParent,
+                getAttribute: (name) => (name === 'id' ? 'sp-settings-modal' : null),
+                classList: { add: jest.fn(), remove: jest.fn() }
+            },
+            'sp-settings-backdrop': {
+                id: 'sp-settings-backdrop',
+                parentNode: modalParent,
+                getAttribute: (name) => (name === 'id' ? 'sp-settings-backdrop' : null),
+                classList: { add: jest.fn(), remove: jest.fn() }
+            }
+        };
+        mod._setShadowRootForTest({
+            host: { isConnected: true },
+            getElementById: (id) => nodes[id] || null,
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        });
+
+        expect(mod._executeCommandPaletteCommandForTest('open-settings', {
+            action: 'open-settings',
+            triggeredByShortcut: true
+        })).toBe(true);
+
+        expect(removedNodeIds).toEqual(expect.arrayContaining([
+            'sp-settings-backdrop',
+            'sp-settings-modal'
+        ]));
     });
 });

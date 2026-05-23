@@ -1,4 +1,5 @@
 describe('background.js message listener', () => {
+    const DEFAULT_VISIBLE_QUICK_VIEW_KINDS = ['all', 'ungrouped', 'disabled', 'tag', 'recent', 'issues'];
     let listener;
     let mockSendResponse;
 
@@ -480,9 +481,11 @@ describe('background.js message listener', () => {
                 sourcesPlusPreferences: {
                     developerModeEnabled: true,
                     welcomeOnboardingSeenVersion: 0,
-                    whatsNewSeenVersion: 0,
+                    whatsNewSeenVersion: '',
                     historyRetentionLimit: 20,
-                    languageOverride: 'auto'
+                    languageOverride: 'auto',
+                    commandShortcuts: {},
+                    visibleQuickViewKinds: DEFAULT_VISIBLE_QUICK_VIEW_KINDS
                 }
             },
             expect.any(Function)
@@ -492,9 +495,11 @@ describe('background.js message listener', () => {
             preferences: {
                 developerModeEnabled: true,
                 welcomeOnboardingSeenVersion: 0,
-                whatsNewSeenVersion: 0,
+                whatsNewSeenVersion: '',
                 historyRetentionLimit: 20,
-                languageOverride: 'auto'
+                languageOverride: 'auto',
+                commandShortcuts: {},
+                visibleQuickViewKinds: DEFAULT_VISIBLE_QUICK_VIEW_KINDS
             }
         });
 
@@ -506,7 +511,7 @@ describe('background.js message listener', () => {
         listener({ type: 'LOAD_PREFERENCES' }, {}, mockSendResponse);
 
         expect(global.chrome.storage.local.get).toHaveBeenCalledWith(
-            ['sourcesPlusPreferences'],
+            null,
             expect.any(Function)
         );
         expect(mockSendResponse).toHaveBeenCalledWith({
@@ -514,11 +519,52 @@ describe('background.js message listener', () => {
             preferences: {
                 developerModeEnabled: true,
                 welcomeOnboardingSeenVersion: 0,
-                whatsNewSeenVersion: 0,
+                whatsNewSeenVersion: '',
                 historyRetentionLimit: 20,
-                languageOverride: 'auto'
+                languageOverride: 'auto',
+                commandShortcuts: {},
+                visibleQuickViewKinds: DEFAULT_VISIBLE_QUICK_VIEW_KINDS
+            },
+            usageState: {
+                hasExistingPluginData: true,
+                hasStoredPreferences: true
             }
         });
+    });
+
+    it('reports whether stored extension data already exists when loading preferences', () => {
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            expect(keys).toBeNull();
+            cb({});
+        });
+
+        listener({ type: 'LOAD_PREFERENCES' }, {}, mockSendResponse);
+
+        expect(mockSendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: true,
+            usageState: {
+                hasExistingPluginData: false,
+                hasStoredPreferences: false
+            }
+        }));
+
+        mockSendResponse.mockClear();
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            expect(keys).toBeNull();
+            cb({
+                sourcesPlusState_abc: { schemaVersion: 4 }
+            });
+        });
+
+        listener({ type: 'LOAD_PREFERENCES' }, {}, mockSendResponse);
+
+        expect(mockSendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: true,
+            usageState: {
+                hasExistingPluginData: true,
+                hasStoredPreferences: false
+            }
+        }));
     });
 
     it('merges welcome onboarding preference updates without clearing developer mode', () => {
@@ -540,9 +586,11 @@ describe('background.js message listener', () => {
                 sourcesPlusPreferences: {
                     developerModeEnabled: true,
                     welcomeOnboardingSeenVersion: 1,
-                    whatsNewSeenVersion: 0,
+                    whatsNewSeenVersion: '',
                     historyRetentionLimit: 20,
-                    languageOverride: 'auto'
+                    languageOverride: 'auto',
+                    commandShortcuts: {},
+                    visibleQuickViewKinds: DEFAULT_VISIBLE_QUICK_VIEW_KINDS
                 }
             },
             expect.any(Function)
@@ -552,9 +600,11 @@ describe('background.js message listener', () => {
             preferences: {
                 developerModeEnabled: true,
                 welcomeOnboardingSeenVersion: 1,
-                whatsNewSeenVersion: 0,
+                whatsNewSeenVersion: '',
                 historyRetentionLimit: 20,
-                languageOverride: 'auto'
+                languageOverride: 'auto',
+                commandShortcuts: {},
+                visibleQuickViewKinds: DEFAULT_VISIBLE_QUICK_VIEW_KINDS
             }
         });
     });
@@ -565,7 +615,7 @@ describe('background.js message listener', () => {
                 sourcesPlusPreferences: {
                     developerModeEnabled: true,
                     welcomeOnboardingSeenVersion: 1,
-                    whatsNewSeenVersion: 0,
+                    whatsNewSeenVersion: '',
                     historyRetentionLimit: 20,
                     languageOverride: 'auto'
                 }
@@ -575,7 +625,7 @@ describe('background.js message listener', () => {
         listener({
             type: 'SAVE_PREFERENCES',
             preferences: {
-                whatsNewSeenVersion: 1,
+                whatsNewSeenVersion: '2.7.4',
                 historyRetentionLimit: 50,
                 languageOverride: 'zh_CN'
             }
@@ -586,13 +636,172 @@ describe('background.js message listener', () => {
                 sourcesPlusPreferences: {
                     developerModeEnabled: true,
                     welcomeOnboardingSeenVersion: 1,
-                    whatsNewSeenVersion: 1,
+                    whatsNewSeenVersion: '2.7.4',
                     historyRetentionLimit: 50,
-                    languageOverride: 'zh_CN'
+                    languageOverride: 'zh_CN',
+                    commandShortcuts: {},
+                    visibleQuickViewKinds: DEFAULT_VISIBLE_QUICK_VIEW_KINDS
                 }
             },
             expect.any(Function)
         );
+    });
+
+    it('saves command shortcuts without clearing existing preferences', () => {
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({
+                sourcesPlusPreferences: {
+                    developerModeEnabled: true,
+                    welcomeOnboardingSeenVersion: 1,
+                    whatsNewSeenVersion: '2.7.4',
+                    historyRetentionLimit: 50,
+                    languageOverride: 'zh_CN',
+                    commandShortcuts: {
+                        'quick-view-recent': 'Meta+Shift+R'
+                    }
+                }
+            });
+        });
+
+        listener({
+            type: 'SAVE_PREFERENCES',
+            preferences: {
+                commandShortcuts: {
+                    'quick-view-recent': '',
+                    'quick-view-issues': 'Ctrl+Alt+I',
+                    '../bad': 'Meta+X'
+                }
+            }
+        }, {}, mockSendResponse);
+
+        expect(global.chrome.storage.local.set).toHaveBeenCalledWith(
+            {
+                sourcesPlusPreferences: {
+                    developerModeEnabled: true,
+                    welcomeOnboardingSeenVersion: 1,
+                    whatsNewSeenVersion: '2.7.4',
+                    historyRetentionLimit: 50,
+                    languageOverride: 'zh_CN',
+                    commandShortcuts: {
+                        'quick-view-issues': 'Ctrl+Alt+I'
+                    },
+                    visibleQuickViewKinds: DEFAULT_VISIBLE_QUICK_VIEW_KINDS
+                }
+            },
+            expect.any(Function)
+        );
+    });
+
+    it('saves visible quick view button preferences without clearing existing preferences', () => {
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({
+                sourcesPlusPreferences: {
+                    developerModeEnabled: true,
+                    welcomeOnboardingSeenVersion: 1,
+                    whatsNewSeenVersion: '2.7.4',
+                    historyRetentionLimit: 50,
+                    languageOverride: 'zh_CN',
+                    commandShortcuts: {
+                        'quick-view-recent': 'Meta+Shift+R'
+                    },
+                    visibleQuickViewKinds: ['all', 'recent', 'issues']
+                }
+            });
+        });
+
+        listener({
+            type: 'SAVE_PREFERENCES',
+            preferences: {
+                visibleQuickViewKinds: ['issues', 'bad-kind', 'all', 'issues']
+            }
+        }, {}, mockSendResponse);
+
+        expect(global.chrome.storage.local.set).toHaveBeenCalledWith(
+            {
+                sourcesPlusPreferences: {
+                    developerModeEnabled: true,
+                    welcomeOnboardingSeenVersion: 1,
+                    whatsNewSeenVersion: '2.7.4',
+                    historyRetentionLimit: 50,
+                    languageOverride: 'zh_CN',
+                    commandShortcuts: {
+                        'quick-view-recent': 'Meta+Shift+R'
+                    },
+                    visibleQuickViewKinds: ['all', 'issues']
+                }
+            },
+            expect.any(Function)
+        );
+
+        mockSendResponse.mockClear();
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({ sourcesPlusPreferences: { visibleQuickViewKinds: [] } });
+        });
+
+        listener({ type: 'LOAD_PREFERENCES' }, {}, mockSendResponse);
+
+        expect(mockSendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: true,
+            preferences: expect.objectContaining({
+                visibleQuickViewKinds: []
+            })
+        }));
+    });
+
+    it('serializes concurrent preference saves so partial updates do not overwrite each other', async () => {
+        const pendingGets = [];
+        const pendingSets = [];
+        global.chrome.storage.local.get.mockImplementation((keys, cb) => {
+            pendingGets.push(cb);
+        });
+        global.chrome.storage.local.set.mockImplementation((payload, cb) => {
+            pendingSets.push({ payload, cb });
+        });
+
+        listener({
+            type: 'SAVE_PREFERENCES',
+            preferences: { welcomeOnboardingSeenVersion: 1 }
+        }, {}, mockSendResponse);
+        listener({
+            type: 'SAVE_PREFERENCES',
+            preferences: { languageOverride: 'zh_CN' }
+        }, {}, mockSendResponse);
+
+        expect(pendingGets).toHaveLength(1);
+
+        pendingGets.shift()({ sourcesPlusPreferences: { developerModeEnabled: true } });
+        expect(pendingSets).toHaveLength(1);
+        expect(pendingSets[0].payload.sourcesPlusPreferences).toMatchObject({
+            developerModeEnabled: true,
+            welcomeOnboardingSeenVersion: 1,
+            languageOverride: 'auto'
+        });
+        pendingSets.shift().cb();
+
+        expect(mockSendResponse).toHaveBeenCalledTimes(1);
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(pendingGets).toHaveLength(1);
+
+        pendingGets.shift()({
+            sourcesPlusPreferences: {
+                developerModeEnabled: true,
+                welcomeOnboardingSeenVersion: 1,
+                whatsNewSeenVersion: '',
+                historyRetentionLimit: 20,
+                languageOverride: 'auto',
+                commandShortcuts: {}
+            }
+        });
+        expect(pendingSets).toHaveLength(1);
+        expect(pendingSets[0].payload.sourcesPlusPreferences).toMatchObject({
+            developerModeEnabled: true,
+            welcomeOnboardingSeenVersion: 1,
+            languageOverride: 'zh_CN'
+        });
+        pendingSets.shift().cb();
+
+        expect(mockSendResponse).toHaveBeenCalledTimes(2);
     });
 
     it('rejects developer log writes from unauthorized senders', () => {

@@ -163,12 +163,38 @@
         const renderSaveStatus = typeof deps.renderSaveStatus === 'function'
             ? deps.renderSaveStatus
             : () => null;
+        const QUICK_VIEW_BUTTON_OPTIONS = [
+            ['all', 'ui_quick_view_all'],
+            ['ungrouped', 'ui_quick_view_ungrouped'],
+            ['disabled', 'ui_quick_view_disabled'],
+            ['tag', 'ui_quick_view_tag'],
+            ['recent', 'ui_quick_view_recent'],
+            ['issues', 'ui_quick_view_issues']
+        ];
         const getCommandPaletteCommands = typeof deps.getCommandPaletteCommands === 'function'
             ? deps.getCommandPaletteCommands
             : () => [];
         const executeCommandPaletteCommand = typeof deps.executeCommandPaletteCommand === 'function'
             ? deps.executeCommandPaletteCommand
             : () => false;
+        const getCommandShortcut = typeof deps.getCommandShortcut === 'function'
+            ? deps.getCommandShortcut
+            : () => '';
+        const setCommandShortcut = typeof deps.setCommandShortcut === 'function'
+            ? deps.setCommandShortcut
+            : () => Promise.resolve('');
+        const getCommandShortcutComboFromEvent = typeof deps.getCommandShortcutComboFromEvent === 'function'
+            ? deps.getCommandShortcutComboFromEvent
+            : () => '';
+        const formatCommandShortcut = typeof deps.formatCommandShortcut === 'function'
+            ? deps.formatCommandShortcut
+            : (shortcut) => String(shortcut || '');
+        const getVisibleQuickViewKinds = typeof deps.getVisibleQuickViewKinds === 'function'
+            ? deps.getVisibleQuickViewKinds
+            : () => QUICK_VIEW_BUTTON_OPTIONS.map(([kind]) => kind);
+        const setVisibleQuickViewKinds = typeof deps.setVisibleQuickViewKinds === 'function'
+            ? deps.setVisibleQuickViewKinds
+            : () => Promise.resolve(QUICK_VIEW_BUTTON_OPTIONS.map(([kind]) => kind));
         const applyTagQuickFilter = typeof deps.applyTagQuickFilter === 'function'
             ? deps.applyTagQuickFilter
             : (tagId) => {
@@ -737,6 +763,38 @@
                         ])
                     ]),
                     languageSelect
+                ]),
+                el('div', { className: 'sp-settings-preference-row sp-command-palette-settings-row' }, [
+                    el('div', { className: 'sp-settings-preference-copy' }, [
+                        el('div', { className: 'sp-settings-preference-title' }, [
+                            getMessage('ui_command_palette')
+                        ]),
+                        el('p', { className: 'sp-settings-helper-text' }, [
+                            getMessage('ui_command_palette_settings_body')
+                        ])
+                    ]),
+                    el('button', {
+                        type: 'button',
+                        className: 'sp-button sp-settings-open-command-palette-btn sp-glare-hover'
+                    }, [
+                        getMessage('ui_settings_open_command_palette')
+                    ])
+                ]),
+                el('div', { className: 'sp-settings-preference-row sp-quick-view-buttons-settings-row' }, [
+                    el('div', { className: 'sp-settings-preference-copy' }, [
+                        el('div', { className: 'sp-settings-preference-title' }, [
+                            getMessage('ui_settings_quick_view_buttons_title')
+                        ]),
+                        el('p', { className: 'sp-settings-helper-text' }, [
+                            getMessage('ui_settings_quick_view_buttons_body')
+                        ])
+                    ]),
+                    el('button', {
+                        type: 'button',
+                        className: 'sp-button sp-settings-manage-quick-view-buttons-btn sp-glare-hover'
+                    }, [
+                        getMessage('ui_settings_manage_quick_view_buttons')
+                    ])
                 ])
             ]);
         }
@@ -1051,11 +1109,27 @@
             ]);
             let commands = [];
             let activeIndex = 0;
+            let shortcutCaptureCommandId = null;
 
             const clearList = () => {
                 Array.from(list.childNodes || []).forEach((child) => {
                     if (typeof list.removeChild === 'function') list.removeChild(child);
                 });
+            };
+            const saveCommandShortcut = (commandId, shortcut) => {
+                const nextShortcut = String(shortcut || '');
+                return Promise.resolve(setCommandShortcut(commandId, nextShortcut))
+                    .then(() => {
+                        shortcutCaptureCommandId = null;
+                        renderItems();
+                        return true;
+                    })
+                    .catch(() => {
+                        shortcutCaptureCommandId = null;
+                        showToast(getMessage('ui_command_shortcut_save_failed'), { variant: 'error' });
+                        renderItems();
+                        return false;
+                    });
             };
             const renderItems = () => {
                 commands = Array.isArray(getCommandPaletteCommands(input.value)) ? getCommandPaletteCommands(input.value) : [];
@@ -1069,12 +1143,27 @@
                 }
                 commands.forEach((command, index) => {
                     const isActive = index === activeIndex;
-                    const item = el('button', {
+                    const commandId = String(command.id || command.action || '');
+                    const isCapturingShortcut = Boolean(commandId && shortcutCaptureCommandId === commandId);
+                    const shortcut = commandId ? String(getCommandShortcut(commandId) || '') : '';
+                    const shortcutButtonLabel = isCapturingShortcut
+                        ? getMessage('ui_command_shortcut_recording')
+                        : (shortcut ? formatCommandShortcut(shortcut) : getMessage('ui_command_shortcut_set'));
+                    const shortcutButton = el('button', {
                         type: 'button',
-                        className: 'sp-command-palette-item' + (isActive ? ' is-active' : ''),
+                        className: 'sp-command-shortcut-btn' + (isCapturingShortcut ? ' is-recording' : ''),
+                        'aria-label': getMessage(shortcut ? 'ui_command_shortcut_change' : 'ui_command_shortcut_set_for', [command.title || commandId]),
+                        title: isCapturingShortcut
+                            ? getMessage('ui_command_shortcut_clear_hint')
+                            : getMessage(shortcut ? 'ui_command_shortcut_change' : 'ui_command_shortcut_set_for', [command.title || commandId])
+                    }, [
+                        shortcutButtonLabel
+                    ]);
+                    const item = el('div', {
+                        className: 'sp-command-palette-item' + (isActive ? ' is-active' : '') + (command.disabled ? ' is-disabled' : ''),
                         role: 'option',
                         'aria-selected': isActive ? 'true' : 'false',
-                        disabled: Boolean(command.disabled),
+                        'aria-disabled': command.disabled ? 'true' : 'false',
                         dataset: { commandIndex: String(index) }
                     }, [
                         el('span', { className: 'google-symbols sp-command-palette-icon', 'aria-hidden': 'true' }, [
@@ -1085,8 +1174,17 @@
                             command.subtitle
                                 ? el('span', { className: 'sp-command-palette-subtitle' }, [command.subtitle])
                                 : ''
-                        ])
+                        ]),
+                        shortcutButton
                     ]);
+                    shortcutButton.addEventListener('click', (event) => {
+                        event.preventDefault?.();
+                        event.stopPropagation?.();
+                        if (!commandId) return;
+                        shortcutCaptureCommandId = commandId;
+                        renderItems();
+                        if (typeof modal.focus === 'function') modal.focus();
+                    });
                     item.addEventListener('mousemove', () => {
                         activeIndex = index;
                         renderItems();
@@ -1119,6 +1217,27 @@
                 activeIndex = 0;
                 renderItems();
             });
+            modal.addEventListener('keydown', (event) => {
+                if (!shortcutCaptureCommandId) return;
+                event.preventDefault?.();
+                event.stopPropagation?.();
+                event.stopImmediatePropagation?.();
+
+                if (event.key === 'Escape') {
+                    shortcutCaptureCommandId = null;
+                    renderItems();
+                    return;
+                }
+                if (event.key === 'Backspace' || event.key === 'Delete') {
+                    const commandId = shortcutCaptureCommandId;
+                    saveCommandShortcut(commandId, '');
+                    return;
+                }
+
+                const shortcut = getCommandShortcutComboFromEvent(event);
+                if (!shortcut) return;
+                saveCommandShortcut(shortcutCaptureCommandId, shortcut);
+            });
             input.addEventListener('keydown', (event) => {
                 if (event.key === 'ArrowDown') {
                     event.preventDefault();
@@ -1142,6 +1261,105 @@
             const modalKeyboard = bindModalKeyboardNavigation(modal, {
                 closeModal: closeCommandPaletteModal,
                 initialFocusTarget: () => input
+            });
+            requestAnimationFrame(() => {
+                backdrop.classList.add('visible');
+                modal.classList.add('visible');
+                modalKeyboard.focusInitial();
+            });
+            return true;
+        }
+
+        function normalizeVisibleQuickViewKinds(value) {
+            if (!Array.isArray(value)) return QUICK_VIEW_BUTTON_OPTIONS.map(([kind]) => kind);
+            const requestedKinds = new Set(value.map((kind) => String(kind || '').trim().toLowerCase()));
+            return QUICK_VIEW_BUTTON_OPTIONS.map(([kind]) => kind).filter((kind) => requestedKinds.has(kind));
+        }
+
+        function renderQuickViewButtonsModal() {
+            const shadowRoot = getShadowRoot();
+            const documentObj = getDocument();
+            if (!shadowRoot || !documentObj || !el) return false;
+
+            prepareModalOpen('sp-quick-view-buttons-modal', 'sp-quick-view-buttons-backdrop');
+
+            const backdrop = el('div', { className: 'sp-overlay-backdrop', id: 'sp-quick-view-buttons-backdrop' });
+            const modal = el('div', {
+                className: 'sp-folder-modal sp-quick-view-buttons-modal',
+                id: 'sp-quick-view-buttons-modal',
+                role: 'dialog',
+                'aria-modal': 'true',
+                'aria-labelledby': 'sp-quick-view-buttons-title',
+                tabindex: '-1'
+            });
+            const header = el('div', { className: 'sp-folder-modal-header' }, [
+                el('h3', { className: 'sp-folder-modal-title', id: 'sp-quick-view-buttons-title' }, [
+                    getMessage('ui_settings_quick_view_buttons_title')
+                ])
+            ]);
+            const currentVisibleKinds = new Set(normalizeVisibleQuickViewKinds(getVisibleQuickViewKinds()));
+            const list = el('div', { className: 'sp-quick-view-visibility-list' }, QUICK_VIEW_BUTTON_OPTIONS.map(([kind, labelKey]) => (
+                el('label', { className: 'sp-quick-view-visibility-row' }, [
+                    el('input', {
+                        type: 'checkbox',
+                        className: 'sp-quick-view-visibility-checkbox',
+                        checked: currentVisibleKinds.has(kind),
+                        dataset: { quickViewKind: kind }
+                    }),
+                    el('span', { className: 'sp-quick-view-visibility-label' }, [getMessage(labelKey)])
+                ])
+            )));
+            const content = el('div', { className: 'sp-folder-modal-content sp-quick-view-buttons-content' }, [
+                el('p', { className: 'sp-settings-helper-text sp-quick-view-buttons-body' }, [
+                    getMessage('ui_settings_quick_view_buttons_body')
+                ]),
+                list
+            ]);
+            const footer = el('div', { className: 'sp-folder-modal-footer' }, [
+                el('button', { type: 'button', className: 'sp-modal-cancel sp-quick-view-buttons-done-btn' }, [
+                    getMessage('ui_done')
+                ])
+            ]);
+
+            const collectSelectedKinds = () => (
+                QUICK_VIEW_BUTTON_OPTIONS.map(([kind]) => {
+                    const checkbox = Array.from(list.querySelectorAll?.('.sp-quick-view-visibility-checkbox') || [])
+                        .find((input) => input?.dataset?.quickViewKind === kind);
+                    return checkbox?.checked ? kind : null;
+                }).filter(Boolean)
+            );
+
+            Array.from(list.querySelectorAll?.('.sp-quick-view-visibility-checkbox') || []).forEach((checkbox) => {
+                checkbox.addEventListener('change', () => {
+                    const previousKinds = normalizeVisibleQuickViewKinds(getVisibleQuickViewKinds());
+                    const nextKinds = collectSelectedKinds();
+                    Promise.resolve(setVisibleQuickViewKinds(nextKinds))
+                        .then(() => {
+                            render();
+                        })
+                        .catch(() => {
+                            const previousSet = new Set(previousKinds);
+                            Array.from(list.querySelectorAll?.('.sp-quick-view-visibility-checkbox') || []).forEach((input) => {
+                                input.checked = previousSet.has(input?.dataset?.quickViewKind);
+                            });
+                            showToast(getMessage('ui_settings_quick_view_buttons_save_failed'), { variant: 'error' });
+                        });
+                });
+            });
+            backdrop.addEventListener('click', () => closeManagedModal('sp-quick-view-buttons-modal', 'sp-quick-view-buttons-backdrop'));
+            footer.querySelector?.('.sp-quick-view-buttons-done-btn')?.addEventListener('click', () => {
+                closeManagedModal('sp-quick-view-buttons-modal', 'sp-quick-view-buttons-backdrop');
+            });
+
+            modal.appendChild(header);
+            modal.appendChild(content);
+            modal.appendChild(footer);
+            shadowRoot.appendChild(backdrop);
+            shadowRoot.appendChild(modal);
+
+            const modalKeyboard = bindModalKeyboardNavigation(modal, {
+                closeModal: (options) => closeManagedModal('sp-quick-view-buttons-modal', 'sp-quick-view-buttons-backdrop', options),
+                initialFocusTarget: () => modal.querySelector('.sp-quick-view-visibility-checkbox') || modal.querySelector('.sp-quick-view-buttons-done-btn')
             });
             requestAnimationFrame(() => {
                 backdrop.classList.add('visible');
@@ -1585,6 +1803,14 @@
             });
             content.querySelector('.sp-settings-open-web-store-feedback-btn')?.addEventListener('click', () => {
                 openWebStoreFeedback();
+            });
+            content.querySelector('.sp-settings-open-command-palette-btn')?.addEventListener('click', () => {
+                closeSettingsModal({ immediate: true, restoreFocus: false });
+                renderCommandPaletteModal();
+            });
+            content.querySelector('.sp-settings-manage-quick-view-buttons-btn')?.addEventListener('click', () => {
+                closeSettingsModal({ immediate: true, restoreFocus: false });
+                renderQuickViewButtonsModal();
             });
             content.querySelector('.sp-settings-language-select')?.addEventListener('change', (event) => {
                 const nextLanguage = event?.target?.value || 'auto';
@@ -2589,6 +2815,7 @@
             renderNativeLabelImportModal,
             closeCommandPaletteModal,
             renderCommandPaletteModal,
+            renderQuickViewButtonsModal,
             closeTagFilterModal,
             renderTagFilterModal,
             closeWelcomeModal,

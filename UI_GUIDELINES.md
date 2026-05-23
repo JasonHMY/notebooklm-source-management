@@ -437,9 +437,15 @@ Current built-in views:
 Rules:
 
 - Quick view pills use existing `--sp-*` tokens, small type, and accent active state.
+- The rail keeps horizontal and vertical safe inset, plus scroll padding, so active/focus outlines are not clipped by the source panel edge or toolbar boundary.
+- Quick view buttons use a reset native appearance and fixed inline-flex capsule height; do not rely on default browser button rendering for this row.
+- Users may hide any or all quick view buttons through Settings; this only changes rail visibility, not the command palette actions or custom shortcuts.
+- When every quick view button is hidden, the rail itself must be `display: none` so it does not leave an empty strip between the toolbar and source list.
 - Quick view state is session-only except for source metadata required to support it, such as `sourceStateById[sourceKey].addedAt`.
 - Choosing a quick view must not clear the search query; it may clear other view-level state such as folder isolation or tag quick filter to keep the result set understandable.
 - Do not turn this rail into user-defined saved views until a separate design handles naming, persistence, and conflict behavior.
+
+The source list keeps a small bottom safe area so the final row can scroll above the resizer and NotebookLM's native add/search controls instead of being clipped in dense All view.
 
 ## 8. Buttons
 
@@ -459,7 +465,7 @@ Feedback:
 
 - Hover: brighter surface + stronger border
 - Active: `scale(0.95)`
-- Decorative sweep: pseudo-element shimmer on hover
+- Hover feedback should not use decorative sweep or glare pseudo-elements; keep the state change to surface, border, and subtle scale.
 
 Use for:
 
@@ -847,13 +853,15 @@ What's New:
 
 Settings preferences:
 
-- Lightweight preferences such as language and history retention should use `.sp-settings-preference-row` with a compact native `select`.
+- Lightweight preferences such as language, history retention, command palette entry, and quick view button management should use `.sp-settings-preference-row`.
 - Keep preference copy short and functional; do not add explanatory cards inside settings sections.
 
 Command palette:
 
 - `.sp-command-palette-modal` uses the same modal shell and focus trap.
-- It is opened from the toolbar button only; no global keyboard shortcut is enabled in the first version.
+- It is opened from the Settings preferences section; command rows also expose a compact shortcut control.
+- No command ships with a default shortcut. Users may assign their own modifier-based shortcuts, and those shortcuts are stored in global preferences.
+- Repeating a user-defined shortcut should reverse reversible command state where possible: collapse search, clear an active quick view, or close the corresponding modal.
 - Commands should bridge to existing manager actions instead of duplicating business logic.
 - Batch commands must remain disabled until batch mode has selected sources.
 

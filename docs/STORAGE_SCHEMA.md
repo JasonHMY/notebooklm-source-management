@@ -15,7 +15,7 @@ chrome.storage.local
 ├── sourcesPlusHistory_<projectId>
 │   └── Per-notebook bounded history snapshots.
 ├── sourcesPlusPreferences
-│   └── Global preferences: developer mode, onboarding/update dismissal, history retention, and language override.
+│   └── Global preferences: developer mode, onboarding/update dismissal, history retention, language override, command shortcuts, and quick view button visibility.
 └── sourcesPlusDeveloperLogs_<projectId>
     └── Per-notebook bounded developer logs.
 ```
@@ -30,17 +30,25 @@ chrome.storage.local
 {
   "developerModeEnabled": false,
   "welcomeOnboardingSeenVersion": 1,
-  "whatsNewSeenVersion": 1,
+  "whatsNewSeenVersion": "2.7.4",
   "historyRetentionLimit": 20,
-  "languageOverride": "auto"
+  "languageOverride": "auto",
+  "commandShortcuts": {
+    "quick-view-recent": "Meta+Shift+R"
+  },
+  "visibleQuickViewKinds": ["all", "ungrouped", "disabled", "tag", "recent", "issues"]
 }
 ```
 
 - `developerModeEnabled` controls sanitized developer log collection.
 - `welcomeOnboardingSeenVersion` records the latest first-run welcome modal version the user has dismissed. Missing or `0` means the current welcome modal can be shown once.
-- `whatsNewSeenVersion` records the latest update-introduction modal version the user has dismissed. Missing or `0` means the current enabled What's New modal can be shown once.
+- `whatsNewSeenVersion` records the latest extension version string whose update-introduction modal the user has dismissed. Missing or an older dotted version means the current enabled What's New modal can be shown once for existing users.
 - `historyRetentionLimit` controls how many `sourcesPlusHistory_<projectId>` entries are retained. Valid values are `20`, `50`, and `100`; invalid or missing values fall back to `20`.
 - `languageOverride` controls extension UI language. Valid values are `auto`, `en`, `es`, and `zh_CN`; `auto` follows Chrome UI language.
+- `commandShortcuts` stores user-defined command palette shortcuts by command id. There are no default shortcuts; invalid command ids or malformed combos are ignored, and assigning a combo to one command removes the same combo from another command.
+- `visibleQuickViewKinds` controls which quick view rail buttons render in the source panel. Valid values are `all`, `ungrouped`, `disabled`, `tag`, `recent`, and `issues`; an empty array hides the rail while command palette actions and custom shortcuts remain available.
+
+`LOAD_PREFERENCES` also returns derived `usageState` booleans. They are not stored inside `sourcesPlusPreferences`; the background derives them from whether `sourcesPlusPreferences`, `sourcesPlusState_*`, `sourcesPlusHistory_*`, or `sourcesPlusDeveloperLogs_*` already exists in local storage.
 
 ## Current state schema
 

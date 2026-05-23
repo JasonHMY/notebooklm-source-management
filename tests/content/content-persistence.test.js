@@ -186,6 +186,50 @@ describe('saveState', () => {
         expect(normalizedLegacy.sourceStateById.legacy).not.toHaveProperty('addedAt');
     });
 
+    it('preserves addedAt when restoring a persisted snapshot without native DOM rows', () => {
+        const restored = mod.restorePersistedSnapshotWithoutDom({
+            schemaVersion: 4,
+            groups: [],
+            groupsById: {},
+            ungrouped: ['source1'],
+            sourceStateById: {
+                source1: {
+                    enabled: true,
+                    title: 'Source 1',
+                    normalizedTitle: 'source 1',
+                    stableToken: 'doc-1',
+                    fingerprint: 'source 1||article',
+                    identityType: 'stable-token',
+                    addedAt: '2026-05-17T00:00:00.000Z'
+                }
+            },
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {}
+        });
+
+        expect(restored).toBe(true);
+        expect(mod.sourcesByKey.get('source1').addedAt).toBe('2026-05-17T00:00:00.000Z');
+        expect(mod.buildPersistableState().sourceStateById.source1.addedAt).toBe('2026-05-17T00:00:00.000Z');
+    });
+
+    it('reports manual restore point creation failure when history append fails', async () => {
+        seedPersistedState();
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'APPEND_STATE_HISTORY') {
+                cb({ success: false, errorCode: 'runtime_failure' });
+                return;
+            }
+            if (message?.type === 'LOAD_STATE_HISTORY') {
+                cb({ success: true, history: [] });
+                return;
+            }
+            cb({ success: true });
+        });
+
+        await expect(mod.createManualRestorePoint('Before import')).resolves.toBe(false);
+    });
+
     it('serializes immediate saves and assigns increasing revisions', async () => {
         const projectId = seedPersistedState();
         const pendingRuntimeCallbacks = [];

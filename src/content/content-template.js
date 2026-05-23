@@ -16,14 +16,6 @@
                     }, [
                         el('span', { className: 'google-symbols' }, ['settings'])
                     ]),
-                    el('button', {
-                        id: 'sp-command-palette-btn',
-                        className: 'sp-icon-button sp-command-palette-trigger sp-glare-hover',
-                        title: getMessage("ui_command_palette"),
-                        'aria-label': getMessage("ui_command_palette")
-                    }, [
-                        el('span', { className: 'google-symbols' }, ['keyboard_command_key'])
-                    ]),
                     el('button', { id: 'sp-new-group-btn', className: 'sp-button sp-toolbar-action' }, [getMessage("ui_new_group")]),
                     el('button', { id: 'sp-manage-tags-btn', className: 'sp-button sp-toolbar-action' }, [getMessage("ui_manage_tags")]),
                     el('button', { id: 'sp-batch-action-btn', className: 'sp-button sp-toolbar-action' }, [getMessage("ui_batch_action")])

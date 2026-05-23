@@ -2,6 +2,7 @@
     'use strict';
 
     function createContentRender(deps = {}) {
+        const QUICK_VIEW_BUTTON_KINDS = ['all', 'ungrouped', 'disabled', 'tag', 'recent', 'issues'];
         const getDocument = typeof deps.getDocument === 'function'
             ? deps.getDocument
             : () => (typeof document !== 'undefined' ? document : null);
@@ -26,6 +27,9 @@
         const getPendingBatchKeys = typeof deps.getPendingBatchKeys === 'function'
             ? deps.getPendingBatchKeys
             : () => (deps.pendingBatchKeys || new Set());
+        const getVisibleQuickViewKinds = typeof deps.getVisibleQuickViewKinds === 'function'
+            ? deps.getVisibleQuickViewKinds
+            : () => [...QUICK_VIEW_BUTTON_KINDS];
         const getActiveIsolationGroupId = typeof deps.getActiveIsolationGroupId === 'function'
             ? deps.getActiveIsolationGroupId
             : () => (deps.activeIsolationGroupId || null);
@@ -126,6 +130,12 @@
         const SPOTLIGHT_SURFACE_SELECTOR = '.sp-spotlight-surface';
         let focusedSourceActionMenuKey = null;
         let pendingSourceActionMenuFocus = null;
+
+        function normalizeVisibleQuickViewKinds(value) {
+            if (!Array.isArray(value)) return [...QUICK_VIEW_BUTTON_KINDS];
+            const requestedKinds = new Set(value.map((kind) => String(kind || '').trim().toLowerCase()));
+            return QUICK_VIEW_BUTTON_KINDS.filter((kind) => requestedKinds.has(kind));
+        }
 
         function getCappedMotionIndex(index) {
             const normalizedIndex = Number.isFinite(index) ? Math.max(0, index) : 0;
@@ -733,14 +743,18 @@
             const state = getState() || {};
             const activeQuickViewKind = String(state.activeQuickViewKind || '');
             const hasActiveTag = Boolean(state.activeTagId);
-            [
+            const visibleQuickViewKinds = normalizeVisibleQuickViewKinds(getVisibleQuickViewKinds());
+            const quickViewOptions = [
                 ['all', 'ui_quick_view_all'],
                 ['ungrouped', 'ui_quick_view_ungrouped'],
                 ['disabled', 'ui_quick_view_disabled'],
                 ['tag', 'ui_quick_view_tag'],
                 ['recent', 'ui_quick_view_recent'],
                 ['issues', 'ui_quick_view_issues']
-            ].forEach(([kind, labelKey]) => {
+            ].filter(([kind]) => visibleQuickViewKinds.includes(kind));
+
+            container.hidden = quickViewOptions.length === 0;
+            quickViewOptions.forEach(([kind, labelKey]) => {
                 const active = kind === 'all'
                     ? !activeQuickViewKind && !hasActiveTag
                     : (kind === 'tag' ? hasActiveTag : activeQuickViewKind === kind);

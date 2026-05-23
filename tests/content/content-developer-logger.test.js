@@ -1,14 +1,31 @@
 const createContentDeveloperLogger = require('../../src/content/content-developer-logger.js');
 
-function createRuntimeMock() {
+function createRuntimeMock(options = {}) {
     const storedLogs = new Map();
-    let preferences = { developerModeEnabled: false, welcomeOnboardingSeenVersion: 0 };
+    let preferences = {
+        developerModeEnabled: false,
+        welcomeOnboardingSeenVersion: 0,
+        whatsNewSeenVersion: '',
+        historyRetentionLimit: 20,
+        languageOverride: 'auto',
+        commandShortcuts: {},
+        visibleQuickViewKinds: ['all', 'ungrouped', 'disabled', 'tag', 'recent', 'issues']
+    };
+    const savePreferencesResponse = options.savePreferencesResponse || null;
+    const usageState = options.usageState || {
+        hasExistingPluginData: false,
+        hasStoredPreferences: false
+    };
     const sendMessage = jest.fn((message, cb) => {
         if (message?.type === 'LOAD_PREFERENCES') {
-            cb?.({ success: true, preferences });
+            cb?.({ success: true, preferences, usageState });
             return;
         }
         if (message?.type === 'SAVE_PREFERENCES') {
+            if (savePreferencesResponse) {
+                cb?.(savePreferencesResponse);
+                return;
+            }
             preferences = Object.assign({}, preferences, message.preferences || {});
             cb?.({ success: true, preferences });
             return;
@@ -194,17 +211,98 @@ describe('content developer logger', () => {
             getProjectId: () => 'project-dev'
         });
 
-        await logger.setWhatsNewSeenVersion(1);
+        await logger.setWhatsNewSeenVersion('2.7.4');
         await logger.setHistoryRetentionLimit(50);
         await logger.setLanguageOverride('zh_CN');
 
-        expect(logger.getWhatsNewSeenVersion()).toBe(1);
+        expect(logger.getWhatsNewSeenVersion()).toBe('2.7.4');
         expect(logger.getHistoryRetentionLimit()).toBe(50);
         expect(logger.getLanguageOverride()).toBe('zh_CN');
         expect(getPreferences()).toMatchObject({
-            whatsNewSeenVersion: 1,
+            whatsNewSeenVersion: '2.7.4',
             historyRetentionLimit: 50,
             languageOverride: 'zh_CN'
         });
+    });
+
+    it('loads preference usage state from the background response', async () => {
+        const { chromeApi } = createRuntimeMock({
+            usageState: {
+                hasExistingPluginData: true,
+                hasStoredPreferences: false
+            }
+        });
+        const logger = createContentDeveloperLogger({
+            chrome: chromeApi,
+            getProjectId: () => 'project-dev'
+        });
+
+        await logger.loadDeveloperPreferences();
+
+        expect(logger.getPreferenceUsageState()).toEqual({
+            hasExistingPluginData: true,
+            hasStoredPreferences: false
+        });
+    });
+
+    it('loads, saves, and clears custom command shortcuts', async () => {
+        const { chromeApi, getPreferences } = createRuntimeMock();
+        const logger = createContentDeveloperLogger({
+            chrome: chromeApi,
+            getProjectId: () => 'project-dev'
+        });
+
+        await logger.loadDeveloperPreferences();
+        expect(logger.getCommandShortcuts()).toEqual({});
+
+        await logger.setCommandShortcut('quick-view-recent', 'Meta+Shift+R');
+        expect(logger.getCommandShortcut('quick-view-recent')).toBe('Meta+Shift+R');
+        expect(getPreferences().commandShortcuts).toEqual({
+            'quick-view-recent': 'Meta+Shift+R'
+        });
+
+        await logger.setCommandShortcut('quick-view-recent', '');
+        expect(logger.getCommandShortcut('quick-view-recent')).toBe('');
+        expect(logger.getCommandShortcuts()).toEqual({});
+    });
+
+    it('loads and saves visible quick view button preferences', async () => {
+        const { chromeApi, getPreferences } = createRuntimeMock();
+        const logger = createContentDeveloperLogger({
+            chrome: chromeApi,
+            getProjectId: () => 'project-dev'
+        });
+
+        await logger.loadDeveloperPreferences();
+        expect(logger.getVisibleQuickViewKinds()).toEqual([
+            'all',
+            'ungrouped',
+            'disabled',
+            'tag',
+            'recent',
+            'issues'
+        ]);
+
+        await logger.setVisibleQuickViewKinds(['issues', 'bad-kind', 'all', 'issues']);
+
+        expect(logger.getVisibleQuickViewKinds()).toEqual(['all', 'issues']);
+        expect(getPreferences().visibleQuickViewKinds).toEqual(['all', 'issues']);
+
+        await logger.setVisibleQuickViewKinds([]);
+        expect(logger.getVisibleQuickViewKinds()).toEqual([]);
+    });
+
+    it('keeps the previous preference value when saving preferences fails', async () => {
+        const { chromeApi } = createRuntimeMock({
+            savePreferencesResponse: { success: false, errorCode: 'runtime_failure' }
+        });
+        const logger = createContentDeveloperLogger({
+            chrome: chromeApi,
+            getProjectId: () => 'project-dev'
+        });
+
+        await expect(logger.setLanguageOverride('zh_CN')).rejects.toThrow(/runtime_failure/);
+
+        expect(logger.getLanguageOverride()).toBe('auto');
     });
 });

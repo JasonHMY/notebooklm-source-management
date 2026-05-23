@@ -49,6 +49,29 @@ describe('manager launcher messaging', () => {
         await Promise.resolve();
     }
 
+    function createOnboardingShadowRoot() {
+        const appendedNodes = [];
+        const shadowRoot = {
+            host: { isConnected: true, remove: jest.fn() },
+            activeElement: null,
+            appendChild: jest.fn((node) => {
+                appendedNodes.push(node);
+                node.parentNode = {
+                    removeChild: jest.fn((child) => {
+                        const index = appendedNodes.indexOf(child);
+                        if (index >= 0) appendedNodes.splice(index, 1);
+                        return child;
+                    })
+                };
+                return node;
+            }),
+            getElementById: jest.fn((id) => appendedNodes.find((node) => node?.id === id) || null),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        return { appendedNodes, shadowRoot };
+    }
+
     it('reports source_panel_missing when the notebook UI is unavailable', () => {
         mod._setProjectId('testproject');
         global.document.querySelector = jest.fn(() => null);
@@ -130,25 +153,7 @@ describe('manager launcher messaging', () => {
 
     it('renders the first-run welcome onboarding when the stored version is unseen', async () => {
         const originalRequestAnimationFrame = global.requestAnimationFrame;
-        const appendedNodes = [];
-        const shadowRoot = {
-            host: { isConnected: true, remove: jest.fn() },
-            activeElement: null,
-            appendChild: jest.fn((node) => {
-                appendedNodes.push(node);
-                node.parentNode = {
-                    removeChild: jest.fn((child) => {
-                        const index = appendedNodes.indexOf(child);
-                        if (index >= 0) appendedNodes.splice(index, 1);
-                        return child;
-                    })
-                };
-                return node;
-            }),
-            getElementById: jest.fn((id) => appendedNodes.find((node) => node?.id === id) || null),
-            querySelector: jest.fn(() => null),
-            querySelectorAll: jest.fn(() => [])
-        };
+        const { shadowRoot } = createOnboardingShadowRoot();
 
         global.requestAnimationFrame = jest.fn((callback) => {
             callback?.();
@@ -161,6 +166,10 @@ describe('manager launcher messaging', () => {
                     preferences: {
                         developerModeEnabled: false,
                         welcomeOnboardingSeenVersion: 0
+                    },
+                    usageState: {
+                        hasExistingPluginData: false,
+                        hasStoredPreferences: false
                     }
                 });
             }
@@ -181,6 +190,149 @@ describe('manager launcher messaging', () => {
             const appendCount = shadowRoot.appendChild.mock.calls.length;
             await expect(mod.maybeRenderWelcomeOnboarding()).resolves.toBe(false);
             expect(shadowRoot.appendChild).toHaveBeenCalledTimes(appendCount);
+        } finally {
+            if (originalRequestAnimationFrame) {
+                global.requestAnimationFrame = originalRequestAnimationFrame;
+            } else {
+                delete global.requestAnimationFrame;
+            }
+        }
+    });
+
+    it('shows only the welcome modal for a brand-new user and marks the current whats new version as seen', async () => {
+        const originalRequestAnimationFrame = global.requestAnimationFrame;
+        const { shadowRoot } = createOnboardingShadowRoot();
+        const savedPreferences = [];
+        global.requestAnimationFrame = jest.fn((callback) => {
+            callback?.();
+            return 1;
+        });
+        global.chrome.runtime.getManifest = jest.fn(() => ({ version: '2.7.4' }));
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'LOAD_PREFERENCES' && typeof cb === 'function') {
+                cb({
+                    success: true,
+                    preferences: {
+                        developerModeEnabled: false,
+                        welcomeOnboardingSeenVersion: 0,
+                        whatsNewSeenVersion: ''
+                    },
+                    usageState: {
+                        hasExistingPluginData: false,
+                        hasStoredPreferences: false
+                    }
+                });
+                return;
+            }
+            if (message?.type === 'SAVE_PREFERENCES' && typeof cb === 'function') {
+                savedPreferences.push(message.preferences);
+                cb({
+                    success: true,
+                    preferences: Object.assign({
+                        developerModeEnabled: false,
+                        welcomeOnboardingSeenVersion: 0,
+                        whatsNewSeenVersion: ''
+                    }, message.preferences)
+                });
+            }
+        });
+
+        try {
+            mod._setShadowRootForTest(shadowRoot);
+
+            await expect(mod.maybeRenderOnboardingModals()).resolves.toBe(true);
+
+            expect(shadowRoot.getElementById('sp-welcome-modal')).toBeTruthy();
+            expect(shadowRoot.getElementById('sp-whats-new-modal')).toBeFalsy();
+
+            await mod.markWelcomeOnboardingSeen();
+
+            expect(savedPreferences).toContainEqual({
+                welcomeOnboardingSeenVersion: 1,
+                whatsNewSeenVersion: '2.7.4'
+            });
+        } finally {
+            if (originalRequestAnimationFrame) {
+                global.requestAnimationFrame = originalRequestAnimationFrame;
+            } else {
+                delete global.requestAnimationFrame;
+            }
+        }
+    });
+
+    it('skips welcome and shows whats new for an existing user with legacy unseen versions', async () => {
+        const originalRequestAnimationFrame = global.requestAnimationFrame;
+        const { shadowRoot } = createOnboardingShadowRoot();
+        global.requestAnimationFrame = jest.fn((callback) => {
+            callback?.();
+            return 1;
+        });
+        global.chrome.runtime.getManifest = jest.fn(() => ({ version: '2.7.4' }));
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'LOAD_PREFERENCES' && typeof cb === 'function') {
+                cb({
+                    success: true,
+                    preferences: {
+                        developerModeEnabled: false,
+                        welcomeOnboardingSeenVersion: 0,
+                        whatsNewSeenVersion: 1
+                    },
+                    usageState: {
+                        hasExistingPluginData: true,
+                        hasStoredPreferences: false
+                    }
+                });
+            }
+        });
+
+        try {
+            mod._setShadowRootForTest(shadowRoot);
+
+            await expect(mod.maybeRenderOnboardingModals()).resolves.toBe(true);
+
+            expect(shadowRoot.getElementById('sp-welcome-modal')).toBeFalsy();
+            expect(shadowRoot.getElementById('sp-whats-new-modal')).toBeTruthy();
+        } finally {
+            if (originalRequestAnimationFrame) {
+                global.requestAnimationFrame = originalRequestAnimationFrame;
+            } else {
+                delete global.requestAnimationFrame;
+            }
+        }
+    });
+
+    it('does not show whats new after the current manifest version has already been seen', async () => {
+        const originalRequestAnimationFrame = global.requestAnimationFrame;
+        const { shadowRoot } = createOnboardingShadowRoot();
+        global.requestAnimationFrame = jest.fn((callback) => {
+            callback?.();
+            return 1;
+        });
+        global.chrome.runtime.getManifest = jest.fn(() => ({ version: '2.7.4' }));
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'LOAD_PREFERENCES' && typeof cb === 'function') {
+                cb({
+                    success: true,
+                    preferences: {
+                        developerModeEnabled: false,
+                        welcomeOnboardingSeenVersion: 1,
+                        whatsNewSeenVersion: '2.7.4'
+                    },
+                    usageState: {
+                        hasExistingPluginData: true,
+                        hasStoredPreferences: true
+                    }
+                });
+            }
+        });
+
+        try {
+            mod._setShadowRootForTest(shadowRoot);
+
+            await expect(mod.maybeRenderOnboardingModals()).resolves.toBe(false);
+
+            expect(shadowRoot.getElementById('sp-welcome-modal')).toBeFalsy();
+            expect(shadowRoot.getElementById('sp-whats-new-modal')).toBeFalsy();
         } finally {
             if (originalRequestAnimationFrame) {
                 global.requestAnimationFrame = originalRequestAnimationFrame;

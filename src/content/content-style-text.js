@@ -466,19 +466,32 @@
                 align-items: center;
                 gap: 6px;
                 min-width: 0;
+                min-height: 44px;
                 overflow-x: auto;
-                padding: 6px 0 4px;
+                padding: 8px 8px 6px;
+                scroll-padding-inline: 8px;
                 scrollbar-width: none;
+            }
+            .sp-quick-view-rail[hidden] {
+                display: none;
             }
             .sp-quick-view-rail::-webkit-scrollbar {
                 display: none;
             }
             .sp-quick-view-btn {
+                appearance: none;
+                -webkit-appearance: none;
+                box-sizing: border-box;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
                 flex: 0 0 auto;
-                min-height: 28px;
+                height: 30px;
+                min-height: 30px;
+                margin: 0;
                 border: 1px solid var(--sp-border-light);
                 border-radius: 999px;
-                padding: 5px 10px;
+                padding: 0 12px;
                 background: var(--sp-bg-button);
                 color: var(--sp-text-secondary);
                 font-size: 11px;
@@ -553,12 +566,15 @@
             }
             
             #sources-list {
+                --sp-source-list-bottom-safe-area: 28px;
                 overflow-y: auto;
                 overflow-x: hidden;
                 flex-grow: 1;
                 min-height: 0;
                 padding-right: 8px;
                 padding-top: 4px;
+                padding-bottom: var(--sp-source-list-bottom-safe-area);
+                scroll-padding-bottom: var(--sp-source-list-bottom-safe-area);
                 background: var(--sp-panel-bg);
                 position: relative;
                 isolation: isolate;
@@ -734,20 +750,6 @@
             .sp-button:active {
                 background-color: var(--sp-bg-button-active);
                 transform: scale(0.98);
-            }
-            .sp-button::after {
-                content: '';
-                position: absolute;
-                top: 0;
-                left: -100%;
-                width: 50%;
-                height: 100%;
-                background: linear-gradient(90deg, transparent, rgba(128,128,128,0.15), transparent);
-                transform: skewX(-20deg);
-                transition: left var(--sp-motion-slow) var(--sp-ease-emphasized);
-            }
-            .sp-button:hover::after {
-                left: 150%;
             }
             
             /* --- Ultra Premium Custom Animated Checkboxes --- */
@@ -1238,36 +1240,7 @@
             }
             .sp-glare-hover {
                 position: relative;
-                overflow: hidden;
                 isolation: isolate;
-            }
-            .sp-glare-hover::after {
-                content: '';
-                position: absolute;
-                inset: -1px;
-                border-radius: inherit;
-                pointer-events: none;
-                z-index: 0;
-                opacity: 0;
-                background:
-                    linear-gradient(
-                        115deg,
-                        transparent 0%,
-                        transparent 42%,
-                        var(--sp-glare-color) 50%,
-                        transparent 58%,
-                        transparent 100%
-                    );
-                background-size: 220% 220%;
-                background-position: -140% -140%;
-                transition:
-                    opacity var(--sp-motion-base) var(--sp-ease-standard),
-                    background-position var(--sp-motion-slow) var(--sp-ease-emphasized);
-            }
-            .sp-glare-hover:hover::after,
-            .sp-glare-hover:focus-visible::after {
-                opacity: 1;
-                background-position: 140% 140%;
             }
             .sp-glare-hover > * {
                 position: relative;
@@ -2083,7 +2056,7 @@
             }
             .sp-command-palette-item {
                 display: grid;
-                grid-template-columns: 24px minmax(0, 1fr);
+                grid-template-columns: 24px minmax(0, 1fr) auto;
                 align-items: center;
                 gap: 10px;
             }
@@ -2095,7 +2068,7 @@
                 border-color: var(--sp-search-focus-border);
                 background: var(--sp-tag-active-bg);
             }
-            .sp-command-palette-item:disabled {
+            .sp-command-palette-item.is-disabled {
                 cursor: not-allowed;
                 opacity: 0.55;
             }
@@ -2126,6 +2099,36 @@
             }
             .sp-command-palette-icon {
                 color: var(--sp-accent);
+            }
+            .sp-command-shortcut-btn {
+                border: 1px solid var(--sp-border-light);
+                border-radius: 8px;
+                padding: 4px 8px;
+                min-width: 74px;
+                max-width: 132px;
+                background: var(--sp-bg-secondary);
+                color: var(--sp-text-secondary);
+                font: inherit;
+                font-size: 11px;
+                font-weight: 650;
+                line-height: 1.2;
+                text-align: center;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                cursor: pointer;
+                transition:
+                    background-color var(--sp-motion-base) var(--sp-ease-standard),
+                    border-color var(--sp-motion-base) var(--sp-ease-standard),
+                    color var(--sp-motion-base) var(--sp-ease-standard);
+            }
+            .sp-command-shortcut-btn:hover,
+            .sp-command-shortcut-btn:focus-visible,
+            .sp-command-shortcut-btn.is-recording {
+                border-color: var(--sp-search-focus-border);
+                color: var(--sp-accent);
+                background: var(--sp-tag-active-bg);
+                outline: none;
             }
             .sp-settings-import-warning {
                 border: 1px solid var(--sp-border-light);
@@ -2220,6 +2223,30 @@
             .sp-settings-select:focus {
                 border-color: var(--sp-search-focus-border);
                 box-shadow: var(--sp-search-focus-ring);
+            }
+            .sp-quick-view-visibility-list {
+                display: grid;
+                gap: 8px;
+            }
+            .sp-quick-view-visibility-row {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                min-height: 36px;
+                padding: 8px 10px;
+                border: 1px solid var(--sp-border-light);
+                border-radius: 10px;
+                background: var(--sp-bg-secondary);
+                color: var(--sp-text-primary);
+                font-size: 13px;
+                font-weight: 600;
+                line-height: 1.3;
+            }
+            .sp-quick-view-visibility-checkbox {
+                width: 16px;
+                height: 16px;
+                margin: 0;
+                accent-color: var(--sp-accent);
             }
             .sp-settings-developer-unlock-row {
                 display: flex;
@@ -2969,11 +2996,6 @@
                 .sp-checkbox.is-animating:checked,
                 .sp-checkbox.is-animating:checked::before {
                     animation: none !important;
-                }
-
-                .sp-glare-hover::after {
-                    background-position: 50% 50% !important;
-                    transition-property: opacity !important;
                 }
 
                 .source-item.sp-spotlight-surface::before,

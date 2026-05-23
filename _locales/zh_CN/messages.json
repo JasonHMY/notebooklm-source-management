@@ -176,6 +176,24 @@
     "ui_command_palette": {
         "message": "命令面板"
     },
+    "ui_command_palette_settings_body": {
+        "message": "打开命令列表并管理自定义快捷键。"
+    },
+    "ui_settings_open_command_palette": {
+        "message": "打开命令面板"
+    },
+    "ui_settings_quick_view_buttons_title": {
+        "message": "快速视图按钮"
+    },
+    "ui_settings_quick_view_buttons_body": {
+        "message": "选择来源面板中显示哪些快速视图按钮。隐藏按钮后，自定义快捷键仍然可以使用这些功能。"
+    },
+    "ui_settings_manage_quick_view_buttons": {
+        "message": "管理按钮"
+    },
+    "ui_settings_quick_view_buttons_save_failed": {
+        "message": "快速视图按钮保存失败"
+    },
     "ui_command_palette_placeholder": {
         "message": "输入命令或搜索内容"
     },
@@ -229,6 +247,30 @@
     },
     "ui_command_open_settings": {
         "message": "打开设置"
+    },
+    "ui_command_shortcut_set": {
+        "message": "设置快捷键"
+    },
+    "ui_command_shortcut_set_for": {
+        "message": "为 $1 设置快捷键",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_command_shortcut_change": {
+        "message": "修改 $1 的快捷键",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_command_shortcut_recording": {
+        "message": "按下快捷键"
+    },
+    "ui_command_shortcut_clear_hint": {
+        "message": "按下新的快捷键。Backspace 或 Delete 可清除。"
+    },
+    "ui_command_shortcut_save_failed": {
+        "message": "快捷键保存失败"
     },
     "ui_search_results_count": {
         "message": "$1 个结果",
@@ -908,6 +950,9 @@
     },
     "ui_save": {
         "message": "保存"
+    },
+    "ui_done": {
+        "message": "完成"
     },
     "ui_save_failed": {
         "message": "保存失败。刷新前请重试。"

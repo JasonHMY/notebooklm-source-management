@@ -129,6 +129,15 @@ NotebookLM Source Management
 ├── scripts/
 │   └── package.js
 │       └── Chrome Web Store zip 打包 allowlist
+├── marketing/
+│   ├── README.md
+│   ├── account-matrix.md
+│   ├── content-calendar.md
+│   ├── platform-playbooks.md
+│   ├── x-publisher/
+│   │   └── X OAuth 2.0 PKCE 本地授权、账号验证和人工确认发帖脚本；`.env` 与 `tokens.json` 只保存在本机
+│   └── assets/
+│       └── 宣传账号、内容排期、平台打法和素材记录；不是 runtime，也不进入发布包
 ├── .github/workflows/ci.yml
 │   └── CI: install -> unit -> smoke -> package -> artifact
 ├── README.md
@@ -311,7 +320,7 @@ manifest.json
 │   ├── 负责
 │   │   ├── title/tag/folder 搜索
 │   │   ├── `tag:` / `folder:` filters
-│   │   ├── quick view rail: All / Ungrouped / Disabled / Tag / Recent / Issues
+│   │   ├── quick view rail: All / Ungrouped / Disabled / Tag / Recent / Issues；显示按钮由全局 `visibleQuickViewKinds` 偏好控制
 │   │   ├── activeQuickViewKind session-only runtime state
 │   │   ├── 搜索时自动展开匹配分组
 │   │   ├── active isolation group
@@ -344,7 +353,7 @@ manifest.json
 │   │   ├── import diff preview；说明替换语义、来源启用变化、文件夹/tag 差异和设置变化
 │   │   ├── import size/count/depth/cycle 校验
 │   │   ├── source remap preview
-│   │   ├── toolbar command palette modal；无全局快捷键，复用现有搜索、视图、设置、标签和批量操作入口
+│   │   ├── 设置页命令面板入口和 command palette modal；复用现有搜索、视图、设置、标签和批量操作入口，并允许用户为每个命令自定义快捷键；重复触发可收起搜索、退出快速视图或关闭对应 modal
 │   │   ├── 仅在检测到来源匹配问题时独立突出显示 Source Repair，否则收进帮助/排查区域
 │   │   ├── 原生 NotebookLM 标签导入 preview
 │   │   └── 密码入口控制的开发者功能 UI；已开启 Developer Mode 时免密码显示
@@ -468,8 +477,9 @@ chrome.storage.local
 │   ├── 写入: background SAVE_STATE / APPEND_STATE_HISTORY
 │   └── 排障: src/background/index.js, src/content/content-persistence.js
 ├── sourcesPlusPreferences
-│   ├── 用途: 全局偏好，包含 developerModeEnabled、welcomeOnboardingSeenVersion、whatsNewSeenVersion、historyRetentionLimit、languageOverride
-│   ├── 写入: settings / welcome onboarding / what’s new -> background SAVE_PREFERENCES
+│   ├── 用途: 全局偏好，包含 developerModeEnabled、welcomeOnboardingSeenVersion、whatsNewSeenVersion、historyRetentionLimit、languageOverride、commandShortcuts、visibleQuickViewKinds
+│   ├── 写入: settings / welcome onboarding / manifest-version what’s new / command palette shortcuts / quick view button visibility -> background SAVE_PREFERENCES
+│   ├── 读取: LOAD_PREFERENCES 同时返回从 preferences/state/history/log keys 派生的 usageState，用于区分新用户和升级用户
 │   └── 排障: src/content/content-developer-logger.js, src/background/index.js
 └── sourcesPlusDeveloperLogs_<projectId>
     ├── 用途: 每个 notebook 的脱敏开发者日志
@@ -824,6 +834,8 @@ CI: .github/workflows/ci.yml
 │   └── popup/content/background 消息、sender 校验、key 前缀和错误码
 ├── docs/RELEASE_CHECKLIST.md
 │   └── 发布检查清单
+├── marketing/
+│   └── 宣传资料工作区；记录社媒账号矩阵、内容日历、平台打法、素材清单和 X 本地发布工具，不属于扩展 runtime
 ├── CHANGELOG.md
 │   └── 更新日志和写作规范；agent 写入前必须先读顶部规则
 ├── .agents/rules/code-style-guide.md

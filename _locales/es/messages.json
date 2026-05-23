@@ -176,6 +176,24 @@
     "ui_command_palette": {
         "message": "Paleta de comandos"
     },
+    "ui_command_palette_settings_body": {
+        "message": "Abre comandos y administra atajos personalizados."
+    },
+    "ui_settings_open_command_palette": {
+        "message": "Abrir paleta de comandos"
+    },
+    "ui_settings_quick_view_buttons_title": {
+        "message": "Botones de vista rápida"
+    },
+    "ui_settings_quick_view_buttons_body": {
+        "message": "Elige qué botones de vista rápida aparecen en el panel de fuentes. Los botones ocultos siguen funcionando con atajos personalizados."
+    },
+    "ui_settings_manage_quick_view_buttons": {
+        "message": "Administrar botones"
+    },
+    "ui_settings_quick_view_buttons_save_failed": {
+        "message": "No se pudieron guardar los botones de vista rápida"
+    },
     "ui_command_palette_placeholder": {
         "message": "Escribe un comando o búsqueda"
     },
@@ -229,6 +247,30 @@
     },
     "ui_command_open_settings": {
         "message": "Abrir configuración"
+    },
+    "ui_command_shortcut_set": {
+        "message": "Asignar atajo"
+    },
+    "ui_command_shortcut_set_for": {
+        "message": "Asignar atajo para $1",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_command_shortcut_change": {
+        "message": "Cambiar atajo para $1",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_command_shortcut_recording": {
+        "message": "Pulsa teclas"
+    },
+    "ui_command_shortcut_clear_hint": {
+        "message": "Pulsa un atajo. Retroceso o Supr lo borra."
+    },
+    "ui_command_shortcut_save_failed": {
+        "message": "No se pudo guardar el atajo"
     },
     "ui_search_results_count": {
         "message": "$1 resultado(s)",
@@ -908,6 +950,9 @@
     },
     "ui_save": {
         "message": "Guardar"
+    },
+    "ui_done": {
+        "message": "Listo"
     },
     "ui_save_failed": {
         "message": "No se pudo guardar. Reintenta antes de actualizar."

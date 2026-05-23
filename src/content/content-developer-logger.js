@@ -25,12 +25,19 @@
         ]);
         const SENSITIVE_KEY_PATTERN = /(title|label|name|text|content|body|html|json|url|href|dom|clipboard)/i;
         const HASH_SOURCE_KEYS = new Set(['stableToken', 'fingerprint']);
+        const QUICK_VIEW_BUTTON_KINDS = ['all', 'ungrouped', 'disabled', 'tag', 'recent', 'issues'];
 
         let developerModeEnabled = false;
         let welcomeOnboardingSeenVersion = 0;
-        let whatsNewSeenVersion = 0;
+        let whatsNewSeenVersion = '';
+        let preferenceUsageState = {
+            hasExistingPluginData: false,
+            hasStoredPreferences: false
+        };
         let historyRetentionLimit = 20;
         let languageOverride = 'auto';
+        let commandShortcuts = {};
+        let visibleQuickViewKinds = [...QUICK_VIEW_BUTTON_KINDS];
         let developerLogs = [];
         let nextLogSequence = 1;
 
@@ -169,6 +176,7 @@
             const response = await sendRuntimeMessage({ type: 'LOAD_PREFERENCES' });
             if (response?.success) {
                 applyLoadedPreferences(response.preferences);
+                applyLoadedPreferenceUsageState(response.usageState);
                 if (developerModeEnabled) {
                     await loadDeveloperLogs();
                 }
@@ -179,9 +187,18 @@
         function applyLoadedPreferences(preferences = {}) {
             developerModeEnabled = Boolean(preferences?.developerModeEnabled);
             welcomeOnboardingSeenVersion = normalizePreferenceVersion(preferences?.welcomeOnboardingSeenVersion);
-            whatsNewSeenVersion = normalizePreferenceVersion(preferences?.whatsNewSeenVersion);
+            whatsNewSeenVersion = normalizeWhatsNewSeenVersion(preferences?.whatsNewSeenVersion);
             historyRetentionLimit = normalizeHistoryRetentionLimit(preferences?.historyRetentionLimit);
             languageOverride = normalizeLanguageOverride(preferences?.languageOverride);
+            commandShortcuts = normalizeCommandShortcuts(preferences?.commandShortcuts);
+            visibleQuickViewKinds = normalizeVisibleQuickViewKinds(preferences?.visibleQuickViewKinds);
+        }
+
+        function applyLoadedPreferenceUsageState(usageState = {}) {
+            preferenceUsageState = {
+                hasExistingPluginData: Boolean(usageState?.hasExistingPluginData),
+                hasStoredPreferences: Boolean(usageState?.hasStoredPreferences)
+            };
         }
 
         async function savePreferences(nextPreferences = {}) {
@@ -189,15 +206,33 @@
                 type: 'SAVE_PREFERENCES',
                 preferences: nextPreferences
             });
+            if (!response || response.success === false) {
+                throw new Error(response?.errorCode || 'runtime_failure');
+            }
             if (response?.success && response.preferences) {
                 applyLoadedPreferences(response.preferences);
+            }
+            if (response?.success && response.usageState) {
+                applyLoadedPreferenceUsageState(response.usageState);
+            } else if (response?.success) {
+                preferenceUsageState = {
+                    hasExistingPluginData: true,
+                    hasStoredPreferences: true
+                };
             }
             return response;
         }
 
         async function setDeveloperModeEnabled(enabled) {
-            developerModeEnabled = Boolean(enabled);
-            await savePreferences({ developerModeEnabled });
+            const previousValue = developerModeEnabled;
+            const nextValue = Boolean(enabled);
+            developerModeEnabled = nextValue;
+            try {
+                await savePreferences({ developerModeEnabled: nextValue });
+            } catch (error) {
+                developerModeEnabled = previousValue;
+                throw error;
+            }
             if (developerModeEnabled) {
                 await loadDeveloperLogs();
             }
@@ -205,27 +240,127 @@
         }
 
         async function setWelcomeOnboardingSeenVersion(version) {
-            welcomeOnboardingSeenVersion = normalizePreferenceVersion(version);
-            await savePreferences({ welcomeOnboardingSeenVersion });
+            const previousValue = welcomeOnboardingSeenVersion;
+            const nextValue = normalizePreferenceVersion(version);
+            welcomeOnboardingSeenVersion = nextValue;
+            try {
+                await savePreferences({ welcomeOnboardingSeenVersion: nextValue });
+            } catch (error) {
+                welcomeOnboardingSeenVersion = previousValue;
+                throw error;
+            }
             return welcomeOnboardingSeenVersion;
         }
 
         async function setWhatsNewSeenVersion(version) {
-            whatsNewSeenVersion = normalizePreferenceVersion(version);
-            await savePreferences({ whatsNewSeenVersion });
+            const previousValue = whatsNewSeenVersion;
+            const nextValue = normalizeWhatsNewSeenVersion(version);
+            whatsNewSeenVersion = nextValue;
+            try {
+                await savePreferences({ whatsNewSeenVersion: nextValue });
+            } catch (error) {
+                whatsNewSeenVersion = previousValue;
+                throw error;
+            }
             return whatsNewSeenVersion;
         }
 
+        async function setOnboardingModalSeenVersions(nextVersions = {}) {
+            const previousWelcomeValue = welcomeOnboardingSeenVersion;
+            const previousWhatsNewValue = whatsNewSeenVersion;
+            const nextPreferences = {};
+
+            if (Object.prototype.hasOwnProperty.call(nextVersions || {}, 'welcomeOnboardingSeenVersion')) {
+                nextPreferences.welcomeOnboardingSeenVersion = normalizePreferenceVersion(nextVersions.welcomeOnboardingSeenVersion);
+            }
+            if (Object.prototype.hasOwnProperty.call(nextVersions || {}, 'whatsNewSeenVersion')) {
+                nextPreferences.whatsNewSeenVersion = normalizeWhatsNewSeenVersion(nextVersions.whatsNewSeenVersion);
+            }
+
+            if (Object.prototype.hasOwnProperty.call(nextPreferences, 'welcomeOnboardingSeenVersion')) {
+                welcomeOnboardingSeenVersion = nextPreferences.welcomeOnboardingSeenVersion;
+            }
+            if (Object.prototype.hasOwnProperty.call(nextPreferences, 'whatsNewSeenVersion')) {
+                whatsNewSeenVersion = nextPreferences.whatsNewSeenVersion;
+            }
+
+            try {
+                await savePreferences(nextPreferences);
+            } catch (error) {
+                welcomeOnboardingSeenVersion = previousWelcomeValue;
+                whatsNewSeenVersion = previousWhatsNewValue;
+                throw error;
+            }
+
+            return {
+                welcomeOnboardingSeenVersion,
+                whatsNewSeenVersion
+            };
+        }
+
         async function setHistoryRetentionLimit(limit) {
-            historyRetentionLimit = normalizeHistoryRetentionLimit(limit);
-            await savePreferences({ historyRetentionLimit });
+            const previousValue = historyRetentionLimit;
+            const nextValue = normalizeHistoryRetentionLimit(limit);
+            historyRetentionLimit = nextValue;
+            try {
+                await savePreferences({ historyRetentionLimit: nextValue });
+            } catch (error) {
+                historyRetentionLimit = previousValue;
+                throw error;
+            }
             return historyRetentionLimit;
         }
 
         async function setLanguageOverride(locale) {
-            languageOverride = normalizeLanguageOverride(locale);
-            await savePreferences({ languageOverride });
+            const previousValue = languageOverride;
+            const nextValue = normalizeLanguageOverride(locale);
+            languageOverride = nextValue;
+            try {
+                await savePreferences({ languageOverride: nextValue });
+            } catch (error) {
+                languageOverride = previousValue;
+                throw error;
+            }
             return languageOverride;
+        }
+
+        async function setCommandShortcut(commandId, shortcut) {
+            const id = normalizeCommandShortcutId(commandId);
+            if (!id) return '';
+            const previousShortcuts = cloneCommandShortcuts(commandShortcuts);
+            const nextShortcuts = cloneCommandShortcuts(commandShortcuts);
+            const normalizedShortcut = normalizeCommandShortcutCombo(shortcut);
+            if (!normalizedShortcut) {
+                delete nextShortcuts[id];
+            } else {
+                Object.keys(nextShortcuts).forEach((existingId) => {
+                    if (nextShortcuts[existingId] === normalizedShortcut && existingId !== id) {
+                        delete nextShortcuts[existingId];
+                    }
+                });
+                nextShortcuts[id] = normalizedShortcut;
+            }
+            commandShortcuts = nextShortcuts;
+            try {
+                await savePreferences({ commandShortcuts: { [id]: normalizedShortcut } });
+            } catch (error) {
+                commandShortcuts = previousShortcuts;
+                throw error;
+            }
+            return getCommandShortcut(id);
+        }
+
+        async function setVisibleQuickViewKinds(kinds) {
+            const previousKinds = getVisibleQuickViewKinds();
+            const nextKinds = normalizeVisibleQuickViewKinds(kinds);
+            visibleQuickViewKinds = nextKinds;
+            try {
+                await savePreferences({ visibleQuickViewKinds: nextKinds });
+            } catch (error) {
+                visibleQuickViewKinds = previousKinds;
+                throw error;
+            }
+            return getVisibleQuickViewKinds();
         }
 
         async function loadDeveloperLogs() {
@@ -253,10 +388,24 @@
             return whatsNewSeenVersion;
         }
 
+        function getPreferenceUsageState() {
+            return Object.assign({}, preferenceUsageState);
+        }
+
         function normalizePreferenceVersion(value) {
             const version = Number(value);
             if (!Number.isFinite(version) || version < 0) return 0;
             return Math.floor(version);
+        }
+
+        function normalizeWhatsNewSeenVersion(value) {
+            if (value == null) return '';
+            const text = String(value).trim();
+            if (!text) return '';
+            if (!/^\d+(?:\.\d+){0,3}$/.test(text)) return '';
+            return text.split('.')
+                .map((part) => String(Number(part)))
+                .join('.');
         }
 
         function normalizeHistoryRetentionLimit(value) {
@@ -271,12 +420,115 @@
                 : 'auto';
         }
 
+        function normalizeCommandShortcutId(value) {
+            const id = String(value || '').trim();
+            return /^[a-z0-9][a-z0-9-]{0,79}$/.test(id) ? id : '';
+        }
+
+        function normalizeCommandShortcutKey(value) {
+            const key = String(value || '').trim();
+            if (!key) return '';
+            if (key === ' ') return 'Space';
+            const aliases = {
+                esc: 'Escape',
+                escape: 'Escape',
+                spacebar: 'Space',
+                space: 'Space',
+                return: 'Enter',
+                enter: 'Enter',
+                del: 'Delete',
+                delete: 'Delete',
+                backspace: 'Backspace',
+                tab: 'Tab'
+            };
+            const lower = key.toLowerCase();
+            if (aliases[lower]) return aliases[lower];
+            if (/^f\d{1,2}$/i.test(key)) return key.toUpperCase();
+            if (key.length === 1) return key.toUpperCase();
+            return key.replace(/^\w/, (char) => char.toUpperCase()).slice(0, 32);
+        }
+
+        function normalizeCommandShortcutCombo(value) {
+            const parts = String(value || '')
+                .split('+')
+                .map((part) => part.trim())
+                .filter(Boolean);
+            if (parts.length < 2) return '';
+
+            const modifierAliases = new Map([
+                ['cmd', 'Meta'],
+                ['command', 'Meta'],
+                ['meta', 'Meta'],
+                ['ctrl', 'Ctrl'],
+                ['control', 'Ctrl'],
+                ['alt', 'Alt'],
+                ['option', 'Alt'],
+                ['shift', 'Shift']
+            ]);
+            const modifiers = new Set();
+            let shortcutKey = '';
+
+            parts.forEach((part, index) => {
+                const alias = modifierAliases.get(part.toLowerCase());
+                if (alias && index < parts.length - 1) {
+                    modifiers.add(alias);
+                    return;
+                }
+                shortcutKey = normalizeCommandShortcutKey(part);
+            });
+
+            if (!shortcutKey || modifiers.size === 0) return '';
+            return ['Meta', 'Ctrl', 'Alt', 'Shift']
+                .filter((modifier) => modifiers.has(modifier))
+                .concat(shortcutKey)
+                .join('+');
+        }
+
+        function normalizeCommandShortcuts(value) {
+            if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+            return Object.entries(value).reduce((result, [rawId, rawCombo]) => {
+                const id = normalizeCommandShortcutId(rawId);
+                const combo = normalizeCommandShortcutCombo(rawCombo);
+                if (!id || !combo) return result;
+                Object.keys(result).forEach((existingId) => {
+                    if (result[existingId] === combo && existingId !== id) {
+                        delete result[existingId];
+                    }
+                });
+                result[id] = combo;
+                return result;
+            }, {});
+        }
+
+        function normalizeVisibleQuickViewKinds(value) {
+            if (!Array.isArray(value)) return [...QUICK_VIEW_BUTTON_KINDS];
+            const requestedKinds = new Set(value.map((kind) => String(kind || '').trim().toLowerCase()));
+            return QUICK_VIEW_BUTTON_KINDS.filter((kind) => requestedKinds.has(kind));
+        }
+
+        function cloneCommandShortcuts(shortcuts = commandShortcuts) {
+            return Object.assign({}, normalizeCommandShortcuts(shortcuts));
+        }
+
         function getHistoryRetentionLimit() {
             return historyRetentionLimit;
         }
 
         function getLanguageOverride() {
             return languageOverride;
+        }
+
+        function getCommandShortcuts() {
+            return cloneCommandShortcuts(commandShortcuts);
+        }
+
+        function getCommandShortcut(commandId) {
+            const id = normalizeCommandShortcutId(commandId);
+            return id ? commandShortcuts[id] || '' : '';
+        }
+
+        function getVisibleQuickViewKinds() {
+            return [...visibleQuickViewKinds];
         }
 
         function getDeveloperLogs() {
@@ -341,10 +593,17 @@
             setWelcomeOnboardingSeenVersion,
             getWhatsNewSeenVersion,
             setWhatsNewSeenVersion,
+            setOnboardingModalSeenVersions,
+            getPreferenceUsageState,
             getHistoryRetentionLimit,
             setHistoryRetentionLimit,
             getLanguageOverride,
             setLanguageOverride,
+            getCommandShortcuts,
+            getCommandShortcut,
+            setCommandShortcut,
+            getVisibleQuickViewKinds,
+            setVisibleQuickViewKinds,
             loadDeveloperPreferences,
             loadDeveloperLogs,
             getDeveloperLogs,

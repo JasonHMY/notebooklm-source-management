@@ -176,6 +176,24 @@
     "ui_command_palette": {
         "message": "Command palette"
     },
+    "ui_command_palette_settings_body": {
+        "message": "Open commands and manage custom shortcuts."
+    },
+    "ui_settings_open_command_palette": {
+        "message": "Open command palette"
+    },
+    "ui_settings_quick_view_buttons_title": {
+        "message": "Quick view buttons"
+    },
+    "ui_settings_quick_view_buttons_body": {
+        "message": "Choose which quick view buttons appear in the source panel. Hidden buttons still work from custom shortcuts."
+    },
+    "ui_settings_manage_quick_view_buttons": {
+        "message": "Manage buttons"
+    },
+    "ui_settings_quick_view_buttons_save_failed": {
+        "message": "Could not save quick view buttons"
+    },
     "ui_command_palette_placeholder": {
         "message": "Type a command or search"
     },
@@ -229,6 +247,30 @@
     },
     "ui_command_open_settings": {
         "message": "Open settings"
+    },
+    "ui_command_shortcut_set": {
+        "message": "Set shortcut"
+    },
+    "ui_command_shortcut_set_for": {
+        "message": "Set shortcut for $1",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_command_shortcut_change": {
+        "message": "Change shortcut for $1",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_command_shortcut_recording": {
+        "message": "Press keys"
+    },
+    "ui_command_shortcut_clear_hint": {
+        "message": "Press a shortcut. Backspace or Delete clears it."
+    },
+    "ui_command_shortcut_save_failed": {
+        "message": "Could not save shortcut"
     },
     "ui_search_results_count": {
         "message": "$1 result(s)",
@@ -908,6 +950,9 @@
     },
     "ui_save": {
         "message": "Save"
+    },
+    "ui_done": {
+        "message": "Done"
     },
     "ui_save_failed": {
         "message": "Save failed. Retry before refreshing."

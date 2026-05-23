@@ -230,7 +230,13 @@ const createModalMotionTestRuntime = ({
     clearDeveloperLogs = jest.fn(() => Promise.resolve(true)),
     renderSaveStatus = jest.fn(),
     getCommandPaletteCommands = jest.fn(() => []),
-    executeCommandPaletteCommand = jest.fn(() => false)
+    executeCommandPaletteCommand = jest.fn(() => false),
+    getCommandShortcut = jest.fn(() => ''),
+    setCommandShortcut = jest.fn(() => Promise.resolve('')),
+    getCommandShortcutComboFromEvent = jest.fn(() => ''),
+    formatCommandShortcut = jest.fn((shortcut) => shortcut),
+    getVisibleQuickViewKinds = jest.fn(() => ['all', 'ungrouped', 'disabled', 'tag', 'recent', 'issues']),
+    setVisibleQuickViewKinds = jest.fn(() => Promise.resolve(['all', 'ungrouped', 'disabled', 'tag', 'recent', 'issues']))
 } = {}) => {
     const createContentModals = require('../../src/content/content-modals.js');
     const shadowRoot = createModalTestShadowRoot();
@@ -280,6 +286,12 @@ const createModalMotionTestRuntime = ({
         renderSaveStatus,
         getCommandPaletteCommands,
         executeCommandPaletteCommand,
+        getCommandShortcut,
+        setCommandShortcut,
+        getCommandShortcutComboFromEvent,
+        formatCommandShortcut,
+        getVisibleQuickViewKinds,
+        setVisibleQuickViewKinds,
         updateTag: jest.fn(() => null),
         deleteTag: jest.fn(),
         showToast,
@@ -901,6 +913,139 @@ describe('modal option motion', () => {
             payload: { kind: 'recent' }
         }));
         expect(shadowRoot.getElementById('sp-command-palette-modal')).toBeNull();
+    });
+
+    it('opens the command palette from settings instead of the main toolbar', () => {
+        const getCommandPaletteCommands = jest.fn(() => [
+            {
+                id: 'quick-all',
+                title: 'All',
+                subtitle: 'Switch quick view',
+                action: 'quick-view',
+                payload: { kind: null }
+            }
+        ]);
+        const { modals, shadowRoot } = createModalMotionTestRuntime({
+            getCommandPaletteCommands
+        });
+
+        expect(modals.renderSettingsModal()).toBe(true);
+
+        const commandPaletteButton = shadowRoot.querySelector('.sp-settings-open-command-palette-btn');
+        expect(commandPaletteButton).toBeTruthy();
+        expect(commandPaletteButton.textContent).toContain('ui_settings_open_command_palette');
+
+        commandPaletteButton.dispatchEvent({ type: 'click' });
+
+        expect(shadowRoot.getElementById('sp-settings-modal')).toBeNull();
+        expect(shadowRoot.getElementById('sp-command-palette-modal')).toBeTruthy();
+        expect(getCommandPaletteCommands).toHaveBeenCalledWith('');
+    });
+
+    it('opens quick view button management from settings and saves hidden buttons', async () => {
+        let visibleQuickViewKinds = ['all', 'recent'];
+        const setVisibleQuickViewKinds = jest.fn((nextKinds) => {
+            visibleQuickViewKinds = nextKinds;
+            return Promise.resolve(nextKinds);
+        });
+        const render = jest.fn();
+        const { modals, shadowRoot } = createModalMotionTestRuntime({
+            getVisibleQuickViewKinds: () => visibleQuickViewKinds,
+            setVisibleQuickViewKinds,
+            render
+        });
+
+        expect(modals.renderSettingsModal()).toBe(true);
+
+        const manageButton = shadowRoot.querySelector('.sp-settings-manage-quick-view-buttons-btn');
+        expect(manageButton).toBeTruthy();
+        expect(manageButton.textContent).toContain('ui_settings_manage_quick_view_buttons');
+
+        manageButton.dispatchEvent({ type: 'click' });
+
+        expect(shadowRoot.getElementById('sp-settings-modal')).toBeNull();
+        expect(shadowRoot.getElementById('sp-quick-view-buttons-modal')).toBeTruthy();
+        const checkboxes = shadowRoot.querySelectorAll('.sp-quick-view-visibility-checkbox');
+        expect(checkboxes.map((checkbox) => checkbox.dataset.quickViewKind)).toEqual([
+            'all',
+            'ungrouped',
+            'disabled',
+            'tag',
+            'recent',
+            'issues'
+        ]);
+        expect(checkboxes.find((checkbox) => checkbox.dataset.quickViewKind === 'all').checked).toBe(true);
+        expect(checkboxes.find((checkbox) => checkbox.dataset.quickViewKind === 'ungrouped').checked).toBe(false);
+
+        const recentCheckbox = checkboxes.find((checkbox) => checkbox.dataset.quickViewKind === 'recent');
+        recentCheckbox.checked = false;
+        recentCheckbox.dispatchEvent({ type: 'change', target: recentCheckbox });
+        await Promise.resolve();
+
+        expect(setVisibleQuickViewKinds).toHaveBeenCalledWith(['all']);
+        expect(render).toHaveBeenCalled();
+
+        const allCheckbox = shadowRoot.querySelectorAll('.sp-quick-view-visibility-checkbox')
+            .find((checkbox) => checkbox.dataset.quickViewKind === 'all');
+        allCheckbox.checked = false;
+        allCheckbox.dispatchEvent({ type: 'change', target: allCheckbox });
+        await Promise.resolve();
+
+        expect(setVisibleQuickViewKinds).toHaveBeenLastCalledWith([]);
+    });
+
+    it('lets users assign a shortcut from each command row without executing the command', async () => {
+        const executeCommandPaletteCommand = jest.fn(() => true);
+        let storedShortcut = '';
+        const setCommandShortcut = jest.fn((commandId, shortcut) => {
+            storedShortcut = shortcut;
+            return Promise.resolve(shortcut);
+        });
+        const getCommandShortcutComboFromEvent = jest.fn(() => 'Meta+Shift+R');
+        const { modals, shadowRoot } = createModalMotionTestRuntime({
+            getCommandPaletteCommands: jest.fn(() => [
+                {
+                    id: 'quick-view-recent',
+                    title: 'Recent',
+                    subtitle: 'Show recent sources',
+                    action: 'quick-view',
+                    payload: { kind: 'recent' }
+                }
+            ]),
+            executeCommandPaletteCommand,
+            getCommandShortcut: jest.fn(() => storedShortcut),
+            setCommandShortcut,
+            getCommandShortcutComboFromEvent,
+            formatCommandShortcut: (shortcut) => shortcut.replace(/\+/g, ' ')
+        });
+
+        expect(modals.renderCommandPaletteModal()).toBe(true);
+
+        const shortcutButton = shadowRoot.querySelector('.sp-command-shortcut-btn');
+        expect(shortcutButton).toBeTruthy();
+        expect(shortcutButton.textContent).toContain('ui_command_shortcut_set');
+
+        shortcutButton.dispatchEvent({
+            type: 'click',
+            preventDefault: jest.fn(),
+            stopPropagation: jest.fn()
+        });
+        expect(executeCommandPaletteCommand).not.toHaveBeenCalled();
+
+        const modal = shadowRoot.getElementById('sp-command-palette-modal');
+        modal.dispatchEvent({
+            type: 'keydown',
+            key: 'r',
+            metaKey: true,
+            shiftKey: true,
+            preventDefault: jest.fn(),
+            stopPropagation: jest.fn()
+        });
+        await Promise.resolve();
+
+        expect(getCommandShortcutComboFromEvent).toHaveBeenCalled();
+        expect(setCommandShortcut).toHaveBeenCalledWith('quick-view-recent', 'Meta+Shift+R');
+        expect(shadowRoot.querySelector('.sp-command-shortcut-btn').textContent).toContain('Meta Shift R');
     });
 
     it('renders source repair and history actions in settings', async () => {

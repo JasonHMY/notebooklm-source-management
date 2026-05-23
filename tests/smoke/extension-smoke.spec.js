@@ -14,8 +14,9 @@ const {
 } = require('./helpers/notebooklm-fixture');
 
 const repoRoot = path.resolve(__dirname, '../..');
+const manifest = require('../../manifest.json');
 const SMOKE_WELCOME_ONBOARDING_SEEN_VERSION = 1;
-const SMOKE_WHATS_NEW_SEEN_VERSION = 1;
+const SMOKE_WHATS_NEW_SEEN_VERSION = manifest.version;
 
 test.describe.serial('extension smoke', () => {
     let env;

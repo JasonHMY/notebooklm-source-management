@@ -67,4 +67,20 @@ describe('package script', () => {
             expect.any(Object)
         );
     });
+
+    it('keeps the extension icon assets in the release package', () => {
+        const repoRoot = path.resolve(__dirname, '..');
+        const packagedPaths = new Set(getPackageEntries(repoRoot).map((entry) => entry.targetPath));
+
+        [
+            'src/assets/icons/1.png',
+            'src/assets/icons/icon16.png',
+            'src/assets/icons/icon32.png',
+            'src/assets/icons/icon48.png',
+            'src/assets/icons/icon128.png'
+        ].forEach((iconPath) => {
+            expect(fs.existsSync(path.join(repoRoot, iconPath))).toBe(true);
+            expect(packagedPaths.has(iconPath)).toBe(true);
+        });
+    });
 });

@@ -26,15 +26,33 @@
 ## [Unreleased] (未发布)
 
 ### Added
+- **X 本地发布工具 (Local X Publisher Tool)**: 新增 `marketing/x-publisher/`，提供 OAuth 2.0 PKCE 授权、账号验证和人工确认后发帖的本地脚本，并用本地 `.gitignore` 排除 `.env` 与 `tokens.json`。
+- **宣传账号邮箱记录 (Promotion Account Email Record)**: 在宣传账号矩阵中记录插件推广账号统一使用 `notebooklmsourcemanagement@gmail.com` 注册，便于后续社媒账号创建保持一致。
+- **宣传资料工作区 (Promotion Workspace)**: 新增 `marketing/` 目录，用于整理社媒账号矩阵、内容日历、平台宣传打法和素材记录，不进入扩展运行时或发布包。
 - **快速筛选视图 (Quick Filter Views)**: 在来源管理器工具栏下方新增 All、Ungrouped、Disabled、Tag、Recent 和 Issues 快速视图，支持与搜索词叠加筛选，并为新识别来源保存 `addedAt` 以支持最近新增视图。
+- **快速视图按钮自定义 (Quick View Button Customization)**: 设置页新增快速视图按钮管理入口，用户可选择来源面板中显示哪些 quick view 按钮，也可全部隐藏；隐藏后对应命令和自定义快捷键仍可使用。
 - **导入差异预览 (Import Diff Preview)**: 导入配置预览新增来源启用状态、文件夹、标签和面板设置差异摘要，并明确提示当前导入仍是恢复/替换当前管理配置而非增量合并。
-- **命令面板入口 (Command Palette Entry)**: 新增工具栏命令面板按钮，支持搜索来源、切换快速视图、切换来源视图、打开设置/标签管理，并在批量模式下执行移动和标签批量命令。
+- **命令面板入口 (Command Palette Entry)**: 在设置页偏好区域新增命令面板入口，支持搜索来源、切换快速视图、切换来源视图、打开设置/标签管理，并在批量模式下执行移动和标签批量命令。
+- **命令快捷键自定义 (Command Shortcut Customization)**: 命令面板每个命令新增快捷键设置入口，默认不绑定任何快捷键，用户可自行录入、替换或清除快捷键并保存到全局偏好。
 - **更新后介绍弹窗 (What's New Modal)**: 新增按功能版本显示一次的更新介绍弹窗，并在开发者功能区提供测试入口，便于大功能发布时向用户说明变化。
 - **本地快照策略 (Local Snapshot Policy)**: 设置页新增历史快照保留数量选择和手动命名恢复点，支持按每个 notebook 保留更多本地版本历史。
 - **手动语言切换 (Manual Language Selection)**: 设置页新增 Auto、English、Español、简体中文语言选择，允许扩展 UI 独立于 Chrome UI 语言切换。
 
 ### Changed
 - **设置页信息架构收敛 (Settings Information Architecture Consolidation)**: 将设置页的导出、导入和版本历史合并到“备份与恢复”，将反馈与诊断信息合并到“帮助与反馈”，保存状态移动到标题栏，并仅在导入预览有效时显示“应用导入”按钮；来源修复仅在检测到匹配问题时独立突出显示。
+- **命令快捷键重复触发 (Command Shortcut Repeat Toggle)**: 用户自定义命令快捷键再次触发同一搜索、快速视图或 modal 类命令时，会收起搜索、退出当前快速视图或关闭已打开的对应面板。
+- **按钮扫光动效关闭 (Button Sweep Hover Motion Disabled)**: 关闭 `.sp-button` 的 shimmer 扫光和 `.sp-glare-hover` 的 glare 扫光伪元素，保留普通 hover 背景、边框和缩放反馈。
+- **启动弹窗版本分流 (Startup Modal Version Routing)**: 首次使用的新用户只显示欢迎弹窗并标记当前版本更新说明已处理，已有本地插件数据的老用户升级后按 manifest 版本显示一次 What's New 弹窗。
+
+### Fixed
+- **偏好与恢复点保存失败反馈 (Preference and Restore Point Save Failure Feedback)**: 修复语言、历史保留数量等偏好保存失败时设置页误报成功的问题，并让手动恢复点创建在 history 写入失败时显示失败结果。
+- **命令面板过滤与最近来源时间戳 (Command Palette Filtering and Recent Source Timestamps)**: 修复命令面板输入内容不会过滤命令的问题，并在无原生 DOM 行的恢复路径中保留来源 `addedAt`，避免 Recent 视图时间戳被后续保存抹掉。
+- **发布包图标保留校验 (Release Icon Asset Guard)**: 补充发布包图标资源校验，确保插件图标资源继续进入 release zip。
+- **全部视图边界遮挡 (All View Edge Clipping)**: 修复 All 快速视图下快速筛选按钮被渲染成裁切括号状、以及来源列表最后一行贴近底部边界时可能被面板边缘、拖拽手柄或 NotebookLM 原生控件截断的问题。
+- **空快速视图栏隐藏 (Empty Quick View Rail Hiding)**: 修复用户在设置中隐藏所有 quick view 按钮后，来源面板仍保留空白按钮栏区域的问题。
+
+### Security
+- **本地会话文件忽略 (Local Session File Ignore)**: 将根目录 `cookies.json` 加入 `.gitignore`，避免小红书或其他本地登录工具生成的会话文件被误提交。
 
 ## [2026-05-17] [2.7.4]
 

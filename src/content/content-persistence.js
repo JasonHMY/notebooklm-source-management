@@ -683,16 +683,16 @@
                 saveRevision: entry.saveRevision
             });
 
-            const appendLocally = () => new Promise((resolve) => {
+            const appendLocally = () => new Promise((resolve, reject) => {
                 if (!chromeApi?.storage?.local?.get || !chromeApi?.storage?.local?.set) {
-                    resolve(getStateHistoryEntries());
+                    reject(new Error('storage_unavailable'));
                     return;
                 }
 
                 try {
                     chromeApi.storage.local.get([key], (data) => {
                         if (chromeApi.runtime?.lastError) {
-                            resolve(getStateHistoryEntries());
+                            reject(new Error('runtime_message_error'));
                             return;
                         }
                         const existingEntries = normalizeStateHistoryEntries(data?.[key] || []);
@@ -706,14 +706,14 @@
                         const trimmedEntries = trimStateHistoryEntries(nextEntries);
                         chromeApi.storage.local.set({ [key]: trimmedEntries }, () => {
                             if (chromeApi.runtime?.lastError) {
-                                resolve(getStateHistoryEntries());
+                                reject(new Error('runtime_message_error'));
                                 return;
                             }
                             resolve(setStateHistoryEntries(trimmedEntries));
                         });
                     });
                 } catch (error) {
-                    resolve(getStateHistoryEntries());
+                    reject(error);
                 }
             });
 
@@ -721,21 +721,27 @@
                 return appendLocally();
             }
 
-            return new Promise((resolve) => {
+            return new Promise((resolve, reject) => {
                 try {
                     chromeApi.runtime.sendMessage({
                         type: 'APPEND_STATE_HISTORY',
                         key,
                         entry
                     }, (response) => {
-                        if (chromeApi.runtime.lastError || !response || response.success === false) {
-                            resolve(getStateHistoryEntries());
+                        if (response && response.success === false) {
+                            reject(new Error(response.errorCode || 'runtime_failure'));
+                            return;
+                        }
+                        if (chromeApi.runtime.lastError || !response) {
+                            appendLocally().then(resolve).catch((error) => {
+                                reject(error instanceof Error ? error : new Error(response?.errorCode || 'runtime_message_error'));
+                            });
                             return;
                         }
                         resolve(setStateHistoryEntries(response.history || []));
                     });
                 } catch (error) {
-                    resolve(getStateHistoryEntries());
+                    appendLocally().then(resolve).catch(reject);
                 }
             });
         }
@@ -1510,6 +1516,7 @@
                     isDisabled: false,
                     enabled: sourceRecord?.enabled !== false,
                     nativeLabelTitle: sourceRecord?.nativeLabelTitle || '',
+                    addedAt: sourceRecord?.addedAt || '',
                     isPendingNativeHydration: true
                 });
             });

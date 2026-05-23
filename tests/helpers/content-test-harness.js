@@ -233,9 +233,15 @@ const setupGlobalMocks = () => {
                         preferences: {
                             developerModeEnabled: false,
                             welcomeOnboardingSeenVersion: 0,
-                            whatsNewSeenVersion: 0,
+                            whatsNewSeenVersion: '',
                             historyRetentionLimit: 20,
-                            languageOverride: 'auto'
+                            languageOverride: 'auto',
+                            commandShortcuts: {},
+                            visibleQuickViewKinds: ['all', 'ungrouped', 'disabled', 'tag', 'recent', 'issues']
+                        },
+                        usageState: {
+                            hasExistingPluginData: false,
+                            hasStoredPreferences: false
                         }
                     });
                     return;
@@ -246,9 +252,11 @@ const setupGlobalMocks = () => {
                         preferences: Object.assign({
                             developerModeEnabled: false,
                             welcomeOnboardingSeenVersion: 0,
-                            whatsNewSeenVersion: 0,
+                            whatsNewSeenVersion: '',
                             historyRetentionLimit: 20,
-                            languageOverride: 'auto'
+                            languageOverride: 'auto',
+                            commandShortcuts: {},
+                            visibleQuickViewKinds: ['all', 'ungrouped', 'disabled', 'tag', 'recent', 'issues']
                         }, message.preferences || {})
                     });
                     return;

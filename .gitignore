@@ -27,5 +27,9 @@ docs/superpowers/plans/
 
 # PLAN
 PLAN.md
+
+# Local credentials and session files
+cookies.json
+
 # Dependencies
 node_modules/

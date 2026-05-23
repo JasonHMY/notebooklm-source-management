@@ -9,6 +9,7 @@ const STATE_HISTORY_KEY_PREFIX = 'sourcesPlusHistory_';
 const DEVELOPER_LOG_KEY_PREFIX = 'sourcesPlusDeveloperLogs_';
 const STATE_HISTORY_LIMIT = 20;
 const HISTORY_RETENTION_LIMIT_OPTIONS = [20, 50, 100];
+const QUICK_VIEW_BUTTON_KINDS = ['all', 'ungrouped', 'disabled', 'tag', 'recent', 'issues'];
 const DEVELOPER_LOG_LIMIT = 500;
 const DEVELOPER_LOG_MAX_BYTES = 512 * 1024;
 const DEFAULT_STORAGE_QUOTA_BYTES = 10 * 1024 * 1024;
@@ -263,9 +264,11 @@ function normalizePreferences(preferences = {}) {
     return {
         developerModeEnabled: Boolean(preferences?.developerModeEnabled),
         welcomeOnboardingSeenVersion: normalizePreferenceVersion(preferences?.welcomeOnboardingSeenVersion),
-        whatsNewSeenVersion: normalizePreferenceVersion(preferences?.whatsNewSeenVersion),
+        whatsNewSeenVersion: normalizeWhatsNewSeenVersion(preferences?.whatsNewSeenVersion),
         historyRetentionLimit: normalizeHistoryRetentionLimit(preferences?.historyRetentionLimit),
-        languageOverride: normalizeLanguageOverride(preferences?.languageOverride)
+        languageOverride: normalizeLanguageOverride(preferences?.languageOverride),
+        commandShortcuts: normalizeCommandShortcuts(preferences?.commandShortcuts),
+        visibleQuickViewKinds: normalizeVisibleQuickViewKinds(preferences?.visibleQuickViewKinds)
     };
 }
 
@@ -273,6 +276,31 @@ function normalizePreferenceVersion(value) {
     const version = Number(value);
     if (!Number.isFinite(version) || version < 0) return 0;
     return Math.floor(version);
+}
+
+function normalizeWhatsNewSeenVersion(value) {
+    if (value == null) return '';
+    const text = String(value).trim();
+    if (!text) return '';
+    if (!/^\d+(?:\.\d+){0,3}$/.test(text)) return '';
+    return text.split('.')
+        .map((part) => String(Number(part)))
+        .join('.');
+}
+
+function createPreferenceUsageState(storageData = {}) {
+    const data = storageData && typeof storageData === 'object' ? storageData : {};
+    const keys = Object.keys(data);
+    const hasStoredPreferences = Object.prototype.hasOwnProperty.call(data, PREFERENCES_KEY);
+    const hasNotebookData = keys.some((key) => (
+        key.startsWith(STATE_KEY_PREFIX) ||
+        key.startsWith(STATE_HISTORY_KEY_PREFIX) ||
+        key.startsWith(DEVELOPER_LOG_KEY_PREFIX)
+    ));
+    return {
+        hasExistingPluginData: hasStoredPreferences || hasNotebookData,
+        hasStoredPreferences
+    };
 }
 
 function normalizeHistoryRetentionLimit(value) {
@@ -287,6 +315,115 @@ function normalizeLanguageOverride(value) {
         : 'auto';
 }
 
+function normalizeCommandShortcutId(value) {
+    const id = String(value || '').trim();
+    return /^[a-z0-9][a-z0-9-]{0,79}$/.test(id) ? id : '';
+}
+
+function normalizeCommandShortcutKey(value) {
+    const key = String(value || '').trim();
+    if (!key) return '';
+    if (key === ' ') return 'Space';
+    const aliases = {
+        esc: 'Escape',
+        escape: 'Escape',
+        spacebar: 'Space',
+        space: 'Space',
+        return: 'Enter',
+        enter: 'Enter',
+        del: 'Delete',
+        delete: 'Delete',
+        backspace: 'Backspace',
+        tab: 'Tab'
+    };
+    const lower = key.toLowerCase();
+    if (aliases[lower]) return aliases[lower];
+    if (/^f\d{1,2}$/i.test(key)) return key.toUpperCase();
+    if (key.length === 1) return key.toUpperCase();
+    return key.replace(/^\w/, (char) => char.toUpperCase()).slice(0, 32);
+}
+
+function normalizeCommandShortcutCombo(value) {
+    const parts = String(value || '')
+        .split('+')
+        .map((part) => part.trim())
+        .filter(Boolean);
+    if (parts.length < 2) return '';
+
+    const modifierAliases = new Map([
+        ['cmd', 'Meta'],
+        ['command', 'Meta'],
+        ['meta', 'Meta'],
+        ['ctrl', 'Ctrl'],
+        ['control', 'Ctrl'],
+        ['alt', 'Alt'],
+        ['option', 'Alt'],
+        ['shift', 'Shift']
+    ]);
+    const modifiers = new Set();
+    let shortcutKey = '';
+
+    parts.forEach((part, index) => {
+        const alias = modifierAliases.get(part.toLowerCase());
+        if (alias && index < parts.length - 1) {
+            modifiers.add(alias);
+            return;
+        }
+        shortcutKey = normalizeCommandShortcutKey(part);
+    });
+
+    if (!shortcutKey || modifiers.size === 0) return '';
+    return ['Meta', 'Ctrl', 'Alt', 'Shift']
+        .filter((modifier) => modifiers.has(modifier))
+        .concat(shortcutKey)
+        .join('+');
+}
+
+function normalizeCommandShortcuts(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+    return Object.entries(value).reduce((result, [rawId, rawCombo]) => {
+        const id = normalizeCommandShortcutId(rawId);
+        const combo = normalizeCommandShortcutCombo(rawCombo);
+        if (!id || !combo) return result;
+        Object.keys(result).forEach((existingId) => {
+            if (result[existingId] === combo && existingId !== id) {
+                delete result[existingId];
+            }
+        });
+        result[id] = combo;
+        return result;
+    }, {});
+}
+
+function normalizeVisibleQuickViewKinds(value) {
+    if (!Array.isArray(value)) return [...QUICK_VIEW_BUTTON_KINDS];
+    const requestedKinds = new Set(value.map((kind) => String(kind || '').trim().toLowerCase()));
+    return QUICK_VIEW_BUTTON_KINDS.filter((kind) => requestedKinds.has(kind));
+}
+
+function mergeCommandShortcuts(existingShortcuts = {}, nextShortcuts = {}) {
+    const merged = normalizeCommandShortcuts(existingShortcuts);
+    if (!nextShortcuts || typeof nextShortcuts !== 'object' || Array.isArray(nextShortcuts)) {
+        return merged;
+    }
+    Object.entries(nextShortcuts).forEach(([rawId, rawCombo]) => {
+        const id = normalizeCommandShortcutId(rawId);
+        if (!id) return;
+        const combo = normalizeCommandShortcutCombo(rawCombo);
+        if (!combo) {
+            delete merged[id];
+            return;
+        }
+        Object.keys(merged).forEach((existingId) => {
+            if (merged[existingId] === combo && existingId !== id) {
+                delete merged[existingId];
+            }
+        });
+        merged[id] = combo;
+    });
+    return merged;
+}
+
 function mergePreferences(existingPreferences = {}, nextPreferences = {}) {
     const merged = normalizePreferences(existingPreferences);
     if (Object.prototype.hasOwnProperty.call(nextPreferences || {}, 'developerModeEnabled')) {
@@ -296,7 +433,7 @@ function mergePreferences(existingPreferences = {}, nextPreferences = {}) {
         merged.welcomeOnboardingSeenVersion = normalizePreferenceVersion(nextPreferences.welcomeOnboardingSeenVersion);
     }
     if (Object.prototype.hasOwnProperty.call(nextPreferences || {}, 'whatsNewSeenVersion')) {
-        merged.whatsNewSeenVersion = normalizePreferenceVersion(nextPreferences.whatsNewSeenVersion);
+        merged.whatsNewSeenVersion = normalizeWhatsNewSeenVersion(nextPreferences.whatsNewSeenVersion);
     }
     if (Object.prototype.hasOwnProperty.call(nextPreferences || {}, 'historyRetentionLimit')) {
         merged.historyRetentionLimit = normalizeHistoryRetentionLimit(nextPreferences.historyRetentionLimit);
@@ -304,11 +441,17 @@ function mergePreferences(existingPreferences = {}, nextPreferences = {}) {
     if (Object.prototype.hasOwnProperty.call(nextPreferences || {}, 'languageOverride')) {
         merged.languageOverride = normalizeLanguageOverride(nextPreferences.languageOverride);
     }
+    if (Object.prototype.hasOwnProperty.call(nextPreferences || {}, 'commandShortcuts')) {
+        merged.commandShortcuts = mergeCommandShortcuts(merged.commandShortcuts, nextPreferences.commandShortcuts);
+    }
+    if (Object.prototype.hasOwnProperty.call(nextPreferences || {}, 'visibleQuickViewKinds')) {
+        merged.visibleQuickViewKinds = normalizeVisibleQuickViewKinds(nextPreferences.visibleQuickViewKinds);
+    }
     return normalizePreferences(merged);
 }
 
 function getPreferences(sendResponse) {
-    chrome.storage.local.get([PREFERENCES_KEY], (data) => {
+    chrome.storage.local.get(null, (data) => {
         if (chrome.runtime.lastError) {
             sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
             return;
@@ -316,12 +459,13 @@ function getPreferences(sendResponse) {
 
         sendResponse({
             success: true,
-            preferences: normalizePreferences(data?.[PREFERENCES_KEY])
+            preferences: normalizePreferences(data?.[PREFERENCES_KEY]),
+            usageState: createPreferenceUsageState(data)
         });
     });
 }
 
-function setPreferences(request, sendResponse) {
+function setPreferencesNow(request, sendResponse) {
     chrome.storage.local.get([PREFERENCES_KEY], (data) => {
         if (chrome.runtime.lastError) {
             sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
@@ -338,6 +482,15 @@ function setPreferences(request, sendResponse) {
             sendResponse({ success: true, preferences });
         });
     });
+}
+
+function setPreferences(request, sendResponse) {
+    enqueueStorageTask(PREFERENCES_KEY, () => new Promise((resolve) => {
+        setPreferencesNow(request, (response) => {
+            sendResponse(response);
+            resolve(response);
+        });
+    }));
 }
 
 function isValidDeveloperLogKey(key) {

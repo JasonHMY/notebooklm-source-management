@@ -170,7 +170,6 @@
     const NATIVE_RENAME_WATCHER_INTERVAL_MS = 250;
     const NATIVE_RENAME_WATCHER_DURATION_MS = 5000;
     const CURRENT_WELCOME_ONBOARDING_VERSION = 1;
-    const CURRENT_WHATS_NEW_VERSION = 1;
     const WHATS_NEW_ENABLED = true;
     const SOURCE_VIEW_LIST = 'list';
     const SOURCE_VIEW_LABEL = 'label';
@@ -415,10 +414,17 @@
         setWelcomeOnboardingSeenVersion,
         getWhatsNewSeenVersion,
         setWhatsNewSeenVersion,
+        setOnboardingModalSeenVersions,
+        getPreferenceUsageState,
         getHistoryRetentionLimit,
         setHistoryRetentionLimit,
         getLanguageOverride,
         setLanguageOverride,
+        getCommandShortcuts,
+        getCommandShortcut,
+        setCommandShortcut,
+        getVisibleQuickViewKinds,
+        setVisibleQuickViewKinds,
         loadDeveloperPreferences,
         loadDeveloperLogs,
         getDeveloperLogs,
@@ -647,6 +653,12 @@
         renderSaveStatus: (...args) => renderSaveStatus(...args),
         getCommandPaletteCommands: (...args) => getCommandPaletteCommands(...args),
         executeCommandPaletteCommand: (...args) => executeCommandPaletteCommand(...args),
+        getCommandShortcut: (...args) => getCommandShortcut(...args),
+        setCommandShortcut: (...args) => setCommandShortcut(...args),
+        getCommandShortcutComboFromEvent: (...args) => getCommandShortcutComboFromEvent(...args),
+        formatCommandShortcut: (...args) => formatCommandShortcut(...args),
+        getVisibleQuickViewKinds: (...args) => getVisibleQuickViewKinds(...args),
+        setVisibleQuickViewKinds: (...args) => setVisibleQuickViewKinds(...args),
         getHistoryRetentionLimit: (...args) => getHistoryRetentionLimit(...args),
         setHistoryRetentionLimit: (...args) => setHistoryRetentionLimit(...args),
         createManualRestorePoint: (...args) => createManualRestorePoint(...args),
@@ -688,6 +700,7 @@
         renderWhatsNewModal,
         renderCommandPaletteModal,
         renderTagFilterModal,
+        closeTagFilterModal,
         renderTagModal
     } = modalsModule;
 
@@ -814,6 +827,7 @@
         getSourcesByKey: () => sourcesByKey,
         getParentMap: () => parentMap,
         getPendingBatchKeys: () => pendingBatchKeys,
+        getVisibleQuickViewKinds: (...args) => getVisibleQuickViewKinds(...args),
         getActiveIsolationGroupId: () => activeIsolationGroupId,
         getIsDeletingSources: () => isDeletingSources,
         getMessage,
@@ -1828,11 +1842,6 @@
             settingsButton.setAttribute('title', getMessage('ui_settings'));
             settingsButton.setAttribute('aria-label', getMessage('ui_settings'));
         }
-        const commandButton = shadowRoot.getElementById('sp-command-palette-btn');
-        if (commandButton) {
-            commandButton.setAttribute('title', getMessage('ui_command_palette'));
-            commandButton.setAttribute('aria-label', getMessage('ui_command_palette'));
-        }
         setLocalizedButton(shadowRoot.getElementById('sp-new-group-btn'), 'ui_new_group');
         setLocalizedButton(shadowRoot.getElementById('sp-manage-tags-btn'), 'ui_manage_tags');
         setLocalizedButton(shadowRoot.getElementById('sp-batch-action-btn'), 'ui_batch_action');
@@ -1868,15 +1877,62 @@
         return developerPreferencesLoadPromise;
     }
 
+    function normalizeDottedVersion(value) {
+        const text = String(value || '').trim();
+        if (!/^\d+(?:\.\d+){0,3}$/.test(text)) return '';
+        return text.split('.')
+            .map((part) => String(Number(part)))
+            .join('.');
+    }
+
+    function getCurrentWhatsNewVersion() {
+        return normalizeDottedVersion(globalThis.chrome?.runtime?.getManifest?.()?.version) || '0';
+    }
+
+    function compareDottedVersions(leftVersion, rightVersion) {
+        const left = normalizeDottedVersion(leftVersion);
+        const right = normalizeDottedVersion(rightVersion);
+        if (!right) return 0;
+        if (!left) return -1;
+        const leftParts = left.split('.').map((part) => Number(part));
+        const rightParts = right.split('.').map((part) => Number(part));
+        const length = Math.max(leftParts.length, rightParts.length);
+        for (let index = 0; index < length; index += 1) {
+            const leftPart = leftParts[index] || 0;
+            const rightPart = rightParts[index] || 0;
+            if (leftPart > rightPart) return 1;
+            if (leftPart < rightPart) return -1;
+        }
+        return 0;
+    }
+
+    function hasSeenCurrentWhatsNewVersion() {
+        return compareDottedVersions(getWhatsNewSeenVersion(), getCurrentWhatsNewVersion()) >= 0;
+    }
+
     function markWelcomeOnboardingSeen() {
         welcomeOnboardingPromptedThisSession = true;
-        return Promise.resolve(setWelcomeOnboardingSeenVersion(CURRENT_WELCOME_ONBOARDING_VERSION))
+        const usageState = typeof getPreferenceUsageState === 'function' ? getPreferenceUsageState() : {};
+        const shouldMarkWhatsNewSeen = !usageState.hasExistingPluginData && typeof setOnboardingModalSeenVersions === 'function';
+        const savePromise = shouldMarkWhatsNewSeen
+            ? setOnboardingModalSeenVersions({
+                welcomeOnboardingSeenVersion: CURRENT_WELCOME_ONBOARDING_VERSION,
+                whatsNewSeenVersion: getCurrentWhatsNewVersion()
+            })
+            : setWelcomeOnboardingSeenVersion(CURRENT_WELCOME_ONBOARDING_VERSION);
+        return Promise.resolve(savePromise)
             .catch(() => false);
     }
 
     function markWhatsNewSeen() {
         whatsNewPromptedThisSession = true;
-        return Promise.resolve(setWhatsNewSeenVersion(CURRENT_WHATS_NEW_VERSION))
+        const savePromise = typeof setOnboardingModalSeenVersions === 'function'
+            ? setOnboardingModalSeenVersions({
+                welcomeOnboardingSeenVersion: CURRENT_WELCOME_ONBOARDING_VERSION,
+                whatsNewSeenVersion: getCurrentWhatsNewVersion()
+            })
+            : setWhatsNewSeenVersion(getCurrentWhatsNewVersion());
+        return Promise.resolve(savePromise)
             .catch(() => false);
     }
 
@@ -1891,9 +1947,11 @@
         }
 
         return ensureDeveloperPreferencesLoaded().then(() => {
+            const usageState = typeof getPreferenceUsageState === 'function' ? getPreferenceUsageState() : {};
             if (
                 whatsNewPromptedThisSession ||
-                getWhatsNewSeenVersion() >= CURRENT_WHATS_NEW_VERSION
+                !usageState.hasExistingPluginData ||
+                hasSeenCurrentWhatsNewVersion()
             ) {
                 return false;
             }
@@ -1908,8 +1966,10 @@
         }
 
         return ensureDeveloperPreferencesLoaded().then(() => {
+            const usageState = typeof getPreferenceUsageState === 'function' ? getPreferenceUsageState() : {};
             if (
                 welcomeOnboardingPromptedThisSession ||
+                usageState.hasExistingPluginData ||
                 getWelcomeOnboardingSeenVersion() >= CURRENT_WELCOME_ONBOARDING_VERSION
             ) {
                 return false;
@@ -3181,6 +3241,80 @@
         return applyQuickViewKind(kind === 'all' ? null : kind);
     }
 
+    function commandMatchesPaletteQuery(command, query) {
+        const terms = String(query || '')
+            .trim()
+            .toLowerCase()
+            .split(/\s+/)
+            .filter(Boolean);
+        if (terms.length === 0) return true;
+        const haystack = [
+            command.id,
+            command.action,
+            command.title,
+            command.subtitle,
+            command.icon,
+            ...(Array.isArray(command.keywords) ? command.keywords : [])
+        ]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase();
+        return terms.every((term) => haystack.includes(term));
+    }
+
+    function normalizeCommandShortcutKeyFromEvent(event) {
+        const key = String(event?.key || '').trim();
+        if (!key || key === 'Dead') return '';
+        const modifierOnlyKeys = new Set(['Meta', 'Control', 'Ctrl', 'Alt', 'Option', 'Shift', 'OS']);
+        if (modifierOnlyKeys.has(key)) return '';
+        if (key === ' ') return 'Space';
+        if (/^f\d{1,2}$/i.test(key)) return key.toUpperCase();
+        if (key.length === 1) return key.toUpperCase();
+        const aliases = {
+            esc: 'Escape',
+            escape: 'Escape',
+            spacebar: 'Space',
+            space: 'Space',
+            return: 'Enter',
+            enter: 'Enter',
+            del: 'Delete',
+            delete: 'Delete',
+            backspace: 'Backspace',
+            tab: 'Tab'
+        };
+        const lower = key.toLowerCase();
+        if (aliases[lower]) return aliases[lower];
+        return key.replace(/^\w/, (char) => char.toUpperCase()).slice(0, 32);
+    }
+
+    function getCommandShortcutComboFromEvent(event) {
+        if (!event || event.isComposing) return '';
+        const shortcutKey = normalizeCommandShortcutKeyFromEvent(event);
+        if (!shortcutKey) return '';
+        const modifiers = [];
+        if (event.metaKey) modifiers.push('Meta');
+        if (event.ctrlKey) modifiers.push('Ctrl');
+        if (event.altKey) modifiers.push('Alt');
+        if (event.shiftKey) modifiers.push('Shift');
+        if (modifiers.length === 0) return '';
+        return modifiers.concat(shortcutKey).join('+');
+    }
+
+    function formatCommandShortcut(shortcut) {
+        const parts = String(shortcut || '')
+            .split('+')
+            .map((part) => part.trim())
+            .filter(Boolean);
+        const labels = {
+            Meta: '⌘',
+            Ctrl: 'Ctrl',
+            Alt: '⌥',
+            Shift: '⇧',
+            Space: 'Space'
+        };
+        return parts.map((part) => labels[part] || part).join(' ');
+    }
+
     function getCommandPaletteCommands(query = '') {
         const trimmedQuery = String(query || '').trim();
         const selectedCount = pendingBatchKeys.size;
@@ -3295,15 +3429,87 @@
             }
         );
 
-        return commands;
+        if (!trimmedQuery) return commands;
+        const searchCommand = commands[0];
+        return [
+            searchCommand,
+            ...commands.slice(1).filter((command) => commandMatchesPaletteQuery(command, trimmedQuery))
+        ];
+    }
+
+    function getCommandPaletteCommandById(commandId) {
+        const id = String(commandId || '');
+        if (!id) return null;
+        return getCommandPaletteCommands('')
+            .find((command) => command && command.id === id) || null;
+    }
+
+    function getCommandPaletteCommandForShortcut(shortcut) {
+        const combo = String(shortcut || '');
+        if (!combo) return null;
+        const shortcuts = typeof getCommandShortcuts === 'function' ? getCommandShortcuts() : {};
+        const commandId = Object.keys(shortcuts || {})
+            .find((id) => shortcuts[id] === combo);
+        return commandId ? getCommandPaletteCommandById(commandId) : null;
+    }
+
+    function isCommandPaletteModalOpen() {
+        return isManagedModalOpen('sp-command-palette-modal');
+    }
+
+    function isManagedModalOpen(modalId) {
+        const expectedId = String(modalId || '');
+        if (!expectedId) return false;
+        const modal = shadowRoot?.getElementById?.(expectedId);
+        return Boolean(
+            modal &&
+            (
+                modal.id === expectedId ||
+                modal.getAttribute?.('id') === expectedId
+            )
+        );
+    }
+
+    function closeModalCommandIfOpen(modalId, closeModal) {
+        if (!isManagedModalOpen(modalId)) return false;
+        if (typeof closeModal === 'function') {
+            closeModal({ immediate: true, restoreFocus: false });
+        }
+        return true;
+    }
+
+    function handleCommandShortcutKeydown(event) {
+        if (!event || event.defaultPrevented || event.repeat || !isExtensionEnabled) return false;
+        if (isCommandPaletteModalOpen()) return false;
+        if (isEditableUndoTarget(event.target)) return false;
+
+        const shortcut = getCommandShortcutComboFromEvent(event);
+        const command = getCommandPaletteCommandForShortcut(shortcut);
+        if (!command || command.disabled) return false;
+
+        event.preventDefault?.();
+        event.stopPropagation?.();
+        event.stopImmediatePropagation?.();
+        closeSourceActionMenu();
+        return executeCommandPaletteCommand(command.action, Object.assign({}, command, {
+            triggeredByShortcut: true
+        }));
     }
 
     function executeCommandPaletteCommand(action, command = {}) {
         const commandAction = String(action || command.action || '');
         const payload = command.payload || {};
+        const triggeredByShortcut = Boolean(command.triggeredByShortcut);
         if (command.disabled) return false;
 
         if (commandAction === 'search-sources') {
+            if (triggeredByShortcut && isSearchUiCurrentlyExpanded()) {
+                handleSearchCloseButtonClick(() => {
+                    closeSourceActionMenu();
+                    render();
+                });
+                return true;
+            }
             state.filterQuery = String(payload.query || '');
             expandSearch({ focus: true });
             closeSourceActionMenu();
@@ -3313,9 +3519,16 @@
 
         if (commandAction === 'quick-view') {
             if (payload.kind === 'tag') {
+                if (triggeredByShortcut && closeModalCommandIfOpen('sp-tag-filter-modal', closeTagFilterModal)) {
+                    return true;
+                }
                 return tagsById.size > 0 ? renderTagFilterModal() : false;
             }
-            return applyQuickViewKind(payload.kind === 'all' ? null : payload.kind);
+            const normalizedKind = payload.kind === 'all' ? null : normalizeQuickViewKind(payload.kind);
+            if (triggeredByShortcut && normalizedKind && state.activeQuickViewKind === normalizedKind) {
+                return applyQuickViewKind(null);
+            }
+            return applyQuickViewKind(normalizedKind);
         }
 
         if (commandAction === 'switch-source-view') {
@@ -3327,16 +3540,19 @@
 
         if (commandAction === 'batch-move-folder') {
             if (!state.isBatchMode || pendingBatchKeys.size === 0) return false;
+            if (triggeredByShortcut && closeModalCommandIfOpen('sp-move-modal', closeMoveToFolderModal)) return true;
             renderMoveToFolderModal(Array.from(pendingBatchKeys));
             return true;
         }
         if (commandAction === 'batch-add-tags') {
             if (!state.isBatchMode || pendingBatchKeys.size === 0) return false;
+            if (triggeredByShortcut && closeModalCommandIfOpen('sp-batch-tag-modal', closeBatchTagModal)) return true;
             renderBatchTagModal('add', Array.from(pendingBatchKeys));
             return true;
         }
         if (commandAction === 'batch-remove-tags') {
             if (!state.isBatchMode || pendingBatchKeys.size === 0) return false;
+            if (triggeredByShortcut && closeModalCommandIfOpen('sp-batch-tag-modal', closeBatchTagModal)) return true;
             renderBatchTagModal('remove', Array.from(pendingBatchKeys));
             return true;
         }
@@ -3346,10 +3562,12 @@
             return true;
         }
         if (commandAction === 'manage-tags') {
+            if (triggeredByShortcut && closeModalCommandIfOpen('sp-tag-modal', closeTagModal)) return true;
             renderTagModal();
             return true;
         }
         if (commandAction === 'open-settings') {
+            if (triggeredByShortcut && closeModalCommandIfOpen('sp-settings-modal', closeSettingsModal)) return true;
             loadStateHistory().finally(() => renderSettingsModal());
             return true;
         }
@@ -4119,6 +4337,7 @@
         }
         observedNativeScrollArea = null;
         document.removeEventListener('keydown', handleUndoKeydown, true);
+        document.removeEventListener('keydown', handleCommandShortcutKeydown, true);
         document.removeEventListener('click', handleDocumentOutsideClick, true);
         if (shadowRoot && typeof shadowRoot.removeEventListener === 'function') {
             shadowRoot.removeEventListener('scroll', handleSourceActionMenuViewportChange, true);
@@ -4480,7 +4699,6 @@
         shadowRoot.getElementById('sp-settings-btn').addEventListener('click', () => {
             loadStateHistory().finally(() => renderSettingsModal());
         });
-        shadowRoot.getElementById('sp-command-palette-btn').addEventListener('click', () => renderCommandPaletteModal());
         shadowRoot.getElementById('sp-new-group-btn').addEventListener('click', () => handleAddNewGroup());
         shadowRoot.getElementById('sp-manage-tags-btn').addEventListener('click', () => renderTagModal());
 
@@ -4530,6 +4748,7 @@
         shadowRoot.addEventListener('scroll', handleSourceActionMenuViewportChange, true);
         document.addEventListener('click', handleDocumentOutsideClick, true);
         bindNativeDocumentListeners();
+        document.addEventListener('keydown', handleCommandShortcutKeydown, true);
         document.addEventListener('keydown', handleUndoKeydown, true);
         syncSearchUi();
 
@@ -4829,6 +5048,8 @@
             setWelcomeOnboardingSeenVersion,
             getWhatsNewSeenVersion,
             setWhatsNewSeenVersion,
+            getPreferenceUsageState,
+            setOnboardingModalSeenVersions,
             getHistoryRetentionLimit,
             setHistoryRetentionLimit,
             getLanguageOverride,
@@ -4958,6 +5179,15 @@
             _resetUndoHistoryBaselineForTest: resetUndoHistoryBaseline,
             _setUndoBaselineSnapshotForTest: setUndoBaselineSnapshot,
             _handleUndoKeydownForTest: handleUndoKeydown,
+            _handleCommandShortcutKeydownForTest: handleCommandShortcutKeydown,
+            _getCommandShortcutComboFromEventForTest: getCommandShortcutComboFromEvent,
+            _formatCommandShortcutForTest: formatCommandShortcut,
+            _getCommandShortcutsForTest: getCommandShortcuts,
+            _getCommandPaletteCommandForShortcutForTest: getCommandPaletteCommandForShortcut,
+            _hasCommandPaletteModalForTest: isCommandPaletteModalOpen,
+            _setCommandShortcutForTest: setCommandShortcut,
+            _getVisibleQuickViewKindsForTest: getVisibleQuickViewKinds,
+            _setVisibleQuickViewKindsForTest: setVisibleQuickViewKinds,
             _isEditableUndoTargetForTest: isEditableUndoTarget,
             _setIsDeletingSources: (val) => { isDeletingSources = val; },
             _getFreshRowCache: () => freshRowCache,

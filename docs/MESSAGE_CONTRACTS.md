@@ -25,7 +25,7 @@ Notebook-scoped storage messages require a sender tab whose URL starts with `htt
 
 Global messages that are not notebook-state writes, such as extension enable/disable, preferences, tab focus/open, and web store feedback, are not tied to one notebook state key.
 
-`LOAD_PREFERENCES` returns `sourcesPlusPreferences` fields such as `developerModeEnabled`, `welcomeOnboardingSeenVersion`, `whatsNewSeenVersion`, `historyRetentionLimit`, and `languageOverride`. `SAVE_PREFERENCES` accepts partial preference updates and merges them with the existing stored object so toggling one preference does not clear the other stored preference fields.
+`LOAD_PREFERENCES` returns `sourcesPlusPreferences` fields such as `developerModeEnabled`, `welcomeOnboardingSeenVersion`, `whatsNewSeenVersion`, `historyRetentionLimit`, `languageOverride`, `commandShortcuts`, and `visibleQuickViewKinds`. It also returns derived `usageState.hasExistingPluginData` and `usageState.hasStoredPreferences` booleans so content code can distinguish first-time users from users upgrading with existing local extension data. `SAVE_PREFERENCES` accepts partial preference updates and merges them with the existing stored object so toggling one preference does not clear the other stored preference fields.
 
 ## Storage message key rules
 
@@ -105,7 +105,7 @@ Popup/background -> content
 
 ## Developer log messages
 
-Developer logging is controlled by `sourcesPlusPreferences.developerModeEnabled`. When disabled, content code should not append new logs. First-run welcome onboarding is controlled by `sourcesPlusPreferences.welcomeOnboardingSeenVersion` and uses the same preference messages.
+Developer logging is controlled by `sourcesPlusPreferences.developerModeEnabled`. When disabled, content code should not append new logs. First-run welcome onboarding is controlled by `sourcesPlusPreferences.welcomeOnboardingSeenVersion`, and What's New dismissal is controlled by `sourcesPlusPreferences.whatsNewSeenVersion` using the same preference messages.
 
 Log payloads are structured and sanitized before storage:
 
