@@ -32,6 +32,7 @@
     const createContentMessageRouter = globalThis.NSM_CREATE_CONTENT_MESSAGE_ROUTER;
     const createContentToastStatus = globalThis.NSM_CREATE_CONTENT_TOAST_STATUS;
     const createContentToast = globalThis.NSM_CREATE_CONTENT_TOAST;
+    const createContentStateApply = globalThis.NSM_CREATE_CONTENT_STATE_APPLY;
     const createContentDiagnostics = globalThis.NSM_CREATE_CONTENT_DIAGNOSTICS;
     const createContentSourceViewSwitchController = globalThis.NSM_CREATE_CONTENT_SOURCE_VIEW_SWITCH_CONTROLLER;
     const createContentNativeLabelImport = globalThis.NSM_CREATE_CONTENT_NATIVE_LABEL_IMPORT;
@@ -58,6 +59,7 @@
         typeof createContentMessageRouter !== 'function' ||
         typeof createContentToastStatus !== 'function' ||
         typeof createContentToast !== 'function' ||
+        typeof createContentStateApply !== 'function' ||
         typeof createContentDiagnostics !== 'function' ||
         typeof createContentSourceViewSwitchController !== 'function' ||
         typeof createContentNativeLabelImport !== 'function' ||
@@ -1053,79 +1055,17 @@
         return persistState(normalizedOptions);
     }
 
-    function applyPersistableSnapshotToRuntime(snapshot) {
-        const normalizedState = normalizeLoadedState(cloneSerializableData(snapshot));
-        if (!normalizedState || !hasPersistableManagerState(normalizedState)) return false;
-
-        state.groups = Array.isArray(normalizedState.groups) ? [...normalizedState.groups] : [];
-        state.ungrouped = Array.isArray(normalizedState.ungrouped) ? [...normalizedState.ungrouped] : [];
-        state.tagOrder = Array.isArray(normalizedState.tagOrder) ? [...normalizedState.tagOrder] : [];
-        state.isBatchMode = false;
-        pendingBatchKeys.clear();
-
-        groupsById.clear();
-        Object.entries(normalizedState.groupsById || {}).forEach(([groupId, group]) => {
-            groupsById.set(groupId, cloneSerializableData(group));
-        });
-
-        tagsById.clear();
-        Object.entries(normalizedState.tagsById || {}).forEach(([tagId, tag]) => {
-            tagsById.set(tagId, cloneSerializableData(tag));
-        });
-
-        sourceTagsById.clear();
-        Object.entries(normalizedState.sourceTagsById || {}).forEach(([sourceKey, tagIds]) => {
-            sourceTagsById.set(sourceKey, Array.isArray(tagIds) ? [...tagIds] : []);
-        });
-
-        Object.entries(normalizedState.sourceStateById || {}).forEach(([sourceKey, sourceState]) => {
-            const source = sourcesByKey.get(sourceKey);
-            if (!source) return;
-            source.enabled = Boolean(sourceState.enabled);
-            source.title = sourceState.title || source.title;
-            source.normalizedTitle = sourceState.normalizedTitle || normalizeSourceText(source.title);
-            source.stableToken = sourceState.stableToken || source.stableToken || '';
-            source.fingerprint = sourceState.fingerprint || source.fingerprint || '';
-            source.identityType = sourceState.identityType || source.identityType || 'fingerprint';
-            source.addedAt = sourceState.addedAt || source.addedAt || '';
-        });
-
-        const knownSourceKeys = new Set(state.ungrouped);
-        const visitGroupSources = (groupId) => {
-            const group = groupsById.get(groupId);
-            if (!group || !Array.isArray(group.children)) return;
-            group.children.forEach((child) => {
-                if (child?.type === 'source' && child.key) {
-                    knownSourceKeys.add(child.key);
-                } else if (child?.type === 'group' && child.id) {
-                    visitGroupSources(child.id);
-                }
-            });
-        };
-        state.groups.forEach(visitGroupSources);
-        sourcesByKey.forEach((source, sourceKey) => {
-            if (!knownSourceKeys.has(sourceKey)) {
-                state.ungrouped.push(sourceKey);
-                knownSourceKeys.add(sourceKey);
-            }
-        });
-
-        if (state.activeTagId && !tagsById.has(state.activeTagId)) {
-            state.activeTagId = null;
-        }
-
-        if (normalizedState.customHeight != null) {
-            customHeight = normalizedState.customHeight;
-            const container = shadowRoot?.querySelector?.('.sp-container');
-            if (container) container.style.height = `${customHeight}px`;
-        }
-
-        buildParentMap();
-        sourcesByKey.forEach((source) => {
-            syncSourceToPage(source, isSourceEffectivelyEnabled(source));
-        });
-        return true;
-    }
+    const stateApplyModule = createContentStateApply({
+        runtime: runtimeContext,
+        cloneSerializableData,
+        normalizeLoadedState,
+        hasPersistableManagerState,
+        normalizeSourceText,
+        buildParentMap: (...args) => buildParentMap(...args),
+        syncSourceToPage: (...args) => syncSourceToPage(...args),
+        isSourceEffectivelyEnabled: (...args) => isSourceEffectivelyEnabled(...args)
+    });
+    const { applyPersistableSnapshotToRuntime } = stateApplyModule;
 
     function undoLastOperation() {
         const snapshot = undoStack.pop();

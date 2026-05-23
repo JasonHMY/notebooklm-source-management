@@ -57,6 +57,7 @@
         "src/content/content-message-router.js",
         "src/content/content-toast-status.js",
         "src/content/content-toast.js",
+        "src/content/content-state-apply.js",
         "src/content/content-diagnostics.js",
         "src/content/content-source-view-switch-controller.js",
         "src/content/content-persistence.js",
