@@ -15,6 +15,7 @@ function clearContentGlobals() {
     delete globalThis.NSM_CREATE_CONTENT_TOAST_STATUS;
     delete globalThis.NSM_CREATE_CONTENT_TOAST;
     delete globalThis.NSM_CREATE_CONTENT_STATE_APPLY;
+    delete globalThis.NSM_CREATE_CONTENT_UNDO_HISTORY;
     delete globalThis.NSM_CREATE_CONTENT_IMPORT_EXPORT;
     delete globalThis.NSM_CREATE_CONTENT_DIAGNOSTICS;
     delete globalThis.NSM_CREATE_CONTENT_SOURCE_VIEW_SWITCH_CONTROLLER;
@@ -55,6 +56,7 @@ function loadContentModule() {
     require('../../src/content/content-toast-status.js');
     require('../../src/content/content-toast.js');
     require('../../src/content/content-state-apply.js');
+    require('../../src/content/content-undo-history.js');
     require('../../src/content/content-import-export.js');
     require('../../src/content/content-diagnostics.js');
     require('../../src/content/content-source-view-switch-controller.js');

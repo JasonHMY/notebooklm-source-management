@@ -33,6 +33,7 @@
     const createContentToastStatus = globalThis.NSM_CREATE_CONTENT_TOAST_STATUS;
     const createContentToast = globalThis.NSM_CREATE_CONTENT_TOAST;
     const createContentStateApply = globalThis.NSM_CREATE_CONTENT_STATE_APPLY;
+    const createContentUndoHistory = globalThis.NSM_CREATE_CONTENT_UNDO_HISTORY;
     const createContentImportExport = globalThis.NSM_CREATE_CONTENT_IMPORT_EXPORT;
     const createContentDiagnostics = globalThis.NSM_CREATE_CONTENT_DIAGNOSTICS;
     const createContentSourceViewSwitchController = globalThis.NSM_CREATE_CONTENT_SOURCE_VIEW_SWITCH_CONTROLLER;
@@ -61,6 +62,7 @@
         typeof createContentToastStatus !== 'function' ||
         typeof createContentToast !== 'function' ||
         typeof createContentStateApply !== 'function' ||
+        typeof createContentUndoHistory !== 'function' ||
         typeof createContentImportExport !== 'function' ||
         typeof createContentDiagnostics !== 'function' ||
         typeof createContentSourceViewSwitchController !== 'function' ||
@@ -333,7 +335,7 @@
         normalizeToastOptions,
         getToastDuration,
         getMessage,
-        getUndoStack: () => undoStack,
+        getUndoStack: () => (undoHistoryModule ? undoHistoryModule.getUndoStack() : []),
         runUndo: () => undoLastOperation()
     });
     const {
@@ -991,71 +993,6 @@
     } = persistenceModule;
 
     const UNDO_STACK_LIMIT = 20;
-    let undoStack = [];
-    let undoBaselineSnapshot = null;
-    let undoBaselineSignature = '';
-    let isApplyingUndoSnapshot = false;
-
-    function getUndoSnapshotSignature(snapshot) {
-        try {
-            return JSON.stringify(snapshot || null);
-        } catch (error) {
-            return '';
-        }
-    }
-
-    function getCurrentUndoSnapshot() {
-        try {
-            return cloneSerializableData(buildPersistableState());
-        } catch (error) {
-            console.warn('NotebookLM Source Management: Could not capture undo snapshot.', error);
-            return null;
-        }
-    }
-
-    function setUndoBaselineSnapshot(snapshot = null) {
-        const nextSnapshot = snapshot ? cloneSerializableData(snapshot) : getCurrentUndoSnapshot();
-        undoBaselineSnapshot = nextSnapshot;
-        undoBaselineSignature = getUndoSnapshotSignature(nextSnapshot);
-        return Boolean(nextSnapshot);
-    }
-
-    function resetUndoHistoryBaseline(snapshot = null) {
-        undoStack = [];
-        setUndoBaselineSnapshot(snapshot);
-    }
-
-    function recordUndoBaselineForSave(nextSnapshot, options = {}) {
-        const shouldRecordUndo = options.recordUndo !== false && !isApplyingUndoSnapshot;
-        const nextSignature = getUndoSnapshotSignature(nextSnapshot);
-
-        if (
-            shouldRecordUndo &&
-            undoBaselineSnapshot &&
-            undoBaselineSignature &&
-            nextSignature &&
-            nextSignature !== undoBaselineSignature
-        ) {
-            undoStack.push(cloneSerializableData(undoBaselineSnapshot));
-            if (undoStack.length > UNDO_STACK_LIMIT) {
-                undoStack.splice(0, undoStack.length - UNDO_STACK_LIMIT);
-            }
-        }
-
-        undoBaselineSnapshot = cloneSerializableData(nextSnapshot);
-        undoBaselineSignature = nextSignature;
-    }
-
-    function saveState(options = {}) {
-        const normalizedOptions = options && typeof options === 'object' ? options : {};
-        if (projectId) {
-            const nextSnapshot = getCurrentUndoSnapshot();
-            if (nextSnapshot) {
-                recordUndoBaselineForSave(nextSnapshot, normalizedOptions);
-            }
-        }
-        return persistState(normalizedOptions);
-    }
 
     const stateApplyModule = createContentStateApply({
         runtime: runtimeContext,
@@ -1069,29 +1006,34 @@
     });
     const { applyPersistableSnapshotToRuntime } = stateApplyModule;
 
-    function undoLastOperation() {
-        const snapshot = undoStack.pop();
-        if (!snapshot) {
-            showToast(getMessage('ui_undo_empty'), { variant: 'info' });
-            return false;
-        }
+    const undoHistoryModule = createContentUndoHistory({
+        cloneSerializableData,
+        buildPersistableState: (...args) => buildPersistableState(...args),
+        applyPersistableSnapshotToRuntime,
+        showToast: (...args) => showToast(...args),
+        getMessage,
+        closeSourceActionMenu: (...args) => closeSourceActionMenu(...args),
+        render: (...args) => render(...args),
+        runSaveAfterUndo: (options) => saveState(options),
+        stackLimit: UNDO_STACK_LIMIT
+    });
+    const {
+        getCurrentUndoSnapshot,
+        setUndoBaselineSnapshot,
+        resetUndoHistoryBaseline,
+        recordUndoBaselineForSave,
+        undoLastOperation
+    } = undoHistoryModule;
 
-        isApplyingUndoSnapshot = true;
-        try {
-            if (!applyPersistableSnapshotToRuntime(snapshot)) {
-                showToast(getMessage('ui_undo_empty'), { variant: 'info' });
-                return false;
+    function saveState(options = {}) {
+        const normalizedOptions = options && typeof options === 'object' ? options : {};
+        if (projectId) {
+            const nextSnapshot = getCurrentUndoSnapshot();
+            if (nextSnapshot) {
+                recordUndoBaselineForSave(nextSnapshot, normalizedOptions);
             }
-
-            closeSourceActionMenu();
-            render();
-            saveState({ immediate: true, critical: true, recordUndo: false });
-            setUndoBaselineSnapshot(snapshot);
-            showToast(getMessage('ui_undo_toast'), { variant: 'success' });
-            return true;
-        } finally {
-            isApplyingUndoSnapshot = false;
         }
+        return persistState(normalizedOptions);
     }
 
     function isEditableUndoTarget(target) {
@@ -4709,7 +4651,7 @@
             _getToastQueueLengthForTest: () => toastModule.getToastQueueLength(),
             _getActiveToastItemForTest: () => toastModule.getActiveToastItem(),
             _hideActiveToastForTest: hideActiveToast,
-            _getUndoStackLengthForTest: () => undoStack.length,
+            _getUndoStackLengthForTest: () => undoHistoryModule.getUndoStackLength(),
             _resetUndoHistoryBaselineForTest: resetUndoHistoryBaseline,
             _setUndoBaselineSnapshotForTest: setUndoBaselineSnapshot,
             _handleUndoKeydownForTest: handleUndoKeydown,
