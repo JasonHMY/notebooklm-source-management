@@ -1561,13 +1561,13 @@ describe('modal keyboard helpers', () => {
     });
 
     it('declares dialog titles through aria-labelledby', () => {
-        const source = fs.readFileSync(path.join(__dirname, '../../src/content/content-modals.js'), 'utf8');
         const moveSource = fs.readFileSync(path.join(__dirname, '../../src/content/content-modal-move.js'), 'utf8');
+        const tagSource = fs.readFileSync(path.join(__dirname, '../../src/content/content-modal-tag.js'), 'utf8');
 
         expect(moveSource).toContain("'aria-labelledby': 'sp-move-modal-title'");
         expect(moveSource).toContain("id: 'sp-move-modal-title'");
-        expect(source).toContain("'aria-labelledby': 'sp-tag-modal-title'");
-        expect(source).toContain("id: 'sp-tag-modal-title'");
+        expect(tagSource).toContain("'aria-labelledby': 'sp-tag-modal-title'");
+        expect(tagSource).toContain("id: 'sp-tag-modal-title'");
     });
 });
 

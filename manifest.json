@@ -75,6 +75,7 @@
         "src/content/content-modal-tag-filter.js",
         "src/content/content-modal-move.js",
         "src/content/content-modal-command-palette.js",
+        "src/content/content-modal-tag.js",
         "src/content/content-modals.js",
         "src/content/content-render.js",
         "src/content/content-view-state.js",
