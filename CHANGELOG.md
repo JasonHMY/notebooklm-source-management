@@ -44,6 +44,7 @@
 - **按钮扫光动效关闭 (Button Sweep Hover Motion Disabled)**: 关闭 `.sp-button` 的 shimmer 扫光和 `.sp-glare-hover` 的 glare 扫光伪元素，保留普通 hover 背景、边框和缩放反馈。
 - **启动弹窗版本分流 (Startup Modal Version Routing)**: 首次使用的新用户只显示欢迎弹窗并标记当前版本更新说明已处理，已有本地插件数据的老用户升级后按 manifest 版本显示一次 What's New 弹窗。
 - **深拷贝改用 structuredClone (Deep Clone via structuredClone)**: 将 `src/background/index.js` 的 `cloneSerializableData`、`src/content/content-developer-logger.js` 的 `getDeveloperLogs` 与 `src/content/content-state-reconcile.js` 的 `applySourceRemapsToSnapshot` 中裸 `JSON.parse(JSON.stringify)` 替换为 `structuredClone` 优先并保留 JSON 回退，与 `content-persistence.js`、`content/index.js` 已有模式一致。
+- **项目目录索引同步 (Project Directory Index Sync)**: 更新 `docs/PROJECT_DIRECTORY.md` 目录树、Runtime 加载树和功能域树，补齐 `content-state-apply`、`content-undo-history`、`content-import-export`、`content-modal-{welcome,whats-new,tag-filter,move,command-palette,tag,settings}` 与 `content-toast` 等模块条目。
 
 ### Fixed
 - **偏好与恢复点保存失败反馈 (Preference and Restore Point Save Failure Feedback)**: 修复语言、历史保留数量等偏好保存失败时设置页误报成功的问题，并让手动恢复点创建在 history 写入失败时显示失败结果。

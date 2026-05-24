@@ -49,8 +49,30 @@ NotebookLM Source Management
 │   │   │   └── 首次欢迎、更新介绍、设置、导入预览、标签、移动文件夹、批量标签 modal
 │   │   ├── content-modal-focus.js
 │   │   │   └── modal 初始聚焦、Tab trap、Escape 关闭和焦点恢复 helper
+│   │   ├── content-modal-welcome.js
+│   │   │   └── 首次欢迎 modal 渲染、按钮和反馈入口 helper
+│   │   ├── content-modal-whats-new.js
+│   │   │   └── 更新介绍 modal 渲染、变更亮点和反馈入口 helper
+│   │   ├── content-modal-tag-filter.js
+│   │   │   └── tag filter modal：标签列表、选中状态、过滤回调 helper
+│   │   ├── content-modal-move.js
+│   │   │   └── 移动到分组 modal：候选分组列表、确认/取消 helper
+│   │   ├── content-modal-command-palette.js
+│   │   │   └── 命令面板 modal：命令搜索、快捷键展示、触发执行 helper
+│   │   ├── content-modal-tag.js
+│   │   │   └── 单/批量标签编辑 modal：现有标签选择、新建、保存 helper
+│   │   ├── content-modal-settings.js
+│   │   │   └── 设置 modal：备份恢复、偏好、帮助/反馈分组渲染 helper
 │   │   ├── content-persistence.js
-│   │   │   └── save/load/history/recovery/import-export 持久化 helper
+│   │   │   └── save/load/history/recovery 持久化 helper
+│   │   ├── content-import-export.js
+│   │   │   └── 配置 JSON 导出/导入、size/depth/cycle 校验、preview diff helper
+│   │   ├── content-undo-history.js
+│   │   │   └── 撤销/重做栈、容量限制、apply/clear helper
+│   │   ├── content-state-apply.js
+│   │   │   └── 持久化快照应用到 runtime state 的归一化 helper
+│   │   ├── content-toast.js
+│   │   │   └── toast 容器与提示渲染 helper
 │   │   ├── content-source-list-scan.js
 │   │   │   └── 普通来源列表扫描 helper；原生 checkbox 状态读取
 │   │   ├── content-native-label-scan.js
@@ -196,6 +218,10 @@ manifest.json
     ├── src/content/content-runtime-state.js
     ├── src/content/content-message-router.js
     ├── src/content/content-toast-status.js
+    ├── src/content/content-toast.js
+    ├── src/content/content-state-apply.js
+    ├── src/content/content-undo-history.js
+    ├── src/content/content-import-export.js
     ├── src/content/content-diagnostics.js
     ├── src/content/content-source-view-switch-controller.js
     ├── src/content/content-persistence.js
@@ -206,6 +232,13 @@ manifest.json
     ├── src/content/content-native-label-import-modal.js
     ├── src/content/content-source-partial-sync-guard.js
     ├── src/content/content-modal-focus.js
+    ├── src/content/content-modal-welcome.js
+    ├── src/content/content-modal-whats-new.js
+    ├── src/content/content-modal-tag-filter.js
+    ├── src/content/content-modal-move.js
+    ├── src/content/content-modal-command-palette.js
+    ├── src/content/content-modal-tag.js
+    ├── src/content/content-modal-settings.js
     ├── src/content/content-modals.js
     ├── src/content/content-render.js
     ├── src/content/content-view-state.js
@@ -360,6 +393,14 @@ manifest.json
 │   ├── 先看
 │   │   ├── src/content/content-modals.js
 │   │   ├── src/content/content-modal-focus.js
+│   │   ├── src/content/content-modal-welcome.js
+│   │   ├── src/content/content-modal-whats-new.js
+│   │   ├── src/content/content-modal-settings.js
+│   │   ├── src/content/content-modal-tag.js
+│   │   ├── src/content/content-modal-tag-filter.js
+│   │   ├── src/content/content-modal-move.js
+│   │   ├── src/content/content-modal-command-palette.js
+│   │   ├── src/content/content-import-export.js
 │   │   ├── src/content/content-native-label-import-controller.js
 │   │   ├── src/content/content-native-label-import-modal.js
 │   │   ├── src/content/index.js
@@ -386,6 +427,9 @@ manifest.json
 │   │   └── 旧状态 remap/repair
 │   ├── 先看
 │   │   ├── src/content/content-persistence.js
+│   │   ├── src/content/content-state-apply.js
+│   │   ├── src/content/content-undo-history.js
+│   │   ├── src/content/content-import-export.js
 │   │   ├── src/background/index.js
 │   │   ├── src/content/content-state-reconcile.js
 │   │   └── src/content/index.js
@@ -586,6 +630,9 @@ content runtime memory
 ├── 打包 allowlist
 │   ├── 命令: npm run test:unit -- --runTestsByPath tests/package.test.js
 │   └── 文件: tests/package.test.js
+├── manifest 与 content loader 同步
+│   ├── 命令: npm run test:unit -- --runTestsByPath tests/manifest-loader-sync.test.js
+│   └── 文件: tests/manifest-loader-sync.test.js
 ├── 扩展真实上下文 smoke
 │   ├── 命令: npm run test:smoke
 │   ├── 文件: tests/smoke/extension-smoke.spec.js
