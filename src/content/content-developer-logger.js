@@ -532,7 +532,16 @@
         }
 
         function getDeveloperLogs() {
-            return developerLogs.map((entry) => JSON.parse(JSON.stringify(entry)));
+            return developerLogs.map((entry) => {
+                if (typeof globalThis.structuredClone === 'function') {
+                    try {
+                        return globalThis.structuredClone(entry);
+                    } catch (error) {
+                        // Fall through to JSON cloning for plain log entries.
+                    }
+                }
+                return JSON.parse(JSON.stringify(entry));
+            });
         }
 
         function getLatestDeveloperLogAt() {

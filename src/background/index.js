@@ -648,6 +648,13 @@ function getSnapshotSaveRevision(snapshot) {
 
 function cloneSerializableData(value) {
     if (value == null) return value;
+    if (typeof globalThis.structuredClone === 'function') {
+        try {
+            return globalThis.structuredClone(value);
+        } catch (error) {
+            // Fall through to JSON cloning for plain persisted state objects.
+        }
+    }
     try {
         return JSON.parse(JSON.stringify(value));
     } catch (error) {

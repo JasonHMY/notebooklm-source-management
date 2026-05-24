@@ -337,7 +337,18 @@
 
         function applySourceRemapsToSnapshot(snapshot, remaps) {
             const sourceRemaps = normalizeSourceRemaps(remaps);
-            const clonedSnapshot = JSON.parse(JSON.stringify(snapshot || {}));
+            const baseSnapshot = snapshot || {};
+            let clonedSnapshot;
+            if (typeof globalThis.structuredClone === 'function') {
+                try {
+                    clonedSnapshot = globalThis.structuredClone(baseSnapshot);
+                } catch (error) {
+                    // Fall through to JSON cloning for plain persisted snapshots.
+                }
+            }
+            if (!clonedSnapshot) {
+                clonedSnapshot = JSON.parse(JSON.stringify(baseSnapshot));
+            }
             if (sourceRemaps.size === 0) return clonedSnapshot;
 
             const mapSourceKey = (sourceKey) => sourceRemaps.get(sourceKey) || sourceKey;
