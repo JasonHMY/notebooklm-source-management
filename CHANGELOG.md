@@ -37,6 +37,7 @@
 - **更新后介绍弹窗 (What's New Modal)**: 新增按功能版本显示一次的更新介绍弹窗，并在开发者功能区提供测试入口，便于大功能发布时向用户说明变化。
 - **本地快照策略 (Local Snapshot Policy)**: 设置页新增历史快照保留数量选择和手动命名恢复点，支持按每个 notebook 保留更多本地版本历史。
 - **手动语言切换 (Manual Language Selection)**: 设置页新增 Auto、English、Español、简体中文语言选择，允许扩展 UI 独立于 Chrome UI 语言切换。
+- **manifest 与 loader 同步测试 (Manifest <-> Loader Sync Test)**: 新增 `tests/manifest-loader-sync.test.js`，断言 `manifest.json` content_scripts 中 `src/content/*.js` 列表与 `tests/helpers/load-content-module.js` 的 `require` 顺序与文件集合一致，并校验 `clearContentGlobals()` 至少覆盖每个 helper 模块，防止后续抽取模块时测试环境与运行时漂移。
 
 ### Changed
 - **设置页信息架构收敛 (Settings Information Architecture Consolidation)**: 将设置页的导出、导入和版本历史合并到“备份与恢复”，将反馈与诊断信息合并到“帮助与反馈”，保存状态移动到标题栏，并仅在导入预览有效时显示“应用导入”按钮；来源修复仅在检测到匹配问题时独立突出显示。
