@@ -49,6 +49,7 @@
 - **启动弹窗版本分流 (Startup Modal Version Routing)**: 首次使用的新用户只显示欢迎弹窗并标记当前版本更新说明已处理，已有本地插件数据的老用户升级后按 manifest 版本显示一次 What's New 弹窗。
 - **深拷贝改用 structuredClone (Deep Clone via structuredClone)**: 将 `src/background/index.js` 的 `cloneSerializableData`、`src/content/content-developer-logger.js` 的 `getDeveloperLogs` 与 `src/content/content-state-reconcile.js` 的 `applySourceRemapsToSnapshot` 中裸 `JSON.parse(JSON.stringify)` 替换为 `structuredClone` 优先并保留 JSON 回退，与 `content-persistence.js`、`content/index.js` 已有模式一致。
 - **项目目录索引同步 (Project Directory Index Sync)**: 更新 `docs/PROJECT_DIRECTORY.md` 目录树、Runtime 加载树和功能域树，补齐 `content-state-apply`、`content-undo-history`、`content-import-export`、`content-modal-{welcome,whats-new,tag-filter,move,command-palette,tag,settings}` 与 `content-toast` 等模块条目。
+- **快照签名 helper 抽离 (Snapshot Signature Helper Extraction)**: 将 `content-persistence.js` 中纯粹的快照比较与配额识别逻辑（`isStorageQuotaError`、`getStorageMetadataFromResponse/Result`、`getSnapshotSaveRevision`、`isStaleStateWrite`、`getStableComparablePersistableValue`、`getPersistableSnapshotSignature`、`arePersistableSnapshotsEquivalent`）抽离到新模块 `content-snapshot-signature.js`；persistence 在 factory 启动时从 `globalThis.NSM_CREATE_CONTENT_SNAPSHOT_SIGNATURE` 取 helpers，公共返回的字段不变，`src/content/index.js` 与 `src/background/index.js` 调用方无需调整。同时在 manifest/load-content-module/test harness 中登记新模块，并补 `tests/content/content-snapshot-signature.test.js` 单测覆盖所有 helper。
 
 ### Fixed
 - **偏好与恢复点保存失败反馈 (Preference and Restore Point Save Failure Feedback)**: 修复语言、历史保留数量等偏好保存失败时设置页误报成功的问题，并让手动恢复点创建在 history 写入失败时显示失败结果。

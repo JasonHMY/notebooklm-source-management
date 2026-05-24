@@ -62,6 +62,7 @@
         "src/content/content-import-export.js",
         "src/content/content-diagnostics.js",
         "src/content/content-source-view-switch-controller.js",
+        "src/content/content-snapshot-signature.js",
         "src/content/content-persistence.js",
         "src/content/content-source-list-scan.js",
         "src/content/content-native-label-scan.js",
