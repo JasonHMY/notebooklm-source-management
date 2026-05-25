@@ -164,7 +164,6 @@
             throw new Error('NotebookLM Source Management: createContentTreeInteractions requires NSM_CREATE_CONTENT_NATIVE_CHECKBOX_SYNC to be loaded first.');
         }
         const {
-            getNativeControlAttribute,
             getNativeCheckboxState,
             shouldToggleNativeCheckbox,
             resolveDetachedRowEntry

@@ -495,18 +495,10 @@
         }
         const {
             ACTIVE_LABEL_VIEW_CONTROL_PATTERN,
-            SOURCE_VIEW_SWITCH_TEXT_PATTERN,
-            SOURCE_VIEW_SWITCH_ID_PATTERN,
-            SOURCE_VIEW_SWITCH_ICON_PATTERN,
-            NATIVE_LABEL_ENTRY_POINT_TEXT_PATTERN,
             SELECT_ALL_TEXT_PATTERN,
             NATIVE_SOURCE_CONTROL_TEXT_PATTERN,
-            NATIVE_LABEL_TITLE_BLOCKED_TEXT_PATTERN,
-            NATIVE_LABEL_TITLE_RESERVED_TEXT_PATTERN,
             cleanAccessibleLabelTitle,
-            collapseRepeatedNativeLabelTitle,
             cleanNativeLabelTitleCandidate,
-            getComparableLabelText,
             getComparableNativeLabelTitle,
             isLikelyNativeLabelTitle,
             isNativeLabelEntryPointControl,

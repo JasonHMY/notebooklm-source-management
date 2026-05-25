@@ -63,7 +63,6 @@
             getStorageMetadataFromResult,
             getSnapshotSaveRevision,
             isStaleStateWrite,
-            getStableComparablePersistableValue,
             getPersistableSnapshotSignature,
             arePersistableSnapshotsEquivalent
         } = createSnapshotSignatureFactory();
@@ -106,8 +105,6 @@
         }
         const {
             collectSnapshotGroupedSourceKeys,
-            getSnapshotGroupInfo,
-            isCompatibleStructuralRepairCandidate,
             createStructurallyRepairedState,
             findStructuralRepairCandidate
         } = createStateRepairFactory({
