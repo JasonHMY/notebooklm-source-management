@@ -50,10 +50,11 @@ NotebookLM is a single-page app, so switching notebooks does not always trigger 
 Use these commands when you want to verify the repository without doing a full manual smoke pass:
 
 - For a maintainer-oriented map of directories, feature areas, storage keys, and test entrypoints, see [docs/PROJECT_DIRECTORY.md](docs/PROJECT_DIRECTORY.md).
+- `npm run lint` runs ESLint over `src/`, `tests/`, `scripts/`, and `eslint.config.js` using the flat config that pins per-area globals (NSM_* factories, Chrome MV3, Jest, Node) and blocks `innerHTML` writes.
 - `npm run test:unit` runs the Jest unit suite.
 - `npm run test:smoke` runs the Playwright browser smoke suite headlessly by default, so it should not open visible browser windows during normal development.
 - `PLAYWRIGHT_HEADLESS=false npm run test:smoke` runs the smoke suite with visible browser windows when you need to debug an interaction.
-- `npm run verify:full` runs both suites in sequence.
+- `npm run verify:full` runs lint, unit, and smoke suites in sequence — the same gate the GitHub Actions CI workflow enforces.
 - `npm run playwright:install` installs the Chromium browser used by Playwright smoke.
 - `npm run package` creates the Chrome Web Store zip and validates its contents.
 
