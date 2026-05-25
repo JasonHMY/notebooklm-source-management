@@ -69,6 +69,8 @@ NotebookLM Source Management
 │   │   │   └── 设置 modal：备份恢复、偏好、帮助/反馈分组渲染 helper
 │   │   ├── content-snapshot-signature.js
 │   │   │   └── 快照签名归一化、save revision 解析、storage 配额错误识别 helper
+│   │   ├── content-state-repair.js
+│   │   │   └── 受损分组树结构修复候选筛选、合并和 grouped-source-key 扫描 helper
 │   │   ├── content-persistence.js
 │   │   │   └── save/load/history/recovery 持久化 helper
 │   │   ├── content-import-export.js
@@ -231,6 +233,7 @@ manifest.json
     ├── src/content/content-diagnostics.js
     ├── src/content/content-source-view-switch-controller.js
     ├── src/content/content-snapshot-signature.js
+    ├── src/content/content-state-repair.js
     ├── src/content/content-persistence.js
     ├── src/content/content-source-list-scan.js
     ├── src/content/content-native-label-scan.js
@@ -441,6 +444,7 @@ manifest.json
 │   ├── 先看
 │   │   ├── src/content/content-persistence.js
 │   │   ├── src/content/content-snapshot-signature.js
+│   │   ├── src/content/content-state-repair.js
 │   │   ├── src/content/content-state-apply.js
 │   │   ├── src/content/content-undo-history.js
 │   │   ├── src/content/content-import-export.js
@@ -450,6 +454,7 @@ manifest.json
 │   └── 测试
 │       ├── tests/content/content-persistence.test.js
 │       ├── tests/content/content-snapshot-signature.test.js
+│       ├── tests/content/content-state-repair.test.js
 │       ├── tests/content/content-state-reconcile.test.js
 │       └── tests/background.test.js
 ├── 开发者日志

@@ -20,6 +20,7 @@ function clearContentGlobals() {
     delete globalThis.NSM_CREATE_CONTENT_DIAGNOSTICS;
     delete globalThis.NSM_CREATE_CONTENT_SOURCE_VIEW_SWITCH_CONTROLLER;
     delete globalThis.NSM_CREATE_CONTENT_SNAPSHOT_SIGNATURE;
+    delete globalThis.NSM_CREATE_CONTENT_STATE_REPAIR;
     delete globalThis.NSM_CREATE_CONTENT_PERSISTENCE;
     delete globalThis.NSM_CREATE_CONTENT_SOURCE_LIST_SCAN;
     delete globalThis.NSM_CREATE_CONTENT_NATIVE_LABEL_SCAN;
@@ -66,6 +67,7 @@ function loadContentModule() {
     require('../../src/content/content-diagnostics.js');
     require('../../src/content/content-source-view-switch-controller.js');
     require('../../src/content/content-snapshot-signature.js');
+    require('../../src/content/content-state-repair.js');
     require('../../src/content/content-persistence.js');
     require('../../src/content/content-source-list-scan.js');
     require('../../src/content/content-native-label-scan.js');
