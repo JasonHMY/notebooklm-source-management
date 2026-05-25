@@ -27,6 +27,8 @@ NotebookLM Source Management
 .
 ├── manifest.json
 │   └── MV3 清单、权限、content script 加载顺序、popup/background 入口
+├── eslint.config.js
+│   └── ESLint 9 flat config；按 src/tests/scripts 分别配 globals；no-undef、no-restricted-syntax (innerHTML)、no-unused-vars (warn)
 ├── src/
 │   ├── content/
 │   │   ├── index.js
@@ -508,15 +510,18 @@ manifest.json
     │   ├── 版本同步
     │   ├── release zip allowlist
     │   ├── forbidden entries 检查
+    │   ├── ESLint flat config 静态检查（CI 在测试前跑 `npm run lint`）
     │   └── GitHub Actions 验证
     ├── 先看
     │   ├── scripts/package.js
     │   ├── tests/package.test.js
     │   ├── package.json
     │   ├── manifest.json
+    │   ├── eslint.config.js
     │   └── .github/workflows/ci.yml
     └── 测试
-        └── tests/package.test.js
+        ├── tests/package.test.js
+        └── npm run lint
 ```
 
 ## 4. 数据与存储树
