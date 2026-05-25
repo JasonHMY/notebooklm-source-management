@@ -39,6 +39,7 @@ function clearContentGlobals() {
     delete globalThis.NSM_CREATE_CONTENT_RENDER;
     delete globalThis.NSM_CREATE_CONTENT_VIEW_STATE;
     delete globalThis.NSM_CREATE_CONTENT_TREE_INTERACTIONS;
+    delete globalThis.NSM_CREATE_CONTENT_NATIVE_LABEL_DETECTOR;
     delete globalThis.NSM_CREATE_CONTENT_SOURCE_SYNC;
 }
 
@@ -83,6 +84,7 @@ function loadContentModule() {
     require('../../src/content/content-render.js');
     require('../../src/content/content-view-state.js');
     require('../../src/content/content-tree-interactions.js');
+    require('../../src/content/content-native-label-detector.js');
     require('../../src/content/content-source-sync.js');
     return require('../../src/content/index.js');
 }

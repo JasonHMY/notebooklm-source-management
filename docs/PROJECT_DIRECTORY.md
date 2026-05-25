@@ -37,6 +37,8 @@ NotebookLM Source Management
 │   │   │   └── 来源标题/key/token/fingerprint/icon/loading/failed 状态识别
 │   │   ├── content-source-sync.js
 │   │   │   └── 来源扫描、列表/标签视图识别、折叠标签组、MutationObserver 同步
+│   │   ├── content-native-label-detector.js
+│   │   │   └── 原生标签标题清理、可比较归一、label/view-switch 控件识别 helper
 │   │   ├── content-source-actions.js
 │   │   │   └── 来源三点菜单、详情、重命名、删除、原生 menu/dialog 自动化
 │   │   ├── content-source-action-menu.js
@@ -246,6 +248,7 @@ manifest.json
     ├── src/content/content-render.js
     ├── src/content/content-view-state.js
     ├── src/content/content-tree-interactions.js
+    ├── src/content/content-native-label-detector.js
     ├── src/content/content-source-sync.js
     └── src/content/index.js
 ```
@@ -293,9 +296,11 @@ manifest.json
 │   ├── 先看
 │   │   ├── src/content/source-descriptor-helpers.js
 │   │   ├── src/content/content-source-list-scan.js
+│   │   ├── src/content/content-native-label-detector.js
 │   │   └── src/content/content-source-sync.js
 │   └── 测试
 │       ├── tests/content/content-source-sync.test.js
+│       ├── tests/content/content-native-label-detector.test.js
 │       └── tests/content/content-source-list-scan.test.js
 ├── 列表视图 / 标签视图同步
 │   ├── 负责
