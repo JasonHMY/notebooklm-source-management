@@ -81,6 +81,7 @@
         "src/content/content-modals.js",
         "src/content/content-render.js",
         "src/content/content-view-state.js",
+        "src/content/content-native-checkbox-sync.js",
         "src/content/content-tree-interactions.js",
         "src/content/content-native-label-detector.js",
         "src/content/content-source-sync.js",

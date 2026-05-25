@@ -165,6 +165,7 @@ describe('drag and drop ordering guards', () => {
     beforeEach(() => {
         jest.resetModules();
         setupGlobalMocks();
+        require('../../src/content/content-native-checkbox-sync.js');
         createContentTreeInteractions = require('../../src/content/content-tree-interactions.js');
     });
 

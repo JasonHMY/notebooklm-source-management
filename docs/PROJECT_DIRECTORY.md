@@ -43,6 +43,8 @@ NotebookLM Source Management
 │   │   │   └── 来源三点菜单、详情、重命名、删除、原生 menu/dialog 自动化
 │   │   ├── content-source-action-menu.js
 │   │   │   └── 来源三点菜单和 submenu item 生成 helper；失败来源菜单收口
+│   │   ├── content-native-checkbox-sync.js
+│   │   │   └── 原生 checkbox 状态读取、切换判定、detached 行解析 helper
 │   │   ├── content-tree-interactions.js
 │   │   │   └── 分组树、拖拽、checkbox、批量模式交互
 │   │   ├── content-render.js
@@ -247,6 +249,7 @@ manifest.json
     ├── src/content/content-modals.js
     ├── src/content/content-render.js
     ├── src/content/content-view-state.js
+    ├── src/content/content-native-checkbox-sync.js
     ├── src/content/content-tree-interactions.js
     ├── src/content/content-native-label-detector.js
     ├── src/content/content-source-sync.js
@@ -336,11 +339,13 @@ manifest.json
 │   │   └── 批量删除入口
 │   ├── 先看
 │   │   ├── src/content/content-tree-interactions.js
+│   │   ├── src/content/content-native-checkbox-sync.js
 │   │   ├── src/content/content-render.js
 │   │   ├── src/content/content-modals.js
 │   │   └── src/content/content-source-actions.js
 │   └── 测试
 │       ├── tests/content/content-tree.test.js
+│       ├── tests/content/content-native-checkbox-sync.test.js
 │       ├── tests/content/content-render.test.js
 │       └── tests/content/content-source-actions.test.js
 ├── 标签系统
