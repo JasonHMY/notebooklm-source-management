@@ -14,7 +14,6 @@
             normalizeLoadedState,
             hasPersistableManagerState,
             buildPersistableState,
-            applyPersistableSnapshotToRuntime,
             buildSourceLookup,
             resolveStoredSourceKey,
             buildNormalizedTagState,

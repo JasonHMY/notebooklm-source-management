@@ -248,23 +248,6 @@
             : null;
         const createNativeLabelImportPreviewNodes = nativeLabelImportModal?.createPreviewNodes || (() => []);
 
-        function getTagColorRgb(color) {
-            const normalizedColor = normalizeTagColor(color);
-            if (!normalizedColor) return null;
-
-            return {
-                r: parseInt(normalizedColor.slice(1, 3), 16),
-                g: parseInt(normalizedColor.slice(3, 5), 16),
-                b: parseInt(normalizedColor.slice(5, 7), 16)
-            };
-        }
-
-        function getTagColorRgba(color, alpha) {
-            const rgb = getTagColorRgb(color);
-            if (!rgb) return '';
-            return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
-        }
-
         function getTagColorPresets() {
             return [...TAG_COLOR_PRESETS];
         }

@@ -339,10 +339,7 @@
         runUndo: () => undoLastOperation()
     });
     const {
-        ensureToastElement,
-        clearToastTimeout,
         hideActiveToast,
-        showNextToast,
         showToast,
         showUndoableToast
     } = toastModule;
@@ -363,20 +360,13 @@
         waitForElement,
         findSourcePanel,
         findSourcePanelContent,
-        getSourcePanelHeader,
-        getElementComputedStyle,
-        isTransparentColor,
         resolveSourcePanelSurfaceColor,
         applySourcePanelSurfaceColor,
-        getElementBoundingRect,
-        hasRenderableBox,
-        isElementRenderable,
         isSourcePanelCollapsed,
         isSourcePanelRenderable,
         isManagerAttachedToPanel,
         clearScheduledPanelLifecycleSync,
         schedulePanelLifecycleSync,
-        handleSourcePanelHeaderInteraction,
         bindPanelLifecycleHooks
     } = panelDomModule;
 
@@ -391,16 +381,11 @@
         getDefaultTagColor,
         normalizeTagColorInputValue,
         getSerializedTag,
-        getTagColorRgb,
-        getTagColorRgba,
         getTagColorPresets,
         getTagStyleVars,
         getTagColorPreviewStyle,
-        generateTagId,
-        getSortedTagIds,
         getSourceTagIds,
         getTagUsageCounts,
-        findExistingTagIdByLabel,
         createTag,
         updateTag,
         setSourceTagIds,
@@ -529,21 +514,15 @@
 
     const {
         canOpenSourceActionMenu,
-        getViewportSize,
         findSourceActionButton,
         getSourceActionMenuItems,
         getSourceActionSubmenuItems,
-        getSourceActionMenuHeight,
         getSourceActionMenuPosition,
         getSourceActionSubmenuPosition,
         closeSourceActionMenu,
         dismissSourceActionMenuAndRender,
         toggleSourceActionMenu,
         syncActiveSourceActionMenuState,
-        findNativeSourceMenuButton,
-        getNativeMenuItemMetadata,
-        getNativeMenuItemFingerprint,
-        queryNativeMenuItems,
         queryNativeDialogs,
         getNativeDialogMetadata,
         getNativeDialogFingerprint,
@@ -556,17 +535,9 @@
         findNativeDeleteMenuItem,
         findNativeRenameMenuItem,
         findNativeDeleteConfirmButton,
-        getNativeSourceDetailsMenuItemScore,
         findNativeSourceDetailsMenuItem,
-        resolveFreshSourceRow,
-        createSyntheticActivationEvent,
-        dispatchSyntheticActivation,
-        isSourceDetailsTargetCandidate,
-        collectSourceDetailsCandidates,
-        getSourceDetailsTargetScore,
         triggerNativeSourceDetailsDirectWithResult,
         triggerNativeSourceDetailsDirect,
-        waitForNativeMenuItems,
         waitForNativeDialogs,
         triggerNativeSourceDetailsViaNativeMenuWithResult,
         triggerNativeSourceDetailsViaNativeMenu,
@@ -609,25 +580,18 @@
         isDescendant
     });
     const {
-        getEffectivelyEnabledSources,
         areAllAncestorsEnabled,
         isSourceEffectivelyEnabled,
         isGroupWithinActiveIsolation,
         isSourceWithinActiveIsolation,
         parseSearchQuery,
-        sourceMatchesSearchCriteria,
-        groupMatchesSearchCriteria,
         sourceMatchesCurrentFilters,
         hasActiveRenderFilters,
         groupHasRenderableDescendant,
         shouldRenderGroup,
-        getSearchUiElements,
-        getCurrentSearchValue,
-        hasCurrentSearchValue,
         isSearchUiCurrentlyExpanded,
         syncSearchUi,
         expandSearch,
-        collapseSearchIfEmpty,
         handleSearchButtonClick,
         handleSearchCloseButtonClick,
         handleSearchOutsideClick,
@@ -708,8 +672,6 @@
         closeBatchTagModal,
         executeBatchTagUpdate,
         renderBatchTagModal,
-        createTagColorControl,
-        createTagEditor,
         getModalFocusableElements,
         focusModalInitialElement,
         handleModalKeyboardEvent,
@@ -722,11 +684,9 @@
         getTagColorPresets: getModalTagColorPresets,
         closeSettingsModal,
         renderSettingsModal,
-        getImportPreviewMessage,
         renderNativeLabelImportModal,
         renderWelcomeModal,
         renderWhatsNewModal,
-        renderCommandPaletteModal,
         renderTagFilterModal,
         closeTagFilterModal,
         renderTagModal
@@ -767,14 +727,12 @@
         debounce
     });
     const {
-        isFreshRowCacheEntryMatch,
         resolveFreshRowEntry,
         findFreshCheckbox,
         getSourceViewInfo,
         detectSourceView,
         getSourceEntries,
         getCollapsedNativeLabelGroupSummaries,
-        getCollapsedNativeLabelGroupTitles,
         expandCollapsedNativeLabelGroups,
         restoreNativeLabelExpansionControls,
         getSourceElements,
@@ -782,7 +740,6 @@
         hasRenderableSourceRows,
         getSourcePanelState,
         isSourcePanelManageable,
-        isSourceDetailViewPanel,
         scanAndSyncSources,
         handleDomChanges,
         debouncedScanAndSync,
@@ -903,22 +860,13 @@
         sourceMatchesSearchQuery,
         getSearchHighlightTerms,
         createHighlightedTextChildren,
-        updateSearchResultCount,
         collectSearchExpandedGroupIds,
-        getGroupEffectiveState,
-        patchNode,
-        patchChildren,
-        renderViewStateBar,
-        getSourceActionMenuLayer,
-        renderSourceActionMenuLayer,
         getRenderedSourceActionMenuItems,
         findRenderedSourceActionMenu,
         focusSourceActionMenuItem,
         focusSourceActionMenuButton,
         handleSourceActionMenuKeydown,
-        createSourceGlyphIcon,
         createGroupTitleIconElement,
-        replaceSourceIconWithFallback,
         handleSourceIconImageError,
         bindSourceIconFallbackDelegation,
         createSourceIconElement,
@@ -950,16 +898,10 @@
         getManageableSourceElements: (...args) => getManageableSourceElements(...args)
     }));
     const {
-        hasRestorableStateSnapshot,
-        getStateBackupKey,
         getStateHistoryKey,
         getStateHistoryEntries,
-        setStateHistoryEntries,
         loadStateHistory,
         appendStateHistorySnapshot,
-        pickPreferredStoredState,
-        writeStateToLocalStorage,
-        sendStateToStorage,
         enqueueStateSave,
         waitForPendingStateSave,
         preparePersistableSnapshot,
@@ -975,13 +917,11 @@
         flushPendingStateSave,
         cancelPendingStateSave,
         invalidateManagerInstance,
-        isLiveManagerLoadRequest,
         buildPersistableState,
         saveState: persistState,
         handlePageLifecyclePersistence,
         normalizeLoadedState,
         hasPreservableManagerSnapshot,
-        canPersistManagerState,
         hasPersistedSourceRefs,
         hasPersistableManagerState,
         restorePersistedSnapshotWithoutDom,
@@ -1126,16 +1066,13 @@
         handleAddNewGroup,
         syncSourceToPage,
         processClickQueue,
-        findParentGroupOfSource,
         removeSourceFromTree,
         executeBatchMoveToUngrouped,
         canMoveSourceToUngrouped,
         moveSourceToUngrouped,
         removeGroupFromTree,
-        toggleGroupCollapse,
         handleInteraction,
         handleOriginalCheckboxChange,
-        triggerRename,
         handleDragStart,
         handleDragOver,
         handleDragLeave,
@@ -1226,7 +1163,7 @@
         const labels = Array.from(labelsByTitle.values())
             .map((label) => {
                 const existingGroup = findReusableNativeLabelImportGroup(label.title);
-                const { sourceKeySet, ...publicLabel } = label;
+                const { sourceKeySet: _sourceKeySet, ...publicLabel } = label;
                 return Object.assign({}, publicLabel, {
                     sourceCount: label.sourceKeys.length,
                     existingGroupId: existingGroup?.id || null,
@@ -2358,7 +2295,7 @@
 
         if (viewSwitchInProgress) return;
 
-        const previousInfo = getSourceViewInfo(sourcePanel);
+        getSourceViewInfo(sourcePanel);
 
         setTimeout(() => {
             const refreshedSourcePanel = findSourcePanel() || sourcePanel;

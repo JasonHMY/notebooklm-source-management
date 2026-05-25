@@ -13,9 +13,6 @@
         const getDEPS = typeof deps.getDEPS === 'function'
             ? deps.getDEPS
             : () => (runtime.DEPS || globalThis.NSM_CONTENT_CONFIG?.DEPS || {});
-        const getMessage = typeof deps.getMessage === 'function'
-            ? deps.getMessage
-            : (key) => key;
         const findElement = typeof deps.findElement === 'function'
             ? deps.findElement
             : (selectors, parent) => {
@@ -184,15 +181,6 @@
         const getSourcesByKey = () => ensureMap('sourcesByKey');
         const getSourceTagsById = () => ensureMap('sourceTagsById');
         const getGroupsById = () => ensureMap('groupsById');
-        const getParentMap = () => ensureMap('parentMap');
-        const getKeyByElement = () => {
-            if (runtime.keyByElement instanceof WeakMap) {
-                return runtime.keyByElement;
-            }
-            const next = new WeakMap();
-            runtime.keyByElement = next;
-            return next;
-        };
         const getFreshRowCache = () => {
             const current = runtime.freshRowCache;
             if (current == null || current instanceof Map) {
@@ -207,10 +195,6 @@
             return value;
         };
         const getPendingInitialLoadedState = () => runtime.pendingInitialLoadedState ?? null;
-        const setPendingInitialLoadedState = (value) => {
-            runtime.pendingInitialLoadedState = value;
-            return value;
-        };
         const getPendingStorageUpgrade = () => Boolean(runtime.pendingStorageUpgrade);
         const setPendingStorageUpgrade = (value) => {
             runtime.pendingStorageUpgrade = Boolean(value);

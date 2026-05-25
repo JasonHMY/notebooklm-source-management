@@ -95,7 +95,7 @@ const createModalRenderElement = (tag, attrs = {}, children = []) => {
                 if (!candidate || typeof candidate !== 'object') return false;
                 if (selector.startsWith('#')) return candidate.id === selector.slice(1);
                 if (selector.startsWith('.')) {
-                    const className = selector.slice(1).split(/[:\s.\[]/)[0];
+                    const className = selector.slice(1).split(/[:\s.[]/)[0];
                     return String(candidate.className || '').split(/\s+/).includes(className);
                 }
                 return false;
@@ -154,7 +154,7 @@ const createModalTestShadowRoot = () => {
                 if (!candidate || typeof candidate !== 'object') return false;
                 if (selector.startsWith('#')) return candidate.id === selector.slice(1);
                 if (selector.startsWith('.')) {
-                    const className = selector.slice(1).split(/[:\s.\[]/)[0];
+                    const className = selector.slice(1).split(/[:\s.[]/)[0];
                     return String(candidate.className || '').split(/\s+/).includes(className);
                 }
                 return false;

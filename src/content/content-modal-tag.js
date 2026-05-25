@@ -9,7 +9,6 @@
             getWindow = () => (typeof window !== 'undefined' ? window : null),
             getState,
             getTagsById,
-            getSourceTagsById,
             getSourcesByKey,
             getPendingBatchKeys,
             prepareModalOpen,
@@ -492,7 +491,6 @@
             const shadowRoot = getShadowRoot();
             const state = (typeof getState === 'function' ? getState() : null) || {};
             const tagsById = typeof getTagsById === 'function' ? getTagsById() : new Map();
-            const sourceTagsById = typeof getSourceTagsById === 'function' ? getSourceTagsById() : new Map();
             const sourcesByKey = typeof getSourcesByKey === 'function' ? getSourcesByKey() : new Map();
             if (!shadowRoot || !el) return;
 

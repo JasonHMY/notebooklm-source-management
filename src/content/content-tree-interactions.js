@@ -104,12 +104,6 @@
         const resolveFreshRowEntry = typeof deps.resolveFreshRowEntry === 'function'
             ? deps.resolveFreshRowEntry
             : (typeof runtime.resolveFreshRowEntry === 'function' ? runtime.resolveFreshRowEntry : null);
-        const setSourceTagIds = typeof deps.setSourceTagIds === 'function'
-            ? deps.setSourceTagIds
-            : (typeof runtime.setSourceTagIds === 'function' ? runtime.setSourceTagIds : () => {});
-        const renderTagModal = typeof deps.renderTagModal === 'function'
-            ? deps.renderTagModal
-            : (typeof runtime.renderTagModal === 'function' ? runtime.renderTagModal : () => false);
         const isDescendant = typeof deps.isDescendant === 'function'
             ? deps.isDescendant
             : (typeof runtime.isDescendant === 'function' ? runtime.isDescendant : () => false);

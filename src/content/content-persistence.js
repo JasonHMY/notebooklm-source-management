@@ -24,7 +24,6 @@
             : null;
         const scanAndSyncSources = typeof ctx.scanAndSyncSources === 'function' ? ctx.scanAndSyncSources : () => false;
         const findSourcePanel = typeof ctx.findSourcePanel === 'function' ? ctx.findSourcePanel : () => null;
-        const isSourcePanelRenderable = typeof ctx.isSourcePanelRenderable === 'function' ? ctx.isSourcePanelRenderable : () => true;
         const getSourcePanelState = typeof ctx.getSourcePanelState === 'function'
             ? ctx.getSourcePanelState
             : () => ({ state: 'ready' });
