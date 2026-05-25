@@ -651,6 +651,11 @@ describe('manager launcher messaging', () => {
         const sendResponse = jest.fn();
         resolveNativeLabelSwitchResponseDelayTimer();
         let phase = 'list';
+        const listSource = createMockSourceRow({
+            title: 'Native List Source',
+            stableToken: 'native-list-source',
+            checked: true
+        });
         const labelGroup = {
             textContent: 'AI Group',
             parentElement: null,
@@ -717,7 +722,6 @@ describe('manager launcher messaging', () => {
                 return [labelGroup];
             }
             if (mod.DEPS.row.includes(selector) || value.includes('source-row') || value.includes('source-item')) {
-                // eslint-disable-next-line no-undef
                 return phase === 'list' ? [listSource.row] : [];
             }
             return [];
