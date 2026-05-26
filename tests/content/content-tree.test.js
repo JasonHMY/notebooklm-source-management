@@ -1730,4 +1730,118 @@ describe('handleDragOver hover-expand', () => {
             expect(ctx.tree.getGroupAncestorChain('unknown')).toEqual(['unknown']);
         });
     });
+
+    describe('handleDragOver auto-collapse', () => {
+        beforeEach(() => {
+            jest.useFakeTimers();
+        });
+        afterEach(() => {
+            jest.useRealTimers();
+        });
+
+        it('collapses a hover-opened group 600ms after the pointer leaves its subtree', () => {
+            const ctx = setupTreeInteractionsTestContext({
+                state: { isBatchMode: false, ungrouped: [], groups: ['A', 'B'] },
+                pendingBatchKeys: new Set(),
+                groups: {
+                    A: { id: 'A', children: [{ type: 'source', key: 'X' }], collapsed: true },
+                    B: { id: 'B', children: [{ type: 'source', key: 'Y' }], collapsed: true }
+                }
+            });
+
+            const targetA = ctx.helpers.makeGroupContainerTarget('A', { intent: 'drag-into' });
+            ctx.tree.handleDragOver({
+                target: targetA,
+                clientY: targetA.rect.top + targetA.rect.height / 2,
+                preventDefault: jest.fn(),
+                dataTransfer: { dropEffect: 'move' }
+            });
+            jest.advanceTimersByTime(600);
+            expect(ctx.runtime.groupsById.get('A').collapsed).toBe(false);
+            expect(ctx.runtime.hoverExpandedGroupIds.has('A')).toBe(true);
+
+            // Now move pointer to a sibling B (not in A's chain).
+            const targetB = ctx.helpers.makeGroupContainerTarget('B', { intent: 'drag-into' });
+            ctx.tree.handleDragOver({
+                target: targetB,
+                clientY: targetB.rect.top + targetB.rect.height / 2,
+                preventDefault: jest.fn(),
+                dataTransfer: { dropEffect: 'move' }
+            });
+
+            // A should now have a pending collapse timer.
+            expect(ctx.runtime.hoverExpandTimers.get('A')).toMatchObject({ kind: 'collapse' });
+
+            // 600ms later, A collapses.
+            jest.advanceTimersByTime(600);
+            expect(ctx.runtime.groupsById.get('A').collapsed).toBe(true);
+            expect(ctx.runtime.hoverExpandedGroupIds.has('A')).toBe(false);
+        });
+
+        it('cancels the collapse timer when pointer returns within 600ms', () => {
+            const ctx = setupTreeInteractionsTestContext({
+                state: { isBatchMode: false, ungrouped: [], groups: ['A', 'B'] },
+                pendingBatchKeys: new Set(),
+                groups: {
+                    A: { id: 'A', children: [{ type: 'source', key: 'X' }], collapsed: false },
+                    B: { id: 'B', children: [{ type: 'source', key: 'Y' }], collapsed: false }
+                }
+            });
+            ctx.runtime.hoverExpandedGroupIds.add('A');
+
+            // Pointer on B (not in A's chain) → arm collapse timer for A.
+            const targetB = ctx.helpers.makeGroupContainerTarget('B', { intent: 'drag-into' });
+            ctx.tree.handleDragOver({
+                target: targetB,
+                clientY: targetB.rect.top + targetB.rect.height / 2,
+                preventDefault: jest.fn(),
+                dataTransfer: { dropEffect: 'move' }
+            });
+            expect(ctx.runtime.hoverExpandTimers.get('A')).toMatchObject({ kind: 'collapse' });
+            jest.advanceTimersByTime(300);
+
+            // Pointer returns to A → cancel collapse timer.
+            const targetA = ctx.helpers.makeGroupContainerTarget('A', { intent: 'drag-into' });
+            ctx.tree.handleDragOver({
+                target: targetA,
+                clientY: targetA.rect.top + targetA.rect.height / 2,
+                preventDefault: jest.fn(),
+                dataTransfer: { dropEffect: 'move' }
+            });
+            expect(ctx.runtime.hoverExpandTimers.get('A')).toBeUndefined();
+
+            jest.advanceTimersByTime(600);
+            // A is still expanded.
+            expect(ctx.runtime.groupsById.get('A').collapsed).toBe(false);
+            expect(ctx.runtime.hoverExpandedGroupIds.has('A')).toBe(true);
+        });
+
+        it('keeps an ancestor open while pointer is on its descendant', () => {
+            const ctx = setupTreeInteractionsTestContext({
+                state: { isBatchMode: false, ungrouped: [], groups: ['A'] },
+                pendingBatchKeys: new Set(),
+                groups: {
+                    A: { id: 'A', children: [{ type: 'group', id: 'B' }], collapsed: false },
+                    B: { id: 'B', children: [{ type: 'source', key: 'X' }], collapsed: false }
+                },
+                parentMap: new Map([['B', 'A']])
+            });
+            ctx.runtime.hoverExpandedGroupIds.add('A');
+
+            // Pointer enters B (descendant of A).
+            const targetB = ctx.helpers.makeGroupContainerTarget('B', { intent: 'drag-into' });
+            ctx.tree.handleDragOver({
+                target: targetB,
+                clientY: targetB.rect.top + targetB.rect.height / 2,
+                preventDefault: jest.fn(),
+                dataTransfer: { dropEffect: 'move' }
+            });
+
+            // A should NOT have a collapse timer.
+            expect(ctx.runtime.hoverExpandTimers.get('A')).toBeUndefined();
+            jest.advanceTimersByTime(600);
+            expect(ctx.runtime.groupsById.get('A').collapsed).toBe(false);
+            expect(ctx.runtime.hoverExpandedGroupIds.has('A')).toBe(true);
+        });
+    });
 });

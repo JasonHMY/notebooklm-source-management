@@ -1037,11 +1037,37 @@
                     dropTarget.classList.remove('drag-invalid');
                 }
 
-                if (dropTarget && dropTarget.classList && dropTarget.classList.contains('group-container')) {
-                    const groupId = dropTarget.dataset && dropTarget.dataset.groupId;
-                    armHoverExpandTimerForGroup(groupId);
-                } else {
-                    cancelAllHoverTimers();
+                // Compute the pointer's current group and ancestry chain.
+                const pointerGroupContainer = e.target && typeof e.target.closest === 'function'
+                    ? e.target.closest('.group-container')
+                    : null;
+                const pointerGroupId = pointerGroupContainer && pointerGroupContainer.dataset
+                    ? pointerGroupContainer.dataset.groupId
+                    : null;
+                const ancestorChain = pointerGroupId ? getGroupAncestorChain(pointerGroupId) : [];
+                const ancestorSet = new Set(ancestorChain);
+
+                // Dispatch collapse-timer state for every hover-opened group.
+                if (runtime.hoverExpandedGroupIds.size > 0) {
+                    const openedIds = Array.from(runtime.hoverExpandedGroupIds);
+                    for (const G of openedIds) {
+                        if (ancestorSet.has(G)) {
+                            cancelHoverTimerForGroup(G);
+                        } else {
+                            armHoverCollapseTimerForGroup(G);
+                        }
+                    }
+                }
+
+                // Arm expand timer for a collapsed-with-children group under the pointer.
+                if (pointerGroupId) {
+                    const groupsById = getGroupsById();
+                    const pointerGroup = groupsById.get(pointerGroupId);
+                    if (pointerGroup && pointerGroup.collapsed && Array.isArray(pointerGroup.children) && pointerGroup.children.length > 0) {
+                        armHoverExpandTimerForGroup(pointerGroupId);
+                    } else {
+                        cancelHoverTimerForGroup(pointerGroupId);
+                    }
                 }
             } else {
                 cancelAllHoverTimers();
@@ -1164,6 +1190,37 @@
             if (typeof setTimeoutFn !== 'function') return;
             const timeoutId = setTimeoutFn(() => executeHoverExpand(groupId), 600);
             runtime.hoverExpandTimers.set(groupId, { kind: 'expand', timeoutId });
+        }
+
+        function armHoverCollapseTimerForGroup(groupId) {
+            if (!groupId) return;
+            if (!runtime.hoverExpandedGroupIds.has(groupId)) return;
+
+            const existing = runtime.hoverExpandTimers.get(groupId);
+            if (existing && existing.kind === 'collapse') return;
+            if (existing) cancelHoverTimerForGroup(groupId);
+
+            const setTimeoutFn = getSetTimeout();
+            if (typeof setTimeoutFn !== 'function') return;
+            const timeoutId = setTimeoutFn(() => executeHoverCollapse(groupId), 600);
+            runtime.hoverExpandTimers.set(groupId, { kind: 'collapse', timeoutId });
+        }
+
+        function executeHoverCollapse(groupId) {
+            runtime.hoverExpandTimers.delete(groupId);
+            if (!runtime.hoverExpandedGroupIds.has(groupId)) return;
+            runtime.hoverExpandedGroupIds.delete(groupId);
+
+            const groupsById = getGroupsById();
+            const group = groupsById.get(groupId);
+            if (!group) return;
+            if (group.collapsed) return;
+            if (!Array.isArray(group.children) || group.children.length === 0) return;
+            const root = getShadowRoot();
+            if (!root || typeof root.querySelector !== 'function') return;
+            const container = root.querySelector(`.group-container[data-group-id="${cssEscape(groupId)}"]`);
+            if (!container) return;
+            toggleGroupCollapse(group, container);
         }
 
         function cancelExpandTimersForOtherGroups(keepGroupId) {
