@@ -872,6 +872,9 @@
             const groupTarget = e.target.closest('.group-header');
             const setTimeoutFn = getSetTimeout();
 
+            cancelAllHoverTimers();
+            runtime.hoverExpandedGroupIds.clear();
+
             if (sourceTarget) {
                 const key = sourceTarget.dataset.sourceKey;
                 if (!key) return;
