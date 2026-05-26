@@ -996,6 +996,18 @@
         undoLastOperation();
     }
 
+    const dragMulti = typeof globalThis.NSM_CREATE_CONTENT_DRAG_MULTI === 'function'
+        ? globalThis.NSM_CREATE_CONTENT_DRAG_MULTI({
+            getDocument: () => document,
+            requestAnimationFrame: globalThis.requestAnimationFrame
+                ? globalThis.requestAnimationFrame.bind(globalThis)
+                : null,
+            cancelAnimationFrame: globalThis.cancelAnimationFrame
+                ? globalThis.cancelAnimationFrame.bind(globalThis)
+                : null
+        })
+        : null;
+
     const treeInteractionsModule = createContentTreeInteractions({
         runtime: runtimeContext,
         getState: () => state,
@@ -1018,6 +1030,7 @@
         saveState: (...args) => saveState(...args),
         buildParentMap: (...args) => buildParentMap(...args),
         developerLog: (...args) => developerLog(...args),
+        dragMulti,
         isSourceEffectivelyEnabled: (...args) => isSourceEffectivelyEnabled(...args),
         collectEffectiveSourceStates: (...args) => collectEffectiveSourceStates(...args),
         syncSourcesToEffectiveState: (...args) => syncSourcesToEffectiveState(...args),
