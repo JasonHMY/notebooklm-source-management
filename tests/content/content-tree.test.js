@@ -1430,3 +1430,246 @@ describe('handleDragOver invalid-drop feedback', () => {
         expect(dataTransfer.dropEffect).toBe('move');
     });
 });
+
+describe('handleDragOver hover-expand', () => {
+    let createContentTreeInteractions;
+    let createContentDragMulti;
+
+    function makeClassList(initial = []) {
+        const classes = new Set(initial);
+        const api = {
+            add: (...cs) => cs.forEach((c) => classes.add(c)),
+            remove: (...cs) => cs.forEach((c) => classes.delete(c)),
+            contains: (c) => classes.has(c),
+            has: (c) => classes.has(c)
+        };
+        return api;
+    }
+
+    function setupTreeInteractionsTestContext({ state, pendingBatchKeys, groups }) {
+        const runtime = {};
+        const groupsById = new Map();
+        const containersByGroupId = new Map();
+        if (groups && typeof groups === 'object') {
+            Object.keys(groups).forEach((id) => {
+                const group = groups[id];
+                groupsById.set(id, { id, children: [], ...group });
+            });
+        }
+        const shadowRoot = {
+            querySelector: (selector) => {
+                const match = /^\.group-container\[data-group-id="([^"]+)"\]$/.exec(selector);
+                if (match) return containersByGroupId.get(match[1]) || null;
+                return null;
+            },
+            querySelectorAll: () => []
+        };
+        const dragMulti = createContentDragMulti({});
+        const tree = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getPendingBatchKeys: () => pendingBatchKeys,
+            getShadowRoot: () => shadowRoot,
+            getParentMap: () => new Map(),
+            getSetTimeout: () => globalThis.setTimeout,
+            isDescendant: globalThis.isDescendant,
+            dragMulti
+        });
+
+        function makeGroupContainerTarget(groupId, { intent } = {}) {
+            const rect = { top: 200, bottom: 240, height: 40 };
+            const initial = ['group-container'];
+            const classList = makeClassList(initial);
+            if (intent) classList.add(intent);
+            const target = {
+                dataset: { groupId },
+                classList,
+                rect,
+                querySelector: () => null,
+                getBoundingClientRect: () => ({ top: rect.top, bottom: rect.bottom, height: rect.height, left: 0, right: 200, width: 200 })
+            };
+            target.closest = (selector) => {
+                if (selector === '.group-container, .source-item') return target;
+                if (selector === '.group-container') return target;
+                if (selector === '.source-item') return null;
+                return null;
+            };
+            containersByGroupId.set(groupId, target);
+            return target;
+        }
+
+        function makeDropEvent({ data, target }) {
+            return {
+                target,
+                preventDefault: jest.fn(),
+                dataTransfer: {
+                    getData: (key) => (data && Object.prototype.hasOwnProperty.call(data, key) ? data[key] : ''),
+                    dropEffect: 'move'
+                }
+            };
+        }
+
+        return {
+            runtime,
+            tree,
+            helpers: { makeGroupContainerTarget, makeDropEvent },
+            groupsById
+        };
+    }
+
+    beforeEach(() => {
+        jest.resetModules();
+        setupGlobalMocks();
+        require('../../src/content/content-native-checkbox-sync.js');
+        createContentTreeInteractions = require('../../src/content/content-tree-interactions.js');
+        createContentDragMulti = require('../../src/content/content-drag-multi.js');
+        jest.useFakeTimers();
+    });
+
+    afterEach(() => {
+        jest.useRealTimers();
+        teardownGlobalMocks();
+    });
+
+    it('expands a collapsed group after 600ms of continuous hover', () => {
+        const ctx = setupTreeInteractionsTestContext({
+            state: { isBatchMode: false, ungrouped: [], groups: ['g1'] },
+            pendingBatchKeys: new Set(),
+            groups: { g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: true } }
+        });
+        const target = ctx.helpers.makeGroupContainerTarget('g1', { intent: 'drag-into' });
+        const event = {
+            target,
+            clientY: target.rect.top + target.rect.height / 2,
+            preventDefault: jest.fn(),
+            dataTransfer: { dropEffect: 'move' }
+        };
+        ctx.tree.handleDragOver(event);
+        jest.advanceTimersByTime(600);
+        expect(ctx.groupsById.get('g1').collapsed).toBe(false);
+    });
+
+    it('cancels the timer when the drop target changes before 600ms', () => {
+        const ctx = setupTreeInteractionsTestContext({
+            state: { isBatchMode: false, ungrouped: [], groups: ['g1', 'g2'] },
+            pendingBatchKeys: new Set(),
+            groups: {
+                g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: true },
+                g2: { id: 'g2', children: [{ type: 'source', key: 'Y' }], collapsed: true }
+            }
+        });
+        const target1 = ctx.helpers.makeGroupContainerTarget('g1', { intent: 'drag-into' });
+        const target2 = ctx.helpers.makeGroupContainerTarget('g2', { intent: 'drag-into' });
+        ctx.tree.handleDragOver({
+            target: target1,
+            clientY: target1.rect.top + target1.rect.height / 2,
+            preventDefault: jest.fn(),
+            dataTransfer: { dropEffect: 'move' }
+        });
+        jest.advanceTimersByTime(300);
+        ctx.tree.handleDragOver({
+            target: target2,
+            clientY: target2.rect.top + target2.rect.height / 2,
+            preventDefault: jest.fn(),
+            dataTransfer: { dropEffect: 'move' }
+        });
+        jest.advanceTimersByTime(600);
+        expect(ctx.groupsById.get('g1').collapsed).toBe(true);
+    });
+
+    it('does not arm a timer on an already-expanded group', () => {
+        const ctx = setupTreeInteractionsTestContext({
+            state: { isBatchMode: false, ungrouped: [], groups: ['g1'] },
+            pendingBatchKeys: new Set(),
+            groups: { g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: false } }
+        });
+        const target = ctx.helpers.makeGroupContainerTarget('g1', { intent: 'drag-into' });
+        ctx.tree.handleDragOver({
+            target,
+            clientY: target.rect.top + target.rect.height / 2,
+            preventDefault: jest.fn(),
+            dataTransfer: { dropEffect: 'move' }
+        });
+        jest.advanceTimersByTime(1000);
+        expect(ctx.groupsById.get('g1').collapsed).toBe(false);
+    });
+
+    it('does not arm a timer on a collapsed but empty group', () => {
+        const ctx = setupTreeInteractionsTestContext({
+            state: { isBatchMode: false, ungrouped: [], groups: ['g1'] },
+            pendingBatchKeys: new Set(),
+            groups: { g1: { id: 'g1', children: [], collapsed: true } }
+        });
+        const target = ctx.helpers.makeGroupContainerTarget('g1', { intent: 'drag-into' });
+        ctx.tree.handleDragOver({
+            target,
+            clientY: target.rect.top + target.rect.height / 2,
+            preventDefault: jest.fn(),
+            dataTransfer: { dropEffect: 'move' }
+        });
+        jest.advanceTimersByTime(1000);
+        expect(ctx.groupsById.get('g1').collapsed).toBe(true);
+    });
+
+    it('cancels the timer on dragleave from #sources-list', () => {
+        const ctx = setupTreeInteractionsTestContext({
+            state: { isBatchMode: false, ungrouped: [], groups: ['g1'] },
+            pendingBatchKeys: new Set(),
+            groups: { g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: true } }
+        });
+        const target = ctx.helpers.makeGroupContainerTarget('g1', { intent: 'drag-into' });
+        ctx.tree.handleDragOver({
+            target,
+            clientY: target.rect.top + target.rect.height / 2,
+            preventDefault: jest.fn(),
+            dataTransfer: { dropEffect: 'move' }
+        });
+        jest.advanceTimersByTime(300);
+        ctx.tree.handleDragLeave({ target: { id: 'sources-list', closest: () => null } });
+        jest.advanceTimersByTime(600);
+        expect(ctx.groupsById.get('g1').collapsed).toBe(true);
+    });
+
+    it('cancels the timer on dragend', () => {
+        const ctx = setupTreeInteractionsTestContext({
+            state: { isBatchMode: false, ungrouped: [], groups: ['g1'] },
+            pendingBatchKeys: new Set(),
+            groups: { g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: true } }
+        });
+        const target = ctx.helpers.makeGroupContainerTarget('g1', { intent: 'drag-into' });
+        ctx.tree.handleDragOver({
+            target,
+            clientY: target.rect.top + target.rect.height / 2,
+            preventDefault: jest.fn(),
+            dataTransfer: { dropEffect: 'move' }
+        });
+        jest.advanceTimersByTime(300);
+        ctx.tree.handleDragEnd({ target });
+        jest.advanceTimersByTime(600);
+        expect(ctx.groupsById.get('g1').collapsed).toBe(true);
+    });
+
+    it('cancels the timer on drop', () => {
+        const ctx = setupTreeInteractionsTestContext({
+            state: { isBatchMode: false, ungrouped: ['A'], groups: ['g1'] },
+            pendingBatchKeys: new Set(),
+            groups: { g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: true } }
+        });
+        const target = ctx.helpers.makeGroupContainerTarget('g1', { intent: 'drag-into' });
+        ctx.tree.handleDragOver({
+            target,
+            clientY: target.rect.top + target.rect.height / 2,
+            preventDefault: jest.fn(),
+            dataTransfer: { dropEffect: 'move' }
+        });
+        jest.advanceTimersByTime(300);
+        const dropEvent = ctx.helpers.makeDropEvent({
+            data: { 'application/source-key': 'A' },
+            target
+        });
+        ctx.tree.handleDrop(dropEvent);
+        jest.advanceTimersByTime(600);
+        expect(ctx.groupsById.get('g1').collapsed).toBe(true);
+    });
+});

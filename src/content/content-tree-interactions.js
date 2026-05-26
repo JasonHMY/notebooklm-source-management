@@ -167,6 +167,9 @@
         if (typeof runtime.activeDragContext === 'undefined') {
             runtime.activeDragContext = null;
         }
+        if (typeof runtime.hoverExpandTimer === 'undefined') {
+            runtime.hoverExpandTimer = null;
+        }
 
         const autoScrollController = dragMulti && typeof dragMulti.createAutoScrollController === 'function'
             ? dragMulti.createAutoScrollController({
@@ -1028,6 +1031,14 @@
                 } else {
                     dropTarget.classList.remove('drag-invalid');
                 }
+
+                if (dropTarget.classList.contains('group-container')) {
+                    armHoverExpandTimer(dropTarget);
+                } else {
+                    cancelHoverExpandTimer();
+                }
+            } else {
+                cancelHoverExpandTimer();
             }
 
             if (autoScrollController && dragMulti && typeof dragMulti.computeAutoScrollVelocity === 'function') {
@@ -1055,6 +1066,9 @@
             if (e.target && e.target.id === 'sources-list' && autoScrollController) {
                 autoScrollController.stop();
             }
+            if (e.target && e.target.id === 'sources-list') {
+                cancelHoverExpandTimer();
+            }
         }
 
         function clearDragFeedback(root = getShadowRoot()) {
@@ -1070,7 +1084,58 @@
             }
             if (autoScrollController) autoScrollController.stop();
             runtime.activeDragContext = null;
+            cancelHoverExpandTimer();
             return count;
+        }
+
+        function cancelHoverExpandTimer() {
+            if (runtime.hoverExpandTimer && typeof clearTimeout === 'function') {
+                clearTimeout(runtime.hoverExpandTimer.timeoutId);
+            }
+            runtime.hoverExpandTimer = null;
+        }
+
+        function executeHoverExpand(groupId) {
+            runtime.hoverExpandTimer = null;
+            const groupsById = getGroupsById();
+            const group = groupsById.get(groupId);
+            if (!group) return;
+            if (!group.collapsed) return;
+            if (!Array.isArray(group.children) || group.children.length === 0) return;
+            const root = getShadowRoot();
+            if (!root || typeof root.querySelector !== 'function') return;
+            const container = root.querySelector(`.group-container[data-group-id="${cssEscape(groupId)}"]`);
+            if (!container) return;
+            toggleGroupCollapse(group, container);
+        }
+
+        function armHoverExpandTimer(dropTarget) {
+            if (!dropTarget || !dropTarget.dataset) {
+                cancelHoverExpandTimer();
+                return;
+            }
+            const groupId = dropTarget.dataset.groupId;
+            if (!groupId) {
+                cancelHoverExpandTimer();
+                return;
+            }
+            const groupsById = getGroupsById();
+            const group = groupsById.get(groupId);
+            if (!group) {
+                cancelHoverExpandTimer();
+                return;
+            }
+            if (!group.collapsed) return;
+            if (!Array.isArray(group.children) || group.children.length === 0) return;
+
+            if (runtime.hoverExpandTimer && runtime.hoverExpandTimer.groupId === groupId) {
+                return;
+            }
+            cancelHoverExpandTimer();
+            const setTimeoutFn = getSetTimeout();
+            if (typeof setTimeoutFn !== 'function') return;
+            const timeoutId = setTimeoutFn(() => executeHoverExpand(groupId), 600);
+            runtime.hoverExpandTimer = { groupId, timeoutId };
         }
 
         function getSourceTreePosition(sourceKey) {
@@ -1199,6 +1264,7 @@
         }
 
         function handleDrop(e) {
+            cancelHoverExpandTimer();
             const state = getState();
             const groupsById = getGroupsById();
             const sourcesByKey = getSourcesByKey();
@@ -1302,6 +1368,7 @@
         }
 
         function handleDragEnd(e) {
+            cancelHoverExpandTimer();
             clearDragFeedback();
             if (autoScrollController) autoScrollController.stop();
             if (runtime.activeDragGhost && dragMulti && typeof dragMulti.destroyMultiDragGhost === 'function') {
