@@ -23,7 +23,7 @@
 - **中文标题 (English Title)**: 写清楚具体影响、范围或原因。
 ```
 
-## [Unreleased] (未发布)
+## [2026-05-26] [26.5.26]
 
 ### Added
 - **X 本地发布工具 (Local X Publisher Tool)**: 新增 `marketing/x-publisher/`，提供 OAuth 2.0 PKCE 授权、账号验证和人工确认后发帖的本地脚本，并用本地 `.gitignore` 排除 `.env` 与 `tokens.json`。

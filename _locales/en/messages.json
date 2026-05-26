@@ -572,23 +572,23 @@
     "ui_whats_new_subtitle": {
         "message": "A quick look at the latest source management improvements."
     },
-    "ui_whats_new_quick_views_title": {
-        "message": "Quick filter views"
+    "ui_whats_new_batch_drag_title": {
+        "message": "Batch multi-source drag"
     },
-    "ui_whats_new_quick_views_body": {
-        "message": "Jump to ungrouped, disabled, recent, tagged, or issue sources faster."
+    "ui_whats_new_batch_drag_body": {
+        "message": "In batch mode, drag any selected row to move them all."
     },
-    "ui_whats_new_restore_points_title": {
-        "message": "Restore points"
+    "ui_whats_new_hover_expand_title": {
+        "message": "Hover to expand nested folders"
     },
-    "ui_whats_new_restore_points_body": {
-        "message": "Keep more local history and create named snapshots before risky changes."
+    "ui_whats_new_hover_expand_body": {
+        "message": "Hover over a collapsed folder for 0.6s to expand; drag away to collapse."
     },
-    "ui_whats_new_language_title": {
-        "message": "Manual language choice"
+    "ui_whats_new_smart_feedback_title": {
+        "message": "Smarter drag feedback"
     },
-    "ui_whats_new_language_body": {
-        "message": "Switch extension UI language without changing Chrome."
+    "ui_whats_new_smart_feedback_body": {
+        "message": "Auto-scroll near list edges; indicator turns red on invalid drops."
     },
     "ui_whats_new_primary": {
         "message": "Got it"

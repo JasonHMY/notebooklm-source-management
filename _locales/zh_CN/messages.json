@@ -572,23 +572,23 @@
     "ui_whats_new_subtitle": {
         "message": "快速了解这次来源管理的最新改进。"
     },
-    "ui_whats_new_quick_views_title": {
-        "message": "快速筛选视图"
+    "ui_whats_new_batch_drag_title": {
+        "message": "批量多源拖拽"
     },
-    "ui_whats_new_quick_views_body": {
-        "message": "更快查看未分组、已停用、最近新增、标签或异常来源。"
+    "ui_whats_new_batch_drag_body": {
+        "message": "批量模式下拖一行，所有选中来源一起搬到目标文件夹。"
     },
-    "ui_whats_new_restore_points_title": {
-        "message": "恢复点"
+    "ui_whats_new_hover_expand_title": {
+        "message": "悬停展开嵌套文件夹"
     },
-    "ui_whats_new_restore_points_body": {
-        "message": "保留更多本地历史，并在高风险操作前创建命名快照。"
+    "ui_whats_new_hover_expand_body": {
+        "message": "拖到折叠组头停 0.6 秒自动展开；移开 0.6 秒再收回。"
     },
-    "ui_whats_new_language_title": {
-        "message": "手动语言选择"
+    "ui_whats_new_smart_feedback_title": {
+        "message": "更智能的拖拽反馈"
     },
-    "ui_whats_new_language_body": {
-        "message": "不改变 Chrome 语言，也能切换扩展界面语言。"
+    "ui_whats_new_smart_feedback_body": {
+        "message": "贴近列表边缘自动滚动；非法位置 indicator 变红警示。"
     },
     "ui_whats_new_primary": {
         "message": "知道了"

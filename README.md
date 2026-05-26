@@ -1,7 +1,7 @@
 # NotebookLM Source Management
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-2.7.4-green.svg)
+![Version](https://img.shields.io/badge/version-26.5.26-green.svg)
 
 A Chrome extension that makes source management inside Google NotebookLM less awkward.
 

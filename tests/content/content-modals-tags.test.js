@@ -1265,9 +1265,9 @@ describe('modal option motion', () => {
         expect(modal.getAttribute('aria-modal')).toBe('true');
         expect(modal.getAttribute('aria-labelledby')).toBe('sp-whats-new-modal-title');
         expect(modal.textContent).toContain('ui_whats_new_title');
-        expect(modal.textContent).toContain('ui_whats_new_quick_views_title');
-        expect(modal.textContent).toContain('ui_whats_new_restore_points_title');
-        expect(modal.textContent).toContain('ui_whats_new_language_title');
+        expect(modal.textContent).toContain('ui_whats_new_batch_drag_title');
+        expect(modal.textContent).toContain('ui_whats_new_hover_expand_title');
+        expect(modal.textContent).toContain('ui_whats_new_smart_feedback_title');
 
         shadowRoot.querySelector('.sp-whats-new-primary-btn').dispatchEvent({ type: 'click' });
         expect(markWhatsNewSeen).not.toHaveBeenCalled();

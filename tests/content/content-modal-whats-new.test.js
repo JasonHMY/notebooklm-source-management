@@ -109,7 +109,7 @@ describe('content modal whats-new', () => {
         helper.renderWhatsNewModal();
 
         expect(customRow).toHaveBeenCalledTimes(3);
-        expect(customRow).toHaveBeenNthCalledWith(1, 'filter_alt', 'ui_whats_new_quick_views_title', 'ui_whats_new_quick_views_body');
+        expect(customRow).toHaveBeenNthCalledWith(1, 'drag_indicator', 'ui_whats_new_batch_drag_title', 'ui_whats_new_batch_drag_body');
     });
 
     it('clicking the close button marks whats-new seen and closes the modal', async () => {
