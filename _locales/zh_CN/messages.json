@@ -1255,5 +1255,11 @@
     },
     "ui_isolation_cleared_toast": {
         "message": "已退出仅看模式"
+    },
+    "toast_moved_multi_sources": {
+        "message": "已移动 $count$ 项来源",
+        "placeholders": {
+            "count": { "content": "$1" }
+        }
     }
 }

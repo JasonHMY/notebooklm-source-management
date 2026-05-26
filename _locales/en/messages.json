@@ -1255,5 +1255,11 @@
     },
     "ui_isolation_cleared_toast": {
         "message": "Exited isolate view"
+    },
+    "toast_moved_multi_sources": {
+        "message": "Moved $count$ sources",
+        "placeholders": {
+            "count": { "content": "$1" }
+        }
     }
 }
