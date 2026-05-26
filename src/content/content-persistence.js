@@ -1084,12 +1084,18 @@
         }
 
         function getBestPersistableSnapshot() {
+            const currentDisplayKind = normalizeSourceViewDisplayKind(ctx.sourceViewDisplayKind) || 'list';
+
             if (ctx.pendingInitialLoadedState && hasPersistableManagerState(ctx.pendingInitialLoadedState)) {
-                return cloneSerializableData(ctx.pendingInitialLoadedState);
+                const snapshot = cloneSerializableData(ctx.pendingInitialLoadedState);
+                snapshot.sourceViewDisplayKind = currentDisplayKind;
+                return snapshot;
             }
 
             if (ctx.pendingPanelReattachState && hasPersistableManagerState(ctx.pendingPanelReattachState)) {
-                return cloneSerializableData(ctx.pendingPanelReattachState);
+                const snapshot = cloneSerializableData(ctx.pendingPanelReattachState);
+                snapshot.sourceViewDisplayKind = currentDisplayKind;
+                return snapshot;
             }
 
             const liveSnapshot = buildPersistableState();
