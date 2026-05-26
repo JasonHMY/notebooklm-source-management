@@ -50,6 +50,7 @@
 - **README 自动化检查章节补全 (README Automated Checks Section Update)**: 在 `README.md` 的 Automated Checks 列表中补充 `npm run lint` 条目（说明 ESLint flat config 的覆盖面与 globals 配置），并把 `npm run verify:full` 的描述从“两套测试”更新为“lint + 单测 + smoke 三步”，与 `package.json` 实际编排和 CI 工作流一致。
 - **批量拖拽与多源 ghost (Batch Source Drag with Multi Ghost)**: 批量模式下选中多个来源后，拖任意已选行会一起搬运到目标位置；自定义胶囊状 ghost 显示数量徽章，drop 后弹出 “已移动 N 项来源” toast 并自动退出批量模式。
 - **拖拽边缘自动滚动 (Drag Edge Auto-Scroll)**: 拖拽过程中指针靠近 `#sources-list` 顶部或底部 60px 范围时，列表按 RAF 节奏平滑自动滚动，靠边越近滚动越快，越过滚动边界时静默停止。
+- **项目 CLAUDE.md 向导 (Project CLAUDE.md Guide)**: 在仓库根目录新增 `CLAUDE.md`，指向 AGENTS.md 等权威规则并补充 AGENTS.md 未成文的项目惯例 — factory + globalThis 注册模式、加新 content 模块必须同步的四个文件、Shadow DOM 与 global overlay token 边界、locale `ui_*_toast` 命名、`developerLog` 4 参数签名、`#sources-list` 滚动容器、Playwright 用 synthetic DragEvent 而非 `dragTo` 等。同时在 `docs/PROJECT_DIRECTORY.md` 根目录树中登记 `CLAUDE.md` 条目。
 
 ### Changed
 - **设置页信息架构收敛 (Settings Information Architecture Consolidation)**: 将设置页的导出、导入和版本历史合并到“备份与恢复”，将反馈与诊断信息合并到“帮助与反馈”，保存状态移动到标题栏，并仅在导入预览有效时显示“应用导入”按钮；来源修复仅在检测到匹配问题时独立突出显示。

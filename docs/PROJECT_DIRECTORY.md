@@ -175,6 +175,8 @@ NotebookLM Source Management
 ├── .github/workflows/ci.yml
 │   └── CI: install -> unit -> smoke -> package -> artifact
 ├── README.md
+├── CLAUDE.md
+│   └── Claude Code 项目向导；指向 AGENTS.md 等权威规则，并补充 AGENTS.md 未成文的项目惯例（factory 注册模式、Shadow vs global token 边界、locale 命名、developerLog 4 参数签名等）
 ├── AGENTS.md
 │   └── 仓库级 agent 指令；每次变更前应读取，要求同步维护 CHANGELOG、本目录文件和 changelog 写作规范
 ├── PRIVACY.md
