@@ -86,4 +86,71 @@ describe('content-drag-multi factory', () => {
             expect(helper.computeAutoScrollVelocity({ ...baseArgs, pointerY: 500, edgePx: -10 })).toBe(0);
         });
     });
+
+    describe('createMultiDragGhost / destroyMultiDragGhost', () => {
+        function makeDocument() {
+            const created = [];
+            const doc = {
+                createElement: jest.fn((tag) => {
+                    const el = {
+                        tag,
+                        children: [],
+                        className: '',
+                        style: {},
+                        appendChild: jest.fn(function (child) { this.children.push(child); return child; }),
+                        setAttribute: jest.fn(),
+                        parentNode: null
+                    };
+                    created.push(el);
+                    return el;
+                }),
+                createTextNode: jest.fn((text) => ({ text })),
+                body: null
+            };
+            const root = {
+                appendChild: jest.fn(function (child) { child.parentNode = this; return child; }),
+                removeChild: jest.fn(function (child) { child.parentNode = null; return child; })
+            };
+            doc.body = root;
+            return { doc, root, created };
+        }
+
+        it('builds a pill with an icon span and the count text for N=2', () => {
+            const { doc, root } = makeDocument();
+            const helper = createContentDragMulti({ getDocument: () => doc });
+            const ghost = helper.createMultiDragGhost({ count: 2, root });
+            expect(ghost).toBeTruthy();
+            expect(ghost.className).toContain('sp-drag-ghost');
+            const countText = ghost.children
+                .flatMap((c) => c.children || [])
+                .map((node) => node.text)
+                .find((text) => text === '2');
+            expect(countText).toBe('2');
+            expect(root.appendChild).toHaveBeenCalledWith(ghost);
+        });
+
+        it('renders the exact count for arbitrary N', () => {
+            const { doc, root } = makeDocument();
+            const helper = createContentDragMulti({ getDocument: () => doc });
+            const ghost = helper.createMultiDragGhost({ count: 17, root });
+            const textNodes = ghost.children.flatMap((c) => c.children || []).map((n) => n.text);
+            expect(textNodes).toContain('17');
+        });
+
+        it('destroyMultiDragGhost is null-safe and detaches an attached element', () => {
+            const { doc, root } = makeDocument();
+            const helper = createContentDragMulti({ getDocument: () => doc });
+            const ghost = helper.createMultiDragGhost({ count: 3, root });
+            expect(() => helper.destroyMultiDragGhost(null)).not.toThrow();
+            expect(() => helper.destroyMultiDragGhost(undefined)).not.toThrow();
+            helper.destroyMultiDragGhost(ghost);
+            expect(root.removeChild).toHaveBeenCalledWith(ghost);
+        });
+
+        it('returns null when document is unavailable', () => {
+            const helper = createContentDragMulti({ getDocument: () => null });
+            const ghost = helper.createMultiDragGhost({ count: 2, root: null });
+            expect(ghost).toBe(null);
+        });
+    });
 });

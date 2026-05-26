@@ -7,7 +7,7 @@
     function createContentDragMulti(deps = {}) {
         const ctx = deps && typeof deps === 'object' ? deps : {};
 
-        const _getDocument = typeof ctx.getDocument === 'function'
+        const getDocument = typeof ctx.getDocument === 'function'
             ? ctx.getDocument
             : () => (typeof document !== 'undefined' ? document : null);
 
@@ -45,6 +45,37 @@
             return { keys: ordered, isMulti: true };
         }
 
+        function createMultiDragGhost({ count, root }) {
+            const doc = getDocument();
+            if (!doc || typeof doc.createElement !== 'function') return null;
+            if (!root || typeof root.appendChild !== 'function') return null;
+
+            const ghost = doc.createElement('div');
+            ghost.className = 'sp-drag-ghost';
+            ghost.setAttribute('aria-hidden', 'true');
+
+            const icon = doc.createElement('span');
+            icon.className = 'google-symbols sp-drag-ghost-icon';
+            icon.appendChild(doc.createTextNode('drag_indicator'));
+            ghost.appendChild(icon);
+
+            const countSpan = doc.createElement('span');
+            countSpan.className = 'sp-drag-ghost-count';
+            countSpan.appendChild(doc.createTextNode(String(count)));
+            ghost.appendChild(countSpan);
+
+            root.appendChild(ghost);
+            return ghost;
+        }
+
+        function destroyMultiDragGhost(ghost) {
+            if (!ghost) return;
+            const parent = ghost.parentNode;
+            if (parent && typeof parent.removeChild === 'function') {
+                try { parent.removeChild(ghost); } catch (err) { /* ignore detach race */ }
+            }
+        }
+
         function computeAutoScrollVelocity({ pointerY, containerTop, containerBottom, edgePx, maxSpeed }) {
             if (typeof pointerY !== 'number' || typeof containerTop !== 'number' || typeof containerBottom !== 'number') return 0;
             if (typeof edgePx !== 'number' || edgePx <= 0) return 0;
@@ -70,7 +101,9 @@
             EDGE_PX: DEFAULT_AUTO_SCROLL_EDGE_PX,
             MAX_SPEED: DEFAULT_AUTO_SCROLL_MAX_SPEED,
             resolveDragSelection,
-            computeAutoScrollVelocity
+            computeAutoScrollVelocity,
+            createMultiDragGhost,
+            destroyMultiDragGhost
         };
     }
 
