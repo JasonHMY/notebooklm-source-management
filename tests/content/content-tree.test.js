@@ -505,3 +505,159 @@ describe('drag and drop ordering guards', () => {
     });
 
 });
+
+describe('handleDragStart multi-source branch', () => {
+    let createContentTreeInteractions;
+    let createContentDragMulti;
+
+    const createTargetClosestStub = (sourceRow, { inCheckbox = false } = {}) => jest.fn((selector) => {
+        if (selector === '.source-item') return sourceRow;
+        if (selector === '.group-header') return null;
+        if (selector === 'input[type="checkbox"], .sp-batch-checkbox') return inCheckbox ? {} : null;
+        return null;
+    });
+
+    const createDataTransfer = () => ({
+        setData: jest.fn(),
+        setDragImage: jest.fn(),
+        effectAllowed: ''
+    });
+
+    const createSourceRow = (key) => ({
+        dataset: { sourceKey: key },
+        classList: { add: jest.fn(), remove: jest.fn() }
+    });
+
+    beforeEach(() => {
+        jest.resetModules();
+        setupGlobalMocks();
+        require('../../src/content/content-native-checkbox-sync.js');
+        createContentTreeInteractions = require('../../src/content/content-tree-interactions.js');
+        createContentDragMulti = require('../../src/content/content-drag-multi.js');
+    });
+
+    afterEach(teardownGlobalMocks);
+
+    it('writes only application/source-key when batch mode is off', () => {
+        const state = { isBatchMode: false, ungrouped: ['A', 'B'], groups: [] };
+        const pendingBatchKeys = new Set();
+        const sourceRow = createSourceRow('A');
+        const dataTransfer = createDataTransfer();
+        const setTimeoutCalls = [];
+
+        const interactions = createContentTreeInteractions({
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getPendingBatchKeys: () => pendingBatchKeys,
+            getShadowRoot: () => null,
+            getSetTimeout: () => (fn) => { setTimeoutCalls.push(fn); },
+            dragMulti: createContentDragMulti({})
+        });
+
+        const event = {
+            target: { closest: createTargetClosestStub(sourceRow) },
+            dataTransfer
+        };
+        interactions.handleDragStart(event);
+
+        expect(dataTransfer.setData).toHaveBeenCalledWith('application/source-key', 'A');
+        const sourceKeysCall = dataTransfer.setData.mock.calls.find((args) => args[0] === 'application/source-keys');
+        expect(sourceKeysCall).toBeUndefined();
+        expect(dataTransfer.setDragImage).not.toHaveBeenCalled();
+    });
+
+    it('writes application/source-keys (ordered) and sets a custom drag image when batch mode is on and origin is selected', () => {
+        const state = { isBatchMode: true, ungrouped: ['A', 'B', 'C'], groups: [] };
+        const pendingBatchKeys = new Set(['A', 'B', 'C']);
+        const sourceRow = createSourceRow('A');
+        const dataTransfer = createDataTransfer();
+        const setTimeoutCalls = [];
+        const ghostNode = { tagName: 'DIV' };
+        const fakeBody = { appendChild: jest.fn(() => ghostNode) };
+        const fakeDoc = { body: fakeBody };
+        const otherRows = new Map([
+            ['B', createSourceRow('B')],
+            ['C', createSourceRow('C')]
+        ]);
+        const shadowRoot = {
+            querySelector: jest.fn((selector) => {
+                const match = selector.match(/\[data-source-key="([^"]+)"\]/);
+                if (!match) return null;
+                if (match[1] === 'A') return sourceRow;
+                return otherRows.get(match[1]) || null;
+            }),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const dragMulti = {
+            resolveDragSelection: jest.fn(({ originKey, isBatchMode, pendingBatchKeys: keys, sourceOrder }) =>
+                createContentDragMulti({}).resolveDragSelection({ originKey, isBatchMode, pendingBatchKeys: keys, sourceOrder })),
+            createMultiDragGhost: jest.fn(() => ghostNode),
+            destroyMultiDragGhost: jest.fn()
+        };
+
+        const runtime = {};
+        const interactions = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getPendingBatchKeys: () => pendingBatchKeys,
+            getShadowRoot: () => shadowRoot,
+            getDocument: () => fakeDoc,
+            getSetTimeout: () => (fn) => { setTimeoutCalls.push(fn); },
+            dragMulti
+        });
+
+        const event = {
+            target: { closest: createTargetClosestStub(sourceRow) },
+            dataTransfer
+        };
+        interactions.handleDragStart(event);
+
+        expect(dragMulti.resolveDragSelection).toHaveBeenCalledTimes(1);
+        const callArgs = dragMulti.resolveDragSelection.mock.calls[0][0];
+        expect(callArgs.originKey).toBe('A');
+        expect(callArgs.isBatchMode).toBe(true);
+        expect(callArgs.pendingBatchKeys).toBe(pendingBatchKeys);
+        expect(callArgs.sourceOrder).toEqual(['A', 'B', 'C']);
+
+        expect(dataTransfer.setData).toHaveBeenCalledWith('application/source-key', 'A');
+        expect(dataTransfer.setData).toHaveBeenCalledWith('application/source-keys', JSON.stringify(['A', 'B', 'C']));
+        expect(dragMulti.createMultiDragGhost).toHaveBeenCalledWith(expect.objectContaining({ count: 3, root: fakeBody }));
+        expect(dataTransfer.setDragImage).toHaveBeenCalledTimes(1);
+        expect(runtime.activeDragGhost).toBe(ghostNode);
+
+        // Flush the queued setTimeout(0) — every selected row should get `.dragging`.
+        setTimeoutCalls.forEach((fn) => fn());
+        expect(sourceRow.classList.add).toHaveBeenCalledWith('dragging');
+        expect(otherRows.get('B').classList.add).toHaveBeenCalledWith('dragging');
+        expect(otherRows.get('C').classList.add).toHaveBeenCalledWith('dragging');
+    });
+
+    it('falls back to single-source drag when batch mode is on but origin is not in the selection', () => {
+        const state = { isBatchMode: true, ungrouped: ['A', 'B', 'X'], groups: [] };
+        const pendingBatchKeys = new Set(['A', 'B']);
+        const sourceRow = createSourceRow('X');
+        const dataTransfer = createDataTransfer();
+        const setTimeoutCalls = [];
+
+        const interactions = createContentTreeInteractions({
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getPendingBatchKeys: () => pendingBatchKeys,
+            getShadowRoot: () => null,
+            getSetTimeout: () => (fn) => { setTimeoutCalls.push(fn); },
+            dragMulti: createContentDragMulti({})
+        });
+
+        const event = {
+            target: { closest: createTargetClosestStub(sourceRow) },
+            dataTransfer
+        };
+        interactions.handleDragStart(event);
+
+        expect(dataTransfer.setData).toHaveBeenCalledWith('application/source-key', 'X');
+        const sourceKeysCall = dataTransfer.setData.mock.calls.find((args) => args[0] === 'application/source-keys');
+        expect(sourceKeysCall).toBeUndefined();
+        expect(dataTransfer.setDragImage).not.toHaveBeenCalled();
+    });
+});

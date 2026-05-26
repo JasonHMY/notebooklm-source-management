@@ -153,6 +153,22 @@
             ? deps.recordNativeSelectionSyncFailure
             : () => {};
 
+        const dragMulti = (typeof deps.dragMulti === 'object' && deps.dragMulti)
+            ? deps.dragMulti
+            : (typeof runtime.dragMulti === 'object' && runtime.dragMulti
+                ? runtime.dragMulti
+                : (typeof globalThis.NSM_CREATE_CONTENT_DRAG_MULTI === 'function'
+                    ? globalThis.NSM_CREATE_CONTENT_DRAG_MULTI({})
+                    : null));
+
+        function cssEscape(value) {
+            const raw = typeof value === 'string' ? value : String(value ?? '');
+            if (typeof globalThis.CSS === 'object' && globalThis.CSS && typeof globalThis.CSS.escape === 'function') {
+                try { return globalThis.CSS.escape(raw); } catch (err) { /* fall through */ }
+            }
+            return raw.replace(/(["\\])/g, '\\$1');
+        }
+
         const createContentNativeCheckboxSyncFactory = globalThis.NSM_CREATE_CONTENT_NATIVE_CHECKBOX_SYNC;
         if (typeof createContentNativeCheckboxSyncFactory !== 'function') {
             throw new Error('NotebookLM Source Management: createContentTreeInteractions requires NSM_CREATE_CONTENT_NATIVE_CHECKBOX_SYNC to be loaded first.');
@@ -834,14 +850,71 @@
 
             if (sourceTarget) {
                 const key = sourceTarget.dataset.sourceKey;
-                if (key) {
-                    e.dataTransfer.setData('application/source-key', key);
-                    e.dataTransfer.effectAllowed = 'move';
-                    if (typeof setTimeoutFn === 'function') {
-                        setTimeoutFn(() => sourceTarget.classList.add('dragging'), 0);
+                if (!key) return;
+
+                if (typeof e.target.closest === 'function'
+                    && e.target.closest('input[type="checkbox"], .sp-batch-checkbox')) {
+                    if (typeof e.preventDefault === 'function') e.preventDefault();
+                    return;
+                }
+
+                const state = getState();
+                const pendingBatchKeys = getPendingBatchKeys();
+                const hasResolver = dragMulti && typeof dragMulti.resolveDragSelection === 'function';
+                const sourceOrder = hasResolver ? collectSourceKeysInTreeOrder() : [];
+
+                const selection = hasResolver
+                    ? dragMulti.resolveDragSelection({
+                        originKey: key,
+                        isBatchMode: Boolean(state.isBatchMode),
+                        pendingBatchKeys,
+                        sourceOrder
+                    })
+                    : { keys: [key], isMulti: false };
+
+                const keys = Array.isArray(selection?.keys) && selection.keys.length > 0
+                    ? selection.keys
+                    : [key];
+
+                e.dataTransfer.setData('application/source-key', keys[0]);
+                if (selection.isMulti) {
+                    e.dataTransfer.setData('application/source-keys', JSON.stringify(keys));
+                }
+                e.dataTransfer.effectAllowed = 'move';
+
+                if (selection.isMulti && dragMulti && typeof dragMulti.createMultiDragGhost === 'function') {
+                    const doc = getDocument();
+                    const root = doc && doc.body ? doc.body : null;
+                    const ghost = dragMulti.createMultiDragGhost({ count: keys.length, root });
+                    if (ghost && typeof e.dataTransfer.setDragImage === 'function') {
+                        try { e.dataTransfer.setDragImage(ghost, 12, 12); } catch (err) { /* ignore setDragImage failure */ }
+                        runtime.activeDragGhost = ghost;
                     }
                 }
-            } else if (groupTarget) {
+
+                if (typeof setTimeoutFn === 'function') {
+                    setTimeoutFn(() => {
+                        if (selection.isMulti) {
+                            const root = getShadowRoot();
+                            if (root && typeof root.querySelector === 'function') {
+                                keys.forEach((rowKey) => {
+                                    const row = root.querySelector(`.source-item[data-source-key="${cssEscape(rowKey)}"]`);
+                                    if (row && row.classList && typeof row.classList.add === 'function') {
+                                        row.classList.add('dragging');
+                                    }
+                                });
+                            } else if (sourceTarget.classList && typeof sourceTarget.classList.add === 'function') {
+                                sourceTarget.classList.add('dragging');
+                            }
+                        } else if (sourceTarget.classList && typeof sourceTarget.classList.add === 'function') {
+                            sourceTarget.classList.add('dragging');
+                        }
+                    }, 0);
+                }
+                return;
+            }
+
+            if (groupTarget) {
                 const key = groupTarget.dataset.groupId;
                 if (key) {
                     e.dataTransfer.setData('application/group-id', key);
