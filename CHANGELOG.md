@@ -75,6 +75,7 @@
 - **发布包图标保留校验 (Release Icon Asset Guard)**: 补充发布包图标资源校验，确保插件图标资源继续进入 release zip。
 - **全部视图边界遮挡 (All View Edge Clipping)**: 修复 All 快速视图下快速筛选按钮被渲染成裁切括号状、以及来源列表最后一行贴近底部边界时可能被面板边缘、拖拽手柄或 NotebookLM 原生控件截断的问题。
 - **空快速视图栏隐藏 (Empty Quick View Rail Hiding)**: 修复用户在设置中隐藏所有 quick view 按钮后，来源面板仍保留空白按钮栏区域的问题。
+- **content-test-harness 全局列表同步 (Content Test Harness Globals Sync)**: 在 `tests/helpers/content-test-harness.js` 的 `CONTENT_HELPER_GLOBALS` 数组中补齐 `NSM_CREATE_CONTENT_DRAG_MULTI`，按 manifest 加载顺序放在 `NSM_CREATE_CONTENT_NATIVE_CHECKBOX_SYNC` 之后；之前 Task 1 在登记新模块时只更新了 `load-content-module.js`，遗漏了 AGENTS.md 要求一同更新的 harness 文件，会导致使用该 harness 的测试之间 global 残留。修复后 lint 0/0、890 个单元测试继续通过。
 
 ### Security
 - **本地会话文件忽略 (Local Session File Ignore)**: 将根目录 `cookies.json` 加入 `.gitignore`，避免小红书或其他本地登录工具生成的会话文件被误提交。
