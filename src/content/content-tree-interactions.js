@@ -1117,6 +1117,13 @@
             if (autoScrollController) autoScrollController.stop();
             runtime.activeDragContext = null;
             cancelAllHoverTimers();
+            if (runtime.hoverExpandedGroupIds.size > 0) {
+                const openedIds = Array.from(runtime.hoverExpandedGroupIds);
+                for (const G of openedIds) {
+                    executeHoverCollapse(G);
+                }
+                runtime.hoverExpandedGroupIds.clear();
+            }
             return count;
         }
 
@@ -1234,6 +1241,45 @@
             for (const id of idsToCancel) {
                 cancelHoverTimerForGroup(id);
             }
+        }
+
+        function resolveDropLandingGroupId(intent, augmentedIntent) {
+            const probe = augmentedIntent || intent || {};
+            const kind = probe.kind;
+            const targetGroup = probe.targetGroup;
+            if (kind === 'into-group') {
+                return targetGroup && targetGroup.id ? targetGroup.id : null;
+            }
+            if (kind === 'before-source' || kind === 'after-source') {
+                return targetGroup && targetGroup.id ? targetGroup.id : null;
+            }
+            if (kind === 'before-group' || kind === 'after-group') {
+                const parentMap = getParentMap();
+                const tgId = targetGroup && targetGroup.id ? targetGroup.id : null;
+                if (!tgId) return null;
+                if (parentMap && typeof parentMap.get === 'function') {
+                    const parent = parentMap.get(tgId);
+                    return parent || null;
+                }
+                return null;
+            }
+            return null;
+        }
+
+        function disposeHoverOpenedGroupsAfterDrop(intent, augmentedIntent) {
+            if (runtime.hoverExpandedGroupIds.size === 0) return;
+            const landingId = resolveDropLandingGroupId(intent, augmentedIntent);
+            const landingAncestors = landingId ? new Set(getGroupAncestorChain(landingId)) : new Set();
+
+            const openedIds = Array.from(runtime.hoverExpandedGroupIds);
+            for (const G of openedIds) {
+                if (landingAncestors.has(G)) {
+                    runtime.hoverExpandedGroupIds.delete(G);
+                } else {
+                    executeHoverCollapse(G);
+                }
+            }
+            cancelAllHoverTimers();
         }
 
         function getSourceTreePosition(sourceKey) {
@@ -1378,12 +1424,14 @@
             const isAbove = dropTarget.classList.contains('drag-over-top');
             const intentKind = normalizeIntentKind(isInto, isAbove, dropTarget);
             const intent = getDropIntent(dropTarget, isInto, isAbove);
-            clearDragFeedback();
 
             const sourceKey = e.dataTransfer.getData('application/source-key');
             const sourceKeysRaw = e.dataTransfer.getData('application/source-keys');
             const draggedGroupId = e.dataTransfer.getData('application/group-id');
-            if (!intent) return;
+            if (!intent) {
+                clearDragFeedback();
+                return;
+            }
 
             if (sourceKeysRaw && dragMulti && typeof dragMulti.applyMultiSourceDrop === 'function') {
                 let keys = null;
@@ -1398,6 +1446,7 @@
                         kind: intentKind,
                         targetList: intent.targetList,
                         insertIndex: intent.insertIndex,
+                        targetGroup: intent.targetGroup,
                         targetGroupId: intent.targetGroup ? intent.targetGroup.id : null
                     };
                     const result = dragMulti.applyMultiSourceDrop({
@@ -1418,6 +1467,7 @@
                         saveState({ immediate: true, critical: true });
                         render();
                         showToast(getMessage('ui_batch_moved_sources_toast', [String(result.moved)]));
+                        disposeHoverOpenedGroupsAfterDrop(intent, augmentedIntent);
                     }
                     clearDragFeedback();
                     return;
@@ -1425,10 +1475,17 @@
             }
 
             let didMove = false;
+            const augmentedIntent = {
+                kind: intentKind,
+                targetList: intent.targetList,
+                insertIndex: intent.insertIndex,
+                targetGroup: intent.targetGroup
+            };
 
             if (sourceKey) {
                 const originalPosition = getSourceTreePosition(sourceKey);
                 if (isNoopTreeMove(originalPosition, intent.targetList, intent.insertIndex)) {
+                    clearDragFeedback();
                     return;
                 }
                 const insertionIndex = getNormalizedInsertionIndex(intent.targetList, intent.insertIndex, originalPosition);
@@ -1441,12 +1498,17 @@
                 didMove = true;
             } else if (draggedGroupId) {
                 const draggedGroupObj = groupsById.get(draggedGroupId);
-                if (!draggedGroupObj) return;
+                if (!draggedGroupObj) {
+                    clearDragFeedback();
+                    return;
+                }
                 if (intent.targetGroup && isDescendant(intent.targetGroup, draggedGroupObj, groupsById)) {
+                    clearDragFeedback();
                     return;
                 }
                 const originalPosition = getGroupTreePosition(draggedGroupId);
                 if (isNoopTreeMove(originalPosition, intent.targetList, intent.insertIndex)) {
+                    clearDragFeedback();
                     return;
                 }
                 const insertionIndex = getNormalizedInsertionIndex(intent.targetList, intent.insertIndex, originalPosition);
@@ -1459,14 +1521,26 @@
                 didMove = true;
             }
 
-            if (!didMove) return;
+            if (!didMove) {
+                clearDragFeedback();
+                return;
+            }
             buildParentMap();
             render();
             saveState({ immediate: true, critical: true });
+            disposeHoverOpenedGroupsAfterDrop(intent, augmentedIntent);
+            clearDragFeedback();
         }
 
         function handleDragEnd(e) {
             cancelAllHoverTimers();
+            if (runtime.hoverExpandedGroupIds.size > 0) {
+                const openedIds = Array.from(runtime.hoverExpandedGroupIds);
+                for (const G of openedIds) {
+                    executeHoverCollapse(G);
+                }
+                runtime.hoverExpandedGroupIds.clear();
+            }
             clearDragFeedback();
             if (autoScrollController) autoScrollController.stop();
             if (runtime.activeDragGhost && dragMulti && typeof dragMulti.destroyMultiDragGhost === 'function') {

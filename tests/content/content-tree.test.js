@@ -1511,10 +1511,28 @@ describe('handleDragOver hover-expand', () => {
             };
         }
 
+        function makeSourceRowTarget(sourceKey) {
+            const rect = { top: 200, bottom: 240, height: 40 };
+            const classList = makeClassList(['source-item']);
+            const target = {
+                dataset: { sourceKey },
+                classList,
+                rect,
+                getBoundingClientRect: () => ({ top: rect.top, bottom: rect.bottom, height: rect.height, left: 0, right: 200, width: 200 })
+            };
+            target.closest = (selector) => {
+                if (selector === '.group-container, .source-item') return target;
+                if (selector === '.source-item') return target;
+                if (selector === '.group-container') return null;
+                return null;
+            };
+            return target;
+        }
+
         return {
             runtime,
             tree,
-            helpers: { makeGroupContainerTarget, makeDropEvent },
+            helpers: { makeGroupContainerTarget, makeDropEvent, makeSourceRowTarget },
             groupsById
         };
     }
@@ -1842,6 +1860,77 @@ describe('handleDragOver hover-expand', () => {
             jest.advanceTimersByTime(600);
             expect(ctx.runtime.groupsById.get('A').collapsed).toBe(false);
             expect(ctx.runtime.hoverExpandedGroupIds.has('A')).toBe(true);
+        });
+    });
+
+    describe('drop disposition for hover-opened groups', () => {
+        beforeEach(() => {
+            jest.useFakeTimers();
+        });
+        afterEach(() => {
+            jest.useRealTimers();
+        });
+
+        it('keeps the hover-opened group open when drop lands inside its subtree', () => {
+            const ctx = setupTreeInteractionsTestContext({
+                state: { isBatchMode: false, ungrouped: ['A'], groups: ['g1'] },
+                pendingBatchKeys: new Set(),
+                groups: { g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: false } }
+            });
+            ctx.runtime.hoverExpandedGroupIds.add('g1');
+
+            const target = ctx.helpers.makeGroupContainerTarget('g1', { intent: 'drag-into' });
+            const dropEvent = ctx.helpers.makeDropEvent({
+                data: { 'application/source-key': 'A' },
+                target
+            });
+            ctx.tree.handleDrop(dropEvent);
+
+            expect(ctx.runtime.groupsById.get('g1').collapsed).toBe(false);
+            expect(ctx.runtime.hoverExpandedGroupIds.has('g1')).toBe(false);
+        });
+
+        it('collapses the hover-opened group when drop lands outside its subtree', () => {
+            const ctx = setupTreeInteractionsTestContext({
+                state: { isBatchMode: false, ungrouped: ['A'], groups: ['g1', 'g2'] },
+                pendingBatchKeys: new Set(),
+                groups: {
+                    g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: false },
+                    g2: { id: 'g2', children: [], collapsed: false }
+                }
+            });
+            ctx.runtime.hoverExpandedGroupIds.add('g1');
+
+            // Pre-register g1's container so executeHoverCollapse can locate it.
+            ctx.helpers.makeGroupContainerTarget('g1', { intent: 'drag-into' });
+
+            // Drop into g2 (sibling, not in g1's chain).
+            const target = ctx.helpers.makeGroupContainerTarget('g2', { intent: 'drag-into' });
+            const dropEvent = ctx.helpers.makeDropEvent({
+                data: { 'application/source-key': 'A' },
+                target
+            });
+            ctx.tree.handleDrop(dropEvent);
+
+            expect(ctx.runtime.groupsById.get('g1').collapsed).toBe(true);
+            expect(ctx.runtime.hoverExpandedGroupIds.has('g1')).toBe(false);
+        });
+
+        it('collapses hover-opened groups on handleDragEnd if drop never landed inside', () => {
+            const ctx = setupTreeInteractionsTestContext({
+                state: { isBatchMode: false, ungrouped: ['A'], groups: ['g1'] },
+                pendingBatchKeys: new Set(),
+                groups: { g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: false } }
+            });
+            ctx.runtime.hoverExpandedGroupIds.add('g1');
+
+            // Pre-register g1's container so executeHoverCollapse can locate it.
+            ctx.helpers.makeGroupContainerTarget('g1', { intent: 'drag-into' });
+
+            ctx.tree.handleDragEnd({ target: ctx.helpers.makeSourceRowTarget('A') });
+
+            expect(ctx.runtime.groupsById.get('g1').collapsed).toBe(true);
+            expect(ctx.runtime.hoverExpandedGroupIds.size).toBe(0);
         });
     });
 });
