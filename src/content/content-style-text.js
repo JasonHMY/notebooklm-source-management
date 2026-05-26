@@ -3045,9 +3045,36 @@
         `;
 
     const globalOverlayStyleText = `
+                    /* Google Symbols font + base rule for elements appended to
+                       document.body (e.g. the multi-source drag ghost). The
+                       Shadow DOM declaration in contentStyleText is unreachable
+                       from elements outside the shadow root, so the glyph would
+                       otherwise render as literal text or a fallback square. */
+                    @font-face {
+                        font-family: 'Google Symbols';
+                        font-style: normal;
+                        font-weight: 400;
+                        src: url("${googleSymbolsFontUrl}") format('woff2');
+                    }
+                    .google-symbols {
+                        font-family: 'Google Symbols';
+                        font-weight: normal;
+                        font-style: normal;
+                        font-size: 18px;
+                        line-height: 1;
+                        letter-spacing: normal;
+                        text-transform: none;
+                        display: inline-block;
+                        white-space: nowrap;
+                        word-wrap: normal;
+                        direction: ltr;
+                        -webkit-font-feature-settings: 'liga';
+                        -webkit-font-smoothing: antialiased;
+                    }
+
                     /* --------- Global Apple HIG Glassmorphism Overrides --------- */
                     /* Note: Modifying Angular Material generic overlay/dialog structures */
-                    
+
                     /* 1. Popover Menus (More button floating menus) */
                     body .cdk-overlay-container .mat-mdc-menu-panel,
                     body .cdk-overlay-container .mat-menu-panel {
