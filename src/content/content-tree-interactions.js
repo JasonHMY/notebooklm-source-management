@@ -1151,6 +1151,11 @@
                 let keys = null;
                 try { keys = JSON.parse(sourceKeysRaw); } catch (err) { keys = null; }
                 if (Array.isArray(keys) && keys.length >= 2) {
+                    const allowedMultiIntents = new Set(['into-group', 'before-source', 'after-source']);
+                    if (!allowedMultiIntents.has(intentKind)) {
+                        clearDragFeedback();
+                        return;
+                    }
                     const augmentedIntent = {
                         kind: intentKind,
                         targetList: intent.targetList,

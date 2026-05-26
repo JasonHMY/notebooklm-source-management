@@ -898,6 +898,58 @@ describe('drop routes multi vs single source', () => {
             })
         );
     });
+
+    it('does not corrupt state.groups when intent is before-group at top level', () => {
+        const group = { id: 'g1', children: [] };
+        const state = { isBatchMode: true, ungrouped: ['A', 'B', 'C'], groups: ['g1'] };
+        const groupsById = new Map([['g1', group]]);
+        const sourcesByKey = new Map([
+            ['A', { key: 'A' }],
+            ['B', { key: 'B' }],
+            ['C', { key: 'C' }]
+        ]);
+        const pendingBatchKeys = new Set(['A', 'B']);
+        const saveState = jest.fn();
+        const render = jest.fn();
+        const showToast = jest.fn();
+        const buildParentMap = jest.fn();
+        const developerLog = jest.fn();
+        const dropTarget = {
+            dataset: { groupId: 'g1' },
+            classList: createClassList(['group-container', 'drag-over-top'])
+        };
+        const interactions = createContentTreeInteractions({
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getSourcesByKey: () => sourcesByKey,
+            getParentMap: () => new Map(),
+            getPendingBatchKeys: () => pendingBatchKeys,
+            getShadowRoot: () => ({ querySelectorAll: jest.fn(() => []) }),
+            saveState,
+            render,
+            showToast,
+            buildParentMap,
+            developerLog,
+            dragMulti: createContentDragMulti({}),
+            getMessage: (key, args = []) => `${key}:${args.join(',')}`
+        });
+
+        interactions.handleDrop(createDropEvent({
+            dropTarget,
+            sourceKey: 'A',
+            sourceKeysJson: JSON.stringify(['A', 'B'])
+        }));
+
+        expect(state.groups).toEqual(['g1']);
+        expect(state.ungrouped).toEqual(['A', 'B', 'C']);
+        expect(group.children).toEqual([]);
+        expect(state.isBatchMode).toBe(true);
+        expect(pendingBatchKeys.size).toBe(2);
+        expect(saveState).not.toHaveBeenCalled();
+        expect(render).not.toHaveBeenCalled();
+        expect(showToast).not.toHaveBeenCalled();
+        expect(developerLog).not.toHaveBeenCalled();
+    });
 });
 
 describe('drag auto-scroll integration', () => {
