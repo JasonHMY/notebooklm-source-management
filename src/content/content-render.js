@@ -1246,7 +1246,7 @@
 
                 return el('div', {
                     className: 'source-item sp-list-item-enter sp-spotlight-surface' + extraClasses,
-                    draggable: !state.isBatchMode && !isFailed && !isLoading ? 'true' : 'false',
+                    draggable: !isFailed && !isLoading ? 'true' : 'false',
                     dataset: { sourceKey: source.key },
                     style: motionStyle,
                     title: titleAttr
