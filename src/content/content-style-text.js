@@ -2960,12 +2960,20 @@
                 z-index: 10;
             }
 
+            .drag-over-top.drag-invalid {
+                border-top-color: var(--sp-accent-danger) !important;
+                box-shadow: 0 -6px 14px rgba(255, 59, 48, 0.12);
+            }
+            .drag-over-bottom.drag-invalid {
+                border-bottom-color: var(--sp-accent-danger) !important;
+                box-shadow: 0 6px 14px rgba(255, 59, 48, 0.12);
+            }
             .drag-invalid {
                 cursor: not-allowed;
             }
             .drag-over-top.drag-invalid::before,
             .drag-over-bottom.drag-invalid::after {
-                background: var(--sp-accent-danger);
+                background-color: var(--sp-accent-danger);
             }
             .group-container.drag-invalid > .group-header {
                 background-color: rgba(255, 59, 48, 0.08);
