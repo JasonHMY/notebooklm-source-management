@@ -113,6 +113,8 @@ NotebookLM Source Management
 │   │   │   └── toast 参数归一、保存状态文案 key 和 DOM 清空 helper
 │   │   ├── content-diagnostics.js
 │   │   │   └── diagnostics JSON 序列化、Error/unhandled rejection 脱敏摘要 helper
+│   │   ├── content-drag-multi.js
+│   │   │   └── 多源拖拽 selection 解析、单元素 ghost helper、auto-scroll RAF controller、批量 drop 应用
 │   │   ├── content-source-view-switch-controller.js
 │   │   │   └── 来源视图切换目标归一、状态字段和 attempt 记录 helper
 │   │   ├── content-style-text.js
