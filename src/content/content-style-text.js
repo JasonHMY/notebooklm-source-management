@@ -3086,6 +3086,45 @@
                             --sp-glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
                         }
                     }
+
+                    /* multi-source drag ghost
+                       The ghost element is appended to document.body during
+                       multi-source drag, so it lives outside the Shadow DOM
+                       and cannot read --sp-* tokens from :host. Values are
+                       hardcoded to match the resolved light/dark tokens. */
+                    .sp-drag-ghost {
+                        position: fixed;
+                        top: -9999px;
+                        left: -9999px;
+                        display: inline-flex;
+                        align-items: center;
+                        gap: 6px;
+                        padding: 8px 12px;
+                        border-radius: 999px;
+                        background: #fff;
+                        color: #1A1A1C;
+                        border: 1px solid rgba(0, 0, 0, 0.15);
+                        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.08);
+                        font-size: 13px;
+                        pointer-events: none;
+                        user-select: none;
+                    }
+                    .sp-drag-ghost .sp-drag-ghost-icon.google-symbols {
+                        font-size: 16px;
+                        line-height: 1;
+                    }
+                    .sp-drag-ghost-count {
+                        font-weight: 600;
+                        line-height: 1;
+                    }
+                    @media (prefers-color-scheme: dark) {
+                        .sp-drag-ghost {
+                            background: #1c1c1e;
+                            color: #f5f5f7;
+                            border-color: rgba(255, 255, 255, 0.2);
+                            box-shadow: 0 12px 28px rgba(0, 0, 0, 0.32);
+                        }
+                    }
                 `;
 
     globalThis.NSM_CONTENT_STYLE_TEXT = contentStyleText;
