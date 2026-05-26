@@ -153,4 +153,122 @@ describe('content-drag-multi factory', () => {
             expect(ghost).toBe(null);
         });
     });
+
+    describe('applyMultiSourceDrop', () => {
+        function makeState() {
+            return {
+                ungrouped: ['A', 'B', 'C', 'D'],
+                groups: [
+                    {
+                        id: 'g1',
+                        children: [{ type: 'source', key: 'E' }, { type: 'source', key: 'F' }]
+                    }
+                ]
+            };
+        }
+
+        function makeHelpers(state) {
+            const groupsById = new Map(state.groups.map((g) => [g.id, g]));
+            return {
+                removeSourceFromParent: jest.fn((key) => {
+                    const idx = state.ungrouped.indexOf(key);
+                    if (idx !== -1) {
+                        state.ungrouped.splice(idx, 1);
+                        return { list: state.ungrouped, index: idx, fromGroupId: null };
+                    }
+                    for (const group of state.groups) {
+                        const cidx = group.children.findIndex((c) => c.type === 'source' && c.key === key);
+                        if (cidx !== -1) {
+                            group.children.splice(cidx, 1);
+                            return { list: group.children, index: cidx, fromGroupId: group.id };
+                        }
+                    }
+                    return null;
+                }),
+                sourceExists: jest.fn((key) => {
+                    if (state.ungrouped.includes(key)) return true;
+                    for (const group of state.groups) {
+                        if (group.children.some((c) => c.type === 'source' && c.key === key)) return true;
+                    }
+                    return false;
+                }),
+                getGroupById: jest.fn((id) => groupsById.get(id) || null)
+            };
+        }
+
+        it('moves three sources into a group, preserving relative order', () => {
+            const state = makeState();
+            const helpers = makeHelpers(state);
+            const helper = createContentDragMulti();
+            const result = helper.applyMultiSourceDrop({
+                keys: ['A', 'C', 'D'],
+                intent: { kind: 'into-group', targetGroupId: 'g1' },
+                state,
+                helpers
+            });
+            expect(result.moved).toBe(3);
+            expect(state.ungrouped).toEqual(['B']);
+            expect(state.groups[0].children.map((c) => c.key)).toEqual(['E', 'F', 'A', 'C', 'D']);
+        });
+
+        it('skips keys that no longer exist in state', () => {
+            const state = makeState();
+            const helpers = makeHelpers(state);
+            const helper = createContentDragMulti();
+            const result = helper.applyMultiSourceDrop({
+                keys: ['A', 'GHOST', 'C'],
+                intent: { kind: 'into-group', targetGroupId: 'g1' },
+                state,
+                helpers
+            });
+            expect(result.moved).toBe(2);
+            expect(result.skipped).toBe(1);
+        });
+
+        it('inserts before a source intent, advancing past contiguous members of the dragged set', () => {
+            const state = {
+                ungrouped: ['A', 'B', 'C', 'D'],
+                groups: []
+            };
+            const helpers = makeHelpers(state);
+            const helper = createContentDragMulti();
+            const result = helper.applyMultiSourceDrop({
+                keys: ['B', 'C'],
+                intent: { kind: 'before-source', targetList: state.ungrouped, insertIndex: 1 },
+                state,
+                helpers
+            });
+            expect(result.moved).toBe(2);
+            expect(state.ungrouped).toEqual(['A', 'B', 'C', 'D']);
+        });
+
+        it('returns moved=0 when the target list is entirely the dragged set', () => {
+            const state = { ungrouped: ['A', 'B'], groups: [] };
+            const helpers = makeHelpers(state);
+            const helper = createContentDragMulti();
+            const result = helper.applyMultiSourceDrop({
+                keys: ['A', 'B'],
+                intent: { kind: 'before-source', targetList: state.ungrouped, insertIndex: 0 },
+                state,
+                helpers
+            });
+            expect(result.moved).toBe(0);
+            expect(state.ungrouped).toEqual(['A', 'B']);
+        });
+
+        it('does not call saveState or render', () => {
+            const state = makeState();
+            const helpers = makeHelpers(state);
+            const helper = createContentDragMulti();
+            const callTracker = { saveState: jest.fn(), render: jest.fn() };
+            helper.applyMultiSourceDrop({
+                keys: ['A'],
+                intent: { kind: 'into-group', targetGroupId: 'g1' },
+                state,
+                helpers
+            });
+            expect(callTracker.saveState).not.toHaveBeenCalled();
+            expect(callTracker.render).not.toHaveBeenCalled();
+        });
+    });
 });

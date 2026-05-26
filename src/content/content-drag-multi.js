@@ -76,6 +76,72 @@
             }
         }
 
+        function applyMultiSourceDrop({ keys, intent, state, helpers }) {
+            if (!Array.isArray(keys) || keys.length === 0) return { moved: 0, skipped: 0 };
+            if (!intent || typeof intent !== 'object') return { moved: 0, skipped: 0 };
+            if (!helpers || typeof helpers !== 'object') return { moved: 0, skipped: 0 };
+
+            const validKeys = keys.filter((key) => {
+                if (typeof key !== 'string' || !key) return false;
+                return typeof helpers.sourceExists === 'function' ? helpers.sourceExists(key) : true;
+            });
+            const skipped = keys.length - validKeys.length;
+            if (validKeys.length === 0) return { moved: 0, skipped };
+
+            if (intent.kind === 'into-group') {
+                const group = typeof helpers.getGroupById === 'function' ? helpers.getGroupById(intent.targetGroupId) : null;
+                if (!group) return { moved: 0, skipped: keys.length };
+                if (!Array.isArray(group.children)) group.children = [];
+
+                for (const key of validKeys) {
+                    if (typeof helpers.removeSourceFromParent === 'function') helpers.removeSourceFromParent(key);
+                    group.children.push({ type: 'source', key });
+                }
+                return { moved: validKeys.length, skipped };
+            }
+
+            if (intent.kind === 'before-source' || intent.kind === 'after-source' || intent.kind === 'before-group' || intent.kind === 'after-group') {
+                const list = Array.isArray(intent.targetList) ? intent.targetList : null;
+                if (!list) return { moved: 0, skipped: keys.length };
+
+                const draggedSet = new Set(validKeys);
+                const isMemberAt = (idx) => {
+                    const entry = list[idx];
+                    if (typeof entry === 'string') return draggedSet.has(entry);
+                    if (entry && typeof entry === 'object' && entry.type === 'source') return draggedSet.has(entry.key);
+                    return false;
+                };
+
+                let insertIndex = typeof intent.insertIndex === 'number' ? intent.insertIndex : list.length;
+
+                while (insertIndex < list.length && isMemberAt(insertIndex)) insertIndex += 1;
+
+                const allDragged = list.every((_, i) => isMemberAt(i));
+                if (list.length > 0 && allDragged) return { moved: 0, skipped };
+
+                let membersBeforeInsert = 0;
+                for (let i = 0; i < insertIndex; i += 1) {
+                    if (isMemberAt(i)) membersBeforeInsert += 1;
+                }
+                const hadObjectEntries = list.length > 0 && typeof list[0] === 'object';
+                const adjustedInsertIndex = insertIndex - membersBeforeInsert;
+
+                for (let i = 0; i < validKeys.length; i += 1) {
+                    const key = validKeys[i];
+                    if (typeof helpers.removeSourceFromParent === 'function') helpers.removeSourceFromParent(key);
+                }
+
+                for (let i = 0; i < validKeys.length; i += 1) {
+                    const key = validKeys[i];
+                    const entry = hadObjectEntries ? { type: 'source', key } : key;
+                    list.splice(adjustedInsertIndex + i, 0, entry);
+                }
+                return { moved: validKeys.length, skipped };
+            }
+
+            return { moved: 0, skipped: keys.length };
+        }
+
         function computeAutoScrollVelocity({ pointerY, containerTop, containerBottom, edgePx, maxSpeed }) {
             if (typeof pointerY !== 'number' || typeof containerTop !== 'number' || typeof containerBottom !== 'number') return 0;
             if (typeof edgePx !== 'number' || edgePx <= 0) return 0;
@@ -103,7 +169,8 @@
             resolveDragSelection,
             computeAutoScrollVelocity,
             createMultiDragGhost,
-            destroyMultiDragGhost
+            destroyMultiDragGhost,
+            applyMultiSourceDrop
         };
     }
 
