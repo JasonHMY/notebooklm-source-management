@@ -3162,7 +3162,6 @@
                         left: -9999px;
                         display: inline-flex;
                         align-items: center;
-                        gap: 6px;
                         padding: 8px 12px;
                         border-radius: 999px;
                         background: #fff;
@@ -3172,10 +3171,6 @@
                         font-size: 13px;
                         pointer-events: none;
                         user-select: none;
-                    }
-                    .sp-drag-ghost .sp-drag-ghost-icon.google-symbols {
-                        font-size: 16px;
-                        line-height: 1;
                     }
                     .sp-drag-ghost-count {
                         font-weight: 600;

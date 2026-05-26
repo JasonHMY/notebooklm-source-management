@@ -54,11 +54,6 @@
             ghost.className = 'sp-drag-ghost';
             ghost.setAttribute('aria-hidden', 'true');
 
-            const icon = doc.createElement('span');
-            icon.className = 'google-symbols sp-drag-ghost-icon';
-            icon.appendChild(doc.createTextNode('drag_indicator'));
-            ghost.appendChild(icon);
-
             const countSpan = doc.createElement('span');
             countSpan.className = 'sp-drag-ghost-count';
             countSpan.appendChild(doc.createTextNode(String(count)));

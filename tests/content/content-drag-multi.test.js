@@ -115,7 +115,7 @@ describe('content-drag-multi factory', () => {
             return { doc, root, created };
         }
 
-        it('builds a pill with an icon span and the count text for N=2', () => {
+        it('builds a pill with the count text for N=2', () => {
             const { doc, root } = makeDocument();
             const helper = createContentDragMulti({ getDocument: () => doc });
             const ghost = helper.createMultiDragGhost({ count: 2, root });
@@ -135,6 +135,36 @@ describe('content-drag-multi factory', () => {
             const ghost = helper.createMultiDragGhost({ count: 17, root });
             const textNodes = ghost.children.flatMap((c) => c.children || []).map((n) => n.text);
             expect(textNodes).toContain('17');
+        });
+
+        it('ghost contains only number, no icon span (N=1)', () => {
+            const { doc, root } = makeDocument();
+            const helper = createContentDragMulti({ getDocument: () => doc });
+            const ghost = helper.createMultiDragGhost({ count: 1, root });
+            expect(ghost).toBeTruthy();
+            const hasIconSpan = ghost.children.some((c) =>
+                c.className && c.className.includes('sp-drag-ghost-icon')
+            );
+            expect(hasIconSpan).toBe(false);
+            const countSpan = ghost.children.find((c) =>
+                c.className && c.className.includes('sp-drag-ghost-count')
+            );
+            expect(countSpan).toBeTruthy();
+            expect(countSpan.children[0].text).toBe('1');
+        });
+
+        it('ghost with count=3 shows 3 and no icon', () => {
+            const { doc, root } = makeDocument();
+            const helper = createContentDragMulti({ getDocument: () => doc });
+            const ghost = helper.createMultiDragGhost({ count: 3, root });
+            const hasIconSpan = ghost.children.some((c) =>
+                c.className && c.className.includes('sp-drag-ghost-icon')
+            );
+            expect(hasIconSpan).toBe(false);
+            const countSpan = ghost.children.find((c) =>
+                c.className && c.className.includes('sp-drag-ghost-count')
+            );
+            expect(countSpan.children[0].text).toBe('3');
         });
 
         it('destroyMultiDragGhost is null-safe and detaches an attached element', () => {
