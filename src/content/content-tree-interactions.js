@@ -1254,14 +1254,7 @@
                 return targetGroup && targetGroup.id ? targetGroup.id : null;
             }
             if (kind === 'before-group' || kind === 'after-group') {
-                const parentMap = getParentMap();
-                const tgId = targetGroup && targetGroup.id ? targetGroup.id : null;
-                if (!tgId) return null;
-                if (parentMap && typeof parentMap.get === 'function') {
-                    const parent = parentMap.get(tgId);
-                    return parent || null;
-                }
-                return null;
+                return targetGroup && targetGroup.id ? targetGroup.id : null;
             }
             return null;
         }

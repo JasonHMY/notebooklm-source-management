@@ -1932,5 +1932,32 @@ describe('handleDragOver hover-expand', () => {
             expect(ctx.runtime.groupsById.get('g1').collapsed).toBe(true);
             expect(ctx.runtime.hoverExpandedGroupIds.size).toBe(0);
         });
+
+        it('keeps an ancestor open when dropping a group above a sibling inside it', () => {
+            const ctx = setupTreeInteractionsTestContext({
+                state: { isBatchMode: false, ungrouped: [], groups: ['g1', 'gD'] },
+                pendingBatchKeys: new Set(),
+                groups: {
+                    g1: { id: 'g1', children: [{ type: 'group', id: 'g3' }], collapsed: false },
+                    g3: { id: 'g3', children: [], collapsed: false },
+                    gD: { id: 'gD', children: [], collapsed: false }
+                },
+                parentMap: new Map([['g3', 'g1']])
+            });
+            ctx.runtime.hoverExpandedGroupIds.add('g1');
+
+            // Simulate dropping gD above g3 (which is inside g1).
+            // intent.targetGroup = g1 (the parent of g3), intent.kind = 'before-group'.
+            const target = ctx.helpers.makeGroupContainerTarget('g3', { intent: 'drag-over-top' });
+            const dropEvent = ctx.helpers.makeDropEvent({
+                data: { 'application/group-id': 'gD' },
+                target
+            });
+            ctx.tree.handleDrop(dropEvent);
+
+            // g1 should stay open because the drop landed inside g1's subtree.
+            expect(ctx.runtime.groupsById.get('g1').collapsed).toBe(false);
+            expect(ctx.runtime.hoverExpandedGroupIds.has('g1')).toBe(false);
+        });
     });
 });
