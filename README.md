@@ -118,6 +118,7 @@ Use this checklist after changes to the content script, popup launcher, or sourc
    - drag a source over a collapsed folder header for 1 second and verify the folder expands automatically
    - drag a source onto itself and verify the drop indicator turns red with a `not-allowed` cursor
    - drag a parent group onto one of its child subgroups and verify the red indicator + `not-allowed` cursor
+   - hover-open a folder during drag, then drag away from it for 1 second; verify it auto-collapses with the same animation as a chevron click
 
 ## License
 

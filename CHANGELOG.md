@@ -51,7 +51,7 @@
 - **批量拖拽与多源 ghost (Batch Source Drag with Multi Ghost)**: 批量模式下选中多个来源后，拖任意已选行会一起搬运到目标位置；自定义胶囊状 ghost 显示数量徽章，drop 后弹出 “已移动 N 项来源” toast 并自动退出批量模式。
 - **拖拽边缘自动滚动 (Drag Edge Auto-Scroll)**: 拖拽过程中指针靠近 `#sources-list` 顶部或底部 60px 范围时，列表按 RAF 节奏平滑自动滚动，靠边越近滚动越快，越过滚动边界时静默停止。
 - **项目 CLAUDE.md 向导 (Project CLAUDE.md Guide)**: 在仓库根目录新增 `CLAUDE.md`，指向 AGENTS.md 等权威规则并补充 AGENTS.md 未成文的项目惯例 — factory + globalThis 注册模式、加新 content 模块必须同步的四个文件、Shadow DOM 与 global overlay token 边界、locale `ui_*_toast` 命名、`developerLog` 4 参数签名、`#sources-list` 滚动容器、Playwright 用 synthetic DragEvent 而非 `dragTo` 等。同时在 `docs/PROJECT_DIRECTORY.md` 根目录树中登记 `CLAUDE.md` 条目。
-- **拖拽悬停展开折叠组 (Hover-Expand Collapsed Group During Drag)**: 拖拽过程中将光标停留在折叠组头 600ms 后，组会自动展开，允许在一次拖动中送达任意深度的嵌套位置；hover 触发的展开在拖动结束后保持，不会自动折回。
+- **拖拽悬停展开折叠组 (Hover-Expand Collapsed Group During Drag)**: 拖拽过程中将光标停留在折叠组头 600ms 后，组会自动展开，允许在一次拖动中送达任意深度的嵌套位置。
 - **非法 drop 视觉反馈 (Invalid-Drop Visual Feedback)**: 当 dragover 命中会被现有逻辑静默拒绝的目标（拖源到自身、拖分组到自身后代、拖多源到被拖集合中的成员、批量模式 before-group / after-group 顶层意图）时，drop indicator 染红、组头加红色 outline、光标变 `not-allowed`，让"为什么释放不会移动"在松手前就显性化。
 
 ### Changed
@@ -68,6 +68,7 @@
 - **ESLint 静态检查接入 (ESLint Static Analysis Integration)**: 新增 `eslint` 9.39 dev 依赖与 `eslint.config.js` flat config；按 src/tests/scripts 分别配 globals（NSM_* 全部工厂、utils helper、Chrome MV3、Jest、Node），启用 `no-undef`、`no-useless-escape`、禁止 `innerHTML` 赋值（与 AGENTS.md 一致），并在 tests/smoke 子作用域里放宽 `no-restricted-syntax`。`package.json` 新增 `lint` 与 `verify:full` 编排 `npm run lint`；GitHub Actions CI 在 `npm run test:unit` 之前增加 `npm run lint` 步骤。当前 baseline：0 errors、89 warnings（多为 src/ 中可能未使用的 helper，留作后续清理）。
 - **content-drag-multi 模块抽离 (Content Drag Multi Module Extraction)**: 新增 `src/content/content-drag-multi.js`，把多源选择解析、自定义 ghost、批量 drop 应用、边缘速度计算和 RAF 滚动控制器集中到单一 factory；`content-tree-interactions.js` 在 dragstart/dragover/dragleave/drop/dragend 五个点接入新模块。
 - **项目目录索引补齐 (Project Directory Index Patch)**: 在 `docs/PROJECT_DIRECTORY.md` 的 Runtime 加载树、功能域树（分组树/拖拽/批量模式）和测试树 smoke 列表中补齐 `content-drag-multi.js` 与 `tests/smoke/batch-drag.smoke.spec.js` 入口，与新加的批量拖拽 + 边缘自动滚动模块保持同步。
+- **悬停展开可逆 (Reversible Hover-Expand)**: 拖拽悬停展开的折叠组现在对称可逆 — 指针离开该组的子树 600ms 后自动收回；拖动指针回到该组或其后代之内可取消收回计时器、保持展开。drop 落入该组的子树永久保持展开；drop 在子树外或拖动结束时未落进去则立即收回。手动通过 chevron 展开的分组不受此机制影响。
 
 ### Fixed
 - **lifecycle 测试未定义 listSource 修复 (Lifecycle Test Undefined listSource Fix)**: 修复 `tests/content/content-lifecycle.test.js` 第 650 行 "clicks the native label_auto header entry point when switching from plugin list display to label view" 测试缺失 `listSource` 局部变量（之前依赖一个 `eslint-disable-next-line no-undef` 临时绕过）；按照同文件其他类似测试的写法补回 `createMockSourceRow` 调用，并删除 eslint-disable 注释。测试已恢复完整定义，行为不变。
