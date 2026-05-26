@@ -1256,7 +1256,7 @@
     "ui_isolation_cleared_toast": {
         "message": "Se salió del modo aislado"
     },
-    "toast_moved_multi_sources": {
+    "ui_batch_moved_sources_toast": {
         "message": "Se movieron $count$ fuentes",
         "placeholders": {
             "count": { "content": "$1" }
