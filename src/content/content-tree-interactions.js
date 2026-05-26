@@ -1136,7 +1136,7 @@
                         }
                     });
                     if (result && result.moved > 0) {
-                        developerLog('batch_drag_move', { count: result.moved, intent: intentKind });
+                        developerLog('info', 'source_action', 'batch_drag_move', { count: result.moved, intent: intentKind });
                         state.isBatchMode = false;
                         pendingBatchKeys.clear();
                         buildParentMap();

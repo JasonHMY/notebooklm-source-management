@@ -888,9 +888,14 @@ describe('drop routes multi vs single source', () => {
             sourceKeysJson: JSON.stringify(['A', 'B', 'C'])
         }));
 
-        expect(developerLog).toHaveBeenCalledWith('batch_drag_move', expect.objectContaining({
-            count: 3,
-            intent: 'into-group'
-        }));
+        expect(developerLog).toHaveBeenCalledWith(
+            'info',
+            'source_action',
+            'batch_drag_move',
+            expect.objectContaining({
+                count: 3,
+                intent: 'into-group'
+            })
+        );
     });
 });
