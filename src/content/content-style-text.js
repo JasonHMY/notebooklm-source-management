@@ -2960,6 +2960,24 @@
                 z-index: 10;
             }
 
+            .drag-invalid {
+                cursor: not-allowed;
+            }
+            .drag-over-top.drag-invalid::before,
+            .drag-over-bottom.drag-invalid::after {
+                background: var(--sp-accent-danger);
+            }
+            .group-container.drag-invalid > .group-header {
+                background-color: rgba(255, 59, 48, 0.08);
+                outline: 1px solid var(--sp-accent-danger);
+                outline-offset: -1px;
+            }
+            @media (prefers-color-scheme: dark) {
+                .group-container.drag-invalid > .group-header {
+                    background-color: rgba(255, 69, 58, 0.12);
+                }
+            }
+
             @media (prefers-reduced-motion: reduce) {
                 :host {
                     --sp-motion-fast: 1ms;
