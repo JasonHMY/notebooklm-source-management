@@ -899,3 +899,148 @@ describe('drop routes multi vs single source', () => {
         );
     });
 });
+
+describe('drag auto-scroll integration', () => {
+    let createContentTreeInteractions;
+    let createContentDragMulti;
+
+    function makeRaf() {
+        let nextId = 1;
+        const callbacks = new Map();
+        return {
+            requestAnimationFrame: jest.fn((cb) => {
+                const id = nextId++;
+                callbacks.set(id, cb);
+                return id;
+            }),
+            cancelAnimationFrame: jest.fn((id) => {
+                callbacks.delete(id);
+            })
+        };
+    }
+
+    function makeListEl({ top, bottom }) {
+        return {
+            id: 'sources-list',
+            scrollTop: 0,
+            scrollBy: jest.fn(),
+            getBoundingClientRect: jest.fn(() => ({ top, bottom, left: 0, right: 200, height: bottom - top, width: 200 }))
+        };
+    }
+
+    function makeShadowRoot(listEl) {
+        return {
+            getElementById: jest.fn((id) => (id === 'sources-list' ? listEl : null)),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+    }
+
+    function makeDragOverEvent({ clientY, dropTarget }) {
+        return {
+            preventDefault: jest.fn(),
+            clientY,
+            target: {
+                closest: jest.fn(() => dropTarget)
+            }
+        };
+    }
+
+    function makeDropTarget() {
+        const classes = new Set(['source-item']);
+        return {
+            dataset: { sourceKey: 'A' },
+            classList: {
+                contains: (c) => classes.has(c),
+                add: (c) => classes.add(c),
+                remove: (...cs) => cs.forEach((c) => classes.delete(c))
+            },
+            getBoundingClientRect: () => ({ top: 200, bottom: 240, left: 0, right: 200, height: 40, width: 200 })
+        };
+    }
+
+    beforeEach(() => {
+        jest.resetModules();
+        setupGlobalMocks();
+        require('../../src/content/content-native-checkbox-sync.js');
+        createContentTreeInteractions = require('../../src/content/content-tree-interactions.js');
+        createContentDragMulti = require('../../src/content/content-drag-multi.js');
+    });
+
+    afterEach(teardownGlobalMocks);
+
+    it('starts scrolling when pointer hovers near the top edge of #sources-list', () => {
+        const state = { isBatchMode: false, ungrouped: ['A'], groups: [] };
+        const listEl = makeListEl({ top: 100, bottom: 500 });
+        const shadowRoot = makeShadowRoot(listEl);
+        const raf = makeRaf();
+        const dragMulti = createContentDragMulti({
+            requestAnimationFrame: raf.requestAnimationFrame,
+            cancelAnimationFrame: raf.cancelAnimationFrame
+        });
+
+        const interactions = createContentTreeInteractions({
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getPendingBatchKeys: () => new Set(),
+            getShadowRoot: () => shadowRoot,
+            dragMulti
+        });
+
+        const event = makeDragOverEvent({ clientY: 110, dropTarget: makeDropTarget() });
+        interactions.handleDragOver(event);
+
+        expect(raf.requestAnimationFrame).toHaveBeenCalled();
+    });
+
+    it('does not start scrolling when pointer is in the middle of #sources-list', () => {
+        const state = { isBatchMode: false, ungrouped: ['A'], groups: [] };
+        const listEl = makeListEl({ top: 100, bottom: 500 });
+        const shadowRoot = makeShadowRoot(listEl);
+        const raf = makeRaf();
+        const dragMulti = createContentDragMulti({
+            requestAnimationFrame: raf.requestAnimationFrame,
+            cancelAnimationFrame: raf.cancelAnimationFrame
+        });
+
+        const interactions = createContentTreeInteractions({
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getPendingBatchKeys: () => new Set(),
+            getShadowRoot: () => shadowRoot,
+            dragMulti
+        });
+
+        const event = makeDragOverEvent({ clientY: 300, dropTarget: makeDropTarget() });
+        interactions.handleDragOver(event);
+
+        expect(raf.requestAnimationFrame).not.toHaveBeenCalled();
+    });
+
+    it('cancels the pending RAF on handleDragEnd', () => {
+        const state = { isBatchMode: false, ungrouped: ['A'], groups: [] };
+        const listEl = makeListEl({ top: 100, bottom: 500 });
+        const shadowRoot = makeShadowRoot(listEl);
+        const raf = makeRaf();
+        const dragMulti = createContentDragMulti({
+            requestAnimationFrame: raf.requestAnimationFrame,
+            cancelAnimationFrame: raf.cancelAnimationFrame
+        });
+
+        const interactions = createContentTreeInteractions({
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getPendingBatchKeys: () => new Set(),
+            getShadowRoot: () => shadowRoot,
+            dragMulti
+        });
+
+        // Trigger scrolling first
+        interactions.handleDragOver(makeDragOverEvent({ clientY: 110, dropTarget: makeDropTarget() }));
+        expect(raf.requestAnimationFrame).toHaveBeenCalled();
+
+        // dragend should cancel pending RAF
+        interactions.handleDragEnd({});
+        expect(raf.cancelAnimationFrame).toHaveBeenCalled();
+    });
+});

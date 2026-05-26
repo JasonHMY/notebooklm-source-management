@@ -164,6 +164,15 @@
                     ? globalThis.NSM_CREATE_CONTENT_DRAG_MULTI({})
                     : null));
 
+        const autoScrollController = dragMulti && typeof dragMulti.createAutoScrollController === 'function'
+            ? dragMulti.createAutoScrollController({
+                getContainer: () => {
+                    const root = getShadowRoot();
+                    return root && typeof root.getElementById === 'function' ? root.getElementById('sources-list') : null;
+                }
+            })
+            : null;
+
         function cssEscape(value) {
             const raw = typeof value === 'string' ? value : String(value ?? '');
             if (typeof globalThis.CSS === 'object' && globalThis.CSS && typeof globalThis.CSS.escape === 'function') {
@@ -932,20 +941,36 @@
         function handleDragOver(e) {
             e.preventDefault();
             const dropTarget = e.target.closest('.group-container, .source-item');
-            if (!dropTarget) return;
+            if (dropTarget) {
+                const rect = dropTarget.getBoundingClientRect();
+                const offsetY = e.clientY - rect.top;
 
-            const rect = dropTarget.getBoundingClientRect();
-            const offsetY = e.clientY - rect.top;
+                dropTarget.classList.remove('drag-over-top', 'drag-over-bottom', 'drag-into');
 
-            dropTarget.classList.remove('drag-over-top', 'drag-over-bottom', 'drag-into');
+                if (dropTarget.classList.contains('group-container')) {
+                    if (offsetY < rect.height * 0.25) dropTarget.classList.add('drag-over-top');
+                    else if (offsetY > rect.height * 0.75) dropTarget.classList.add('drag-over-bottom');
+                    else dropTarget.classList.add('drag-into');
+                } else {
+                    if (offsetY < rect.height / 2) dropTarget.classList.add('drag-over-top');
+                    else dropTarget.classList.add('drag-over-bottom');
+                }
+            }
 
-            if (dropTarget.classList.contains('group-container')) {
-                if (offsetY < rect.height * 0.25) dropTarget.classList.add('drag-over-top');
-                else if (offsetY > rect.height * 0.75) dropTarget.classList.add('drag-over-bottom');
-                else dropTarget.classList.add('drag-into');
-            } else {
-                if (offsetY < rect.height / 2) dropTarget.classList.add('drag-over-top');
-                else dropTarget.classList.add('drag-over-bottom');
+            if (autoScrollController && dragMulti && typeof dragMulti.computeAutoScrollVelocity === 'function') {
+                const root = getShadowRoot();
+                const list = root && typeof root.getElementById === 'function' ? root.getElementById('sources-list') : null;
+                if (list && typeof list.getBoundingClientRect === 'function') {
+                    const listRect = list.getBoundingClientRect();
+                    const velocity = dragMulti.computeAutoScrollVelocity({
+                        pointerY: e.clientY,
+                        containerTop: listRect.top,
+                        containerBottom: listRect.bottom,
+                        edgePx: dragMulti.EDGE_PX,
+                        maxSpeed: dragMulti.MAX_SPEED
+                    });
+                    autoScrollController.tick(velocity);
+                }
             }
         }
 
@@ -954,17 +979,24 @@
             if (dropTarget) {
                 dropTarget.classList.remove('drag-over-top', 'drag-over-bottom', 'drag-into');
             }
+            if (e.target && e.target.id === 'sources-list' && autoScrollController) {
+                autoScrollController.stop();
+            }
         }
 
         function clearDragFeedback(root = getShadowRoot()) {
-            if (!root || typeof root.querySelectorAll !== 'function') return 0;
-            const nodes = Array.from(root.querySelectorAll('.dragging, .drag-over-top, .drag-over-bottom, .drag-into'));
-            nodes.forEach((node) => {
-                if (node?.classList && typeof node.classList.remove === 'function') {
-                    node.classList.remove('dragging', 'drag-over-top', 'drag-over-bottom', 'drag-into');
-                }
-            });
-            return nodes.length;
+            let count = 0;
+            if (root && typeof root.querySelectorAll === 'function') {
+                const nodes = Array.from(root.querySelectorAll('.dragging, .drag-over-top, .drag-over-bottom, .drag-into'));
+                nodes.forEach((node) => {
+                    if (node?.classList && typeof node.classList.remove === 'function') {
+                        node.classList.remove('dragging', 'drag-over-top', 'drag-over-bottom', 'drag-into');
+                    }
+                });
+                count = nodes.length;
+            }
+            if (autoScrollController) autoScrollController.stop();
+            return count;
         }
 
         function getSourceTreePosition(sourceKey) {
@@ -1192,6 +1224,17 @@
 
         function handleDragEnd(e) {
             clearDragFeedback();
+            if (autoScrollController) autoScrollController.stop();
+            if (runtime.activeDragGhost && dragMulti && typeof dragMulti.destroyMultiDragGhost === 'function') {
+                const ghost = runtime.activeDragGhost;
+                runtime.activeDragGhost = null;
+                const raf = typeof globalThis.requestAnimationFrame === 'function' ? globalThis.requestAnimationFrame : null;
+                if (raf) {
+                    raf(() => dragMulti.destroyMultiDragGhost(ghost));
+                } else {
+                    dragMulti.destroyMultiDragGhost(ghost);
+                }
+            }
         }
 
         return {
