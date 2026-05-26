@@ -1447,8 +1447,8 @@ describe('handleDragOver hover-expand', () => {
     }
 
     function setupTreeInteractionsTestContext({ state, pendingBatchKeys, groups }) {
-        const runtime = {};
         const groupsById = new Map();
+        const runtime = { groupsById };
         const containersByGroupId = new Map();
         if (groups && typeof groups === 'object') {
             Object.keys(groups).forEach((id) => {
@@ -1671,5 +1671,43 @@ describe('handleDragOver hover-expand', () => {
         ctx.tree.handleDrop(dropEvent);
         jest.advanceTimersByTime(600);
         expect(ctx.groupsById.get('g1').collapsed).toBe(true);
+    });
+
+    describe('state shape refactor (Set + Map)', () => {
+        beforeEach(() => {
+            jest.useFakeTimers();
+        });
+        afterEach(() => {
+            jest.useRealTimers();
+        });
+
+        it('initializes hoverExpandedGroupIds as an empty Set and hoverExpandTimers as an empty Map', () => {
+            const ctx = setupTreeInteractionsTestContext({
+                state: { isBatchMode: false, ungrouped: [], groups: [] },
+                pendingBatchKeys: new Set()
+            });
+            expect(ctx.runtime.hoverExpandedGroupIds).toBeInstanceOf(Set);
+            expect(ctx.runtime.hoverExpandedGroupIds.size).toBe(0);
+            expect(ctx.runtime.hoverExpandTimers).toBeInstanceOf(Map);
+            expect(ctx.runtime.hoverExpandTimers.size).toBe(0);
+        });
+
+        it('records the group id in hoverExpandedGroupIds after a successful hover-expand', () => {
+            const ctx = setupTreeInteractionsTestContext({
+                state: { isBatchMode: false, ungrouped: [], groups: ['g1'] },
+                pendingBatchKeys: new Set(),
+                groups: { g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: true } }
+            });
+            const target = ctx.helpers.makeGroupContainerTarget('g1', { intent: 'drag-into' });
+            ctx.tree.handleDragOver({
+                target,
+                clientY: target.rect.top + target.rect.height / 2,
+                preventDefault: jest.fn(),
+                dataTransfer: { dropEffect: 'move' }
+            });
+            jest.advanceTimersByTime(600);
+            expect(ctx.runtime.hoverExpandedGroupIds.has('g1')).toBe(true);
+            expect(ctx.runtime.groupsById.get('g1').collapsed).toBe(false);
+        });
     });
 });

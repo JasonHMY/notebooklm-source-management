@@ -167,8 +167,11 @@
         if (typeof runtime.activeDragContext === 'undefined') {
             runtime.activeDragContext = null;
         }
-        if (typeof runtime.hoverExpandTimer === 'undefined') {
-            runtime.hoverExpandTimer = null;
+        if (!(runtime.hoverExpandedGroupIds instanceof Set)) {
+            runtime.hoverExpandedGroupIds = new Set();
+        }
+        if (!(runtime.hoverExpandTimers instanceof Map)) {
+            runtime.hoverExpandTimers = new Map();
         }
 
         const autoScrollController = dragMulti && typeof dragMulti.createAutoScrollController === 'function'
@@ -1034,13 +1037,14 @@
                     dropTarget.classList.remove('drag-invalid');
                 }
 
-                if (dropTarget.classList.contains('group-container')) {
-                    armHoverExpandTimer(dropTarget);
+                if (dropTarget && dropTarget.classList && dropTarget.classList.contains('group-container')) {
+                    const groupId = dropTarget.dataset && dropTarget.dataset.groupId;
+                    armHoverExpandTimerForGroup(groupId);
                 } else {
-                    cancelHoverExpandTimer();
+                    cancelAllHoverTimers();
                 }
             } else {
-                cancelHoverExpandTimer();
+                cancelAllHoverTimers();
             }
 
             if (autoScrollController && dragMulti && typeof dragMulti.computeAutoScrollVelocity === 'function') {
@@ -1069,7 +1073,7 @@
                 autoScrollController.stop();
             }
             if (e.target && e.target.id === 'sources-list') {
-                cancelHoverExpandTimer();
+                cancelAllHoverTimers();
             }
         }
 
@@ -1086,19 +1090,29 @@
             }
             if (autoScrollController) autoScrollController.stop();
             runtime.activeDragContext = null;
-            cancelHoverExpandTimer();
+            cancelAllHoverTimers();
             return count;
         }
 
-        function cancelHoverExpandTimer() {
-            if (runtime.hoverExpandTimer && typeof clearTimeout === 'function') {
-                clearTimeout(runtime.hoverExpandTimer.timeoutId);
+        function cancelHoverTimerForGroup(groupId) {
+            const entry = runtime.hoverExpandTimers.get(groupId);
+            if (!entry) return;
+            if (typeof clearTimeout === 'function' && entry.timeoutId !== null && entry.timeoutId !== undefined) {
+                clearTimeout(entry.timeoutId);
             }
-            runtime.hoverExpandTimer = null;
+            runtime.hoverExpandTimers.delete(groupId);
+        }
+
+        function cancelAllHoverTimers() {
+            if (runtime.hoverExpandTimers.size === 0) return;
+            const ids = Array.from(runtime.hoverExpandTimers.keys());
+            for (const id of ids) {
+                cancelHoverTimerForGroup(id);
+            }
         }
 
         function executeHoverExpand(groupId) {
-            runtime.hoverExpandTimer = null;
+            runtime.hoverExpandTimers.delete(groupId);
             const groupsById = getGroupsById();
             const group = groupsById.get(groupId);
             if (!group) return;
@@ -1109,35 +1123,44 @@
             const container = root.querySelector(`.group-container[data-group-id="${cssEscape(groupId)}"]`);
             if (!container) return;
             toggleGroupCollapse(group, container);
+            if (!group.collapsed) {
+                runtime.hoverExpandedGroupIds.add(groupId);
+            }
         }
 
-        function armHoverExpandTimer(dropTarget) {
-            if (!dropTarget || !dropTarget.dataset) {
-                cancelHoverExpandTimer();
-                return;
-            }
-            const groupId = dropTarget.dataset.groupId;
-            if (!groupId) {
-                cancelHoverExpandTimer();
-                return;
-            }
+        function armHoverExpandTimerForGroup(groupId) {
+            if (!groupId) return;
             const groupsById = getGroupsById();
             const group = groupsById.get(groupId);
-            if (!group) {
-                cancelHoverExpandTimer();
-                return;
-            }
+            if (!group) return;
             if (!group.collapsed) return;
             if (!Array.isArray(group.children) || group.children.length === 0) return;
 
-            if (runtime.hoverExpandTimer && runtime.hoverExpandTimer.groupId === groupId) {
+            const existing = runtime.hoverExpandTimers.get(groupId);
+            if (existing && existing.kind === 'expand') {
+                cancelExpandTimersForOtherGroups(groupId);
                 return;
             }
-            cancelHoverExpandTimer();
+            if (existing) cancelHoverTimerForGroup(groupId);
+            cancelExpandTimersForOtherGroups(groupId);
+
             const setTimeoutFn = getSetTimeout();
             if (typeof setTimeoutFn !== 'function') return;
             const timeoutId = setTimeoutFn(() => executeHoverExpand(groupId), 600);
-            runtime.hoverExpandTimer = { groupId, timeoutId };
+            runtime.hoverExpandTimers.set(groupId, { kind: 'expand', timeoutId });
+        }
+
+        function cancelExpandTimersForOtherGroups(keepGroupId) {
+            if (runtime.hoverExpandTimers.size === 0) return;
+            const idsToCancel = [];
+            runtime.hoverExpandTimers.forEach((entry, id) => {
+                if (id !== keepGroupId && entry && entry.kind === 'expand') {
+                    idsToCancel.push(id);
+                }
+            });
+            for (const id of idsToCancel) {
+                cancelHoverTimerForGroup(id);
+            }
         }
 
         function getSourceTreePosition(sourceKey) {
@@ -1266,7 +1289,7 @@
         }
 
         function handleDrop(e) {
-            cancelHoverExpandTimer();
+            cancelAllHoverTimers();
             const state = getState();
             const groupsById = getGroupsById();
             const sourcesByKey = getSourcesByKey();
@@ -1370,7 +1393,7 @@
         }
 
         function handleDragEnd(e) {
-            cancelHoverExpandTimer();
+            cancelAllHoverTimers();
             clearDragFeedback();
             if (autoScrollController) autoScrollController.stop();
             if (runtime.activeDragGhost && dragMulti && typeof dragMulti.destroyMultiDragGhost === 'function') {
