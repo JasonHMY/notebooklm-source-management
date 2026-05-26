@@ -115,6 +115,8 @@ NotebookLM Source Management
 │   │   │   └── diagnostics JSON 序列化、Error/unhandled rejection 脱敏摘要 helper
 │   │   ├── content-drag-multi.js
 │   │   │   └── 多源拖拽 selection 解析、单元素 ghost helper、auto-scroll RAF controller、批量 drop 应用
+│   │   ├── content-drag-reflow.js
+│   │   │   └── 拖拽让位 reflow 会话状态：被拖项折叠 + 其他项让位形成跟随鼠标的空槽 helper
 │   │   ├── content-source-view-switch-controller.js
 │   │   │   └── 来源视图切换目标归一、状态字段和 attempt 记录 helper
 │   │   ├── content-style-text.js
@@ -260,6 +262,7 @@ manifest.json
     ├── src/content/content-view-state.js
     ├── src/content/content-native-checkbox-sync.js
     ├── src/content/content-drag-multi.js
+    ├── src/content/content-drag-reflow.js
     ├── src/content/content-tree-interactions.js
     ├── src/content/content-native-label-detector.js
     ├── src/content/content-source-sync.js
@@ -351,6 +354,7 @@ manifest.json
 │   ├── 先看
 │   │   ├── src/content/content-tree-interactions.js
 │   │   ├── src/content/content-drag-multi.js
+│   │   ├── src/content/content-drag-reflow.js
 │   │   ├── src/content/content-native-checkbox-sync.js
 │   │   ├── src/content/content-render.js
 │   │   ├── src/content/content-modals.js
@@ -358,6 +362,7 @@ manifest.json
 │   └── 测试
 │       ├── tests/content/content-tree.test.js
 │       ├── tests/content/content-drag-multi.test.js
+│       ├── tests/content/content-drag-reflow.test.js
 │       ├── tests/content/content-native-checkbox-sync.test.js
 │       ├── tests/content/content-render.test.js
 │       └── tests/content/content-source-actions.test.js

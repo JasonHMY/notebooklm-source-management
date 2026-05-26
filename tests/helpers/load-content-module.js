@@ -19,6 +19,7 @@ function clearContentGlobals() {
     delete globalThis.NSM_CREATE_CONTENT_IMPORT_EXPORT;
     delete globalThis.NSM_CREATE_CONTENT_DIAGNOSTICS;
     delete globalThis.NSM_CREATE_CONTENT_DRAG_MULTI;
+    delete globalThis.NSM_CREATE_CONTENT_DRAG_REFLOW;
     delete globalThis.NSM_CREATE_CONTENT_SOURCE_VIEW_SWITCH_CONTROLLER;
     delete globalThis.NSM_CREATE_CONTENT_SNAPSHOT_SIGNATURE;
     delete globalThis.NSM_CREATE_CONTENT_STATE_REPAIR;
@@ -89,6 +90,7 @@ function loadContentModule() {
     require('../../src/content/content-view-state.js');
     require('../../src/content/content-native-checkbox-sync.js');
     require('../../src/content/content-drag-multi.js');
+    require('../../src/content/content-drag-reflow.js');
     require('../../src/content/content-tree-interactions.js');
     require('../../src/content/content-native-label-detector.js');
     require('../../src/content/content-source-sync.js');

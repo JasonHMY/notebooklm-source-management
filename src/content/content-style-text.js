@@ -2554,6 +2554,17 @@
                 transition: none;
             }
 
+            .sp-drag-folded {
+                transition: height 200ms cubic-bezier(0.2, 0, 0, 1), opacity 200ms cubic-bezier(0.2, 0, 0, 1);
+                overflow: hidden;
+                pointer-events: none;
+            }
+
+            .sp-drop-shift {
+                transition: transform 200ms cubic-bezier(0.2, 0, 0, 1);
+                will-change: transform;
+            }
+
             .group-container.drag-into > .group-header {
                 background-color: var(--sp-drag-into-bg);
                 border-radius: 12px;
