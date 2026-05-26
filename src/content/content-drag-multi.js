@@ -45,10 +45,32 @@
             return { keys: ordered, isMulti: true };
         }
 
+        function computeAutoScrollVelocity({ pointerY, containerTop, containerBottom, edgePx, maxSpeed }) {
+            if (typeof pointerY !== 'number' || typeof containerTop !== 'number' || typeof containerBottom !== 'number') return 0;
+            if (typeof edgePx !== 'number' || edgePx <= 0) return 0;
+            if (typeof maxSpeed !== 'number' || maxSpeed <= 0) return 0;
+            if (pointerY < containerTop || pointerY > containerBottom) return 0;
+
+            const distFromTop = pointerY - containerTop;
+            if (distFromTop < edgePx) {
+                const ratio = 1 - (distFromTop / edgePx);
+                return -1 * Math.min(maxSpeed, maxSpeed * ratio);
+            }
+
+            const distFromBottom = containerBottom - pointerY;
+            if (distFromBottom < edgePx) {
+                const ratio = 1 - (distFromBottom / edgePx);
+                return Math.min(maxSpeed, maxSpeed * ratio);
+            }
+
+            return 0;
+        }
+
         return {
             EDGE_PX: DEFAULT_AUTO_SCROLL_EDGE_PX,
             MAX_SPEED: DEFAULT_AUTO_SCROLL_MAX_SPEED,
-            resolveDragSelection
+            resolveDragSelection,
+            computeAutoScrollVelocity
         };
     }
 
