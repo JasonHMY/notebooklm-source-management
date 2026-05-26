@@ -164,6 +164,10 @@
                     ? globalThis.NSM_CREATE_CONTENT_DRAG_MULTI({})
                     : null));
 
+        if (typeof runtime.activeDragContext === 'undefined') {
+            runtime.activeDragContext = null;
+        }
+
         const autoScrollController = dragMulti && typeof dragMulti.createAutoScrollController === 'function'
             ? dragMulti.createAutoScrollController({
                 getContainer: () => {
@@ -888,6 +892,10 @@
                     ? selection.keys
                     : [key];
 
+                runtime.activeDragContext = selection.isMulti
+                    ? { kind: 'source-multi', keys: keys.slice() }
+                    : { kind: 'source-single', keys: [keys[0]] };
+
                 e.dataTransfer.setData('application/source-key', keys[0]);
                 if (selection.isMulti) {
                     e.dataTransfer.setData('application/source-keys', JSON.stringify(keys));
@@ -930,6 +938,7 @@
                 const key = groupTarget.dataset.groupId;
                 if (key) {
                     e.dataTransfer.setData('application/group-id', key);
+                    runtime.activeDragContext = { kind: 'group', draggedGroupId: key };
                     e.dataTransfer.effectAllowed = 'move';
                     if (typeof setTimeoutFn === 'function') {
                         setTimeoutFn(() => groupTarget.classList.add('dragging'), 0);
@@ -996,6 +1005,7 @@
                 count = nodes.length;
             }
             if (autoScrollController) autoScrollController.stop();
+            runtime.activeDragContext = null;
             return count;
         }
 
@@ -1240,6 +1250,7 @@
                     dragMulti.destroyMultiDragGhost(ghost);
                 }
             }
+            runtime.activeDragContext = null;
         }
 
         return {

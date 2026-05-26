@@ -1096,3 +1096,145 @@ describe('drag auto-scroll integration', () => {
         expect(raf.cancelAnimationFrame).toHaveBeenCalled();
     });
 });
+
+describe('activeDragContext runtime state', () => {
+    let createContentTreeInteractions;
+    let createContentDragMulti;
+
+    const createSourceRowTargetStub = (sourceRow) => ({
+        closest: jest.fn((selector) => {
+            if (selector === '.source-item') return sourceRow;
+            if (selector === '.group-header') return null;
+            if (selector === 'input[type="checkbox"], .sp-batch-checkbox') return null;
+            return null;
+        })
+    });
+
+    const createGroupHeaderTargetStub = (groupHeader) => ({
+        closest: jest.fn((selector) => {
+            if (selector === '.source-item') return null;
+            if (selector === '.group-header') return groupHeader;
+            return null;
+        })
+    });
+
+    const createSourceRow = (key) => ({
+        dataset: { sourceKey: key },
+        classList: { add: jest.fn(), remove: jest.fn() }
+    });
+
+    const createGroupHeader = (groupId) => ({
+        dataset: { groupId },
+        classList: { add: jest.fn(), remove: jest.fn() }
+    });
+
+    const createDataTransfer = () => ({
+        setData: jest.fn(),
+        setDragImage: jest.fn(),
+        effectAllowed: ''
+    });
+
+    function makeInteractions({ state, pendingBatchKeys, runtime, shadowRoot = null, document = null }) {
+        return createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getPendingBatchKeys: () => pendingBatchKeys,
+            getShadowRoot: () => shadowRoot,
+            getDocument: () => document,
+            getSetTimeout: () => () => {},
+            dragMulti: createContentDragMulti({})
+        });
+    }
+
+    beforeEach(() => {
+        jest.resetModules();
+        setupGlobalMocks();
+        require('../../src/content/content-native-checkbox-sync.js');
+        createContentTreeInteractions = require('../../src/content/content-tree-interactions.js');
+        createContentDragMulti = require('../../src/content/content-drag-multi.js');
+    });
+
+    afterEach(teardownGlobalMocks);
+
+    it('sets source-single context on dragstart over a non-batch source row', () => {
+        const runtime = {};
+        const state = { isBatchMode: false, ungrouped: ['A', 'B'], groups: [] };
+        const pendingBatchKeys = new Set();
+        const interactions = makeInteractions({ state, pendingBatchKeys, runtime });
+        const sourceRow = createSourceRow('A');
+
+        const event = {
+            target: createSourceRowTargetStub(sourceRow),
+            dataTransfer: createDataTransfer()
+        };
+        interactions.handleDragStart(event);
+
+        expect(runtime.activeDragContext).toEqual({ kind: 'source-single', keys: ['A'] });
+    });
+
+    it('sets source-multi context on dragstart in batch mode with multi-selection', () => {
+        const runtime = {};
+        const state = { isBatchMode: true, ungrouped: ['A', 'B', 'C'], groups: [] };
+        const pendingBatchKeys = new Set(['A', 'B', 'C']);
+        const sourceRow = createSourceRow('A');
+        const ghostNode = { tagName: 'DIV' };
+        const fakeBody = { appendChild: jest.fn(() => ghostNode) };
+        const fakeDoc = { body: fakeBody };
+        const interactions = makeInteractions({
+            state,
+            pendingBatchKeys,
+            runtime,
+            shadowRoot: { querySelector: jest.fn(() => null), querySelectorAll: jest.fn(() => []) },
+            document: fakeDoc
+        });
+
+        const event = {
+            target: createSourceRowTargetStub(sourceRow),
+            dataTransfer: createDataTransfer()
+        };
+        interactions.handleDragStart(event);
+
+        expect(runtime.activeDragContext).toEqual({ kind: 'source-multi', keys: ['A', 'B', 'C'] });
+    });
+
+    it('sets group context on dragstart over a group header', () => {
+        const runtime = {};
+        const state = { isBatchMode: false, ungrouped: [], groups: ['g1'] };
+        const pendingBatchKeys = new Set();
+        const interactions = makeInteractions({ state, pendingBatchKeys, runtime });
+        const groupHeader = createGroupHeader('g1');
+
+        const event = {
+            target: createGroupHeaderTargetStub(groupHeader),
+            dataTransfer: createDataTransfer()
+        };
+        interactions.handleDragStart(event);
+
+        expect(runtime.activeDragContext).toEqual({ kind: 'group', draggedGroupId: 'g1' });
+    });
+
+    it('clears activeDragContext on handleDragEnd', () => {
+        const runtime = {};
+        const state = { isBatchMode: false, ungrouped: ['A'], groups: [] };
+        const pendingBatchKeys = new Set();
+        const interactions = makeInteractions({ state, pendingBatchKeys, runtime });
+        runtime.activeDragContext = { kind: 'source-single', keys: ['A'] };
+
+        interactions.handleDragEnd({ target: createSourceRowTargetStub(createSourceRow('A')) });
+
+        expect(runtime.activeDragContext).toBe(null);
+    });
+
+    it('clears activeDragContext on clearDragFeedback', () => {
+        const runtime = {};
+        const state = { isBatchMode: false, ungrouped: ['A'], groups: [] };
+        const pendingBatchKeys = new Set();
+        const interactions = makeInteractions({ state, pendingBatchKeys, runtime });
+        runtime.activeDragContext = { kind: 'source-single', keys: ['A'] };
+
+        interactions.clearDragFeedback();
+
+        expect(runtime.activeDragContext).toBe(null);
+    });
+});
