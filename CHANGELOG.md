@@ -51,6 +51,8 @@
 - **批量拖拽与多源 ghost (Batch Source Drag with Multi Ghost)**: 批量模式下选中多个来源后，拖任意已选行会一起搬运到目标位置；自定义胶囊状 ghost 显示数量徽章，drop 后弹出 “已移动 N 项来源” toast 并自动退出批量模式。
 - **拖拽边缘自动滚动 (Drag Edge Auto-Scroll)**: 拖拽过程中指针靠近 `#sources-list` 顶部或底部 60px 范围时，列表按 RAF 节奏平滑自动滚动，靠边越近滚动越快，越过滚动边界时静默停止。
 - **项目 CLAUDE.md 向导 (Project CLAUDE.md Guide)**: 在仓库根目录新增 `CLAUDE.md`，指向 AGENTS.md 等权威规则并补充 AGENTS.md 未成文的项目惯例 — factory + globalThis 注册模式、加新 content 模块必须同步的四个文件、Shadow DOM 与 global overlay token 边界、locale `ui_*_toast` 命名、`developerLog` 4 参数签名、`#sources-list` 滚动容器、Playwright 用 synthetic DragEvent 而非 `dragTo` 等。同时在 `docs/PROJECT_DIRECTORY.md` 根目录树中登记 `CLAUDE.md` 条目。
+- **拖拽悬停展开折叠组 (Hover-Expand Collapsed Group During Drag)**: 拖拽过程中将光标停留在折叠组头 600ms 后，组会自动展开，允许在一次拖动中送达任意深度的嵌套位置；hover 触发的展开在拖动结束后保持，不会自动折回。
+- **非法 drop 视觉反馈 (Invalid-Drop Visual Feedback)**: 当 dragover 命中会被现有逻辑静默拒绝的目标（拖源到自身、拖分组到自身后代、拖多源到被拖集合中的成员、批量模式 before-group / after-group 顶层意图）时，drop indicator 染红、组头加红色 outline、光标变 `not-allowed`，让"为什么释放不会移动"在松手前就显性化。
 
 ### Changed
 - **设置页信息架构收敛 (Settings Information Architecture Consolidation)**: 将设置页的导出、导入和版本历史合并到“备份与恢复”，将反馈与诊断信息合并到“帮助与反馈”，保存状态移动到标题栏，并仅在导入预览有效时显示“应用导入”按钮；来源修复仅在检测到匹配问题时独立突出显示。

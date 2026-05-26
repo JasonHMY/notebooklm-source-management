@@ -115,6 +115,9 @@ Use this checklist after changes to the content script, popup launcher, or sourc
    - enter batch mode, select 3 sources, drag one of them into a folder, verify all three move
    - in single-source mode, drag any source toward the bottom edge of the list and verify the list auto-scrolls
    - drag near the top edge and verify reverse auto-scroll
+   - drag a source over a collapsed folder header for 1 second and verify the folder expands automatically
+   - drag a source onto itself and verify the drop indicator turns red with a `not-allowed` cursor
+   - drag a parent group onto one of its child subgroups and verify the red indicator + `not-allowed` cursor
 
 ## License
 
