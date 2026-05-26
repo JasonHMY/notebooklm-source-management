@@ -2,6 +2,18 @@
 
 所有对该项目的显著更改都将记录在此文件中。
 
+## [Unreleased] (未发布)
+
+### Added
+- **物理拖拽让位 (Physical Drag Reflow)**: 拖动来源时被拖项 height/opacity 折叠为 0 离开列表，目标位置之后的同级项整体 `translateY(N × itemHeight)` 让位形成跟随鼠标的空槽，drop/dragend 时反向归零。覆盖单源/多源、根列表/组内、跨组所有场景；过渡统一为 `200ms cubic-bezier(0.2, 0, 0, 1)`。新增 `src/content/content-drag-reflow.js` 模块封装 `prepareDragSession`/`foldDraggedItems`/`computeReflow`/`applyReflow`/`clearReflow`/`unfoldDraggedItems` 并在 `content-tree-interactions.js` 的 dragstart/dragover/drop/dragend 接入。
+
+### Changed
+- **拖拽 ghost 简化 (Drag Ghost Simplification)**: `.sp-drag-ghost` 移除 `drag_indicator` 图标，仅显示拖动数量数字；单源拖拽（count=1）也启用自定义 ghost，与多源视觉统一。
+- **无效拖放视觉 (Invalid Drop Visual)**: 非法 drop 的红色提示从被悬停整项的 box-shadow 改为目标空槽顶部项的 `.drag-invalid` outline 描边，避免被行 `:hover` 阴影覆盖；分组 into-group 仍保留 `.group-container.drag-invalid > .group-header` 红色头部高亮。
+
+### Removed
+- **蓝条插入指示 (Blue Bar Insertion Indicator)**: 删除 `.drag-over-top` / `.drag-over-bottom` 蓝条 CSS 规则与对应 JS add/remove 逻辑；让位空槽本身即为插入位置指示。
+
 ## Changelog Writing Guidelines (写作规范)
 
 - 顶部最多保留一个 `## [Unreleased] (未发布)`。所有尚未改版本号和重新打包的改动都先写在这里。

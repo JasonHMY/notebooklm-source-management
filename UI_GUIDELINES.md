@@ -679,15 +679,17 @@ Rules:
 
 Existing cues:
 
-- Dragged item scales up and lifts
-- Drop target group gets accent-tinted background
-- Top/bottom insertion markers use accent border lines with circular endpoints
+- Dragged item folds out of the list (height/opacity → 0) so the layout reads "the item has left its slot"; siblings at and after the pointer translate down to open a slot that follows the cursor
+- A custom digit-only pill ghost (`.sp-drag-ghost`) follows the pointer for both single and multi source drags
+- Drop target group gets an accent-tinted header (`.drag-into`)
+- Invalid drop targets surface a red outline on the slot top item (or red group header); the dragged-row scale + lift remain idle so the warning is visible
 - Empty drop zones enlarge slightly and tint on valid target hover
 
 Rules:
 
-- All drag affordances should use accent blue and subtle scaling.
+- All drag affordances should use accent blue (valid) or danger red (invalid) and subtle scaling.
 - Do not introduce unrelated colors or large shake animations.
+- See 13.4 for the canonical physical-reflow timing, classes, and rules.
 
 ## 11. Titles, Tags, Badges, and Metadata
 
@@ -937,28 +939,36 @@ Rules:
 - Empty states should be quiet and actionable.
 - Prefer one clear message over illustration-heavy placeholders.
 
-## 13.4 Drag ghost (multi-source)
+## 13.4 Drag interaction (physical reflow)
 
-Class: `.sp-drag-ghost`
+Classes: `.sp-drag-folded`, `.sp-drop-shift`, `.sp-drag-ghost`, `.drag-into`, `.drag-invalid`
 
 Canonical behavior:
 
-- Appears only when batch mode is on and ≥ 2 sources are dragged together
-- Lives in `document.body`, outside the Shadow DOM, so the browser can capture it as the native drag image
-- Pill shape with a `drag_indicator` glyph and a count badge
-- Hidden off-screen between drag events; destroyed on dragend via a RAF-deferred tick to let the browser finish reading it
+- On dragstart the dragged item(s) fold out of the list: `height` collapses from the cached `offsetHeight` to `0` and `opacity` fades to `0` (`.sp-drag-folded`). Multi-source drag folds every selected row in the same frame.
+- During dragover, siblings at and after the target insertion index translate down by `N × itemHeight` (`.sp-drop-shift` with inline `transform: translateY(...)`). The visible gap that follows the pointer is the insertion slot — there is no separate insertion bar.
+- Both single-source and multi-source drag use the same custom pill ghost (`.sp-drag-ghost`). The ghost shows only a digit: `1` for single drag, `N` for multi. There is no glyph or icon.
+- On drop, transforms zero out before the DOM order changes so the new order is rendered in place. On dragend or cancel the dragged items unfold (height/opacity restore) and all shifted siblings return to `translateY(0)`.
+- Invalid drop highlights the slot top item with `.drag-invalid` (red outline-style treatment) instead of tinting the hovered row's box-shadow, so a row's normal `:hover` lift cannot obscure the warning. Group-into invalid drops still color the group header via `.group-container.drag-invalid > .group-header`.
+
+Motion:
+
+- Fold, unfold, and reflow transitions all use `200ms cubic-bezier(0.2, 0, 0, 1)`. This is a deliberate one-off curve for the physical-drag system — do not promote it into the shared motion tokens, and do not pull standard/emphasized easing here.
+- `transform` uses GPU compositing (`will-change: transform` on shifted rows). `height`/`opacity` use the same duration so folding and reflow feel synchronized.
 
 Implementation notes:
 
-- Styles live in `globalOverlayStyleText` (not `contentStyleText`) because Shadow DOM tokens do not reach `document.body`
-- Color, border, and shadow values are resolved from the standard tokens at the source rather than referenced via `var(--sp-*)`, with a `@media (prefers-color-scheme: dark)` override block for dark mode parity
-- The Google Symbols `@font-face` declaration is duplicated in the global stylesheet so the icon glyph renders correctly
+- Reflow logic lives in `src/content/content-drag-reflow.js` (`prepareDragSession`, `foldDraggedItems`, `computeReflow`, `applyReflow`, `clearReflow`, `unfoldDraggedItems`). `content-tree-interactions.js` calls these from dragstart / dragover / drop / dragend.
+- `.sp-drag-folded` and `.sp-drop-shift` styles live in `contentStyleText` (Shadow DOM).
+- `.sp-drag-ghost` styles live in `globalOverlayStyleText` because the ghost element is appended to `document.body` for the native drag-image capture, and Shadow DOM tokens do not reach it. Color, border, and shadow values are resolved from the standard tokens at the source with a `@media (prefers-color-scheme: dark)` override block.
 
 Rules:
 
-- Do not introduce a new ghost variant for other drag flows without a clear UX reason; reuse this class
-- Do not animate the ghost (it lives ~200ms; transitions would conflict with the browser's drag-image capture)
-- Do not add interactive elements to the ghost (it is `pointer-events: none` and `aria-hidden`)
+- Do not reintroduce blue-bar insertion indicators (`.drag-over-top` / `.drag-over-bottom`) — the moving slot itself is the insertion indicator.
+- Do not introduce a new ghost variant for other drag flows without a clear UX reason; reuse `.sp-drag-ghost`.
+- Do not animate the ghost element itself (it lives ~200ms; transitions would conflict with the browser's drag-image capture).
+- Do not add interactive elements to the ghost (it is `pointer-events: none` and `aria-hidden`).
+- Do not change the 200ms / `cubic-bezier(0.2, 0, 0, 1)` timing in isolation — fold, unfold, and reflow must share the same duration to stay synchronized.
 
 ## 14. Batch Mode
 
