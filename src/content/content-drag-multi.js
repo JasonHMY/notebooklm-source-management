@@ -27,9 +27,28 @@
             ? ctx.el
             : (typeof globalThis.el === 'function' ? globalThis.el : null);
 
+        function resolveDragSelection({ originKey, isBatchMode, pendingBatchKeys, sourceOrder }) {
+            if (!originKey || typeof originKey !== 'string') {
+                return { keys: [], isMulti: false };
+            }
+            const order = Array.isArray(sourceOrder) ? sourceOrder : [];
+            const set = pendingBatchKeys instanceof Set ? pendingBatchKeys : new Set();
+
+            if (!isBatchMode || set.size === 0 || !set.has(originKey)) {
+                return { keys: [originKey], isMulti: false };
+            }
+
+            const ordered = order.filter((key) => set.has(key));
+            if (ordered.length <= 1) {
+                return { keys: [originKey], isMulti: false };
+            }
+            return { keys: ordered, isMulti: true };
+        }
+
         return {
             EDGE_PX: DEFAULT_AUTO_SCROLL_EDGE_PX,
-            MAX_SPEED: DEFAULT_AUTO_SCROLL_MAX_SPEED
+            MAX_SPEED: DEFAULT_AUTO_SCROLL_MAX_SPEED,
+            resolveDragSelection
         };
     }
 
