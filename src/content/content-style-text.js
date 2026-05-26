@@ -2059,6 +2059,7 @@
                 grid-template-columns: 24px minmax(0, 1fr) auto;
                 align-items: center;
                 gap: 10px;
+                box-sizing: border-box;
             }
             .sp-command-palette-item:hover,
             .sp-command-palette-item:focus-visible,
