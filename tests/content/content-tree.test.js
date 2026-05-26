@@ -1446,7 +1446,7 @@ describe('handleDragOver hover-expand', () => {
         return api;
     }
 
-    function setupTreeInteractionsTestContext({ state, pendingBatchKeys, groups }) {
+    function setupTreeInteractionsTestContext({ state, pendingBatchKeys, groups, parentMap }) {
         const groupsById = new Map();
         const runtime = { groupsById };
         const containersByGroupId = new Map();
@@ -1456,6 +1456,7 @@ describe('handleDragOver hover-expand', () => {
                 groupsById.set(id, { id, children: [], ...group });
             });
         }
+        const resolvedParentMap = parentMap instanceof Map ? parentMap : new Map();
         const shadowRoot = {
             querySelector: (selector) => {
                 const match = /^\.group-container\[data-group-id="([^"]+)"\]$/.exec(selector);
@@ -1471,7 +1472,7 @@ describe('handleDragOver hover-expand', () => {
             getGroupsById: () => groupsById,
             getPendingBatchKeys: () => pendingBatchKeys,
             getShadowRoot: () => shadowRoot,
-            getParentMap: () => new Map(),
+            getParentMap: () => resolvedParentMap,
             getSetTimeout: () => globalThis.setTimeout,
             isDescendant: globalThis.isDescendant,
             dragMulti
@@ -1708,6 +1709,25 @@ describe('handleDragOver hover-expand', () => {
             jest.advanceTimersByTime(600);
             expect(ctx.runtime.hoverExpandedGroupIds.has('g1')).toBe(true);
             expect(ctx.runtime.groupsById.get('g1').collapsed).toBe(false);
+        });
+    });
+
+    describe('getGroupAncestorChain helper', () => {
+        it('returns the chain from a deep group up to root', () => {
+            const ctx = setupTreeInteractionsTestContext({
+                state: { isBatchMode: false, ungrouped: [], groups: ['A'] },
+                pendingBatchKeys: new Set(),
+                groups: {
+                    A: { id: 'A', children: [{ type: 'group', id: 'B' }], collapsed: false },
+                    B: { id: 'B', children: [{ type: 'group', id: 'C' }], collapsed: false },
+                    C: { id: 'C', children: [], collapsed: false }
+                },
+                parentMap: new Map([['C', 'B'], ['B', 'A']])
+            });
+            expect(ctx.tree.getGroupAncestorChain('C')).toEqual(['C', 'B', 'A']);
+            expect(ctx.tree.getGroupAncestorChain('A')).toEqual(['A']);
+            expect(ctx.tree.getGroupAncestorChain(null)).toEqual([]);
+            expect(ctx.tree.getGroupAncestorChain('unknown')).toEqual(['unknown']);
         });
     });
 });

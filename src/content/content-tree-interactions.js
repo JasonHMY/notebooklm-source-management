@@ -1094,6 +1094,22 @@
             return count;
         }
 
+        function getGroupAncestorChain(groupId) {
+            if (!groupId || typeof groupId !== 'string') return [];
+            const parentMap = getParentMap();
+            const chain = [groupId];
+            let cursor = groupId;
+            const seen = new Set([groupId]);
+            while (parentMap && typeof parentMap.get === 'function') {
+                const parent = parentMap.get(cursor);
+                if (!parent || seen.has(parent)) break;
+                chain.push(parent);
+                seen.add(parent);
+                cursor = parent;
+            }
+            return chain;
+        }
+
         function cancelHoverTimerForGroup(groupId) {
             const entry = runtime.hoverExpandTimers.get(groupId);
             if (!entry) return;
@@ -1434,7 +1450,8 @@
             getDropIntent,
             getSourceTreePosition,
             getGroupTreePosition,
-            isNoopTreeMove
+            isNoopTreeMove,
+            getGroupAncestorChain
         };
     }
 
