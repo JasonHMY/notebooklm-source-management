@@ -112,6 +112,9 @@ Use this checklist after changes to the content script, popup launcher, or sourc
    - enter batch mode
    - open the batch delete flow
    - confirm untitled sources or groups show localized fallback text
+   - enter batch mode, select 3 sources, drag one of them into a folder, verify all three move
+   - in single-source mode, drag any source toward the bottom edge of the list and verify the list auto-scrolls
+   - drag near the top edge and verify reverse auto-scroll
 
 ## License
 
