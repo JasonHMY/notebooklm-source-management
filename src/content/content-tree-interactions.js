@@ -960,10 +960,35 @@
                 if (dragMulti && typeof dragMulti.createMultiDragGhost === 'function') {
                     const doc = getDocument();
                     const root = doc && doc.body ? doc.body : null;
-                    const ghost = dragMulti.createMultiDragGhost({ count: keys.length, root });
+                    const sourcesListEl = getSourceListContainer();
+                    const sourceClones = keys.slice(0, 3).map((rowKey) => {
+                        if (!sourcesListEl || typeof sourcesListEl.querySelector !== 'function') return null;
+                        const original = sourcesListEl.querySelector(`[data-source-key="${cssEscape(rowKey)}"]`);
+                        if (!original) return null;
+                        return typeof dragMulti.cloneSourceItem === 'function'
+                            ? dragMulti.cloneSourceItem(original)
+                            : null;
+                    }).filter(Boolean);
+                    const ghost = dragMulti.createMultiDragGhost({
+                        count: keys.length,
+                        sourceClones,
+                        root
+                    });
                     if (ghost && typeof e.dataTransfer.setDragImage === 'function') {
+                        let offsetX = 12;
+                        let offsetY = 12;
+                        if (sourcesListEl && typeof sourcesListEl.querySelector === 'function') {
+                            const originEl = sourcesListEl.querySelector(`[data-source-key="${cssEscape(key)}"]`);
+                            const rect = originEl && typeof originEl.getBoundingClientRect === 'function'
+                                ? originEl.getBoundingClientRect()
+                                : null;
+                            if (rect && typeof e.clientX === 'number' && typeof e.clientY === 'number') {
+                                offsetX = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
+                                offsetY = Math.max(0, Math.min(rect.height, e.clientY - rect.top));
+                            }
+                        }
                         try {
-                            e.dataTransfer.setDragImage(ghost, 12, 12);
+                            e.dataTransfer.setDragImage(ghost, offsetX, offsetY);
                         } catch (err) { /* ignore setDragImage failure */ }
                         runtime.activeDragGhost = ghost;
                     }

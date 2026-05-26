@@ -115,72 +115,241 @@ describe('content-drag-multi factory', () => {
             return { doc, root, created };
         }
 
-        it('builds a pill with the count text for N=2', () => {
-            const { doc, root } = makeDocument();
+        function makeSourceClone(tag = 'div') {
+            return {
+                tag,
+                nodeType: 1,
+                className: '',
+                style: {},
+                children: [],
+                parentNode: null
+            };
+        }
+
+        it('returns null when document is unavailable', () => {
+            const helper = createContentDragMulti({ getDocument: () => null });
+            const ghost = helper.createMultiDragGhost({ count: 2, root: null, sourceClones: [] });
+            expect(ghost).toBe(null);
+        });
+
+        it('returns null when root has no appendChild', () => {
+            const { doc } = makeDocument();
             const helper = createContentDragMulti({ getDocument: () => doc });
-            const ghost = helper.createMultiDragGhost({ count: 2, root });
+            const ghost = helper.createMultiDragGhost({ count: 1, root: null, sourceClones: [makeSourceClone()] });
+            expect(ghost).toBe(null);
+        });
+
+        it('single-clone mode (N=1) wraps the clone with sp-drag-ghost + sp-drag-ghost-single and no badge', () => {
+            const { doc, root } = makeDocument();
+            const clone = makeSourceClone();
+            const helper = createContentDragMulti({ getDocument: () => doc });
+            const ghost = helper.createMultiDragGhost({ count: 1, sourceClones: [clone], root });
+
             expect(ghost).toBeTruthy();
             expect(ghost.className).toContain('sp-drag-ghost');
-            const countText = ghost.children
-                .flatMap((c) => c.children || [])
-                .map((node) => node.text)
-                .find((text) => text === '2');
-            expect(countText).toBe('2');
+            expect(ghost.className).toContain('sp-drag-ghost-single');
+            // The single clone is wrapped in a layer div so stack/single CSS transforms
+            // aren't shadowed by the clone's inline cssText.
+            expect(ghost.children).toHaveLength(1);
+            const layer = ghost.children[0];
+            expect(layer.className).toContain('sp-drag-ghost-layer');
+            expect(layer.children).toHaveLength(1);
+            expect(layer.children[0]).toBe(clone);
+            // No badge for N=1
+            const badge = ghost.children.find((c) => c.className && c.className.includes('sp-drag-ghost-badge'));
+            expect(badge).toBeUndefined();
+            // No count pill anymore
+            const countSpan = ghost.children.find((c) => c.className && c.className.includes('sp-drag-ghost-count'));
+            expect(countSpan).toBeUndefined();
             expect(root.appendChild).toHaveBeenCalledWith(ghost);
         });
 
-        it('renders the exact count for arbitrary N', () => {
+        it('multi-clone mode (N=2) builds stack with 2 layers + badge "2"', () => {
             const { doc, root } = makeDocument();
+            const clones = [makeSourceClone(), makeSourceClone()];
             const helper = createContentDragMulti({ getDocument: () => doc });
-            const ghost = helper.createMultiDragGhost({ count: 17, root });
-            const textNodes = ghost.children.flatMap((c) => c.children || []).map((n) => n.text);
-            expect(textNodes).toContain('17');
-        });
+            const ghost = helper.createMultiDragGhost({ count: 2, sourceClones: clones, root });
 
-        it('ghost contains only number, no icon span (N=1)', () => {
-            const { doc, root } = makeDocument();
-            const helper = createContentDragMulti({ getDocument: () => doc });
-            const ghost = helper.createMultiDragGhost({ count: 1, root });
             expect(ghost).toBeTruthy();
-            const hasIconSpan = ghost.children.some((c) =>
-                c.className && c.className.includes('sp-drag-ghost-icon')
-            );
-            expect(hasIconSpan).toBe(false);
-            const countSpan = ghost.children.find((c) =>
-                c.className && c.className.includes('sp-drag-ghost-count')
-            );
-            expect(countSpan).toBeTruthy();
-            expect(countSpan.children[0].text).toBe('1');
+            expect(ghost.className).toContain('sp-drag-ghost');
+            expect(ghost.className).not.toContain('sp-drag-ghost-single');
+            const stack = ghost.children.find((c) => c.className && c.className.includes('sp-drag-ghost-stack'));
+            expect(stack).toBeTruthy();
+            // Each clone is wrapped in a sp-drag-ghost-layer div inside the stack
+            expect(stack.children).toHaveLength(2);
+            stack.children.forEach((layer, i) => {
+                expect(layer.className).toContain('sp-drag-ghost-layer');
+                expect(layer.children[0]).toBe(clones[i]);
+            });
+            const badge = ghost.children.find((c) => c.className && c.className.includes('sp-drag-ghost-badge'));
+            expect(badge).toBeTruthy();
+            expect(badge.children[0].text).toBe('2');
         });
 
-        it('ghost with count=3 shows 3 and no icon', () => {
+        it('multi-clone mode (N=3) builds stack with 3 layers + badge "3"', () => {
             const { doc, root } = makeDocument();
+            const clones = [makeSourceClone(), makeSourceClone(), makeSourceClone()];
             const helper = createContentDragMulti({ getDocument: () => doc });
-            const ghost = helper.createMultiDragGhost({ count: 3, root });
-            const hasIconSpan = ghost.children.some((c) =>
-                c.className && c.className.includes('sp-drag-ghost-icon')
-            );
-            expect(hasIconSpan).toBe(false);
-            const countSpan = ghost.children.find((c) =>
-                c.className && c.className.includes('sp-drag-ghost-count')
-            );
-            expect(countSpan.children[0].text).toBe('3');
+            const ghost = helper.createMultiDragGhost({ count: 3, sourceClones: clones, root });
+
+            const stack = ghost.children.find((c) => c.className && c.className.includes('sp-drag-ghost-stack'));
+            expect(stack.children).toHaveLength(3);
+            stack.children.forEach((layer) => {
+                expect(layer.className).toContain('sp-drag-ghost-layer');
+            });
+            const badge = ghost.children.find((c) => c.className && c.className.includes('sp-drag-ghost-badge'));
+            expect(badge.children[0].text).toBe('3');
+        });
+
+        it('multi-clone mode (N=5 with sourceClones.length=3) caps stack at 3 + badge "5"', () => {
+            const { doc, root } = makeDocument();
+            const clones = [makeSourceClone(), makeSourceClone(), makeSourceClone()];
+            const helper = createContentDragMulti({ getDocument: () => doc });
+            const ghost = helper.createMultiDragGhost({ count: 5, sourceClones: clones, root });
+
+            const stack = ghost.children.find((c) => c.className && c.className.includes('sp-drag-ghost-stack'));
+            expect(stack.children).toHaveLength(3);
+            stack.children.forEach((layer) => {
+                expect(layer.className).toContain('sp-drag-ghost-layer');
+            });
+            const badge = ghost.children.find((c) => c.className && c.className.includes('sp-drag-ghost-badge'));
+            expect(badge.children[0].text).toBe('5');
         });
 
         it('destroyMultiDragGhost is null-safe and detaches an attached element', () => {
             const { doc, root } = makeDocument();
             const helper = createContentDragMulti({ getDocument: () => doc });
-            const ghost = helper.createMultiDragGhost({ count: 3, root });
+            const ghost = helper.createMultiDragGhost({ count: 1, sourceClones: [makeSourceClone()], root });
             expect(() => helper.destroyMultiDragGhost(null)).not.toThrow();
             expect(() => helper.destroyMultiDragGhost(undefined)).not.toThrow();
             helper.destroyMultiDragGhost(ghost);
             expect(root.removeChild).toHaveBeenCalledWith(ghost);
         });
+    });
 
-        it('returns null when document is unavailable', () => {
-            const helper = createContentDragMulti({ getDocument: () => null });
-            const ghost = helper.createMultiDragGhost({ count: 2, root: null });
-            expect(ghost).toBe(null);
+    describe('inlineStylesRecursive', () => {
+        function makeStyledNode({ nodeType = 1, children = [] } = {}) {
+            return {
+                nodeType,
+                style: { cssText: '' },
+                children
+            };
+        }
+
+        function makeComputed(props = {}) {
+            const keys = Object.keys(props);
+            const computed = {
+                length: keys.length,
+                getPropertyValue: jest.fn((name) => (Object.prototype.hasOwnProperty.call(props, name) ? props[name] : ''))
+            };
+            keys.forEach((key, idx) => { computed[idx] = key; });
+            return computed;
+        }
+
+        it('writes inline cssText from getComputedStyle on a single element', () => {
+            const helper = createContentDragMulti();
+            const computed = makeComputed({ color: 'rgb(0, 0, 0)', 'font-size': '13px' });
+            const fakeWindow = { getComputedStyle: jest.fn(() => computed) };
+            const original = { nodeType: 1, children: [] };
+            const clone = makeStyledNode();
+            const previousWindow = globalThis.window;
+            globalThis.window = fakeWindow;
+            try {
+                helper.inlineStylesRecursive(clone, original);
+            } finally {
+                globalThis.window = previousWindow;
+            }
+
+            expect(fakeWindow.getComputedStyle).toHaveBeenCalledWith(original);
+            expect(clone.style.cssText).toContain('color: rgb(0, 0, 0);');
+            expect(clone.style.cssText).toContain('font-size: 13px;');
+        });
+
+        it('recurses into children that exist on both clone and original', () => {
+            const helper = createContentDragMulti();
+            const computed = makeComputed({ color: 'red' });
+            const fakeWindow = { getComputedStyle: jest.fn(() => computed) };
+            const childOriginal = { nodeType: 1, children: [] };
+            const childClone = makeStyledNode();
+            const original = { nodeType: 1, children: [childOriginal] };
+            const clone = makeStyledNode({ children: [childClone] });
+
+            const previousWindow = globalThis.window;
+            globalThis.window = fakeWindow;
+            try {
+                helper.inlineStylesRecursive(clone, original);
+            } finally {
+                globalThis.window = previousWindow;
+            }
+
+            expect(fakeWindow.getComputedStyle).toHaveBeenCalledTimes(2);
+            expect(clone.style.cssText).toContain('color: red;');
+            expect(childClone.style.cssText).toContain('color: red;');
+        });
+
+        it('is null-safe (no throw on null / non-element nodes)', () => {
+            const helper = createContentDragMulti();
+            expect(() => helper.inlineStylesRecursive(null, null)).not.toThrow();
+            expect(() => helper.inlineStylesRecursive(null, { nodeType: 1, children: [] })).not.toThrow();
+            // text node (nodeType 3) — should not call getComputedStyle, no throw
+            const previousWindow = globalThis.window;
+            const fakeWindow = { getComputedStyle: jest.fn() };
+            globalThis.window = fakeWindow;
+            try {
+                helper.inlineStylesRecursive({ nodeType: 3, style: {}, children: [] }, { nodeType: 3, children: [] });
+                expect(fakeWindow.getComputedStyle).not.toHaveBeenCalled();
+            } finally {
+                globalThis.window = previousWindow;
+            }
+        });
+    });
+
+    describe('cloneSourceItem', () => {
+        it('returns null for null input', () => {
+            const helper = createContentDragMulti();
+            expect(helper.cloneSourceItem(null)).toBe(null);
+            expect(helper.cloneSourceItem(undefined)).toBe(null);
+        });
+
+        it('returns null when input lacks cloneNode', () => {
+            const helper = createContentDragMulti();
+            expect(helper.cloneSourceItem({})).toBe(null);
+        });
+
+        it('calls cloneNode(true) and applies inline styles recursively', () => {
+            const helper = createContentDragMulti();
+            const computed = {
+                length: 1,
+                0: 'color',
+                getPropertyValue: jest.fn(() => 'blue')
+            };
+            const fakeWindow = { getComputedStyle: jest.fn(() => computed) };
+            const cloneNode = {
+                nodeType: 1,
+                style: { cssText: '' },
+                children: []
+            };
+            const original = {
+                nodeType: 1,
+                children: [],
+                cloneNode: jest.fn((deep) => {
+                    expect(deep).toBe(true);
+                    return cloneNode;
+                })
+            };
+
+            const previousWindow = globalThis.window;
+            globalThis.window = fakeWindow;
+            let result;
+            try {
+                result = helper.cloneSourceItem(original);
+            } finally {
+                globalThis.window = previousWindow;
+            }
+
+            expect(original.cloneNode).toHaveBeenCalledWith(true);
+            expect(result).toBe(cloneNode);
+            expect(cloneNode.style.cssText).toContain('color: blue;');
         });
     });
 

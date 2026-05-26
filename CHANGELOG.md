@@ -9,6 +9,7 @@
 
 ### Changed
 - **拖拽 ghost 简化 (Drag Ghost Simplification)**: `.sp-drag-ghost` 移除 `drag_indicator` 图标，仅显示拖动数量数字；单源拖拽（count=1）也启用自定义 ghost，与多源视觉统一。
+- **拖拽 Ghost = Source 行克隆 (Drag Ghost = Source-Item Clone)**: ghost 从“数字 pill”改为真实 source-item 行的 1:1 视觉克隆（含 icon / 标题 / 标签），整个 ghost scale 0.95 模拟“抓起”手感。多源拖拽时堆叠前 3 项克隆（错位 + 旋转 + 阴影），右上角圆形 badge 显示总数 N。setDragImage offset 基于鼠标在原行内的实际位置，让 ghost 在指针下自然对齐。
 - **无效拖放视觉 (Invalid Drop Visual)**: 非法 drop 的红色提示从被悬停整项的 box-shadow 改为目标空槽顶部项的 `.drag-invalid` outline 描边，避免被行 `:hover` 阴影覆盖；分组 into-group 仍保留 `.group-container.drag-invalid > .group-header` 红色头部高亮。
 
 ### Removed

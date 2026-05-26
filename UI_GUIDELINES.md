@@ -680,7 +680,7 @@ Rules:
 Existing cues:
 
 - Dragged item folds out of the list (height/opacity → 0) so the layout reads "the item has left its slot"; siblings at and after the pointer translate down to open a slot that follows the cursor
-- A custom digit-only pill ghost (`.sp-drag-ghost`) follows the pointer for both single and multi source drags
+- A custom source-row clone ghost (`.sp-drag-ghost`) follows the pointer; single drag uses one clone, multi drag stacks up to three clones with a count badge
 - Drop target group gets an accent-tinted header (`.drag-into`)
 - Invalid drop targets surface a red outline on the slot top item (or red group header); the dragged-row scale + lift remain idle so the warning is visible
 - Empty drop zones enlarge slightly and tint on valid target hover
@@ -941,13 +941,14 @@ Rules:
 
 ## 13.4 Drag interaction (physical reflow)
 
-Classes: `.sp-drag-folded`, `.sp-drop-shift`, `.sp-drag-ghost`, `.drag-into`, `.drag-invalid`
+Classes: `.sp-drag-folded`, `.sp-drop-shift`, `.sp-drag-ghost`, `.sp-drag-ghost-single`, `.sp-drag-ghost-stack`, `.sp-drag-ghost-badge`, `.drag-into`, `.drag-invalid`
 
 Canonical behavior:
 
 - On dragstart the dragged item(s) fold out of the list: `height` collapses from the cached `offsetHeight` to `0` and `opacity` fades to `0` (`.sp-drag-folded`). Multi-source drag folds every selected row in the same frame.
 - During dragover, siblings at and after the target insertion index translate down by `N × itemHeight` (`.sp-drop-shift` with inline `transform: translateY(...)`). The visible gap that follows the pointer is the insertion slot — there is no separate insertion bar.
-- Both single-source and multi-source drag use the same custom pill ghost (`.sp-drag-ghost`). The ghost shows only a digit: `1` for single drag, `N` for multi. There is no glyph or icon.
+- The drag ghost is a 1:1 clone of the actual source-item row (icon, title, tags) with inline-resolved computed styles so it renders identically outside the Shadow DOM. Single-source drag wraps the clone with `.sp-drag-ghost-single` (transform scale 0.95 + drop-shadow). Multi-source drag stacks the first three clones via `.sp-drag-ghost-stack` (each `:nth-child` offset + rotated + scaled, layers 2/3 dimmed) with a circular `.sp-drag-ghost-badge` at top-right showing the total selection count N.
+- `setDragImage` offset is computed from the pointer's position inside the origin row's bounding rect (`clientX − rect.left`, `clientY − rect.top`, clamped to `[0, rect.width/height]`); the ghost stays aligned under the pointer instead of leaping to a fixed offset.
 - On drop, transforms zero out before the DOM order changes so the new order is rendered in place. On dragend or cancel the dragged items unfold (height/opacity restore) and all shifted siblings return to `translateY(0)`.
 - Invalid drop highlights the slot top item with `.drag-invalid` (red outline-style treatment) instead of tinting the hovered row's box-shadow, so a row's normal `:hover` lift cannot obscure the warning. Group-into invalid drops still color the group header via `.group-container.drag-invalid > .group-header`.
 
@@ -959,8 +960,9 @@ Motion:
 Implementation notes:
 
 - Reflow logic lives in `src/content/content-drag-reflow.js` (`prepareDragSession`, `foldDraggedItems`, `computeReflow`, `applyReflow`, `clearReflow`, `unfoldDraggedItems`). `content-tree-interactions.js` calls these from dragstart / dragover / drop / dragend.
+- Ghost cloning lives in `src/content/content-drag-multi.js` (`cloneSourceItem` / `inlineStylesRecursive`). `createMultiDragGhost({ count, sourceClones, root })` builds the single-vs-stack wrapper + badge from pre-cloned + style-inlined Elements.
 - `.sp-drag-folded` and `.sp-drop-shift` styles live in `contentStyleText` (Shadow DOM).
-- `.sp-drag-ghost` styles live in `globalOverlayStyleText` because the ghost element is appended to `document.body` for the native drag-image capture, and Shadow DOM tokens do not reach it. Color, border, and shadow values are resolved from the standard tokens at the source with a `@media (prefers-color-scheme: dark)` override block.
+- `.sp-drag-ghost`, `.sp-drag-ghost-single`, `.sp-drag-ghost-stack`, `.sp-drag-ghost-badge` styles live in `globalOverlayStyleText` because the ghost element is appended to `document.body` for the native drag-image capture, and Shadow DOM tokens do not reach it. Resolved light/dark accent values are hardcoded with a `@media (prefers-color-scheme: dark)` override on the badge background.
 
 Rules:
 

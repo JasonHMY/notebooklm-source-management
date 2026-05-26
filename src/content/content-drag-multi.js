@@ -45,19 +45,79 @@
             return { keys: ordered, isMulti: true };
         }
 
-        function createMultiDragGhost({ count, root }) {
+        function inlineStylesRecursive(cloneNode, originalNode) {
+            if (!cloneNode || !originalNode) return;
+            if (cloneNode.nodeType === 1 && originalNode.nodeType === 1) {
+                const win = typeof globalThis.window === 'object' && globalThis.window
+                    ? globalThis.window
+                    : (typeof window !== 'undefined' ? window : null);
+                const computed = win && typeof win.getComputedStyle === 'function'
+                    ? win.getComputedStyle(originalNode)
+                    : null;
+                if (computed && cloneNode.style) {
+                    let cssText = '';
+                    for (let i = 0; i < computed.length; i += 1) {
+                        const prop = computed[i];
+                        cssText += `${prop}: ${computed.getPropertyValue(prop)}; `;
+                    }
+                    cloneNode.style.cssText = cssText;
+                }
+            }
+            const origChildren = (originalNode && originalNode.children) || [];
+            const cloneChildren = (cloneNode && cloneNode.children) || [];
+            const len = Math.min(origChildren.length, cloneChildren.length);
+            for (let i = 0; i < len; i += 1) {
+                inlineStylesRecursive(cloneChildren[i], origChildren[i]);
+            }
+        }
+
+        function cloneSourceItem(originalEl) {
+            if (!originalEl || typeof originalEl.cloneNode !== 'function') return null;
+            const clone = originalEl.cloneNode(true);
+            inlineStylesRecursive(clone, originalEl);
+            return clone;
+        }
+
+        function createMultiDragGhost({ count, sourceClones, root }) {
             const doc = getDocument();
             if (!doc || typeof doc.createElement !== 'function') return null;
             if (!root || typeof root.appendChild !== 'function') return null;
+
+            const clones = Array.isArray(sourceClones) ? sourceClones.filter(Boolean) : [];
+            const totalCount = typeof count === 'number' && count > 0 ? count : clones.length;
 
             const ghost = doc.createElement('div');
             ghost.className = 'sp-drag-ghost';
             ghost.setAttribute('aria-hidden', 'true');
 
-            const countSpan = doc.createElement('span');
-            countSpan.className = 'sp-drag-ghost-count';
-            countSpan.appendChild(doc.createTextNode(String(count)));
-            ghost.appendChild(countSpan);
+            if (totalCount === 1 && clones.length === 1) {
+                ghost.className = 'sp-drag-ghost sp-drag-ghost-single';
+                // Wrap clone in a layer div so stack-mode CSS transforms aren't shadowed
+                // by inline cssText that inlineStylesRecursive writes on the clone itself.
+                const layer = doc.createElement('div');
+                layer.className = 'sp-drag-ghost-layer';
+                layer.appendChild(clones[0]);
+                ghost.appendChild(layer);
+                root.appendChild(ghost);
+                return ghost;
+            }
+
+            // Stack mode: up to 3 layer-wrapped clones + badge with totalCount.
+            const stack = doc.createElement('div');
+            stack.className = 'sp-drag-ghost-stack';
+            const stackedClones = clones.slice(0, 3);
+            for (const cloneEl of stackedClones) {
+                const layer = doc.createElement('div');
+                layer.className = 'sp-drag-ghost-layer';
+                layer.appendChild(cloneEl);
+                stack.appendChild(layer);
+            }
+            ghost.appendChild(stack);
+
+            const badge = doc.createElement('span');
+            badge.className = 'sp-drag-ghost-badge';
+            badge.appendChild(doc.createTextNode(String(totalCount)));
+            ghost.appendChild(badge);
 
             root.appendChild(ghost);
             return ghost;
@@ -212,7 +272,9 @@
             createMultiDragGhost,
             destroyMultiDragGhost,
             applyMultiSourceDrop,
-            createAutoScrollController
+            createAutoScrollController,
+            inlineStylesRecursive,
+            cloneSourceItem
         };
     }
 

@@ -3115,37 +3115,69 @@
                         }
                     }
 
-                    /* multi-source drag ghost
+                    /* drag ghost (source-item clone)
                        The ghost element is appended to document.body during
-                       multi-source drag, so it lives outside the Shadow DOM
-                       and cannot read --sp-* tokens from :host. Values are
-                       hardcoded to match the resolved light/dark tokens. */
+                       drag, so it lives outside the Shadow DOM and cannot
+                       read --sp-* tokens from :host. The ghost wraps a
+                       cloned source-item (single mode) or a stack of up to
+                       three clones (multi mode) with a count badge. */
                     .sp-drag-ghost {
                         position: fixed;
                         top: -9999px;
                         left: -9999px;
-                        display: inline-flex;
-                        align-items: center;
-                        padding: 8px 12px;
-                        border-radius: 999px;
-                        background: #fff;
-                        color: #1A1A1C;
-                        border: 1px solid rgba(0, 0, 0, 0.15);
-                        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.08);
-                        font-size: 13px;
                         pointer-events: none;
                         user-select: none;
                     }
-                    .sp-drag-ghost-count {
+                    /* Layer wrapper isolates stack/single transforms from the cloned source-item's
+                       inline cssText (written by inlineStylesRecursive) which would otherwise
+                       win specificity over class selectors. */
+                    .sp-drag-ghost-single > .sp-drag-ghost-layer {
+                        transform: scale(0.95);
+                        filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.15));
+                    }
+                    .sp-drag-ghost-stack {
+                        position: relative;
+                    }
+                    .sp-drag-ghost-stack > .sp-drag-ghost-layer {
+                        position: absolute;
+                        top: 0;
+                        left: 0;
+                        filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.15));
+                    }
+                    .sp-drag-ghost-stack > .sp-drag-ghost-layer:nth-child(1) {
+                        z-index: 3;
+                        transform: scale(0.95);
+                    }
+                    .sp-drag-ghost-stack > .sp-drag-ghost-layer:nth-child(2) {
+                        z-index: 2;
+                        transform: translate(4px, 4px) rotate(-1deg) scale(0.95);
+                        opacity: 0.85;
+                    }
+                    .sp-drag-ghost-stack > .sp-drag-ghost-layer:nth-child(3) {
+                        z-index: 1;
+                        transform: translate(8px, 8px) rotate(-2deg) scale(0.95);
+                        opacity: 0.7;
+                    }
+                    .sp-drag-ghost-badge {
+                        position: absolute;
+                        top: -8px;
+                        right: -8px;
+                        min-width: 22px;
+                        height: 22px;
+                        border-radius: 11px;
+                        background: #007AFF;
+                        color: #fff;
+                        font-size: 12px;
                         font-weight: 600;
-                        line-height: 1;
+                        line-height: 22px;
+                        text-align: center;
+                        padding: 0 6px;
+                        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+                        z-index: 10;
                     }
                     @media (prefers-color-scheme: dark) {
-                        .sp-drag-ghost {
-                            background: #1c1c1e;
-                            color: #f5f5f7;
-                            border-color: rgba(255, 255, 255, 0.2);
-                            box-shadow: 0 12px 28px rgba(0, 0, 0, 0.32);
+                        .sp-drag-ghost-badge {
+                            background: #0A84FF;
                         }
                     }
                 `;

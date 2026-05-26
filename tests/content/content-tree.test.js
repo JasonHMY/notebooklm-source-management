@@ -1417,7 +1417,8 @@ describe('handleDragStart reflow session + unified ghost', () => {
         const dragMulti = {
             resolveDragSelection: jest.fn(({ originKey }) => ({ keys: [originKey], isMulti: false })),
             createMultiDragGhost: jest.fn(() => ghostNode),
-            destroyMultiDragGhost: jest.fn()
+            destroyMultiDragGhost: jest.fn(),
+            cloneSourceItem: jest.fn()
         };
 
         const interactions = createContentTreeInteractions({
@@ -1439,10 +1440,11 @@ describe('handleDragStart reflow session + unified ghost', () => {
 
         expect(dragMulti.createMultiDragGhost).toHaveBeenCalledWith(expect.objectContaining({
             count: 1,
-            root: fakeBody
+            root: fakeBody,
+            sourceClones: expect.any(Array)
         }));
         expect(dataTransfer.setDragImage).toHaveBeenCalledTimes(1);
-        // Browser natively captures + follows the ghost pill as drag image
+        // Browser natively captures + follows the ghost as drag image; offset falls back to (12, 12).
         expect(dataTransfer.setDragImage).toHaveBeenCalledWith(ghostNode, 12, 12);
         expect(runtime.activeDragGhost).toBe(ghostNode);
     });
@@ -1477,7 +1479,8 @@ describe('handleDragStart reflow session + unified ghost', () => {
             resolveDragSelection: jest.fn(({ originKey, isBatchMode, pendingBatchKeys: keys, sourceOrder }) =>
                 createContentDragMulti({}).resolveDragSelection({ originKey, isBatchMode, pendingBatchKeys: keys, sourceOrder })),
             createMultiDragGhost: jest.fn(() => ghostNode),
-            destroyMultiDragGhost: jest.fn()
+            destroyMultiDragGhost: jest.fn(),
+            cloneSourceItem: jest.fn()
         };
 
         const interactions = createContentTreeInteractions({
@@ -1499,11 +1502,143 @@ describe('handleDragStart reflow session + unified ghost', () => {
 
         expect(dragMulti.createMultiDragGhost).toHaveBeenCalledWith(expect.objectContaining({
             count: 3,
-            root: fakeBody
+            root: fakeBody,
+            sourceClones: expect.any(Array)
         }));
         expect(dataTransfer.setDragImage).toHaveBeenCalledTimes(1);
         expect(dataTransfer.setDragImage).toHaveBeenCalledWith(ghostNode, 12, 12);
         expect(runtime.activeDragGhost).toBe(ghostNode);
+    });
+
+    it('clones up to 3 source-items and computes setDragImage offset from pointer-in-row on multi-source dragstart', () => {
+        const runtime = {};
+        const state = { isBatchMode: true, ungrouped: ['A', 'B', 'C', 'D'], groups: [] };
+        const pendingBatchKeys = new Set(['A', 'B', 'C', 'D']);
+        const originalA = {
+            dataset: { sourceKey: 'A' },
+            classList: { add: jest.fn(), remove: jest.fn() },
+            getBoundingClientRect: jest.fn(() => ({ left: 50, top: 100, width: 300, height: 60 }))
+        };
+        const originalB = { dataset: { sourceKey: 'B' }, classList: { add: jest.fn(), remove: jest.fn() } };
+        const originalC = { dataset: { sourceKey: 'C' }, classList: { add: jest.fn(), remove: jest.fn() } };
+        const originalD = { dataset: { sourceKey: 'D' }, classList: { add: jest.fn(), remove: jest.fn() } };
+        const sourcesListEl = {
+            querySelector: jest.fn((selector) => {
+                const match = selector.match(/\[data-source-key="([^"]+)"\]/);
+                if (!match) return null;
+                if (match[1] === 'A') return originalA;
+                if (match[1] === 'B') return originalB;
+                if (match[1] === 'C') return originalC;
+                if (match[1] === 'D') return originalD;
+                return null;
+            })
+        };
+        const shadowRoot = {
+            querySelector: jest.fn((selector) => {
+                const match = selector.match(/\[data-source-key="([^"]+)"\]/);
+                if (!match) return null;
+                if (match[1] === 'A') return originalA;
+                if (match[1] === 'B') return originalB;
+                if (match[1] === 'C') return originalC;
+                if (match[1] === 'D') return originalD;
+                return null;
+            }),
+            querySelectorAll: jest.fn(() => []),
+            getElementById: jest.fn((id) => (id === 'sources-list' ? sourcesListEl : null))
+        };
+
+        const dataTransfer = createDataTransfer();
+        const ghostNode = { tagName: 'DIV' };
+        const fakeBody = { appendChild: jest.fn(() => ghostNode) };
+        const fakeDoc = { body: fakeBody };
+
+        const clonedNodes = [];
+        const dragMulti = {
+            resolveDragSelection: jest.fn(({ originKey, isBatchMode, pendingBatchKeys: keys, sourceOrder }) =>
+                createContentDragMulti({}).resolveDragSelection({ originKey, isBatchMode, pendingBatchKeys: keys, sourceOrder })),
+            createMultiDragGhost: jest.fn(() => ghostNode),
+            destroyMultiDragGhost: jest.fn(),
+            cloneSourceItem: jest.fn((node) => {
+                const clone = { _clonedFrom: node && node.dataset && node.dataset.sourceKey };
+                clonedNodes.push(clone);
+                return clone;
+            })
+        };
+
+        const interactions = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getPendingBatchKeys: () => pendingBatchKeys,
+            getShadowRoot: () => shadowRoot,
+            getDocument: () => fakeDoc,
+            getSetTimeout: () => () => {},
+            dragMulti,
+            dragReflow: null
+        });
+
+        interactions.handleDragStart({
+            target: createSourceRowTargetStub(originalA),
+            dataTransfer,
+            clientX: 120,
+            clientY: 130
+        });
+
+        // Cap at 3 clones even though selection is 4.
+        expect(dragMulti.cloneSourceItem).toHaveBeenCalledTimes(3);
+        expect(dragMulti.createMultiDragGhost).toHaveBeenCalledTimes(1);
+        const ghostArgs = dragMulti.createMultiDragGhost.mock.calls[0][0];
+        expect(ghostArgs.count).toBe(4);
+        expect(ghostArgs.sourceClones).toHaveLength(3);
+        expect(ghostArgs.sourceClones[0]._clonedFrom).toBe('A');
+        expect(ghostArgs.sourceClones[1]._clonedFrom).toBe('B');
+        expect(ghostArgs.sourceClones[2]._clonedFrom).toBe('C');
+
+        // Offset is clientX - rect.left, clientY - rect.top → (70, 30).
+        expect(dataTransfer.setDragImage).toHaveBeenCalledWith(ghostNode, 70, 30);
+        expect(runtime.activeDragGhost).toBe(ghostNode);
+    });
+
+    it('falls back to (12, 12) drag-image offset when sources-list lookup fails', () => {
+        const runtime = {};
+        const state = { isBatchMode: false, ungrouped: ['A'], groups: [] };
+        const pendingBatchKeys = new Set();
+        const sourceRow = createSourceRow('A');
+        const dataTransfer = createDataTransfer();
+        const ghostNode = { tagName: 'DIV' };
+        const fakeBody = { appendChild: jest.fn(() => ghostNode) };
+        const fakeDoc = { body: fakeBody };
+        const dragMulti = {
+            resolveDragSelection: jest.fn(({ originKey }) => ({ keys: [originKey], isMulti: false })),
+            createMultiDragGhost: jest.fn(() => ghostNode),
+            destroyMultiDragGhost: jest.fn(),
+            cloneSourceItem: jest.fn()
+        };
+
+        const interactions = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getPendingBatchKeys: () => pendingBatchKeys,
+            getShadowRoot: () => null,
+            getDocument: () => fakeDoc,
+            getSetTimeout: () => () => {},
+            dragMulti,
+            dragReflow: null
+        });
+
+        interactions.handleDragStart({
+            target: createSourceRowTargetStub(sourceRow),
+            dataTransfer,
+            clientX: 200,
+            clientY: 200
+        });
+
+        expect(dragMulti.cloneSourceItem).not.toHaveBeenCalled();
+        expect(dragMulti.createMultiDragGhost).toHaveBeenCalledWith(expect.objectContaining({
+            sourceClones: []
+        }));
+        expect(dataTransfer.setDragImage).toHaveBeenCalledWith(ghostNode, 12, 12);
     });
 });
 
