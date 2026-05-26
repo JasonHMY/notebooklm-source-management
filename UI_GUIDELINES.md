@@ -937,6 +937,29 @@ Rules:
 - Empty states should be quiet and actionable.
 - Prefer one clear message over illustration-heavy placeholders.
 
+## 13.4 Drag ghost (multi-source)
+
+Class: `.sp-drag-ghost`
+
+Canonical behavior:
+
+- Appears only when batch mode is on and ≥ 2 sources are dragged together
+- Lives in `document.body`, outside the Shadow DOM, so the browser can capture it as the native drag image
+- Pill shape with a `drag_indicator` glyph and a count badge
+- Hidden off-screen between drag events; destroyed on dragend via a RAF-deferred tick to let the browser finish reading it
+
+Implementation notes:
+
+- Styles live in `globalOverlayStyleText` (not `contentStyleText`) because Shadow DOM tokens do not reach `document.body`
+- Color, border, and shadow values are resolved from the standard tokens at the source rather than referenced via `var(--sp-*)`, with a `@media (prefers-color-scheme: dark)` override block for dark mode parity
+- The Google Symbols `@font-face` declaration is duplicated in the global stylesheet so the icon glyph renders correctly
+
+Rules:
+
+- Do not introduce a new ghost variant for other drag flows without a clear UX reason; reuse this class
+- Do not animate the ghost (it lives ~200ms; transitions would conflict with the browser's drag-image capture)
+- Do not add interactive elements to the ghost (it is `pointer-events: none` and `aria-hidden`)
+
 ## 14. Batch Mode
 
 Batch mode adds a temporary command surface while preserving the base visual language.

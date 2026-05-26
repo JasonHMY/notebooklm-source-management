@@ -257,6 +257,7 @@ manifest.json
     ├── src/content/content-render.js
     ├── src/content/content-view-state.js
     ├── src/content/content-native-checkbox-sync.js
+    ├── src/content/content-drag-multi.js
     ├── src/content/content-tree-interactions.js
     ├── src/content/content-native-label-detector.js
     ├── src/content/content-source-sync.js
@@ -341,17 +342,20 @@ manifest.json
 │   │   ├── 新建、重命名、删除、折叠分组
 │   │   ├── 嵌套 children 和 parent map
 │   │   ├── 来源/分组拖拽排序
+│   │   ├── 批量模式多源拖拽与边缘自动滚动
 │   │   ├── 批量选择、加入文件夹、添加/移除标签
 │   │   ├── 移到未分组
 │   │   └── 批量删除入口
 │   ├── 先看
 │   │   ├── src/content/content-tree-interactions.js
+│   │   ├── src/content/content-drag-multi.js
 │   │   ├── src/content/content-native-checkbox-sync.js
 │   │   ├── src/content/content-render.js
 │   │   ├── src/content/content-modals.js
 │   │   └── src/content/content-source-actions.js
 │   └── 测试
 │       ├── tests/content/content-tree.test.js
+│       ├── tests/content/content-drag-multi.test.js
 │       ├── tests/content/content-native-checkbox-sync.test.js
 │       ├── tests/content/content-render.test.js
 │       └── tests/content/content-source-actions.test.js
@@ -662,7 +666,7 @@ content runtime memory
 │   └── 文件: tests/manifest-loader-sync.test.js
 ├── 扩展真实上下文 smoke
 │   ├── 命令: npm run test:smoke
-│   ├── 文件: tests/smoke/extension-smoke.spec.js
+│   ├── 文件: tests/smoke/extension-smoke.spec.js, tests/smoke/batch-drag.smoke.spec.js
 │   └── 默认: headless，不应该弹出可见浏览器窗口
 └── 完整发布前验证
     └── 命令: npm run test:unit && npm run test:smoke && npm run package && git diff --check
