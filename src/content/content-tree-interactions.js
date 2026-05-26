@@ -947,6 +947,51 @@
             }
         }
 
+        function computeIsInvalidDrop({ dropTarget, intent, dragContext }) {
+            if (!dropTarget || !dragContext) return false;
+            if (!intent || typeof intent !== 'object') return false;
+
+            if (dragContext.kind === 'source-single') {
+                const draggedKey = Array.isArray(dragContext.keys) ? dragContext.keys[0] : null;
+                if (!draggedKey) return false;
+                const targetKey = dropTarget.dataset ? dropTarget.dataset.sourceKey : null;
+                return Boolean(targetKey) && targetKey === draggedKey;
+            }
+
+            if (dragContext.kind === 'source-multi') {
+                const keys = Array.isArray(dragContext.keys) ? dragContext.keys : [];
+                if (keys.length === 0) return false;
+                const draggedSet = new Set(keys);
+
+                // Member of dragged set
+                const targetKey = dropTarget.dataset ? dropTarget.dataset.sourceKey : null;
+                if (targetKey && draggedSet.has(targetKey)) return true;
+
+                // Top-level before-group / after-group intent — would splice source keys into state.groups
+                const isGroupContainer = dropTarget.classList && typeof dropTarget.classList.contains === 'function'
+                    && dropTarget.classList.contains('group-container');
+                const isAtTopLevel = intent.targetGroup == null;
+                const isBeforeOrAfter = intent.kind === 'before-group' || intent.kind === 'after-group';
+                if (isGroupContainer && isAtTopLevel && isBeforeOrAfter) return true;
+
+                return false;
+            }
+
+            if (dragContext.kind === 'group') {
+                const draggedGroupId = dragContext.draggedGroupId;
+                if (!draggedGroupId) return false;
+                const targetGroup = intent.targetGroup;
+                if (!targetGroup) return false;
+                if (targetGroup.id === draggedGroupId) return true;
+                const groupsById = getGroupsById();
+                const draggedGroup = groupsById.get(draggedGroupId);
+                if (!draggedGroup) return false;
+                return isDescendant(targetGroup, draggedGroup, groupsById);
+            }
+
+            return false;
+        }
+
         function handleDragOver(e) {
             e.preventDefault();
             const dropTarget = e.target.closest('.group-container, .source-item');
@@ -963,6 +1008,25 @@
                 } else {
                     if (offsetY < rect.height / 2) dropTarget.classList.add('drag-over-top');
                     else dropTarget.classList.add('drag-over-bottom');
+                }
+
+                const isInto = dropTarget.classList.contains('drag-into');
+                const isAbove = dropTarget.classList.contains('drag-over-top');
+                const intentKindForCheck = normalizeIntentKind(isInto, isAbove, dropTarget);
+                const baseIntent = getDropIntent(dropTarget, isInto, isAbove);
+                const intentForInvalidCheck = baseIntent
+                    ? { ...baseIntent, kind: intentKindForCheck }
+                    : { kind: intentKindForCheck, targetGroup: null };
+                const isInvalid = computeIsInvalidDrop({
+                    dropTarget,
+                    intent: intentForInvalidCheck,
+                    dragContext: runtime.activeDragContext
+                });
+                if (isInvalid) {
+                    dropTarget.classList.add('drag-invalid');
+                    if (e.dataTransfer) e.dataTransfer.dropEffect = 'none';
+                } else {
+                    dropTarget.classList.remove('drag-invalid');
                 }
             }
 
@@ -986,7 +1050,7 @@
         function handleDragLeave(e) {
             const dropTarget = e.target.closest('.group-container, .source-item');
             if (dropTarget) {
-                dropTarget.classList.remove('drag-over-top', 'drag-over-bottom', 'drag-into');
+                dropTarget.classList.remove('drag-over-top', 'drag-over-bottom', 'drag-into', 'drag-invalid');
             }
             if (e.target && e.target.id === 'sources-list' && autoScrollController) {
                 autoScrollController.stop();
@@ -996,10 +1060,10 @@
         function clearDragFeedback(root = getShadowRoot()) {
             let count = 0;
             if (root && typeof root.querySelectorAll === 'function') {
-                const nodes = Array.from(root.querySelectorAll('.dragging, .drag-over-top, .drag-over-bottom, .drag-into'));
+                const nodes = Array.from(root.querySelectorAll('.dragging, .drag-over-top, .drag-over-bottom, .drag-into, .drag-invalid'));
                 nodes.forEach((node) => {
                     if (node?.classList && typeof node.classList.remove === 'function') {
-                        node.classList.remove('dragging', 'drag-over-top', 'drag-over-bottom', 'drag-into');
+                        node.classList.remove('dragging', 'drag-over-top', 'drag-over-bottom', 'drag-into', 'drag-invalid');
                     }
                 });
                 count = nodes.length;

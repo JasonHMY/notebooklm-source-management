@@ -373,7 +373,7 @@ describe('drag and drop ordering guards', () => {
 
         expect(interactions.clearDragFeedback()).toBe(2);
         markedNodes.forEach((node) => {
-            expect(node.classList.remove).toHaveBeenCalledWith('dragging', 'drag-over-top', 'drag-over-bottom', 'drag-into');
+            expect(node.classList.remove).toHaveBeenCalledWith('dragging', 'drag-over-top', 'drag-over-bottom', 'drag-into', 'drag-invalid');
         });
     });
 
@@ -1236,5 +1236,197 @@ describe('activeDragContext runtime state', () => {
         interactions.clearDragFeedback();
 
         expect(runtime.activeDragContext).toBe(null);
+    });
+});
+
+describe('handleDragOver invalid-drop feedback', () => {
+    let createContentTreeInteractions;
+    let createContentDragMulti;
+
+    function makeClassList(initial = []) {
+        const classes = new Set(initial);
+        const api = {
+            add: (...cs) => cs.forEach((c) => classes.add(c)),
+            remove: (...cs) => cs.forEach((c) => classes.delete(c)),
+            contains: (c) => classes.has(c),
+            has: (c) => classes.has(c)
+        };
+        return api;
+    }
+
+    function setupTreeInteractionsTestContext({ state, pendingBatchKeys, groups }) {
+        const runtime = {};
+        const groupsById = new Map();
+        if (groups && typeof groups === 'object') {
+            Object.keys(groups).forEach((id) => {
+                const group = groups[id];
+                groupsById.set(id, { id, children: [], ...group });
+            });
+        }
+        const dragMulti = createContentDragMulti({});
+        const tree = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getPendingBatchKeys: () => pendingBatchKeys,
+            getShadowRoot: () => null,
+            getParentMap: () => new Map(),
+            isDescendant: globalThis.isDescendant,
+            dragMulti
+        });
+
+        function makeSourceItemTarget(key, { intent } = {}) {
+            const rect = { top: 200, bottom: 240, height: 40 };
+            const initial = ['source-item'];
+            const classList = makeClassList(initial);
+            if (intent) classList.add(intent);
+            const target = {
+                dataset: { sourceKey: key },
+                classList,
+                rect,
+                getBoundingClientRect: () => ({ top: rect.top, bottom: rect.bottom, height: rect.height, left: 0, right: 200, width: 200 })
+            };
+            target.closest = (selector) => {
+                if (selector === '.group-container, .source-item') return target;
+                if (selector === '.source-item') return target;
+                if (selector === '.group-container') return null;
+                return null;
+            };
+            return target;
+        }
+
+        function makeGroupContainerTarget(groupId, { intent } = {}) {
+            const rect = { top: 200, bottom: 240, height: 40 };
+            const initial = ['group-container'];
+            const classList = makeClassList(initial);
+            if (intent) classList.add(intent);
+            const target = {
+                dataset: { groupId },
+                classList,
+                rect,
+                getBoundingClientRect: () => ({ top: rect.top, bottom: rect.bottom, height: rect.height, left: 0, right: 200, width: 200 })
+            };
+            target.closest = (selector) => {
+                if (selector === '.group-container, .source-item') return target;
+                if (selector === '.group-container') return target;
+                if (selector === '.source-item') return null;
+                return null;
+            };
+            return target;
+        }
+
+        return {
+            runtime,
+            tree,
+            helpers: { makeSourceItemTarget, makeGroupContainerTarget },
+            groupsById
+        };
+    }
+
+    beforeEach(() => {
+        jest.resetModules();
+        setupGlobalMocks();
+        require('../../src/content/content-native-checkbox-sync.js');
+        createContentTreeInteractions = require('../../src/content/content-tree-interactions.js');
+        createContentDragMulti = require('../../src/content/content-drag-multi.js');
+    });
+
+    afterEach(teardownGlobalMocks);
+
+    it('marks drop target invalid when dragging a single source over itself', () => {
+        const ctx = setupTreeInteractionsTestContext({
+            state: { isBatchMode: false, ungrouped: ['A', 'B'], groups: [] },
+            pendingBatchKeys: new Set()
+        });
+        ctx.runtime.activeDragContext = { kind: 'source-single', keys: ['A'] };
+        const target = ctx.helpers.makeSourceItemTarget('A');
+        const dataTransfer = { dropEffect: 'move' };
+        ctx.tree.handleDragOver({
+            target,
+            clientY: target.rect.top + 5,
+            preventDefault: jest.fn(),
+            dataTransfer
+        });
+        expect(target.classList.has('drag-invalid')).toBe(true);
+        expect(target.classList.has('drag-over-top')).toBe(true);
+        expect(dataTransfer.dropEffect).toBe('none');
+    });
+
+    it('marks drop target invalid when dragging a group over its own descendant', () => {
+        const ctx = setupTreeInteractionsTestContext({
+            state: { isBatchMode: false, ungrouped: [], groups: ['g1'] },
+            pendingBatchKeys: new Set(),
+            groups: {
+                g1: { id: 'g1', children: [{ type: 'group', id: 'g2' }] },
+                g2: { id: 'g2', children: [] }
+            }
+        });
+        ctx.runtime.activeDragContext = { kind: 'group', draggedGroupId: 'g1' };
+        const target = ctx.helpers.makeGroupContainerTarget('g2');
+        const dataTransfer = { dropEffect: 'move' };
+        ctx.tree.handleDragOver({
+            target,
+            clientY: target.rect.top + target.rect.height / 2,
+            preventDefault: jest.fn(),
+            dataTransfer
+        });
+        expect(target.classList.has('drag-invalid')).toBe(true);
+        expect(dataTransfer.dropEffect).toBe('none');
+    });
+
+    it('marks drop target invalid when multi-source drag hovers over a member of the dragged set', () => {
+        const ctx = setupTreeInteractionsTestContext({
+            state: { isBatchMode: true, ungrouped: ['A', 'B', 'C'], groups: [] },
+            pendingBatchKeys: new Set(['A', 'B', 'C'])
+        });
+        ctx.runtime.activeDragContext = { kind: 'source-multi', keys: ['A', 'B', 'C'] };
+        const target = ctx.helpers.makeSourceItemTarget('B');
+        const dataTransfer = { dropEffect: 'move' };
+        ctx.tree.handleDragOver({
+            target,
+            clientY: target.rect.top + 5,
+            preventDefault: jest.fn(),
+            dataTransfer
+        });
+        expect(target.classList.has('drag-invalid')).toBe(true);
+        expect(dataTransfer.dropEffect).toBe('none');
+    });
+
+    it('marks drop target invalid for multi-source drag with top-level before-group intent', () => {
+        const ctx = setupTreeInteractionsTestContext({
+            state: { isBatchMode: true, ungrouped: ['A', 'B'], groups: ['g1'] },
+            pendingBatchKeys: new Set(['A', 'B']),
+            groups: { g1: { id: 'g1', children: [] } }
+        });
+        ctx.runtime.activeDragContext = { kind: 'source-multi', keys: ['A', 'B'] };
+        const target = ctx.helpers.makeGroupContainerTarget('g1');
+        const dataTransfer = { dropEffect: 'move' };
+        ctx.tree.handleDragOver({
+            target,
+            clientY: target.rect.top + 5,
+            preventDefault: jest.fn(),
+            dataTransfer
+        });
+        expect(target.classList.has('drag-invalid')).toBe(true);
+        expect(dataTransfer.dropEffect).toBe('none');
+    });
+
+    it('does not mark drop target invalid when single source drags over a different source', () => {
+        const ctx = setupTreeInteractionsTestContext({
+            state: { isBatchMode: false, ungrouped: ['A', 'B'], groups: [] },
+            pendingBatchKeys: new Set()
+        });
+        ctx.runtime.activeDragContext = { kind: 'source-single', keys: ['A'] };
+        const target = ctx.helpers.makeSourceItemTarget('B');
+        const dataTransfer = { dropEffect: 'move' };
+        ctx.tree.handleDragOver({
+            target,
+            clientY: target.rect.top + 5,
+            preventDefault: jest.fn(),
+            dataTransfer
+        });
+        expect(target.classList.has('drag-invalid')).toBe(false);
+        expect(target.classList.has('drag-over-top')).toBe(true);
+        expect(dataTransfer.dropEffect).toBe('move');
     });
 });
