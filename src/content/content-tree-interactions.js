@@ -495,8 +495,10 @@
                 childrenContainer.classList.add('collapsed');
             } else {
                 caret.classList.remove('collapsed');
-                childrenContainer.classList.remove('collapsed');
                 childrenContainer.style.overflow = 'hidden';
+                childrenContainer.style.height = '0px';
+                childrenContainer.classList.remove('collapsed');
+                childrenContainer.offsetHeight;
                 childrenContainer.style.height = `${childrenContainer.scrollHeight}px`;
 
                 childrenContainer.addEventListener('transitionend', function handler() {
