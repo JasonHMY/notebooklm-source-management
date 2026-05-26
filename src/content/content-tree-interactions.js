@@ -152,6 +152,9 @@
         const recordNativeSelectionSyncFailure = typeof deps.recordNativeSelectionSyncFailure === 'function'
             ? deps.recordNativeSelectionSyncFailure
             : () => {};
+        const developerLog = typeof deps.developerLog === 'function'
+            ? deps.developerLog
+            : (typeof runtime.developerLog === 'function' ? runtime.developerLog : () => false);
 
         const dragMulti = (typeof deps.dragMulti === 'object' && deps.dragMulti)
             ? deps.dragMulti
@@ -1083,9 +1086,17 @@
             return null;
         }
 
+        function normalizeIntentKind(isInto, isAbove, dropTarget) {
+            if (isInto && dropTarget.classList.contains('group-container')) return 'into-group';
+            if (dropTarget.classList.contains('group-container')) return isAbove ? 'before-group' : 'after-group';
+            return isAbove ? 'before-source' : 'after-source';
+        }
+
         function handleDrop(e) {
             const state = getState();
             const groupsById = getGroupsById();
+            const sourcesByKey = getSourcesByKey();
+            const pendingBatchKeys = getPendingBatchKeys();
             const dropTarget = e.target.closest('.group-container, .source-item');
             if (!dropTarget) {
                 clearDragFeedback();
@@ -1095,12 +1106,49 @@
 
             const isInto = dropTarget.classList.contains('drag-into');
             const isAbove = dropTarget.classList.contains('drag-over-top');
+            const intentKind = normalizeIntentKind(isInto, isAbove, dropTarget);
             const intent = getDropIntent(dropTarget, isInto, isAbove);
             clearDragFeedback();
 
             const sourceKey = e.dataTransfer.getData('application/source-key');
+            const sourceKeysRaw = e.dataTransfer.getData('application/source-keys');
             const draggedGroupId = e.dataTransfer.getData('application/group-id');
             if (!intent) return;
+
+            if (sourceKeysRaw && dragMulti && typeof dragMulti.applyMultiSourceDrop === 'function') {
+                let keys = null;
+                try { keys = JSON.parse(sourceKeysRaw); } catch (err) { keys = null; }
+                if (Array.isArray(keys) && keys.length >= 2) {
+                    const augmentedIntent = {
+                        kind: intentKind,
+                        targetList: intent.targetList,
+                        insertIndex: intent.insertIndex,
+                        targetGroupId: intent.targetGroup ? intent.targetGroup.id : null
+                    };
+                    const result = dragMulti.applyMultiSourceDrop({
+                        keys,
+                        intent: augmentedIntent,
+                        state,
+                        helpers: {
+                            sourceExists: (key) => sourcesByKey.has(key),
+                            getGroupById: (id) => groupsById.get(id) || null,
+                            removeSourceFromParent: (key) => removeSourceFromTree(key)
+                        }
+                    });
+                    if (result && result.moved > 0) {
+                        developerLog('batch_drag_move', { count: result.moved, intent: intentKind });
+                        state.isBatchMode = false;
+                        pendingBatchKeys.clear();
+                        buildParentMap();
+                        saveState({ immediate: true, critical: true });
+                        render();
+                        showToast(getMessage('ui_batch_moved_sources_toast', [String(result.moved)]));
+                    }
+                    clearDragFeedback();
+                    return;
+                }
+            }
+
             let didMove = false;
 
             if (sourceKey) {

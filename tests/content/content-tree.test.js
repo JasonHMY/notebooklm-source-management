@@ -661,3 +661,236 @@ describe('handleDragStart multi-source branch', () => {
         expect(dataTransfer.setDragImage).not.toHaveBeenCalled();
     });
 });
+
+describe('drop routes multi vs single source', () => {
+    let createContentTreeInteractions;
+    let createContentDragMulti;
+
+    const createClassList = (classes = []) => {
+        const classSet = new Set(classes);
+        return {
+            contains: jest.fn((className) => classSet.has(className)),
+            remove: jest.fn((...classNames) => {
+                classNames.forEach((className) => classSet.delete(className));
+            }),
+            add: jest.fn((className) => {
+                classSet.add(className);
+            })
+        };
+    };
+
+    const createDropEvent = ({ dropTarget, sourceKey = '', sourceKeysJson = '', groupId = '' }) => ({
+        preventDefault: jest.fn(),
+        target: {
+            closest: jest.fn(() => dropTarget)
+        },
+        dataTransfer: {
+            getData: jest.fn((type) => {
+                if (type === 'application/source-key') return sourceKey;
+                if (type === 'application/source-keys') return sourceKeysJson;
+                if (type === 'application/group-id') return groupId;
+                return '';
+            })
+        }
+    });
+
+    beforeEach(() => {
+        jest.resetModules();
+        setupGlobalMocks();
+        require('../../src/content/content-native-checkbox-sync.js');
+        createContentTreeInteractions = require('../../src/content/content-tree-interactions.js');
+        createContentDragMulti = require('../../src/content/content-drag-multi.js');
+    });
+
+    afterEach(teardownGlobalMocks);
+
+    it('routes multi-key drops through applyMultiSourceDrop, exits batch mode, saves, renders, and toasts', () => {
+        const group = { id: 'g1', children: [] };
+        const state = { isBatchMode: true, ungrouped: ['A', 'B', 'C', 'D'], groups: ['g1'] };
+        const groupsById = new Map([['g1', group]]);
+        const sourcesByKey = new Map([
+            ['A', { key: 'A' }],
+            ['B', { key: 'B' }],
+            ['C', { key: 'C' }],
+            ['D', { key: 'D' }]
+        ]);
+        const pendingBatchKeys = new Set(['A', 'B', 'C']);
+        const saveState = jest.fn();
+        const render = jest.fn();
+        const showToast = jest.fn();
+        const buildParentMap = jest.fn();
+        const developerLog = jest.fn();
+        const dropTarget = {
+            dataset: { groupId: 'g1' },
+            classList: createClassList(['group-container', 'drag-into'])
+        };
+        const interactions = createContentTreeInteractions({
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getSourcesByKey: () => sourcesByKey,
+            getParentMap: () => new Map(),
+            getPendingBatchKeys: () => pendingBatchKeys,
+            getShadowRoot: () => ({ querySelectorAll: jest.fn(() => []) }),
+            saveState,
+            render,
+            showToast,
+            buildParentMap,
+            developerLog,
+            dragMulti: createContentDragMulti({}),
+            getMessage: (key, args = []) => `${key}:${args.join(',')}`
+        });
+
+        interactions.handleDrop(createDropEvent({
+            dropTarget,
+            sourceKey: 'A',
+            sourceKeysJson: JSON.stringify(['A', 'B', 'C'])
+        }));
+
+        expect(saveState).toHaveBeenCalledTimes(1);
+        expect(saveState).toHaveBeenCalledWith({ immediate: true, critical: true });
+        expect(render).toHaveBeenCalledTimes(1);
+        expect(showToast).toHaveBeenCalledTimes(1);
+        expect(showToast.mock.calls[0][0]).toEqual(expect.stringContaining('3'));
+        expect(state.isBatchMode).toBe(false);
+        expect(pendingBatchKeys.size).toBe(0);
+        expect(group.children).toEqual([
+            { type: 'source', key: 'A' },
+            { type: 'source', key: 'B' },
+            { type: 'source', key: 'C' }
+        ]);
+        expect(state.ungrouped).toEqual(['D']);
+    });
+
+    it('does not exit batch mode or toast on a no-op multi-drop', () => {
+        const state = { isBatchMode: true, ungrouped: ['A', 'B'], groups: [] };
+        const groupsById = new Map();
+        const sourcesByKey = new Map([
+            ['A', { key: 'A' }],
+            ['B', { key: 'B' }]
+        ]);
+        const pendingBatchKeys = new Set(['A', 'B']);
+        const saveState = jest.fn();
+        const render = jest.fn();
+        const showToast = jest.fn();
+        const buildParentMap = jest.fn();
+        const developerLog = jest.fn();
+        const dropTarget = {
+            dataset: { sourceKey: 'A' },
+            classList: createClassList(['source-item', 'drag-over-top'])
+        };
+        const interactions = createContentTreeInteractions({
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getSourcesByKey: () => sourcesByKey,
+            getParentMap: () => new Map(),
+            getPendingBatchKeys: () => pendingBatchKeys,
+            getShadowRoot: () => ({ querySelectorAll: jest.fn(() => []) }),
+            saveState,
+            render,
+            showToast,
+            buildParentMap,
+            developerLog,
+            dragMulti: createContentDragMulti({}),
+            getMessage: (key, args = []) => `${key}:${args.join(',')}`
+        });
+
+        interactions.handleDrop(createDropEvent({
+            dropTarget,
+            sourceKey: 'A',
+            sourceKeysJson: JSON.stringify(['A', 'B'])
+        }));
+
+        expect(showToast).not.toHaveBeenCalled();
+        expect(state.isBatchMode).toBe(true);
+        expect(pendingBatchKeys.size).toBe(2);
+        expect(developerLog).not.toHaveBeenCalled();
+    });
+
+    it('falls back to single-source path when application/source-keys is absent', () => {
+        const group = { id: 'g1', children: [] };
+        const state = { isBatchMode: false, ungrouped: ['A', 'B'], groups: ['g1'] };
+        const groupsById = new Map([['g1', group]]);
+        const sourcesByKey = new Map([
+            ['A', { key: 'A' }],
+            ['B', { key: 'B' }]
+        ]);
+        const saveState = jest.fn();
+        const render = jest.fn();
+        const showToast = jest.fn();
+        const buildParentMap = jest.fn();
+        const developerLog = jest.fn();
+        const dropTarget = {
+            dataset: { groupId: 'g1' },
+            classList: createClassList(['group-container', 'drag-into'])
+        };
+        const interactions = createContentTreeInteractions({
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getSourcesByKey: () => sourcesByKey,
+            getParentMap: () => new Map(),
+            getPendingBatchKeys: () => new Set(),
+            getShadowRoot: () => ({ querySelectorAll: jest.fn(() => []) }),
+            saveState,
+            render,
+            showToast,
+            buildParentMap,
+            developerLog,
+            dragMulti: createContentDragMulti({}),
+            getMessage: (key, args = []) => `${key}:${args.join(',')}`
+        });
+
+        interactions.handleDrop(createDropEvent({
+            dropTarget,
+            sourceKey: 'A'
+        }));
+
+        expect(group.children).toEqual([{ type: 'source', key: 'A' }]);
+        expect(state.ungrouped).toEqual(['B']);
+        expect(showToast).not.toHaveBeenCalled();
+        expect(developerLog).not.toHaveBeenCalled();
+    });
+
+    it('logs batch_drag_move with count and intent.kind on successful multi-drop', () => {
+        const group = { id: 'g1', children: [] };
+        const state = { isBatchMode: true, ungrouped: ['A', 'B', 'C', 'D'], groups: ['g1'] };
+        const groupsById = new Map([['g1', group]]);
+        const sourcesByKey = new Map([
+            ['A', { key: 'A' }],
+            ['B', { key: 'B' }],
+            ['C', { key: 'C' }],
+            ['D', { key: 'D' }]
+        ]);
+        const pendingBatchKeys = new Set(['A', 'B', 'C']);
+        const developerLog = jest.fn();
+        const dropTarget = {
+            dataset: { groupId: 'g1' },
+            classList: createClassList(['group-container', 'drag-into'])
+        };
+        const interactions = createContentTreeInteractions({
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getSourcesByKey: () => sourcesByKey,
+            getParentMap: () => new Map(),
+            getPendingBatchKeys: () => pendingBatchKeys,
+            getShadowRoot: () => ({ querySelectorAll: jest.fn(() => []) }),
+            saveState: jest.fn(),
+            render: jest.fn(),
+            showToast: jest.fn(),
+            buildParentMap: jest.fn(),
+            developerLog,
+            dragMulti: createContentDragMulti({}),
+            getMessage: (key, args = []) => `${key}:${args.join(',')}`
+        });
+
+        interactions.handleDrop(createDropEvent({
+            dropTarget,
+            sourceKey: 'A',
+            sourceKeysJson: JSON.stringify(['A', 'B', 'C'])
+        }));
+
+        expect(developerLog).toHaveBeenCalledWith('batch_drag_move', expect.objectContaining({
+            count: 3,
+            intent: 'into-group'
+        }));
+    });
+});

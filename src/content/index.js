@@ -1017,6 +1017,7 @@
         render: (...args) => render(...args),
         saveState: (...args) => saveState(...args),
         buildParentMap: (...args) => buildParentMap(...args),
+        developerLog: (...args) => developerLog(...args),
         isSourceEffectivelyEnabled: (...args) => isSourceEffectivelyEnabled(...args),
         collectEffectiveSourceStates: (...args) => collectEffectiveSourceStates(...args),
         syncSourcesToEffectiveState: (...args) => syncSourcesToEffectiveState(...args),
