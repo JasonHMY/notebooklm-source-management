@@ -11,13 +11,13 @@
             ? ctx.getDocument
             : () => (typeof document !== 'undefined' ? document : null);
 
-        const _requestAnimationFrameFn = typeof ctx.requestAnimationFrame === 'function'
+        const requestAnimationFrameFn = typeof ctx.requestAnimationFrame === 'function'
             ? ctx.requestAnimationFrame
             : (typeof globalThis.requestAnimationFrame === 'function'
                 ? globalThis.requestAnimationFrame.bind(globalThis)
                 : null);
 
-        const _cancelAnimationFrameFn = typeof ctx.cancelAnimationFrame === 'function'
+        const cancelAnimationFrameFn = typeof ctx.cancelAnimationFrame === 'function'
             ? ctx.cancelAnimationFrame
             : (typeof globalThis.cancelAnimationFrame === 'function'
                 ? globalThis.cancelAnimationFrame.bind(globalThis)
@@ -142,6 +142,52 @@
             return { moved: 0, skipped: keys.length };
         }
 
+        function createAutoScrollController({ getContainer }) {
+            const resolveContainer = typeof getContainer === 'function' ? getContainer : () => null;
+            const state = { rafId: null, velocity: 0 };
+
+            function step() {
+                state.rafId = null;
+                const container = resolveContainer();
+                if (!container || typeof container.scrollBy !== 'function') {
+                    state.velocity = 0;
+                    return;
+                }
+                const before = typeof container.scrollTop === 'number' ? container.scrollTop : 0;
+                container.scrollBy({ top: state.velocity, behavior: 'auto' });
+                const after = typeof container.scrollTop === 'number' ? container.scrollTop : before;
+
+                if (after === before) {
+                    state.velocity = 0;
+                    return;
+                }
+                if (state.velocity !== 0 && requestAnimationFrameFn) {
+                    state.rafId = requestAnimationFrameFn(step);
+                }
+            }
+
+            function tick(velocity) {
+                if (!velocity) {
+                    stop();
+                    return;
+                }
+                state.velocity = velocity;
+                if (state.rafId !== null) return;
+                if (!requestAnimationFrameFn) return;
+                state.rafId = requestAnimationFrameFn(step);
+            }
+
+            function stop() {
+                if (state.rafId !== null && cancelAnimationFrameFn) {
+                    cancelAnimationFrameFn(state.rafId);
+                }
+                state.rafId = null;
+                state.velocity = 0;
+            }
+
+            return { tick, stop };
+        }
+
         function computeAutoScrollVelocity({ pointerY, containerTop, containerBottom, edgePx, maxSpeed }) {
             if (typeof pointerY !== 'number' || typeof containerTop !== 'number' || typeof containerBottom !== 'number') return 0;
             if (typeof edgePx !== 'number' || edgePx <= 0) return 0;
@@ -170,7 +216,8 @@
             computeAutoScrollVelocity,
             createMultiDragGhost,
             destroyMultiDragGhost,
-            applyMultiSourceDrop
+            applyMultiSourceDrop,
+            createAutoScrollController
         };
     }
 

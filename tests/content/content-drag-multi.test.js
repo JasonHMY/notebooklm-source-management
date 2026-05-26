@@ -271,4 +271,108 @@ describe('content-drag-multi factory', () => {
             expect(callTracker.render).not.toHaveBeenCalled();
         });
     });
+
+    describe('createAutoScrollController', () => {
+        function makeContainer({ scrollTop = 0, scrollHeight = 1000, clientHeight = 400 } = {}) {
+            const state = { scrollTop, scrollHeight, clientHeight };
+            return {
+                get scrollTop() { return state.scrollTop; },
+                set scrollTop(v) { state.scrollTop = v; },
+                get scrollHeight() { return state.scrollHeight; },
+                get clientHeight() { return state.clientHeight; },
+                scrollBy: jest.fn(function ({ top }) { state.scrollTop = Math.max(0, Math.min(state.scrollHeight - state.clientHeight, state.scrollTop + top)); })
+            };
+        }
+
+        function makeRaf() {
+            let nextId = 1;
+            const callbacks = new Map();
+            return {
+                requestAnimationFrame: jest.fn((cb) => {
+                    const id = nextId++;
+                    callbacks.set(id, cb);
+                    return id;
+                }),
+                cancelAnimationFrame: jest.fn((id) => {
+                    callbacks.delete(id);
+                }),
+                flush: () => {
+                    const ids = Array.from(callbacks.keys());
+                    for (const id of ids) {
+                        const cb = callbacks.get(id);
+                        callbacks.delete(id);
+                        if (cb) cb();
+                    }
+                },
+                pending: () => callbacks.size
+            };
+        }
+
+        it('starts the RAF loop on first non-zero tick', () => {
+            const container = makeContainer();
+            const raf = makeRaf();
+            const helper = createContentDragMulti({ requestAnimationFrame: raf.requestAnimationFrame, cancelAnimationFrame: raf.cancelAnimationFrame });
+            const controller = helper.createAutoScrollController({ getContainer: () => container });
+
+            controller.tick(10);
+            expect(raf.requestAnimationFrame).toHaveBeenCalledTimes(1);
+            raf.flush();
+            expect(container.scrollBy).toHaveBeenCalledWith({ top: 10, behavior: 'auto' });
+        });
+
+        it('does not stack multiple loops when tick is called repeatedly', () => {
+            const container = makeContainer();
+            const raf = makeRaf();
+            const helper = createContentDragMulti({ requestAnimationFrame: raf.requestAnimationFrame, cancelAnimationFrame: raf.cancelAnimationFrame });
+            const controller = helper.createAutoScrollController({ getContainer: () => container });
+
+            controller.tick(5);
+            controller.tick(8);
+            controller.tick(12);
+            expect(raf.requestAnimationFrame).toHaveBeenCalledTimes(1);
+        });
+
+        it('stops when tick is called with 0', () => {
+            const container = makeContainer();
+            const raf = makeRaf();
+            const helper = createContentDragMulti({ requestAnimationFrame: raf.requestAnimationFrame, cancelAnimationFrame: raf.cancelAnimationFrame });
+            const controller = helper.createAutoScrollController({ getContainer: () => container });
+
+            controller.tick(8);
+            controller.tick(0);
+            expect(raf.cancelAnimationFrame).toHaveBeenCalled();
+            raf.flush();
+            expect(container.scrollBy).not.toHaveBeenCalled();
+        });
+
+        it('stop() is idempotent', () => {
+            const raf = makeRaf();
+            const helper = createContentDragMulti({ requestAnimationFrame: raf.requestAnimationFrame, cancelAnimationFrame: raf.cancelAnimationFrame });
+            const controller = helper.createAutoScrollController({ getContainer: () => makeContainer() });
+            expect(() => { controller.stop(); controller.stop(); }).not.toThrow();
+        });
+
+        it('stops cleanly when getContainer returns null mid-loop', () => {
+            const raf = makeRaf();
+            const helper = createContentDragMulti({ requestAnimationFrame: raf.requestAnimationFrame, cancelAnimationFrame: raf.cancelAnimationFrame });
+            let container = makeContainer();
+            const controller = helper.createAutoScrollController({ getContainer: () => container });
+
+            controller.tick(10);
+            container = null;
+            expect(() => raf.flush()).not.toThrow();
+        });
+
+        it('stops at the bottom scroll boundary', () => {
+            const container = makeContainer({ scrollTop: 600, scrollHeight: 1000, clientHeight: 400 });
+            const raf = makeRaf();
+            const helper = createContentDragMulti({ requestAnimationFrame: raf.requestAnimationFrame, cancelAnimationFrame: raf.cancelAnimationFrame });
+            const controller = helper.createAutoScrollController({ getContainer: () => container });
+
+            controller.tick(14);
+            raf.flush();
+            expect(container.scrollTop).toBe(600);
+            expect(raf.pending()).toBe(0);
+        });
+    });
 });
