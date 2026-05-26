@@ -1008,6 +1008,10 @@
         })
         : null;
 
+    const dragReflow = typeof globalThis.NSM_CREATE_CONTENT_DRAG_REFLOW === 'function'
+        ? globalThis.NSM_CREATE_CONTENT_DRAG_REFLOW({})
+        : null;
+
     const treeInteractionsModule = createContentTreeInteractions({
         runtime: runtimeContext,
         getState: () => state,
@@ -1031,6 +1035,7 @@
         buildParentMap: (...args) => buildParentMap(...args),
         developerLog: (...args) => developerLog(...args),
         dragMulti,
+        dragReflow,
         isSourceEffectivelyEnabled: (...args) => isSourceEffectivelyEnabled(...args),
         collectEffectiveSourceStates: (...args) => collectEffectiveSourceStates(...args),
         syncSourcesToEffectiveState: (...args) => syncSourcesToEffectiveState(...args),

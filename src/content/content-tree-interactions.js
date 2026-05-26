@@ -164,6 +164,50 @@
                     ? globalThis.NSM_CREATE_CONTENT_DRAG_MULTI({})
                     : null));
 
+        const dragReflow = (typeof deps.dragReflow === 'object' && deps.dragReflow)
+            ? deps.dragReflow
+            : (typeof runtime.dragReflow === 'object' && runtime.dragReflow
+                ? runtime.dragReflow
+                : (typeof globalThis.NSM_CREATE_CONTENT_DRAG_REFLOW === 'function'
+                    ? globalThis.NSM_CREATE_CONTENT_DRAG_REFLOW({})
+                    : null));
+
+        function getSourceListContainer() {
+            const root = getShadowRoot();
+            return root && typeof root.getElementById === 'function' ? root.getElementById('sources-list') : null;
+        }
+
+        function resolveSiblingKeys(intent) {
+            if (!intent) return [];
+            const list = Array.isArray(intent.targetList) ? intent.targetList : null;
+            if (!list) return [];
+            return list.map((entry) => {
+                if (typeof entry === 'string') return entry;
+                if (entry && typeof entry === 'object') {
+                    if (entry.type === 'source') return entry.key;
+                    if (entry.type === 'group') return entry.id;
+                }
+                return null;
+            }).filter(Boolean);
+        }
+
+        function computeDropPosition(dropTarget, clientY) {
+            if (!dropTarget || typeof dropTarget.getBoundingClientRect !== 'function') {
+                return { isAbove: false, isInto: false };
+            }
+            const rect = dropTarget.getBoundingClientRect();
+            const offsetY = typeof clientY === 'number' ? clientY - rect.top : 0;
+            const isGroupContainer = dropTarget.classList
+                && typeof dropTarget.classList.contains === 'function'
+                && dropTarget.classList.contains('group-container');
+            if (isGroupContainer) {
+                if (offsetY < rect.height * 0.25) return { isAbove: true, isInto: false };
+                if (offsetY > rect.height * 0.75) return { isAbove: false, isInto: false };
+                return { isAbove: false, isInto: true };
+            }
+            return { isAbove: offsetY < rect.height / 2, isInto: false };
+        }
+
         if (typeof runtime.activeDragContext === 'undefined') {
             runtime.activeDragContext = null;
         }
@@ -913,13 +957,39 @@
                 }
                 e.dataTransfer.effectAllowed = 'move';
 
-                if (selection.isMulti && dragMulti && typeof dragMulti.createMultiDragGhost === 'function') {
+                if (dragMulti && typeof dragMulti.createMultiDragGhost === 'function') {
                     const doc = getDocument();
                     const root = doc && doc.body ? doc.body : null;
                     const ghost = dragMulti.createMultiDragGhost({ count: keys.length, root });
                     if (ghost && typeof e.dataTransfer.setDragImage === 'function') {
-                        try { e.dataTransfer.setDragImage(ghost, 12, 12); } catch (err) { /* ignore setDragImage failure */ }
+                        try {
+                            e.dataTransfer.setDragImage(ghost, 12, 12);
+                        } catch (err) { /* ignore setDragImage failure */ }
                         runtime.activeDragGhost = ghost;
+                    }
+                }
+
+                if (dragReflow && typeof dragReflow.prepareDragSession === 'function') {
+                    const rootElement = getSourceListContainer();
+                    const session = dragReflow.prepareDragSession({
+                        draggedKeys: keys,
+                        rootElement
+                    });
+                    runtime.dragReflowSession = session;
+                    const raf = typeof globalThis.requestAnimationFrame === 'function'
+                        ? globalThis.requestAnimationFrame
+                        : null;
+                    if (raf) {
+                        raf(() => {
+                            if (dragReflow.foldDraggedItems) {
+                                dragReflow.foldDraggedItems({
+                                    session,
+                                    rootElement: getSourceListContainer()
+                                });
+                            }
+                        });
+                    } else if (typeof dragReflow.foldDraggedItems === 'function') {
+                        dragReflow.foldDraggedItems({ session, rootElement });
                     }
                 }
 
@@ -1007,22 +1077,15 @@
             e.preventDefault();
             const dropTarget = e.target.closest('.group-container, .source-item');
             if (dropTarget) {
-                const rect = dropTarget.getBoundingClientRect();
-                const offsetY = e.clientY - rect.top;
+                const { isInto, isAbove } = computeDropPosition(dropTarget, e.clientY);
 
-                dropTarget.classList.remove('drag-over-top', 'drag-over-bottom', 'drag-into');
-
-                if (dropTarget.classList.contains('group-container')) {
-                    if (offsetY < rect.height * 0.25) dropTarget.classList.add('drag-over-top');
-                    else if (offsetY > rect.height * 0.75) dropTarget.classList.add('drag-over-bottom');
-                    else dropTarget.classList.add('drag-into');
-                } else {
-                    if (offsetY < rect.height / 2) dropTarget.classList.add('drag-over-top');
-                    else dropTarget.classList.add('drag-over-bottom');
+                if (dropTarget.classList && typeof dropTarget.classList.remove === 'function') {
+                    dropTarget.classList.remove('drag-into');
+                }
+                if (isInto && dropTarget.classList && typeof dropTarget.classList.add === 'function') {
+                    dropTarget.classList.add('drag-into');
                 }
 
-                const isInto = dropTarget.classList.contains('drag-into');
-                const isAbove = dropTarget.classList.contains('drag-over-top');
                 const intentKindForCheck = normalizeIntentKind(isInto, isAbove, dropTarget);
                 const baseIntent = getDropIntent(dropTarget, isInto, isAbove);
                 const intentForInvalidCheck = baseIntent
@@ -1033,11 +1096,62 @@
                     intent: intentForInvalidCheck,
                     dragContext: runtime.activeDragContext
                 });
-                if (isInvalid) {
-                    dropTarget.classList.add('drag-invalid');
-                    if (e.dataTransfer) e.dataTransfer.dropEffect = 'none';
-                } else {
+
+                // Clear any prior .drag-invalid markers from the source list before re-applying.
+                const sourceListEl = getSourceListContainer();
+                if (sourceListEl && typeof sourceListEl.querySelectorAll === 'function') {
+                    const stale = sourceListEl.querySelectorAll('.drag-invalid');
+                    if (stale && typeof stale.forEach === 'function') {
+                        stale.forEach((node) => {
+                            if (node && node.classList && typeof node.classList.remove === 'function') {
+                                node.classList.remove('drag-invalid');
+                            }
+                        });
+                    }
+                }
+                if (dropTarget.classList && typeof dropTarget.classList.remove === 'function') {
                     dropTarget.classList.remove('drag-invalid');
+                }
+
+                if (isInvalid) {
+                    if (e.dataTransfer) e.dataTransfer.dropEffect = 'none';
+                    if (intentKindForCheck === 'into-group') {
+                        // Preserve existing group-header invalid highlight via .group-container.drag-invalid > .group-header.
+                        if (dropTarget.classList && typeof dropTarget.classList.add === 'function') {
+                            dropTarget.classList.add('drag-invalid');
+                        }
+                    } else if (baseIntent) {
+                        // Highlight the target slot top item (first sibling shifted down by reflow).
+                        const insertIndex = typeof baseIntent.insertIndex === 'number' ? baseIntent.insertIndex : 0;
+                        const siblingKeys = resolveSiblingKeys(baseIntent);
+                        const targetSlotKey = siblingKeys[insertIndex];
+                        if (targetSlotKey && sourceListEl && typeof sourceListEl.querySelector === 'function') {
+                            const slotEl = sourceListEl.querySelector(`[data-source-key="${cssEscape(targetSlotKey)}"]`);
+                            if (slotEl && slotEl.classList && typeof slotEl.classList.add === 'function') {
+                                slotEl.classList.add('drag-invalid');
+                            }
+                        }
+                    }
+                }
+
+                if (dragReflow && runtime.dragReflowSession && baseIntent && typeof dragReflow.computeReflow === 'function') {
+                    const insertIndex = typeof baseIntent.insertIndex === 'number' ? baseIntent.insertIndex : 0;
+                    const siblingKeys = resolveSiblingKeys(baseIntent);
+                    const rootElement = getSourceListContainer();
+                    const shifts = dragReflow.computeReflow({
+                        session: runtime.dragReflowSession,
+                        insertIndex,
+                        siblingKeys,
+                        rootElement
+                    });
+                    if (typeof dragReflow.applyReflow === 'function') {
+                        dragReflow.applyReflow({
+                            session: runtime.dragReflowSession,
+                            shifts,
+                            rootElement
+                        });
+                    }
+                    runtime.dragReflowSession.currentIntent = { ...intentForInvalidCheck };
                 }
 
                 // Compute the pointer's current group and ancestry chain.
@@ -1096,7 +1210,7 @@
         function handleDragLeave(e) {
             const dropTarget = e.target.closest('.group-container, .source-item');
             if (dropTarget) {
-                dropTarget.classList.remove('drag-over-top', 'drag-over-bottom', 'drag-into', 'drag-invalid');
+                dropTarget.classList.remove('drag-into', 'drag-invalid');
             }
             if (e.target && e.target.id === 'sources-list' && autoScrollController) {
                 autoScrollController.stop();
@@ -1109,10 +1223,10 @@
         function clearDragFeedback(root = getShadowRoot()) {
             let count = 0;
             if (root && typeof root.querySelectorAll === 'function') {
-                const nodes = Array.from(root.querySelectorAll('.dragging, .drag-over-top, .drag-over-bottom, .drag-into, .drag-invalid'));
+                const nodes = Array.from(root.querySelectorAll('.dragging, .drag-into, .drag-invalid'));
                 nodes.forEach((node) => {
                     if (node?.classList && typeof node.classList.remove === 'function') {
-                        node.classList.remove('dragging', 'drag-over-top', 'drag-over-bottom', 'drag-into', 'drag-invalid');
+                        node.classList.remove('dragging', 'drag-into', 'drag-invalid');
                     }
                 });
                 count = nodes.length;
@@ -1403,129 +1517,193 @@
             return isAbove ? 'before-source' : 'after-source';
         }
 
+        function cleanupReflowSession() {
+            if (dragReflow && runtime.dragReflowSession) {
+                if (typeof dragReflow.clearReflow === 'function') {
+                    dragReflow.clearReflow({
+                        session: runtime.dragReflowSession,
+                        rootElement: getSourceListContainer()
+                    });
+                }
+                if (typeof dragReflow.unfoldDraggedItems === 'function') {
+                    dragReflow.unfoldDraggedItems({
+                        session: runtime.dragReflowSession,
+                        rootElement: getSourceListContainer()
+                    });
+                }
+                runtime.dragReflowSession = null;
+            }
+        }
+
         function handleDrop(e) {
-            cancelAllHoverTimers();
-            const state = getState();
-            const groupsById = getGroupsById();
-            const sourcesByKey = getSourcesByKey();
-            const pendingBatchKeys = getPendingBatchKeys();
-            const dropTarget = e.target.closest('.group-container, .source-item');
-            if (!dropTarget) {
-                clearDragFeedback();
-                return;
-            }
-            e.preventDefault();
+            let reflowClearedForMutation = false;
+            const clearReflowBeforeMutation = () => {
+                if (reflowClearedForMutation) return;
+                if (dragReflow && runtime.dragReflowSession && typeof dragReflow.clearReflow === 'function') {
+                    dragReflow.clearReflow({
+                        session: runtime.dragReflowSession,
+                        rootElement: getSourceListContainer()
+                    });
+                    reflowClearedForMutation = true;
+                }
+            };
+            const finalizeReflow = () => {
+                if (dragReflow && runtime.dragReflowSession) {
+                    if (!reflowClearedForMutation && typeof dragReflow.clearReflow === 'function') {
+                        dragReflow.clearReflow({
+                            session: runtime.dragReflowSession,
+                            rootElement: getSourceListContainer()
+                        });
+                    }
+                    if (typeof dragReflow.unfoldDraggedItems === 'function') {
+                        dragReflow.unfoldDraggedItems({
+                            session: runtime.dragReflowSession,
+                            rootElement: getSourceListContainer()
+                        });
+                    }
+                    runtime.dragReflowSession = null;
+                }
+            };
+            try {
+                cancelAllHoverTimers();
+                const state = getState();
+                const groupsById = getGroupsById();
+                const sourcesByKey = getSourcesByKey();
+                const pendingBatchKeys = getPendingBatchKeys();
+                const dropTarget = e.target.closest('.group-container, .source-item');
+                if (!dropTarget) {
+                    clearDragFeedback();
+                    return;
+                }
+                e.preventDefault();
 
-            const isInto = dropTarget.classList.contains('drag-into');
-            const isAbove = dropTarget.classList.contains('drag-over-top');
-            const intentKind = normalizeIntentKind(isInto, isAbove, dropTarget);
-            const intent = getDropIntent(dropTarget, isInto, isAbove);
+                const currentIntent = runtime.dragReflowSession && runtime.dragReflowSession.currentIntent;
+                let isInto;
+                let isAbove;
+                if (currentIntent && typeof currentIntent.kind === 'string') {
+                    isInto = currentIntent.kind === 'into-group';
+                    isAbove = currentIntent.kind === 'before-source' || currentIntent.kind === 'before-group';
+                } else {
+                    const pos = computeDropPosition(dropTarget, e.clientY);
+                    isInto = pos.isInto || (dropTarget.classList
+                        && typeof dropTarget.classList.contains === 'function'
+                        && dropTarget.classList.contains('drag-into'));
+                    isAbove = pos.isAbove;
+                }
+                const intentKind = normalizeIntentKind(isInto, isAbove, dropTarget);
+                const intent = getDropIntent(dropTarget, isInto, isAbove);
 
-            const sourceKey = e.dataTransfer.getData('application/source-key');
-            const sourceKeysRaw = e.dataTransfer.getData('application/source-keys');
-            const draggedGroupId = e.dataTransfer.getData('application/group-id');
-            if (!intent) {
-                clearDragFeedback();
-                return;
-            }
+                const sourceKey = e.dataTransfer.getData('application/source-key');
+                const sourceKeysRaw = e.dataTransfer.getData('application/source-keys');
+                const draggedGroupId = e.dataTransfer.getData('application/group-id');
+                if (!intent) {
+                    clearDragFeedback();
+                    return;
+                }
 
-            if (sourceKeysRaw && dragMulti && typeof dragMulti.applyMultiSourceDrop === 'function') {
-                let keys = null;
-                try { keys = JSON.parse(sourceKeysRaw); } catch (err) { keys = null; }
-                if (Array.isArray(keys) && keys.length >= 2) {
-                    const allowedMultiIntents = new Set(['into-group', 'before-source', 'after-source']);
-                    if (!allowedMultiIntents.has(intentKind)) {
+                if (sourceKeysRaw && dragMulti && typeof dragMulti.applyMultiSourceDrop === 'function') {
+                    let keys = null;
+                    try { keys = JSON.parse(sourceKeysRaw); } catch (err) { keys = null; }
+                    if (Array.isArray(keys) && keys.length >= 2) {
+                        const allowedMultiIntents = new Set(['into-group', 'before-source', 'after-source']);
+                        if (!allowedMultiIntents.has(intentKind)) {
+                            clearDragFeedback();
+                            return;
+                        }
+                        const augmentedIntent = {
+                            kind: intentKind,
+                            targetList: intent.targetList,
+                            insertIndex: intent.insertIndex,
+                            targetGroup: intent.targetGroup,
+                            targetGroupId: intent.targetGroup ? intent.targetGroup.id : null
+                        };
+                        clearReflowBeforeMutation();
+                        const result = dragMulti.applyMultiSourceDrop({
+                            keys,
+                            intent: augmentedIntent,
+                            state,
+                            helpers: {
+                                sourceExists: (key) => sourcesByKey.has(key),
+                                getGroupById: (id) => groupsById.get(id) || null,
+                                removeSourceFromParent: (key) => removeSourceFromTree(key)
+                            }
+                        });
+                        if (result && result.moved > 0) {
+                            developerLog('info', 'source_action', 'batch_drag_move', { count: result.moved, intent: intentKind });
+                            state.isBatchMode = false;
+                            pendingBatchKeys.clear();
+                            buildParentMap();
+                            saveState({ immediate: true, critical: true });
+                            render();
+                            showToast(getMessage('ui_batch_moved_sources_toast', [String(result.moved)]));
+                            disposeHoverOpenedGroupsAfterDrop(intent, augmentedIntent);
+                        }
                         clearDragFeedback();
                         return;
                     }
-                    const augmentedIntent = {
-                        kind: intentKind,
-                        targetList: intent.targetList,
-                        insertIndex: intent.insertIndex,
-                        targetGroup: intent.targetGroup,
-                        targetGroupId: intent.targetGroup ? intent.targetGroup.id : null
-                    };
-                    const result = dragMulti.applyMultiSourceDrop({
-                        keys,
-                        intent: augmentedIntent,
-                        state,
-                        helpers: {
-                            sourceExists: (key) => sourcesByKey.has(key),
-                            getGroupById: (id) => groupsById.get(id) || null,
-                            removeSourceFromParent: (key) => removeSourceFromTree(key)
-                        }
-                    });
-                    if (result && result.moved > 0) {
-                        developerLog('info', 'source_action', 'batch_drag_move', { count: result.moved, intent: intentKind });
-                        state.isBatchMode = false;
-                        pendingBatchKeys.clear();
-                        buildParentMap();
-                        saveState({ immediate: true, critical: true });
-                        render();
-                        showToast(getMessage('ui_batch_moved_sources_toast', [String(result.moved)]));
-                        disposeHoverOpenedGroupsAfterDrop(intent, augmentedIntent);
+                }
+
+                let didMove = false;
+                const augmentedIntent = {
+                    kind: intentKind,
+                    targetList: intent.targetList,
+                    insertIndex: intent.insertIndex,
+                    targetGroup: intent.targetGroup
+                };
+
+                if (sourceKey) {
+                    const originalPosition = getSourceTreePosition(sourceKey);
+                    if (isNoopTreeMove(originalPosition, intent.targetList, intent.insertIndex)) {
+                        clearDragFeedback();
+                        return;
                     }
-                    clearDragFeedback();
-                    return;
+                    const insertionIndex = getNormalizedInsertionIndex(intent.targetList, intent.insertIndex, originalPosition);
+                    clearReflowBeforeMutation();
+                    removeSourceFromTree(sourceKey);
+                    if (intent.targetGroup) {
+                        intent.targetGroup.children.splice(insertionIndex, 0, { type: 'source', key: sourceKey });
+                    } else {
+                        state.ungrouped.splice(insertionIndex, 0, sourceKey);
+                    }
+                    didMove = true;
+                } else if (draggedGroupId) {
+                    const draggedGroupObj = groupsById.get(draggedGroupId);
+                    if (!draggedGroupObj) {
+                        clearDragFeedback();
+                        return;
+                    }
+                    if (intent.targetGroup && isDescendant(intent.targetGroup, draggedGroupObj, groupsById)) {
+                        clearDragFeedback();
+                        return;
+                    }
+                    const originalPosition = getGroupTreePosition(draggedGroupId);
+                    if (isNoopTreeMove(originalPosition, intent.targetList, intent.insertIndex)) {
+                        clearDragFeedback();
+                        return;
+                    }
+                    const insertionIndex = getNormalizedInsertionIndex(intent.targetList, intent.insertIndex, originalPosition);
+                    clearReflowBeforeMutation();
+                    removeGroupFromTree(draggedGroupId);
+                    if (intent.targetGroup) {
+                        intent.targetGroup.children.splice(insertionIndex, 0, { type: 'group', id: draggedGroupId });
+                    } else {
+                        state.groups.splice(insertionIndex, 0, draggedGroupId);
+                    }
+                    didMove = true;
                 }
-            }
 
-            let didMove = false;
-            const augmentedIntent = {
-                kind: intentKind,
-                targetList: intent.targetList,
-                insertIndex: intent.insertIndex,
-                targetGroup: intent.targetGroup
-            };
-
-            if (sourceKey) {
-                const originalPosition = getSourceTreePosition(sourceKey);
-                if (isNoopTreeMove(originalPosition, intent.targetList, intent.insertIndex)) {
+                if (!didMove) {
                     clearDragFeedback();
                     return;
                 }
-                const insertionIndex = getNormalizedInsertionIndex(intent.targetList, intent.insertIndex, originalPosition);
-                removeSourceFromTree(sourceKey);
-                if (intent.targetGroup) {
-                    intent.targetGroup.children.splice(insertionIndex, 0, { type: 'source', key: sourceKey });
-                } else {
-                    state.ungrouped.splice(insertionIndex, 0, sourceKey);
-                }
-                didMove = true;
-            } else if (draggedGroupId) {
-                const draggedGroupObj = groupsById.get(draggedGroupId);
-                if (!draggedGroupObj) {
-                    clearDragFeedback();
-                    return;
-                }
-                if (intent.targetGroup && isDescendant(intent.targetGroup, draggedGroupObj, groupsById)) {
-                    clearDragFeedback();
-                    return;
-                }
-                const originalPosition = getGroupTreePosition(draggedGroupId);
-                if (isNoopTreeMove(originalPosition, intent.targetList, intent.insertIndex)) {
-                    clearDragFeedback();
-                    return;
-                }
-                const insertionIndex = getNormalizedInsertionIndex(intent.targetList, intent.insertIndex, originalPosition);
-                removeGroupFromTree(draggedGroupId);
-                if (intent.targetGroup) {
-                    intent.targetGroup.children.splice(insertionIndex, 0, { type: 'group', id: draggedGroupId });
-                } else {
-                    state.groups.splice(insertionIndex, 0, draggedGroupId);
-                }
-                didMove = true;
-            }
-
-            if (!didMove) {
+                buildParentMap();
+                render();
+                saveState({ immediate: true, critical: true });
+                disposeHoverOpenedGroupsAfterDrop(intent, augmentedIntent);
                 clearDragFeedback();
-                return;
+            } finally {
+                finalizeReflow();
             }
-            buildParentMap();
-            render();
-            saveState({ immediate: true, critical: true });
-            disposeHoverOpenedGroupsAfterDrop(intent, augmentedIntent);
-            clearDragFeedback();
         }
 
         function handleDragEnd(e) {
@@ -1550,6 +1728,7 @@
                 }
             }
             runtime.activeDragContext = null;
+            cleanupReflowSession();
         }
 
         return {
@@ -1578,7 +1757,9 @@
             getSourceTreePosition,
             getGroupTreePosition,
             isNoopTreeMove,
-            getGroupAncestorChain
+            getGroupAncestorChain,
+            resolveSiblingKeys,
+            computeDropPosition
         };
     }
 

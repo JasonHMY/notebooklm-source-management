@@ -283,9 +283,16 @@ describe('drag and drop ordering guards', () => {
         const render = jest.fn();
         const dropTarget = {
             dataset: { sourceKey: 'source-1' },
-            classList: createClassList(['source-item', 'drag-over-top'])
+            classList: createClassList(['source-item'])
+        };
+        const runtime = {
+            dragReflowSession: {
+                draggedKeys: new Set(['source-1']),
+                currentIntent: { kind: 'before-source' }
+            }
         };
         const interactions = createContentTreeInteractions({
+            runtime,
             getState: () => state,
             getGroupsById: () => new Map(),
             getParentMap: () => new Map(),
@@ -307,9 +314,16 @@ describe('drag and drop ordering guards', () => {
         const render = jest.fn();
         const dropTarget = {
             dataset: { sourceKey: 'source-2' },
-            classList: createClassList(['source-item', 'drag-over-bottom'])
+            classList: createClassList(['source-item'])
+        };
+        const runtime = {
+            dragReflowSession: {
+                draggedKeys: new Set(['source-1']),
+                currentIntent: { kind: 'after-source' }
+            }
         };
         const interactions = createContentTreeInteractions({
+            runtime,
             getState: () => state,
             getGroupsById: () => new Map(),
             getParentMap: () => new Map(),
@@ -365,7 +379,7 @@ describe('drag and drop ordering guards', () => {
     it('clears dragging and drop marker classes on drag end', () => {
         const markedNodes = [
             { classList: createClassList(['dragging']) },
-            { classList: createClassList(['drag-over-bottom']) }
+            { classList: createClassList(['drag-into']) }
         ];
         const interactions = createContentTreeInteractions({
             getShadowRoot: () => ({ querySelectorAll: jest.fn(() => markedNodes) })
@@ -373,7 +387,7 @@ describe('drag and drop ordering guards', () => {
 
         expect(interactions.clearDragFeedback()).toBe(2);
         markedNodes.forEach((node) => {
-            expect(node.classList.remove).toHaveBeenCalledWith('dragging', 'drag-over-top', 'drag-over-bottom', 'drag-into', 'drag-invalid');
+            expect(node.classList.remove).toHaveBeenCalledWith('dragging', 'drag-into', 'drag-invalid');
         });
     });
 
@@ -776,9 +790,16 @@ describe('drop routes multi vs single source', () => {
         const developerLog = jest.fn();
         const dropTarget = {
             dataset: { sourceKey: 'A' },
-            classList: createClassList(['source-item', 'drag-over-top'])
+            classList: createClassList(['source-item'])
+        };
+        const runtime = {
+            dragReflowSession: {
+                draggedKeys: new Set(['A', 'B']),
+                currentIntent: { kind: 'before-source' }
+            }
         };
         const interactions = createContentTreeInteractions({
+            runtime,
             getState: () => state,
             getGroupsById: () => groupsById,
             getSourcesByKey: () => sourcesByKey,
@@ -916,9 +937,16 @@ describe('drop routes multi vs single source', () => {
         const developerLog = jest.fn();
         const dropTarget = {
             dataset: { groupId: 'g1' },
-            classList: createClassList(['group-container', 'drag-over-top'])
+            classList: createClassList(['group-container'])
+        };
+        const runtime = {
+            dragReflowSession: {
+                draggedKeys: new Set(['A', 'B']),
+                currentIntent: { kind: 'before-group' }
+            }
         };
         const interactions = createContentTreeInteractions({
+            runtime,
             getState: () => state,
             getGroupsById: () => groupsById,
             getSourcesByKey: () => sourcesByKey,
@@ -1239,6 +1267,246 @@ describe('activeDragContext runtime state', () => {
     });
 });
 
+describe('handleDragStart reflow session + unified ghost', () => {
+    let createContentTreeInteractions;
+    let createContentDragMulti;
+
+    const createSourceRowTargetStub = (sourceRow) => ({
+        closest: jest.fn((selector) => {
+            if (selector === '.source-item') return sourceRow;
+            if (selector === '.group-header') return null;
+            if (selector === 'input[type="checkbox"], .sp-batch-checkbox') return null;
+            return null;
+        })
+    });
+
+    const createSourceRow = (key) => ({
+        dataset: { sourceKey: key },
+        classList: { add: jest.fn(), remove: jest.fn() }
+    });
+
+    const createDataTransfer = () => ({
+        setData: jest.fn(),
+        setDragImage: jest.fn(),
+        effectAllowed: ''
+    });
+
+    const createDragReflowMock = () => ({
+        prepareDragSession: jest.fn(({ draggedKeys }) => ({
+            draggedKeys: new Set(Array.isArray(draggedKeys) ? draggedKeys : []),
+            itemHeights: new Map(),
+            totalDraggedHeight: 0,
+            currentIntent: null,
+            shiftedItems: new Map()
+        })),
+        foldDraggedItems: jest.fn()
+    });
+
+    beforeEach(() => {
+        jest.resetModules();
+        setupGlobalMocks();
+        require('../../src/content/content-native-checkbox-sync.js');
+        createContentTreeInteractions = require('../../src/content/content-tree-interactions.js');
+        createContentDragMulti = require('../../src/content/content-drag-multi.js');
+        global.__rafCallbacks = [];
+        global.requestAnimationFrame = (cb) => {
+            global.__rafCallbacks.push(cb);
+            return global.__rafCallbacks.length;
+        };
+    });
+
+    afterEach(() => {
+        teardownGlobalMocks();
+        delete global.requestAnimationFrame;
+    });
+
+    it('prepares a reflow session on dragstart with selection.keys and stores it on runtime', () => {
+        const runtime = {};
+        const state = { isBatchMode: false, ungrouped: ['A', 'B'], groups: [] };
+        const pendingBatchKeys = new Set();
+        const sourceRow = createSourceRow('A');
+        const sourcesListEl = { id: 'sources-list' };
+        const shadowRoot = {
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => []),
+            getElementById: jest.fn((id) => (id === 'sources-list' ? sourcesListEl : null))
+        };
+        const dragReflow = createDragReflowMock();
+
+        const interactions = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getPendingBatchKeys: () => pendingBatchKeys,
+            getShadowRoot: () => shadowRoot,
+            getDocument: () => null,
+            getSetTimeout: () => () => {},
+            dragMulti: createContentDragMulti({}),
+            dragReflow
+        });
+
+        const event = {
+            target: createSourceRowTargetStub(sourceRow),
+            dataTransfer: createDataTransfer()
+        };
+        interactions.handleDragStart(event);
+
+        expect(dragReflow.prepareDragSession).toHaveBeenCalledTimes(1);
+        const prepCallArgs = dragReflow.prepareDragSession.mock.calls[0][0];
+        expect(prepCallArgs.draggedKeys).toEqual(['A']);
+        expect(prepCallArgs.rootElement).toBe(sourcesListEl);
+        expect(runtime.dragReflowSession).toBeDefined();
+        expect(runtime.dragReflowSession.draggedKeys.has('A')).toBe(true);
+    });
+
+    it('schedules foldDraggedItems via requestAnimationFrame after prepare', () => {
+        const runtime = {};
+        const state = { isBatchMode: false, ungrouped: ['A'], groups: [] };
+        const pendingBatchKeys = new Set();
+        const sourceRow = createSourceRow('A');
+        const sourcesListEl = { id: 'sources-list' };
+        const shadowRoot = {
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => []),
+            getElementById: jest.fn((id) => (id === 'sources-list' ? sourcesListEl : null))
+        };
+        const dragReflow = createDragReflowMock();
+
+        const interactions = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getPendingBatchKeys: () => pendingBatchKeys,
+            getShadowRoot: () => shadowRoot,
+            getDocument: () => null,
+            getSetTimeout: () => () => {},
+            dragMulti: createContentDragMulti({}),
+            dragReflow
+        });
+
+        interactions.handleDragStart({
+            target: createSourceRowTargetStub(sourceRow),
+            dataTransfer: createDataTransfer()
+        });
+
+        // foldDraggedItems should not be called synchronously
+        expect(dragReflow.foldDraggedItems).not.toHaveBeenCalled();
+        expect(global.__rafCallbacks.length).toBeGreaterThan(0);
+
+        // Flush the queued RAF — foldDraggedItems should fire
+        global.__rafCallbacks.forEach((cb) => cb && cb());
+        expect(dragReflow.foldDraggedItems).toHaveBeenCalledTimes(1);
+        const foldArgs = dragReflow.foldDraggedItems.mock.calls[0][0];
+        expect(foldArgs.session).toBe(runtime.dragReflowSession);
+        expect(foldArgs.rootElement).toBe(sourcesListEl);
+    });
+
+    it('creates a custom ghost with count=1 on single-source dragstart and calls setDragImage', () => {
+        const runtime = {};
+        const state = { isBatchMode: false, ungrouped: ['A'], groups: [] };
+        const pendingBatchKeys = new Set();
+        const sourceRow = createSourceRow('A');
+        const dataTransfer = createDataTransfer();
+        const ghostNode = { tagName: 'DIV' };
+        const fakeBody = { appendChild: jest.fn(() => ghostNode) };
+        const transparentCanvas = { tagName: 'CANVAS', width: 0, height: 0 };
+        const fakeDoc = {
+            body: fakeBody,
+            createElement: jest.fn((tag) => (tag === 'canvas' ? transparentCanvas : null))
+        };
+        const dragMulti = {
+            resolveDragSelection: jest.fn(({ originKey }) => ({ keys: [originKey], isMulti: false })),
+            createMultiDragGhost: jest.fn(() => ghostNode),
+            destroyMultiDragGhost: jest.fn()
+        };
+
+        const interactions = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getPendingBatchKeys: () => pendingBatchKeys,
+            getShadowRoot: () => null,
+            getDocument: () => fakeDoc,
+            getSetTimeout: () => () => {},
+            dragMulti,
+            dragReflow: null
+        });
+
+        interactions.handleDragStart({
+            target: createSourceRowTargetStub(sourceRow),
+            dataTransfer
+        });
+
+        expect(dragMulti.createMultiDragGhost).toHaveBeenCalledWith(expect.objectContaining({
+            count: 1,
+            root: fakeBody
+        }));
+        expect(dataTransfer.setDragImage).toHaveBeenCalledTimes(1);
+        // Browser natively captures + follows the ghost pill as drag image
+        expect(dataTransfer.setDragImage).toHaveBeenCalledWith(ghostNode, 12, 12);
+        expect(runtime.activeDragGhost).toBe(ghostNode);
+    });
+
+    it('creates a custom ghost with count=N on multi-source dragstart and calls setDragImage with the ghost', () => {
+        const runtime = {};
+        const state = { isBatchMode: true, ungrouped: ['A', 'B', 'C'], groups: [] };
+        const pendingBatchKeys = new Set(['A', 'B', 'C']);
+        const sourceRow = createSourceRow('A');
+        const dataTransfer = createDataTransfer();
+        const ghostNode = { tagName: 'DIV' };
+        const fakeBody = { appendChild: jest.fn(() => ghostNode) };
+        const transparentCanvas = { tagName: 'CANVAS', width: 0, height: 0 };
+        const fakeDoc = {
+            body: fakeBody,
+            createElement: jest.fn((tag) => (tag === 'canvas' ? transparentCanvas : null))
+        };
+        const otherRows = new Map([
+            ['B', createSourceRow('B')],
+            ['C', createSourceRow('C')]
+        ]);
+        const shadowRoot = {
+            querySelector: jest.fn((selector) => {
+                const match = selector.match(/\[data-source-key="([^"]+)"\]/);
+                if (!match) return null;
+                if (match[1] === 'A') return sourceRow;
+                return otherRows.get(match[1]) || null;
+            }),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const dragMulti = {
+            resolveDragSelection: jest.fn(({ originKey, isBatchMode, pendingBatchKeys: keys, sourceOrder }) =>
+                createContentDragMulti({}).resolveDragSelection({ originKey, isBatchMode, pendingBatchKeys: keys, sourceOrder })),
+            createMultiDragGhost: jest.fn(() => ghostNode),
+            destroyMultiDragGhost: jest.fn()
+        };
+
+        const interactions = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getPendingBatchKeys: () => pendingBatchKeys,
+            getShadowRoot: () => shadowRoot,
+            getDocument: () => fakeDoc,
+            getSetTimeout: () => () => {},
+            dragMulti,
+            dragReflow: null
+        });
+
+        interactions.handleDragStart({
+            target: createSourceRowTargetStub(sourceRow),
+            dataTransfer
+        });
+
+        expect(dragMulti.createMultiDragGhost).toHaveBeenCalledWith(expect.objectContaining({
+            count: 3,
+            root: fakeBody
+        }));
+        expect(dataTransfer.setDragImage).toHaveBeenCalledTimes(1);
+        expect(dataTransfer.setDragImage).toHaveBeenCalledWith(ghostNode, 12, 12);
+        expect(runtime.activeDragGhost).toBe(ghostNode);
+    });
+});
+
 describe('handleDragOver invalid-drop feedback', () => {
     let createContentTreeInteractions;
     let createContentDragMulti;
@@ -1263,13 +1531,42 @@ describe('handleDragOver invalid-drop feedback', () => {
                 groupsById.set(id, { id, children: [], ...group });
             });
         }
+        const sourceItemElements = new Map();
+        function getOrCreateSlotEl(sourceKey) {
+            if (!sourceItemElements.has(sourceKey)) {
+                sourceItemElements.set(sourceKey, {
+                    dataset: { sourceKey },
+                    classList: makeClassList(['source-item'])
+                });
+            }
+            return sourceItemElements.get(sourceKey);
+        }
+        const sourcesListEl = {
+            id: 'sources-list',
+            querySelector: (selector) => {
+                const match = selector.match(/\[data-source-key="([^"]+)"\]/);
+                if (!match) return null;
+                return sourceItemElements.has(match[1]) ? sourceItemElements.get(match[1]) : null;
+            },
+            querySelectorAll: () => {
+                const matches = [];
+                sourceItemElements.forEach((el) => {
+                    if (el.classList.has('drag-invalid')) matches.push(el);
+                });
+                return matches;
+            }
+        };
+        const shadowRoot = {
+            getElementById: (id) => (id === 'sources-list' ? sourcesListEl : null),
+            querySelectorAll: () => []
+        };
         const dragMulti = createContentDragMulti({});
         const tree = createContentTreeInteractions({
             runtime,
             getState: () => state,
             getGroupsById: () => groupsById,
             getPendingBatchKeys: () => pendingBatchKeys,
-            getShadowRoot: () => null,
+            getShadowRoot: () => shadowRoot,
             getParentMap: () => new Map(),
             isDescendant: globalThis.isDescendant,
             dragMulti
@@ -1277,8 +1574,8 @@ describe('handleDragOver invalid-drop feedback', () => {
 
         function makeSourceItemTarget(key, { intent } = {}) {
             const rect = { top: 200, bottom: 240, height: 40 };
-            const initial = ['source-item'];
-            const classList = makeClassList(initial);
+            const slotEl = getOrCreateSlotEl(key);
+            const classList = slotEl.classList;
             if (intent) classList.add(intent);
             const target = {
                 dataset: { sourceKey: key },
@@ -1318,8 +1615,9 @@ describe('handleDragOver invalid-drop feedback', () => {
         return {
             runtime,
             tree,
-            helpers: { makeSourceItemTarget, makeGroupContainerTarget },
-            groupsById
+            helpers: { makeSourceItemTarget, makeGroupContainerTarget, getOrCreateSlotEl },
+            groupsById,
+            sourcesListEl
         };
     }
 
@@ -1348,7 +1646,8 @@ describe('handleDragOver invalid-drop feedback', () => {
             dataTransfer
         });
         expect(target.classList.has('drag-invalid')).toBe(true);
-        expect(target.classList.has('drag-over-top')).toBe(true);
+        expect(target.classList.has('drag-over-top')).toBe(false);
+        expect(target.classList.has('drag-over-bottom')).toBe(false);
         expect(dataTransfer.dropEffect).toBe('none');
     });
 
@@ -1392,7 +1691,7 @@ describe('handleDragOver invalid-drop feedback', () => {
         expect(dataTransfer.dropEffect).toBe('none');
     });
 
-    it('marks drop target invalid for multi-source drag with top-level before-group intent', () => {
+    it('sets dropEffect to none for multi-source drag with top-level before-group invalid intent', () => {
         const ctx = setupTreeInteractionsTestContext({
             state: { isBatchMode: true, ungrouped: ['A', 'B'], groups: ['g1'] },
             pendingBatchKeys: new Set(['A', 'B']),
@@ -1407,7 +1706,9 @@ describe('handleDragOver invalid-drop feedback', () => {
             preventDefault: jest.fn(),
             dataTransfer
         });
-        expect(target.classList.has('drag-invalid')).toBe(true);
+        // The slot top is a group entry, not a source item — no [data-source-key] match → no red highlight applied.
+        // Group-container itself is not highlighted because intentKind is before-group, not into-group.
+        expect(target.classList.has('drag-invalid')).toBe(false);
         expect(dataTransfer.dropEffect).toBe('none');
     });
 
@@ -1426,8 +1727,331 @@ describe('handleDragOver invalid-drop feedback', () => {
             dataTransfer
         });
         expect(target.classList.has('drag-invalid')).toBe(false);
-        expect(target.classList.has('drag-over-top')).toBe(true);
+        expect(target.classList.has('drag-over-top')).toBe(false);
+        expect(target.classList.has('drag-over-bottom')).toBe(false);
         expect(dataTransfer.dropEffect).toBe('move');
+    });
+});
+
+describe('handleDragOver physical reflow', () => {
+    let createContentTreeInteractions;
+    let createContentDragMulti;
+
+    function makeClassList(initial = []) {
+        const classes = new Set(initial);
+        return {
+            add: jest.fn((...cs) => cs.forEach((c) => classes.add(c))),
+            remove: jest.fn((...cs) => cs.forEach((c) => classes.delete(c))),
+            contains: (c) => classes.has(c),
+            has: (c) => classes.has(c)
+        };
+    }
+
+    function setupCtx({ state, pendingBatchKeys, groups, dragReflow }) {
+        const groupsById = new Map();
+        const runtime = {};
+        if (groups && typeof groups === 'object') {
+            Object.keys(groups).forEach((id) => {
+                const group = groups[id];
+                groupsById.set(id, { id, children: [], ...group });
+            });
+        }
+        const sourcesListEl = { id: 'sources-list' };
+        const shadowRoot = {
+            querySelector: () => null,
+            querySelectorAll: () => [],
+            getElementById: (id) => (id === 'sources-list' ? sourcesListEl : null)
+        };
+        const tree = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getPendingBatchKeys: () => pendingBatchKeys,
+            getShadowRoot: () => shadowRoot,
+            getParentMap: () => new Map(),
+            isDescendant: globalThis.isDescendant,
+            dragMulti: createContentDragMulti({}),
+            dragReflow
+        });
+
+        function makeSourceItemTarget(key) {
+            const rect = { top: 200, bottom: 240, height: 40 };
+            const classList = makeClassList(['source-item']);
+            const target = {
+                dataset: { sourceKey: key },
+                classList,
+                rect,
+                getBoundingClientRect: () => ({ top: rect.top, bottom: rect.bottom, height: rect.height, left: 0, right: 200, width: 200 })
+            };
+            target.closest = (selector) => {
+                if (selector === '.group-container, .source-item') return target;
+                if (selector === '.source-item') return target;
+                if (selector === '.group-container') return null;
+                return null;
+            };
+            return target;
+        }
+
+        function makeGroupContainerTarget(groupId) {
+            const rect = { top: 200, bottom: 240, height: 40 };
+            const classList = makeClassList(['group-container']);
+            const target = {
+                dataset: { groupId },
+                classList,
+                rect,
+                getBoundingClientRect: () => ({ top: rect.top, bottom: rect.bottom, height: rect.height, left: 0, right: 200, width: 200 })
+            };
+            target.closest = (selector) => {
+                if (selector === '.group-container, .source-item') return target;
+                if (selector === '.group-container') return target;
+                if (selector === '.source-item') return null;
+                return null;
+            };
+            return target;
+        }
+
+        return {
+            runtime,
+            tree,
+            sourcesListEl,
+            helpers: { makeSourceItemTarget, makeGroupContainerTarget }
+        };
+    }
+
+    function makeDragReflowMock() {
+        return {
+            computeReflow: jest.fn(() => new Map([['B', 40]])),
+            applyReflow: jest.fn(),
+            clearReflow: jest.fn(),
+            prepareDragSession: jest.fn(),
+            foldDraggedItems: jest.fn(),
+            unfoldDraggedItems: jest.fn()
+        };
+    }
+
+    beforeEach(() => {
+        jest.resetModules();
+        setupGlobalMocks();
+        require('../../src/content/content-native-checkbox-sync.js');
+        createContentTreeInteractions = require('../../src/content/content-tree-interactions.js');
+        createContentDragMulti = require('../../src/content/content-drag-multi.js');
+    });
+
+    afterEach(teardownGlobalMocks);
+
+    it('calls applyReflow with shifts when dragging over a source-item (no blue bar classes added)', () => {
+        const dragReflow = makeDragReflowMock();
+        const ctx = setupCtx({
+            state: { isBatchMode: false, ungrouped: ['A', 'B'], groups: [] },
+            pendingBatchKeys: new Set(),
+            dragReflow
+        });
+        ctx.runtime.activeDragContext = { kind: 'source-single', keys: ['A'] };
+        ctx.runtime.dragReflowSession = {
+            draggedKeys: new Set(['A']),
+            itemHeights: new Map([['A', 40]]),
+            totalDraggedHeight: 40,
+            currentIntent: null,
+            shiftedItems: new Map()
+        };
+
+        const target = ctx.helpers.makeSourceItemTarget('B');
+        ctx.tree.handleDragOver({
+            target,
+            clientY: target.rect.top + 5,
+            preventDefault: jest.fn(),
+            dataTransfer: { dropEffect: 'move' }
+        });
+
+        expect(dragReflow.computeReflow).toHaveBeenCalledTimes(1);
+        expect(dragReflow.applyReflow).toHaveBeenCalledTimes(1);
+        const computeArgs = dragReflow.computeReflow.mock.calls[0][0];
+        expect(computeArgs.session).toBe(ctx.runtime.dragReflowSession);
+        // Hover over upper half of 'B' (index 1) → before-source → insertIndex = 1
+        expect(computeArgs.insertIndex).toBe(1);
+        // siblingKeys should reflect the targetList resolved from getDropIntent — here ungrouped is ['A', 'B'].
+        expect(computeArgs.siblingKeys).toEqual(['A', 'B']);
+        expect(computeArgs.rootElement).toBe(ctx.sourcesListEl);
+        const applyArgs = dragReflow.applyReflow.mock.calls[0][0];
+        expect(applyArgs.session).toBe(ctx.runtime.dragReflowSession);
+        expect(applyArgs.shifts).toBeInstanceOf(Map);
+        expect(applyArgs.rootElement).toBe(ctx.sourcesListEl);
+
+        // No blue-bar classes should be added
+        expect(target.classList.add).not.toHaveBeenCalledWith('drag-over-top');
+        expect(target.classList.add).not.toHaveBeenCalledWith('drag-over-bottom');
+        expect(target.classList.has('drag-over-top')).toBe(false);
+        expect(target.classList.has('drag-over-bottom')).toBe(false);
+    });
+
+    it('updates session.currentIntent with intent kind on dragover', () => {
+        const dragReflow = makeDragReflowMock();
+        const ctx = setupCtx({
+            state: { isBatchMode: false, ungrouped: ['A', 'B'], groups: [] },
+            pendingBatchKeys: new Set(),
+            dragReflow
+        });
+        ctx.runtime.activeDragContext = { kind: 'source-single', keys: ['A'] };
+        ctx.runtime.dragReflowSession = {
+            draggedKeys: new Set(['A']),
+            itemHeights: new Map([['A', 40]]),
+            totalDraggedHeight: 40,
+            currentIntent: null,
+            shiftedItems: new Map()
+        };
+
+        const target = ctx.helpers.makeSourceItemTarget('B');
+        ctx.tree.handleDragOver({
+            target,
+            // upper half → before-source
+            clientY: target.rect.top + 5,
+            preventDefault: jest.fn(),
+            dataTransfer: { dropEffect: 'move' }
+        });
+
+        expect(ctx.runtime.dragReflowSession.currentIntent).toBeTruthy();
+        expect(ctx.runtime.dragReflowSession.currentIntent.kind).toBe('before-source');
+    });
+
+    it('records after-source kind when pointer is on the lower half of a source-item', () => {
+        const dragReflow = makeDragReflowMock();
+        const ctx = setupCtx({
+            state: { isBatchMode: false, ungrouped: ['A', 'B'], groups: [] },
+            pendingBatchKeys: new Set(),
+            dragReflow
+        });
+        ctx.runtime.activeDragContext = { kind: 'source-single', keys: ['A'] };
+        ctx.runtime.dragReflowSession = {
+            draggedKeys: new Set(['A']),
+            itemHeights: new Map([['A', 40]]),
+            totalDraggedHeight: 40,
+            currentIntent: null,
+            shiftedItems: new Map()
+        };
+
+        const target = ctx.helpers.makeSourceItemTarget('B');
+        ctx.tree.handleDragOver({
+            target,
+            // lower half → after-source
+            clientY: target.rect.top + 35,
+            preventDefault: jest.fn(),
+            dataTransfer: { dropEffect: 'move' }
+        });
+
+        expect(ctx.runtime.dragReflowSession.currentIntent.kind).toBe('after-source');
+    });
+
+    it('records into-group kind and adds drag-into class when pointer is in middle of group-container', () => {
+        const dragReflow = makeDragReflowMock();
+        const ctx = setupCtx({
+            state: { isBatchMode: false, ungrouped: [], groups: ['g1'] },
+            pendingBatchKeys: new Set(),
+            groups: { g1: { id: 'g1', children: [] } },
+            dragReflow
+        });
+        ctx.runtime.activeDragContext = { kind: 'source-single', keys: ['A'] };
+        ctx.runtime.dragReflowSession = {
+            draggedKeys: new Set(['A']),
+            itemHeights: new Map([['A', 40]]),
+            totalDraggedHeight: 40,
+            currentIntent: null,
+            shiftedItems: new Map()
+        };
+
+        const target = ctx.helpers.makeGroupContainerTarget('g1');
+        ctx.tree.handleDragOver({
+            target,
+            // middle of group → into-group
+            clientY: target.rect.top + target.rect.height / 2,
+            preventDefault: jest.fn(),
+            dataTransfer: { dropEffect: 'move' }
+        });
+
+        expect(target.classList.has('drag-into')).toBe(true);
+        expect(target.classList.has('drag-over-top')).toBe(false);
+        expect(target.classList.has('drag-over-bottom')).toBe(false);
+        expect(ctx.runtime.dragReflowSession.currentIntent.kind).toBe('into-group');
+    });
+
+    it('skips reflow when dragReflow dep is missing', () => {
+        const ctx = setupCtx({
+            state: { isBatchMode: false, ungrouped: ['A', 'B'], groups: [] },
+            pendingBatchKeys: new Set(),
+            dragReflow: null
+        });
+        ctx.runtime.activeDragContext = { kind: 'source-single', keys: ['A'] };
+
+        const target = ctx.helpers.makeSourceItemTarget('B');
+        expect(() => ctx.tree.handleDragOver({
+            target,
+            clientY: target.rect.top + 5,
+            preventDefault: jest.fn(),
+            dataTransfer: { dropEffect: 'move' }
+        })).not.toThrow();
+        // No blue-bar classes even without dragReflow
+        expect(target.classList.has('drag-over-top')).toBe(false);
+        expect(target.classList.has('drag-over-bottom')).toBe(false);
+    });
+});
+
+describe('resolveSiblingKeys helper', () => {
+    let createContentTreeInteractions;
+
+    beforeEach(() => {
+        jest.resetModules();
+        setupGlobalMocks();
+        require('../../src/content/content-native-checkbox-sync.js');
+        createContentTreeInteractions = require('../../src/content/content-tree-interactions.js');
+    });
+
+    afterEach(teardownGlobalMocks);
+
+    it('returns empty array for null intent', () => {
+        const tree = createContentTreeInteractions({});
+        expect(tree.resolveSiblingKeys(null)).toEqual([]);
+    });
+
+    it('returns empty array when targetList is not an array', () => {
+        const tree = createContentTreeInteractions({});
+        expect(tree.resolveSiblingKeys({ targetList: null })).toEqual([]);
+    });
+
+    it('returns string entries directly (state.ungrouped or state.groups)', () => {
+        const tree = createContentTreeInteractions({});
+        expect(tree.resolveSiblingKeys({ targetList: ['A', 'B', 'C'] })).toEqual(['A', 'B', 'C']);
+    });
+
+    it('returns source keys from object entries with type=source', () => {
+        const tree = createContentTreeInteractions({});
+        expect(tree.resolveSiblingKeys({
+            targetList: [
+                { type: 'source', key: 'k1' },
+                { type: 'source', key: 'k2' }
+            ]
+        })).toEqual(['k1', 'k2']);
+    });
+
+    it('returns group ids from object entries with type=group', () => {
+        const tree = createContentTreeInteractions({});
+        expect(tree.resolveSiblingKeys({
+            targetList: [
+                { type: 'source', key: 'k1' },
+                { type: 'group', id: 'g1' },
+                { type: 'source', key: 'k2' }
+            ]
+        })).toEqual(['k1', 'g1', 'k2']);
+    });
+
+    it('filters out malformed entries', () => {
+        const tree = createContentTreeInteractions({});
+        expect(tree.resolveSiblingKeys({
+            targetList: [
+                { type: 'source', key: 'k1' },
+                { type: 'other' },
+                null,
+                'plainKey'
+            ]
+        })).toEqual(['k1', 'plainKey']);
     });
 });
 
@@ -1948,7 +2572,11 @@ describe('handleDragOver hover-expand', () => {
 
             // Simulate dropping gD above g3 (which is inside g1).
             // intent.targetGroup = g1 (the parent of g3), intent.kind = 'before-group'.
-            const target = ctx.helpers.makeGroupContainerTarget('g3', { intent: 'drag-over-top' });
+            const target = ctx.helpers.makeGroupContainerTarget('g3');
+            ctx.runtime.dragReflowSession = {
+                draggedKeys: new Set(['gD']),
+                currentIntent: { kind: 'before-group' }
+            };
             const dropEvent = ctx.helpers.makeDropEvent({
                 data: { 'application/group-id': 'gD' },
                 target
@@ -1959,5 +2587,468 @@ describe('handleDragOver hover-expand', () => {
             expect(ctx.runtime.groupsById.get('g1').collapsed).toBe(false);
             expect(ctx.runtime.hoverExpandedGroupIds.has('g1')).toBe(false);
         });
+    });
+});
+
+describe('handleDrop reflow cleanup', () => {
+    let createContentTreeInteractions;
+    let createContentDragMulti;
+
+    const createClassList = (classes = []) => {
+        const classSet = new Set(classes);
+        return {
+            contains: jest.fn((className) => classSet.has(className)),
+            remove: jest.fn((...classNames) => {
+                classNames.forEach((className) => classSet.delete(className));
+            }),
+            add: jest.fn((className) => {
+                classSet.add(className);
+            })
+        };
+    };
+
+    const createDropEvent = ({ dropTarget, sourceKey = '', sourceKeysJson = '', groupId = '' }) => ({
+        preventDefault: jest.fn(),
+        target: {
+            closest: jest.fn(() => dropTarget)
+        },
+        dataTransfer: {
+            getData: jest.fn((type) => {
+                if (type === 'application/source-key') return sourceKey;
+                if (type === 'application/source-keys') return sourceKeysJson;
+                if (type === 'application/group-id') return groupId;
+                return '';
+            })
+        }
+    });
+
+    function makeDragReflowMock() {
+        return {
+            prepareDragSession: jest.fn(),
+            foldDraggedItems: jest.fn(),
+            computeReflow: jest.fn(() => new Map()),
+            applyReflow: jest.fn(),
+            clearReflow: jest.fn(),
+            unfoldDraggedItems: jest.fn()
+        };
+    }
+
+    beforeEach(() => {
+        jest.resetModules();
+        setupGlobalMocks();
+        require('../../src/content/content-native-checkbox-sync.js');
+        createContentTreeInteractions = require('../../src/content/content-tree-interactions.js');
+        createContentDragMulti = require('../../src/content/content-drag-multi.js');
+    });
+
+    afterEach(teardownGlobalMocks);
+
+    it('clears reflow before DOM mutation and unfolds dragged items after a successful single-source drop', () => {
+        const state = { groups: [], ungrouped: ['source-1', 'source-2'] };
+        const saveState = jest.fn();
+        const render = jest.fn();
+        const sourcesListEl = { id: 'sources-list' };
+        const shadowRoot = {
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => []),
+            getElementById: jest.fn((id) => (id === 'sources-list' ? sourcesListEl : null))
+        };
+        const dropTarget = {
+            dataset: { sourceKey: 'source-2' },
+            classList: createClassList(['source-item'])
+        };
+        const session = {
+            draggedKeys: new Set(['source-1']),
+            currentIntent: { kind: 'after-source' },
+            shiftedItems: new Map()
+        };
+        const runtime = { dragReflowSession: session };
+        const dragReflow = makeDragReflowMock();
+
+        // Track ordering: clearReflow MUST be called before saveState (the DOM mutation point).
+        const callOrder = [];
+        dragReflow.clearReflow.mockImplementation(() => { callOrder.push('clearReflow'); });
+        dragReflow.unfoldDraggedItems.mockImplementation(() => { callOrder.push('unfoldDraggedItems'); });
+        saveState.mockImplementation(() => { callOrder.push('saveState'); });
+        render.mockImplementation(() => { callOrder.push('render'); });
+
+        const interactions = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getParentMap: () => new Map(),
+            getShadowRoot: () => shadowRoot,
+            saveState,
+            render,
+            dragMulti: createContentDragMulti({}),
+            dragReflow
+        });
+
+        interactions.handleDrop(createDropEvent({ dropTarget, sourceKey: 'source-1' }));
+
+        expect(dragReflow.clearReflow).toHaveBeenCalledTimes(1);
+        expect(dragReflow.unfoldDraggedItems).toHaveBeenCalledTimes(1);
+        const clearArgs = dragReflow.clearReflow.mock.calls[0][0];
+        expect(clearArgs.session).toBe(session);
+        expect(clearArgs.rootElement).toBe(sourcesListEl);
+        const unfoldArgs = dragReflow.unfoldDraggedItems.mock.calls[0][0];
+        expect(unfoldArgs.session).toBe(session);
+        expect(unfoldArgs.rootElement).toBe(sourcesListEl);
+
+        // clearReflow must come BEFORE any DOM mutation step (saveState / render).
+        expect(callOrder.indexOf('clearReflow')).toBeLessThan(callOrder.indexOf('saveState'));
+        expect(callOrder.indexOf('clearReflow')).toBeLessThan(callOrder.indexOf('render'));
+        // unfoldDraggedItems must come AFTER the DOM mutation step.
+        expect(callOrder.indexOf('unfoldDraggedItems')).toBeGreaterThan(callOrder.indexOf('render'));
+
+        // runtime.dragReflowSession nulled out at the end.
+        expect(runtime.dragReflowSession).toBeNull();
+    });
+
+    it('clears reflow and unfolds dragged items on an invalid drop (no DOM mutation)', () => {
+        // Invalid: dropping a group into its own descendant — handleDrop returns early without mutation.
+        const state = { groups: ['root'], ungrouped: [] };
+        const groupsById = new Map([
+            ['root', { id: 'root', children: [{ type: 'group', id: 'child' }] }],
+            ['child', { id: 'child', children: [] }]
+        ]);
+        const parentMap = new Map([['child', 'root']]);
+        const saveState = jest.fn();
+        const render = jest.fn();
+        const sourcesListEl = { id: 'sources-list' };
+        const shadowRoot = {
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => []),
+            getElementById: jest.fn((id) => (id === 'sources-list' ? sourcesListEl : null))
+        };
+        const dropTarget = {
+            dataset: { groupId: 'child' },
+            classList: createClassList(['group-container', 'drag-into'])
+        };
+        const session = {
+            draggedKeys: new Set(['root']),
+            currentIntent: { kind: 'into-group' },
+            shiftedItems: new Map()
+        };
+        const runtime = { dragReflowSession: session };
+        const dragReflow = makeDragReflowMock();
+
+        const interactions = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getParentMap: () => parentMap,
+            getShadowRoot: () => shadowRoot,
+            isDescendant: global.isDescendant,
+            saveState,
+            render,
+            dragMulti: createContentDragMulti({}),
+            dragReflow
+        });
+
+        interactions.handleDrop(createDropEvent({ dropTarget, groupId: 'root' }));
+
+        // Move was rejected — no save / no render.
+        expect(saveState).not.toHaveBeenCalled();
+        expect(render).not.toHaveBeenCalled();
+
+        // Cleanup still runs.
+        expect(dragReflow.clearReflow).toHaveBeenCalledTimes(1);
+        expect(dragReflow.unfoldDraggedItems).toHaveBeenCalledTimes(1);
+        expect(runtime.dragReflowSession).toBeNull();
+    });
+
+    it('clears reflow and unfolds dragged items when handleDrop returns early on a no-op move', () => {
+        // Source-1 dropped back into its current position — early return without mutation.
+        const state = { groups: [], ungrouped: ['source-1', 'source-2'] };
+        const saveState = jest.fn();
+        const render = jest.fn();
+        const sourcesListEl = { id: 'sources-list' };
+        const shadowRoot = {
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => []),
+            getElementById: jest.fn((id) => (id === 'sources-list' ? sourcesListEl : null))
+        };
+        const dropTarget = {
+            dataset: { sourceKey: 'source-1' },
+            classList: createClassList(['source-item'])
+        };
+        const session = {
+            draggedKeys: new Set(['source-1']),
+            currentIntent: { kind: 'before-source' },
+            shiftedItems: new Map()
+        };
+        const runtime = { dragReflowSession: session };
+        const dragReflow = makeDragReflowMock();
+
+        const interactions = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getParentMap: () => new Map(),
+            getShadowRoot: () => shadowRoot,
+            saveState,
+            render,
+            dragMulti: createContentDragMulti({}),
+            dragReflow
+        });
+
+        interactions.handleDrop(createDropEvent({ dropTarget, sourceKey: 'source-1' }));
+
+        expect(saveState).not.toHaveBeenCalled();
+        expect(render).not.toHaveBeenCalled();
+        expect(dragReflow.clearReflow).toHaveBeenCalledTimes(1);
+        expect(dragReflow.unfoldDraggedItems).toHaveBeenCalledTimes(1);
+        expect(runtime.dragReflowSession).toBeNull();
+    });
+
+    it('clears reflow and unfolds dragged items after a successful multi-source drop', () => {
+        const group = { id: 'g1', children: [] };
+        const state = { isBatchMode: true, ungrouped: ['A', 'B', 'C', 'D'], groups: ['g1'] };
+        const groupsById = new Map([['g1', group]]);
+        const sourcesByKey = new Map([
+            ['A', { key: 'A' }],
+            ['B', { key: 'B' }],
+            ['C', { key: 'C' }],
+            ['D', { key: 'D' }]
+        ]);
+        const pendingBatchKeys = new Set(['A', 'B', 'C']);
+        const sourcesListEl = { id: 'sources-list' };
+        const shadowRoot = {
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => []),
+            getElementById: jest.fn((id) => (id === 'sources-list' ? sourcesListEl : null))
+        };
+        const dropTarget = {
+            dataset: { groupId: 'g1' },
+            classList: createClassList(['group-container', 'drag-into'])
+        };
+        const session = {
+            draggedKeys: new Set(['A', 'B', 'C']),
+            currentIntent: { kind: 'into-group' },
+            shiftedItems: new Map()
+        };
+        const runtime = { dragReflowSession: session };
+        const dragReflow = makeDragReflowMock();
+
+        const interactions = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getSourcesByKey: () => sourcesByKey,
+            getParentMap: () => new Map(),
+            getPendingBatchKeys: () => pendingBatchKeys,
+            getShadowRoot: () => shadowRoot,
+            saveState: jest.fn(),
+            render: jest.fn(),
+            showToast: jest.fn(),
+            buildParentMap: jest.fn(),
+            developerLog: jest.fn(),
+            dragMulti: createContentDragMulti({}),
+            dragReflow,
+            getMessage: (key, args = []) => `${key}:${args.join(',')}`
+        });
+
+        interactions.handleDrop(createDropEvent({
+            dropTarget,
+            sourceKey: 'A',
+            sourceKeysJson: JSON.stringify(['A', 'B', 'C'])
+        }));
+
+        expect(dragReflow.clearReflow).toHaveBeenCalledTimes(1);
+        expect(dragReflow.unfoldDraggedItems).toHaveBeenCalledTimes(1);
+        expect(runtime.dragReflowSession).toBeNull();
+    });
+
+    it('is a no-op when dragReflowSession is missing', () => {
+        const state = { groups: [], ungrouped: ['source-1', 'source-2'] };
+        const dropTarget = {
+            dataset: { sourceKey: 'source-2' },
+            classList: createClassList(['source-item'])
+        };
+        const runtime = { dragReflowSession: null };
+        const dragReflow = makeDragReflowMock();
+
+        const interactions = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getParentMap: () => new Map(),
+            getShadowRoot: () => ({ querySelectorAll: jest.fn(() => []) }),
+            saveState: jest.fn(),
+            render: jest.fn(),
+            dragMulti: createContentDragMulti({}),
+            dragReflow
+        });
+
+        expect(() => {
+            interactions.handleDrop(createDropEvent({ dropTarget, sourceKey: 'source-1' }));
+        }).not.toThrow();
+
+        expect(dragReflow.clearReflow).not.toHaveBeenCalled();
+        expect(dragReflow.unfoldDraggedItems).not.toHaveBeenCalled();
+    });
+});
+
+describe('handleDragEnd reflow restore', () => {
+    let createContentTreeInteractions;
+    let createContentDragMulti;
+
+    const createClassList = (classes = []) => {
+        const classSet = new Set(classes);
+        return {
+            contains: jest.fn((className) => classSet.has(className)),
+            remove: jest.fn((...classNames) => {
+                classNames.forEach((className) => classSet.delete(className));
+            }),
+            add: jest.fn((className) => {
+                classSet.add(className);
+            })
+        };
+    };
+
+    const createDropEvent = ({ dropTarget, sourceKey = '', sourceKeysJson = '', groupId = '' }) => ({
+        preventDefault: jest.fn(),
+        target: {
+            closest: jest.fn(() => dropTarget)
+        },
+        dataTransfer: {
+            getData: jest.fn((type) => {
+                if (type === 'application/source-key') return sourceKey;
+                if (type === 'application/source-keys') return sourceKeysJson;
+                if (type === 'application/group-id') return groupId;
+                return '';
+            })
+        }
+    });
+
+    function makeDragReflowMock() {
+        return {
+            prepareDragSession: jest.fn(),
+            foldDraggedItems: jest.fn(),
+            computeReflow: jest.fn(() => new Map()),
+            applyReflow: jest.fn(),
+            clearReflow: jest.fn(),
+            unfoldDraggedItems: jest.fn()
+        };
+    }
+
+    beforeEach(() => {
+        jest.resetModules();
+        setupGlobalMocks();
+        require('../../src/content/content-native-checkbox-sync.js');
+        createContentTreeInteractions = require('../../src/content/content-tree-interactions.js');
+        createContentDragMulti = require('../../src/content/content-drag-multi.js');
+    });
+
+    afterEach(teardownGlobalMocks);
+
+    it('clears reflow and unfolds dragged items when dragend fires without a prior drop (esc cancel)', () => {
+        const state = { groups: [], ungrouped: ['A', 'B'] };
+        const sourcesListEl = { id: 'sources-list' };
+        const shadowRoot = {
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => []),
+            getElementById: jest.fn((id) => (id === 'sources-list' ? sourcesListEl : null))
+        };
+        const session = {
+            draggedKeys: new Set(['A']),
+            currentIntent: null,
+            shiftedItems: new Map()
+        };
+        const runtime = { dragReflowSession: session };
+        const dragReflow = makeDragReflowMock();
+
+        const interactions = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getPendingBatchKeys: () => new Set(),
+            getShadowRoot: () => shadowRoot,
+            dragMulti: createContentDragMulti({}),
+            dragReflow
+        });
+
+        interactions.handleDragEnd({ target: { closest: jest.fn(() => null) } });
+
+        expect(dragReflow.clearReflow).toHaveBeenCalledTimes(1);
+        expect(dragReflow.unfoldDraggedItems).toHaveBeenCalledTimes(1);
+        const clearArgs = dragReflow.clearReflow.mock.calls[0][0];
+        expect(clearArgs.session).toBe(session);
+        expect(clearArgs.rootElement).toBe(sourcesListEl);
+        expect(runtime.dragReflowSession).toBeNull();
+    });
+
+    it('is a no-op for reflow after a successful drop already nulled the session', () => {
+        const state = { groups: [], ungrouped: ['source-1', 'source-2'] };
+        const sourcesListEl = { id: 'sources-list' };
+        const shadowRoot = {
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => []),
+            getElementById: jest.fn((id) => (id === 'sources-list' ? sourcesListEl : null))
+        };
+        const dropTarget = {
+            dataset: { sourceKey: 'source-2' },
+            classList: createClassList(['source-item'])
+        };
+        const session = {
+            draggedKeys: new Set(['source-1']),
+            currentIntent: { kind: 'after-source' },
+            shiftedItems: new Map()
+        };
+        const runtime = { dragReflowSession: session };
+        const dragReflow = makeDragReflowMock();
+
+        const interactions = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getParentMap: () => new Map(),
+            getPendingBatchKeys: () => new Set(),
+            getShadowRoot: () => shadowRoot,
+            saveState: jest.fn(),
+            render: jest.fn(),
+            dragMulti: createContentDragMulti({}),
+            dragReflow
+        });
+
+        // Drop first — should clear + unfold once and null the session.
+        interactions.handleDrop(createDropEvent({ dropTarget, sourceKey: 'source-1' }));
+        expect(dragReflow.clearReflow).toHaveBeenCalledTimes(1);
+        expect(dragReflow.unfoldDraggedItems).toHaveBeenCalledTimes(1);
+        expect(runtime.dragReflowSession).toBeNull();
+
+        // dragend afterwards — must not double-call.
+        interactions.handleDragEnd({ target: { closest: jest.fn(() => null) } });
+        expect(dragReflow.clearReflow).toHaveBeenCalledTimes(1);
+        expect(dragReflow.unfoldDraggedItems).toHaveBeenCalledTimes(1);
+    });
+
+    it('is a no-op when dragReflowSession is missing on dragend', () => {
+        const state = { groups: [], ungrouped: ['A'] };
+        const shadowRoot = {
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => []),
+            getElementById: jest.fn(() => null)
+        };
+        const runtime = { dragReflowSession: null };
+        const dragReflow = makeDragReflowMock();
+
+        const interactions = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getPendingBatchKeys: () => new Set(),
+            getShadowRoot: () => shadowRoot,
+            dragMulti: createContentDragMulti({}),
+            dragReflow
+        });
+
+        expect(() => {
+            interactions.handleDragEnd({ target: { closest: jest.fn(() => null) } });
+        }).not.toThrow();
+
+        expect(dragReflow.clearReflow).not.toHaveBeenCalled();
+        expect(dragReflow.unfoldDraggedItems).not.toHaveBeenCalled();
     });
 });
