@@ -2555,9 +2555,19 @@
             }
 
             .sp-drag-folded {
-                transition: height 200ms cubic-bezier(0.2, 0, 0, 1), opacity 200ms cubic-bezier(0.2, 0, 0, 1);
+                transition: height 200ms cubic-bezier(0.2, 0, 0, 1),
+                            opacity 200ms cubic-bezier(0.2, 0, 0, 1),
+                            padding 200ms cubic-bezier(0.2, 0, 0, 1),
+                            margin 200ms cubic-bezier(0.2, 0, 0, 1),
+                            border-width 200ms cubic-bezier(0.2, 0, 0, 1);
                 overflow: hidden;
                 pointer-events: none;
+                padding-top: 0 !important;
+                padding-bottom: 0 !important;
+                margin-top: 0 !important;
+                margin-bottom: 0 !important;
+                border-top-width: 0 !important;
+                border-bottom-width: 0 !important;
             }
 
             .sp-drop-shift {
@@ -2935,56 +2945,10 @@
             }
             
             /* Enhanced Drag Feedback */
-	            .drag-over-top {
-	                border-top: 2px solid var(--sp-accent) !important;
-	                position: relative;
-	                box-shadow: 0 -6px 14px rgba(0, 122, 255, 0.12);
-	            }
-            .drag-over-top::before {
-                content: '';
-                position: absolute;
-                top: -5px;
-                left: -5px;
-                width: 8px;
-                height: 8px;
-                border-radius: 50%;
-                background-color: var(--sp-accent);
-                border: 2px solid var(--sp-bg-primary, white);
-                z-index: 10;
-            }
-            
-	            .drag-over-bottom {
-	                border-bottom: 2px solid var(--sp-accent) !important;
-	                position: relative;
-	                box-shadow: 0 6px 14px rgba(0, 122, 255, 0.12);
-	            }
-            .drag-over-bottom::after {
-                content: '';
-                position: absolute;
-                bottom: -5px;
-                left: -5px;
-                width: 8px;
-                height: 8px;
-                border-radius: 50%;
-                background-color: var(--sp-accent);
-                border: 2px solid var(--sp-bg-primary, white);
-                z-index: 10;
-            }
-
-            .drag-over-top.drag-invalid {
-                border-top-color: var(--sp-accent-danger) !important;
-                box-shadow: 0 -6px 14px rgba(255, 59, 48, 0.12);
-            }
-            .drag-over-bottom.drag-invalid {
-                border-bottom-color: var(--sp-accent-danger) !important;
-                box-shadow: 0 6px 14px rgba(255, 59, 48, 0.12);
-            }
             .drag-invalid {
                 cursor: not-allowed;
-            }
-            .drag-over-top.drag-invalid::before,
-            .drag-over-bottom.drag-invalid::after {
-                background-color: var(--sp-accent-danger);
+                outline: 2px solid var(--sp-accent-danger);
+                outline-offset: -2px;
             }
             .group-container.drag-invalid > .group-header {
                 background-color: rgba(255, 59, 48, 0.08);
