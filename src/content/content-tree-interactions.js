@@ -2022,7 +2022,7 @@
                             render();
                             showToast(getMessage('ui_batch_moved_sources_toast', [String(result.moved)]));
                             disposeHoverOpenedGroupsAfterDrop(intent, augmentedIntent);
-                            applyDropLandingAndFlash(Array.isArray(keys) ? keys : []);
+                            applyDropLandingAndFlash(Array.isArray(keys) ? keys : [], e.clientX, e.clientY);
                         }
                         clearDragFeedback();
                         return;
@@ -2087,35 +2087,59 @@
                 saveState({ immediate: true, critical: true });
                 disposeHoverOpenedGroupsAfterDrop(intent, augmentedIntent);
                 clearDragFeedback();
-                applyDropLandingAndFlash(sourceKey ? [sourceKey] : (draggedGroupId ? [draggedGroupId] : []));
+                applyDropLandingAndFlash(
+                    sourceKey ? [sourceKey] : (draggedGroupId ? [draggedGroupId] : []),
+                    e.clientX, e.clientY
+                );
             } finally {
                 finalizeReflow();
             }
         }
 
         // Drop landing visual feedback: after render() places the dropped items in their
-        // new DOM positions, briefly animate them in (scaleY 0→1, opacity 0→1 over 200ms)
-        // and flash an accent outline (600ms fade) so the user's eye catches the new
-        // location. CSS handles the animation; this helper only manages the classes +
-        // cleanup. Safe no-op when reduced-motion is on (CSS suppresses animation; the
-        // setTimeout backstop still removes the classes).
-        function applyDropLandingAndFlash(landedKeys) {
+        // new DOM positions, animate them in and flash an accent outline (600ms fade) so
+        // the user's eye catches the new location. Two animation strategies:
+        //
+        //   - Single-source with a valid cursor position: FLIP fly-in. Read the landed
+        //     element's destination rect, set inline `transform: translate(dx, dy)` where
+        //     (dx, dy) = cursor pointer offset from the destination top-left, force a
+        //     reflow, then add the .sp-drop-flying transition class and clear the inline
+        //     transform — the element animates from the cursor's drop position to the
+        //     slot (looks like the source "snaps" from where the user released to its
+        //     final spot).
+        //   - Multi-source / missing cursor: .sp-drop-landing scaleY animation (a single
+        //     fly-in from one cursor point would visually scatter N elements which is
+        //     more confusing than helpful for batch drag).
+        //
+        // .sp-drop-landed runs concurrently in both cases (600ms accent outline flash).
+        // Both cleanup on animationend with a setTimeout(800ms) backstop. Reduced-motion
+        // is handled in CSS (transition/animation become no-op; setTimeout still removes
+        // classes).
+        function applyDropLandingAndFlash(landedKeys, cursorX, cursorY) {
             if (!Array.isArray(landedKeys) || landedKeys.length === 0) return;
             const rootElement = getSourceListContainer();
             if (!rootElement || typeof rootElement.querySelector !== 'function') return;
             const setTimeoutFn = getSetTimeout();
+            const useFlyIn = landedKeys.length === 1
+                && typeof cursorX === 'number'
+                && typeof cursorY === 'number';
             for (const key of landedKeys) {
                 if (typeof key !== 'string' || !key) continue;
                 const safe = key.replace(/"/g, '\\"');
                 const el = rootElement.querySelector(`[data-source-key="${safe}"]`)
                     || rootElement.querySelector(`[data-group-id="${safe}"]`);
                 if (!el || !el.classList || typeof el.classList.add !== 'function') continue;
-                el.classList.add('sp-drop-landing');
-                el.classList.add('sp-drop-landed');
+
                 const cleanup = () => {
                     if (el.classList && typeof el.classList.remove === 'function') {
                         el.classList.remove('sp-drop-landing');
                         el.classList.remove('sp-drop-landed');
+                        el.classList.remove('sp-drop-flying');
+                    }
+                    if (el.style) {
+                        el.style.transform = '';
+                        el.style.opacity = '';
+                        el.style.transformOrigin = '';
                     }
                 };
                 const onEnd = (ev) => {
@@ -2126,6 +2150,31 @@
                         }
                     }
                 };
+
+                if (useFlyIn && el.style && typeof el.getBoundingClientRect === 'function') {
+                    // FLIP: read destination rect, offset element to cursor position, then
+                    // animate transform back to (0, 0) via the transition class.
+                    const destRect = el.getBoundingClientRect();
+                    const dx = cursorX - destRect.left;
+                    const dy = cursorY - destRect.top;
+                    el.style.transformOrigin = 'top left';
+                    el.style.transform = `translate(${dx}px, ${dy}px)`;
+                    el.style.opacity = '0.85';
+                    // Force a layout flush so the initial transform is applied before the
+                    // transition kicks in. Without this the browser may coalesce both writes
+                    // and skip the animation.
+                    // eslint-disable-next-line no-unused-expressions
+                    el.offsetHeight;
+                    el.classList.add('sp-drop-flying');
+                    el.style.transform = '';
+                    el.style.opacity = '';
+                } else {
+                    // Multi-source (or no cursor info): scaleY landing.
+                    el.classList.add('sp-drop-landing');
+                }
+
+                el.classList.add('sp-drop-landed');
+
                 if (typeof el.addEventListener === 'function') {
                     el.addEventListener('animationend', onEnd);
                 }

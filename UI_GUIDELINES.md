@@ -941,7 +941,7 @@ Rules:
 
 ## 13.4 Drag interaction (physical reflow)
 
-Classes: `.sp-drag-folded`, `.sp-drop-shift`, `.sp-drag-ghost`, `.sp-drag-ghost-single`, `.sp-drag-ghost-stack`, `.sp-drag-ghost-badge`, `.sp-drop-landing`, `.sp-drop-landed`, `.drag-into`, `.drag-invalid`
+Classes: `.sp-drag-folded`, `.sp-drop-shift`, `.sp-drag-ghost`, `.sp-drag-ghost-single`, `.sp-drag-ghost-stack`, `.sp-drag-ghost-badge`, `.sp-drop-landing`, `.sp-drop-flying`, `.sp-drop-landed`, `.drag-into`, `.drag-invalid`
 
 Canonical behavior:
 
@@ -951,7 +951,7 @@ Canonical behavior:
 - `setDragImage` offset is computed from the pointer's position inside the origin row's bounding rect (`clientX − rect.left`, `clientY − rect.top`, clamped to `[0, rect.width/height]`); the ghost stays aligned under the pointer instead of leaping to a fixed offset.
 - On drop, transforms zero out before the DOM order changes so the new order is rendered in place. On dragend or cancel the dragged items unfold (height/opacity restore) and all shifted siblings return to `translateY(0)`.
 - Invalid drop highlights the slot top item with `.drag-invalid` (red outline-style treatment) instead of tinting the hovered row's box-shadow, so a row's normal `:hover` lift cannot obscure the warning. Group-into invalid drops still color the group header via `.group-container.drag-invalid > .group-header`.
-- After a successful drop, the landed element gets `.sp-drop-landing` (200ms scaleY 0→1 + opacity 0→1 from top, giving a "settling into place" feel) AND `.sp-drop-landed` (600ms accent outline flash via box-shadow) concurrently. Both classes auto-clear on `animationend` with a setTimeout backstop. Disabled under `prefers-reduced-motion: reduce`.
+- After a successful drop, the landed element animates in. Single-source drops use the **FLIP fly-in** path (`.sp-drop-flying`): JS reads the cursor's drop position and the landed element's destination rect, sets inline `transform: translate(dx, dy)` so the element starts at the cursor, force-reflows, then clears the transform so the transition (280ms cubic-bezier) carries it back into the slot — visually the source snaps from where the user released to its final spot. Multi-source / group drops use `.sp-drop-landing` instead (200ms scaleY 0→1 + opacity 0→1 from top) because N elements flying from a single cursor point look like a confusing scatter. Both paths concurrently add `.sp-drop-landed` (600ms accent outline flash via box-shadow). All classes + inline styles auto-clear on `animationend` with a setTimeout(800ms) backstop. Disabled under `prefers-reduced-motion: reduce`.
 
 Motion:
 

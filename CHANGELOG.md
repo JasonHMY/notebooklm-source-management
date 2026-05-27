@@ -6,7 +6,7 @@
 
 ### Added
 - **物理拖拽让位 (Physical Drag Reflow)**: 拖动来源时被拖项 height/opacity 折叠为 0 离开列表，目标位置之后的同级项整体 `translateY(N × itemHeight)` 让位形成跟随鼠标的空槽，drop/dragend 时反向归零。覆盖单源/多源、根列表/组内、跨组所有场景；过渡统一为 `200ms cubic-bezier(0.2, 0, 0, 1)`。新增 `src/content/content-drag-reflow.js` 模块封装 `prepareDragSession`/`foldDraggedItems`/`computeReflow`/`applyReflow`/`clearReflow`/`unfoldDraggedItems` 并在 `content-tree-interactions.js` 的 dragstart/dragover/drop/dragend 接入。
-- **Drop 着陆动画 + 落地高亮 (Drop Landing Animation + Flash)**: 放手后落地元素 `scaleY(0) → scaleY(1) + opacity 0 → 1` 200ms cubic-bezier 展开，给"放下"的物理感而非瞬移；同时 600ms accent outline flash（box-shadow 从 2px accent 渐变到 0）帮助视线 catch 新位置。CSS `.sp-drop-landing` / `.sp-drop-landed` 类驱动动画，`@media (prefers-reduced-motion: reduce)` 下自动禁用。新增 `applyDropLandingAndFlash` helper，在 handleDrop 的单源 / 多源 / group-drag 三条 path 都接入。
+- **Drop 着陆动画 + 落地高亮 (Drop Landing Animation + Flash)**: 放手后落地元素同时启动两条动画。单源拖拽走 FLIP "fly-in" 路径（`.sp-drop-flying`）：读取 cursor drop 位置 + 落地元素 rect，给元素先设 inline `transform: translate(dx, dy)` 让它出现在 cursor 处，强制 reflow 后加 transition 把 transform 清零 — 视觉上 source 从 cursor 平滑飞到 slot（280ms cubic-bezier）。多源 / group 拖拽走 `.sp-drop-landing` scaleY(0→1) 展开（200ms cubic-bezier），多个落地元素从同一 cursor 点散开会视觉混乱所以不用 fly-in。两条 path 都并行播放 `.sp-drop-landed` 600ms accent outline flash 帮助视线 catch 新位置。新增 `applyDropLandingAndFlash(landedKeys, cursorX, cursorY)` helper，自动按 keys 数量选 fly-in vs scaleY。`@media (prefers-reduced-motion: reduce)` 下两条动画都禁用，setTimeout 800ms backstop 兜底清理 class。
 
 ### Changed
 - **拖拽 ghost 简化 (Drag Ghost Simplification)**: `.sp-drag-ghost` 移除 `drag_indicator` 图标，仅显示拖动数量数字；单源拖拽（count=1）也启用自定义 ghost，与多源视觉统一。

@@ -2575,9 +2575,11 @@
                 will-change: transform;
             }
 
-            /* Drop landing: dropped items animate from scaleY(0) + opacity 0 to natural,
-               giving a "settling into place" feel instead of an instant snap. transform-origin
-               is top so the expansion grows downward into the slot the sibling reflow opened. */
+            /* Drop landing (multi-source): dropped items animate from scaleY(0) + opacity 0
+               to natural, giving a "settling into place" feel instead of an instant snap.
+               transform-origin is top so the expansion grows downward into the slot the
+               sibling reflow opened. Used when N>=2 — single-source uses the fly-in path
+               (.sp-drop-flying) below for a more natural snap-to-slot feel. */
             .sp-drop-landing {
                 animation: sp-drop-landing-anim 200ms cubic-bezier(0.2, 0, 0, 1) both;
                 transform-origin: top;
@@ -2585,6 +2587,19 @@
             @keyframes sp-drop-landing-anim {
                 from { transform: scaleY(0); opacity: 0; }
                 to   { transform: scaleY(1); opacity: 1; }
+            }
+
+            /* Drop fly-in (single-source FLIP): when a single source is dropped, JS reads
+               the cursor's viewport position and the landed element's final rect, sets an
+               initial inline transform to position the element under the cursor, then adds
+               this class to enable the transition. Clearing the inline transform in the
+               same frame lets the element animate from cursor back to slot. The transition
+               targets transform + opacity. */
+            .sp-drop-flying {
+                transition:
+                    transform 280ms cubic-bezier(0.2, 0, 0, 1),
+                    opacity 280ms cubic-bezier(0.2, 0, 0, 1);
+                will-change: transform, opacity;
             }
 
             /* Drop landing flash: 600ms accent outline so the user's eye catches the new
@@ -2601,6 +2616,9 @@
                 .sp-drop-landing,
                 .sp-drop-landed {
                     animation: none !important;
+                }
+                .sp-drop-flying {
+                    transition: none !important;
                 }
             }
 

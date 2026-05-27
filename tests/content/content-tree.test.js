@@ -3278,12 +3278,31 @@ describe('handleDrop reflow cleanup', () => {
         expect(runtime.dragReflowSession).toBeNull();
     });
 
-    it('applies drop landing + flash classes to the landed element after a successful drop', () => {
+    it('flies the landed element from cursor position back to its slot on a single-source drop (FLIP)', () => {
         const state = { groups: [], ungrouped: ['source-1', 'source-2'] };
         const saveState = jest.fn();
         const render = jest.fn();
-        // sourcesListEl needs a working querySelector so applyDropLandingAndFlash can find the landed element.
-        const landedEl = { classList: createClassList(['source-item']), addEventListener: jest.fn() };
+        // Capture every transform write so we can verify the FLIP sequence:
+        //   1. translate(dx, dy) — offset from cursor to slot
+        //   2. '' — cleared so the transition animates back to (0, 0)
+        const transformWrites = [];
+        const opacityWrites = [];
+        const landedStyle = {};
+        Object.defineProperty(landedStyle, 'transform', {
+            get() { return this._t || ''; },
+            set(v) { transformWrites.push(v); this._t = v; }
+        });
+        Object.defineProperty(landedStyle, 'opacity', {
+            get() { return this._o || ''; },
+            set(v) { opacityWrites.push(v); this._o = v; }
+        });
+        const landedEl = {
+            classList: createClassList(['source-item']),
+            addEventListener: jest.fn(),
+            style: landedStyle,
+            offsetHeight: 40, // read forces layout flush
+            getBoundingClientRect: () => ({ left: 100, top: 200, right: 400, bottom: 240, width: 300, height: 40 })
+        };
         const sourcesListEl = {
             id: 'sources-list',
             querySelector: jest.fn((selector) => {
@@ -3327,13 +3346,99 @@ describe('handleDrop reflow cleanup', () => {
             dragReflow
         });
 
-        interactions.handleDrop(createDropEvent({ dropTarget, sourceKey: 'source-1' }));
+        // Cursor dropped at (160, 220) — element rect is (100, 200) so offset = (60, 20).
+        const dropEvent = createDropEvent({ dropTarget, sourceKey: 'source-1' });
+        dropEvent.clientX = 160;
+        dropEvent.clientY = 220;
+        interactions.handleDrop(dropEvent);
 
-        // Both landing (scaleY) and flash (accent outline) classes applied to the landed element.
-        expect(landedEl.classList.add).toHaveBeenCalledWith('sp-drop-landing');
+        // FLIP path took: fly-in class + flash, NOT scaleY landing.
+        expect(landedEl.classList.add).toHaveBeenCalledWith('sp-drop-flying');
         expect(landedEl.classList.add).toHaveBeenCalledWith('sp-drop-landed');
-        // animationend listener attached so the helper can self-cleanup when CSS animation completes.
+        expect(landedEl.classList.add).not.toHaveBeenCalledWith('sp-drop-landing');
+
+        // FLIP transform sequence: first translate(60px, 20px), then cleared ''.
+        expect(transformWrites).toEqual(['translate(60px, 20px)', '']);
+        expect(opacityWrites).toEqual(['0.85', '']);
+
+        // animationend listener attached for cleanup.
         expect(landedEl.addEventListener).toHaveBeenCalledWith('animationend', expect.any(Function));
+    });
+
+    it('uses scaleY landing (no fly-in) for multi-source drops', () => {
+        const state = { groups: [], ungrouped: ['source-1', 'source-2', 'source-3'] };
+        const saveState = jest.fn();
+        const render = jest.fn();
+        const sourcesByKey = new Map([
+            ['source-1', { key: 'source-1' }],
+            ['source-2', { key: 'source-2' }],
+            ['source-3', { key: 'source-3' }]
+        ]);
+        const landedA = { classList: createClassList(['source-item']), addEventListener: jest.fn(), style: {} };
+        const landedB = { classList: createClassList(['source-item']), addEventListener: jest.fn(), style: {} };
+        const sourcesListEl = {
+            id: 'sources-list',
+            querySelector: jest.fn((selector) => {
+                if (selector === '[data-source-key="source-1"]') return landedA;
+                if (selector === '[data-source-key="source-2"]') return landedB;
+                return null;
+            })
+        };
+        const shadowRoot = {
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => []),
+            getElementById: jest.fn((id) => (id === 'sources-list' ? sourcesListEl : null))
+        };
+        const dropTarget = {
+            dataset: { sourceKey: 'source-3' },
+            classList: createClassList(['source-item'])
+        };
+        const session = {
+            draggedKeys: new Set(['source-1', 'source-2']),
+            currentIntent: {
+                kind: 'after-source',
+                targetGroup: null,
+                targetList: state.ungrouped,
+                insertIndex: 3,
+                targetGroupId: null,
+                slotKey: 'source-3'
+            },
+            shiftedItems: new Map()
+        };
+        const runtime = { dragReflowSession: session, activeDragContext: { kind: 'source-multi', keys: ['source-1', 'source-2'] } };
+        const dragReflow = makeDragReflowMock();
+
+        const interactions = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getSourcesByKey: () => sourcesByKey,
+            getPendingBatchKeys: () => new Set(),
+            getParentMap: () => new Map(),
+            getShadowRoot: () => shadowRoot,
+            saveState,
+            render,
+            dragMulti: createContentDragMulti({}),
+            dragReflow,
+            buildParentMap: jest.fn(),
+            showToast: jest.fn(),
+            getMessage: (k, args) => `${k}:${(args || []).join(',')}`
+        });
+
+        const dropEvent = createDropEvent({
+            dropTarget,
+            sourceKeysJson: JSON.stringify(['source-1', 'source-2'])
+        });
+        dropEvent.clientX = 160;
+        dropEvent.clientY = 220;
+        interactions.handleDrop(dropEvent);
+
+        // Both landed elements get scaleY landing + flash, no fly-in.
+        expect(landedA.classList.add).toHaveBeenCalledWith('sp-drop-landing');
+        expect(landedA.classList.add).toHaveBeenCalledWith('sp-drop-landed');
+        expect(landedA.classList.add).not.toHaveBeenCalledWith('sp-drop-flying');
+        expect(landedB.classList.add).toHaveBeenCalledWith('sp-drop-landing');
+        expect(landedB.classList.add).toHaveBeenCalledWith('sp-drop-landed');
     });
 
     it('clears reflow and unfolds dragged items on an invalid drop (no DOM mutation)', () => {
