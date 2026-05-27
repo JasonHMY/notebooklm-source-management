@@ -1669,7 +1669,13 @@ describe('handleDragStart reflow session + unified ghost', () => {
         const pendingBatchKeys = new Set();
         const sourceRow = createSourceRow('A');
         const dataTransfer = createDataTransfer();
-        const ghostNode = { tagName: 'DIV' };
+        // Mock the ghost as a single-mode ghost (has .sp-drag-ghost-single class) so
+        // the production code's shadow-padding correction picks the single-mode values
+        // (24 left, 16 top from box-shadow: 0 8px 24px).
+        const ghostNode = {
+            tagName: 'DIV',
+            classList: { contains: (c) => c === 'sp-drag-ghost-single' }
+        };
         const fakeBody = { appendChild: jest.fn(() => ghostNode) };
         const transparentCanvas = { tagName: 'CANVAS', width: 0, height: 0 };
         const fakeDoc = {
@@ -1706,8 +1712,11 @@ describe('handleDragStart reflow session + unified ghost', () => {
             sourceClones: expect.any(Array)
         }));
         expect(dataTransfer.setDragImage).toHaveBeenCalledTimes(1);
-        // Browser natively captures + follows the ghost as drag image; offset falls back to (12, 12).
-        expect(dataTransfer.setDragImage).toHaveBeenCalledWith(ghostNode, 12, 12);
+        // No sourcesListEl in this test (getShadowRoot returns null), so the production
+        // code falls back to default 12 click offset PLUS the single-mode shadow padding
+        // (24 left, 16 top) to compensate for the ghost's box-shadow extending the
+        // captured image bounds.
+        expect(dataTransfer.setDragImage).toHaveBeenCalledWith(ghostNode, 36, 28);
         expect(runtime.activeDragGhost).toBe(ghostNode);
     });
 
@@ -1768,7 +1777,10 @@ describe('handleDragStart reflow session + unified ghost', () => {
             sourceClones: expect.any(Array)
         }));
         expect(dataTransfer.setDragImage).toHaveBeenCalledTimes(1);
-        expect(dataTransfer.setDragImage).toHaveBeenCalledWith(ghostNode, 12, 12);
+        // Multi-source ghost without explicit classList in test → falls back to stack-mode
+        // shadow padding (12 left, 8 top from filter: drop-shadow(0 4px 12px)). No rect lookup
+        // (no clientX/Y), so offset = 12 default click + (12, 8) shadow padding = (24, 20).
+        expect(dataTransfer.setDragImage).toHaveBeenCalledWith(ghostNode, 24, 20);
         expect(runtime.activeDragGhost).toBe(ghostNode);
     });
 
@@ -1856,12 +1868,14 @@ describe('handleDragStart reflow session + unified ghost', () => {
         expect(ghostArgs.sourceClones[1]._clonedFrom).toBe('B');
         expect(ghostArgs.sourceClones[2]._clonedFrom).toBe('C');
 
-        // Offset is clientX - rect.left, clientY - rect.top → (70, 30).
-        expect(dataTransfer.setDragImage).toHaveBeenCalledWith(ghostNode, 70, 30);
+        // Click offset within source row = (70, 30); ghost is plain stub (no classList)
+        // so production code uses stack-mode shadow padding (12 left, 8 top).
+        // Final setDragImage offset = click + shadow padding = (70 + 12, 30 + 8) = (82, 38).
+        expect(dataTransfer.setDragImage).toHaveBeenCalledWith(ghostNode, 82, 38);
         expect(runtime.activeDragGhost).toBe(ghostNode);
     });
 
-    it('falls back to (12, 12) drag-image offset when sources-list lookup fails', () => {
+    it('falls back to drag-image offset when sources-list lookup fails', () => {
         const runtime = {};
         const state = { isBatchMode: false, ungrouped: ['A'], groups: [] };
         const pendingBatchKeys = new Set();
@@ -1900,7 +1914,9 @@ describe('handleDragStart reflow session + unified ghost', () => {
         expect(dragMulti.createMultiDragGhost).toHaveBeenCalledWith(expect.objectContaining({
             sourceClones: []
         }));
-        expect(dataTransfer.setDragImage).toHaveBeenCalledWith(ghostNode, 12, 12);
+        // No source-list, ghost is plain stub (no classList) → stack-mode fallback
+        // padding (12, 8) added to default 12 click offset = (24, 20).
+        expect(dataTransfer.setDragImage).toHaveBeenCalledWith(ghostNode, 24, 20);
     });
 });
 
