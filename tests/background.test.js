@@ -1852,4 +1852,12 @@ describe('mergePreferences deep-merges appearance', () => {
         expect(merged.appearance.hoverSpotlightEnabled).toBe(false);
         expect(merged.developerModeEnabled).toBe(true);
     });
+
+    it('treats non-object appearance as empty object (does not throw)', () => {
+        const merged = mergePreferences(
+            { appearance: { hoverSpotlightEnabled: false } },
+            { appearance: null }
+        );
+        expect(merged.appearance.hoverSpotlightEnabled).toBe(false);
+    });
 });
