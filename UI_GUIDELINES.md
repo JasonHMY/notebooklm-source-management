@@ -633,7 +633,7 @@ State variants:
 - `failed-source`: danger color treatment, disabled affordance
 - `loading-source`: wait cursor, spinner, pulsing title, hidden checkbox
 - `selected-for-batch`: tinted selection + dashed accent border
-- `dragging`: larger scale, accent border, stronger shadow
+- `dragging`: state marker only (cursor: grabbing). The actual visual reaction is `.sp-drag-folded` (height/opacity → 0, fully collapsed). See 13.4.
 
 Rules:
 
@@ -682,7 +682,9 @@ Existing cues:
 - Dragged item folds out of the list (height/opacity → 0) so the layout reads "the item has left its slot"; siblings at and after the pointer translate down to open a slot that follows the cursor
 - A custom source-row clone ghost (`.sp-drag-ghost`) follows the pointer; single drag uses one clone, multi drag stacks up to three clones with a count badge
 - Drop target group gets an accent-tinted header (`.drag-into`)
-- Invalid drop targets surface a red outline on the slot top item (or red group header); the dragged-row scale + lift remain idle so the warning is visible
+- Invalid drop targets surface a red outline on the slot top item (or red group header). Because the dragged row itself is folded out (height/opacity 0), the warning lives on a sibling slot and is never obscured by the dragged item.
+- On successful drop, the landed row gets a 200ms in-place animation + 600ms accent outline flash so the user's eye catches the new location. Single-source uses FLIP fly-in (from cursor to slot); multi-source uses scaleY (per element).
+- On dragend cancel (esc / drop outside), the dragged row smoothly grows back from height 0 to natural over 200ms, paired with sibling translateY clearing — no instant snap.
 - Empty drop zones enlarge slightly and tint on valid target hover
 
 Rules:
@@ -941,7 +943,7 @@ Rules:
 
 ## 13.4 Drag interaction (physical reflow)
 
-Classes: `.sp-drag-folded`, `.sp-drag-unfolding`, `.sp-drop-shift`, `.sp-drag-ghost`, `.sp-drag-ghost-single`, `.sp-drag-ghost-stack`, `.sp-drag-ghost-badge`, `.sp-drop-landing`, `.sp-drop-flying`, `.sp-drop-landed`, `.drag-into`, `.drag-invalid`
+Classes: `.dragging` (state marker), `.sp-drag-folded`, `.sp-drag-unfolding`, `.sp-drop-shift`, `.sp-drag-ghost`, `.sp-drag-ghost-single`, `.sp-drag-ghost-stack`, `.sp-drag-ghost-layer`, `.sp-drag-ghost-badge`, `.sp-drop-landing`, `.sp-drop-flying`, `.sp-drop-landed`, `.drag-into`, `.drag-invalid`
 
 Canonical behavior:
 
@@ -957,16 +959,18 @@ Canonical behavior:
 
 Motion:
 
-- Fold, unfold, and reflow transitions all use `200ms cubic-bezier(0.2, 0, 0, 1)`. This is a deliberate one-off curve for the physical-drag system — do not promote it into the shared motion tokens, and do not pull standard/emphasized easing here.
-- `transform` uses GPU compositing (`will-change: transform` on shifted rows). `height`/`opacity` use the same duration so folding and reflow feel synchronized.
+- **Fold is instant** (no transition on `.sp-drag-folded`): the dragged item leaves layout in one frame so its height collapse doesn't run in parallel with the sibling reflow translateY transition and produce jitter.
+- **Unfold (`.sp-drag-unfolding` on cancel), reflow shift (`.sp-drop-shift`), single-source fly-in (`.sp-drop-flying`), multi-source landing (`.sp-drop-landing`)** all use `200ms cubic-bezier(0.2, 0, 0, 1)`. **Drop landing flash (`.sp-drop-landed`)** uses the same curve at `600ms`. This is a deliberate one-off curve for the physical-drag system — do not promote it into the shared motion tokens (`--sp-ease-standard` etc.) and do not pull standard / emphasized easing here.
+- `transform` uses GPU compositing (`will-change: transform` on `.sp-drop-shift` and `.sp-drop-flying`).
+- `@media (prefers-reduced-motion: reduce)` disables all drag animations + transitions; `setTimeout(800ms)` backstop still removes drop landing classes.
 
 Implementation notes:
 
 - Reflow logic lives in `src/content/content-drag-reflow.js` (`prepareDragSession`, `foldDraggedItems`, `computeReflow`, `applyReflow`, `clearReflow`, `unfoldDraggedItems`). `content-tree-interactions.js` calls these from dragstart / dragover / drop / dragend.
 - Ghost cloning lives in `src/content/content-drag-multi.js` (`cloneSourceItem` / `inlineStylesRecursive`). `createMultiDragGhost({ count, sourceClones, root })` builds the single-vs-stack wrapper + badge from pre-cloned + style-inlined Elements.
 - Insertion position is computed by `computeDropIntent` in `content-tree-interactions.js` as a pure pointer-Y → list → slot mapping against each element's *un-shifted layout top* (`rect.top - extractInlineTranslateY(el)`), so the active reflow shift on a sibling does not feed back into intent detection. The deepest group-container whose un-shifted children-area contains the pointer wins (via parent-map depth), then mid-Y of its direct children selects the slot. Never derive intent from `e.target.closest()` during a drag — the rendered (visual) layout includes transform shifts.
-- `.sp-drag-folded` and `.sp-drop-shift` styles live in `contentStyleText` (Shadow DOM).
-- `.sp-drag-ghost`, `.sp-drag-ghost-single`, `.sp-drag-ghost-stack`, `.sp-drag-ghost-badge` styles live in `globalOverlayStyleText` because the ghost element is appended to `document.body` for the native drag-image capture, and Shadow DOM tokens do not reach it. Resolved light/dark accent values are hardcoded with a `@media (prefers-color-scheme: dark)` override on the badge background.
+- `.dragging`, `.sp-drag-folded`, `.sp-drag-unfolding`, `.sp-drop-shift`, `.sp-drop-landing`, `.sp-drop-flying`, `.sp-drop-landed`, `.drag-into`, `.drag-invalid` styles all live in `contentStyleText` (Shadow DOM scope).
+- `.sp-drag-ghost`, `.sp-drag-ghost-single`, `.sp-drag-ghost-stack`, `.sp-drag-ghost-layer`, `.sp-drag-ghost-badge` styles live in `globalOverlayStyleText` because the ghost element is appended to `document.body` for the native drag-image capture, and Shadow DOM tokens do not reach it. Resolved light/dark accent values are hardcoded with a `@media (prefers-color-scheme: dark)` override on the badge background. `.sp-drag-ghost-layer` is an inner wrapper around each cloned source-item — it carries the stack/single transform + drop-shadow so the clone's inline `cssText` (written by `inlineStylesRecursive` to resolve Shadow DOM tokens outside the shadow tree) doesn't override the positional transforms.
 
 Rules:
 
@@ -974,7 +978,7 @@ Rules:
 - Do not introduce a new ghost variant for other drag flows without a clear UX reason; reuse `.sp-drag-ghost`.
 - Do not animate the ghost element itself (it lives ~200ms; transitions would conflict with the browser's drag-image capture).
 - Do not add interactive elements to the ghost (it is `pointer-events: none` and `aria-hidden`).
-- Do not change the 200ms / `cubic-bezier(0.2, 0, 0, 1)` timing in isolation — fold, unfold, and reflow must share the same duration to stay synchronized.
+- Do not change the 200ms / `cubic-bezier(0.2, 0, 0, 1)` timing in isolation. Unfold, reflow shift, fly-in, and landing scaleY must all share that 200ms beat (and flash uses the same easing at 600ms) so the system feels coordinated. Fold stays instant on purpose — adding a transition there re-introduces dragged-item collapse + sibling reflow parallel-animation jitter.
 
 ## 14. Batch Mode
 
