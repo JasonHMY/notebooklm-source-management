@@ -960,6 +960,22 @@
                 box-shadow: none;
                 z-index: 1;
             }
+            /* Same drag-active window: kill the spotlight ::before radial-gradient glow
+               on the stale native :hover target. Without this, the blue spotlight halo
+               stays painted on the originally-cursor'd row after drop, separate from the
+               main bg/transform/shadow visuals we already suppress above. The companion
+               .sp-pseudo-hover::before rule below paints the glow on the correct row. */
+            #sources-list.sp-drag-active .source-item.sp-spotlight-surface:hover::before,
+            #sources-list.sp-drag-active .group-header.sp-spotlight-surface:hover::before {
+                opacity: 0;
+            }
+            /* JS-managed pseudo-hover spotlight: mirrors :hover::before so the cursor's
+               actual row shows the radial-gradient glow during the post-drop hover-stuck
+               window, before the user's first real mousemove restores native :hover. */
+            .source-item.sp-spotlight-surface.sp-pseudo-hover::before,
+            .group-header.sp-spotlight-surface.sp-pseudo-hover::before {
+                opacity: 1;
+            }
             .source-item.sp-spotlight-surface:hover::before,
             .source-item.sp-spotlight-surface:focus-within::before,
             .source-item.sp-spotlight-surface.is-spotlight-active::before,
