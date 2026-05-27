@@ -1457,35 +1457,16 @@
                         root
                     });
                     if (ghost && typeof e.dataTransfer.setDragImage === 'function') {
-                        // setDragImage offset coordinates are relative to the captured image's
-                        // top-left. The capture includes any rendered pixels (including
-                        // box-shadow / filter drop-shadow), so the source-item CONTENT's origin
-                        // sits OFFSET inside the image by however far the ghost's shadow
-                        // extends to the left/top. Without this compensation the cursor appears
-                        // to be in the shadow region and the ghost source-item shows up
-                        // visually offset to the right/below cursor.
-                        //
-                        // For single-mode ghost (.sp-drag-ghost-single), the layer rule has
-                        // `box-shadow: 0 8px 24px` → extends 24px to left, 24-8=16px up
-                        // (offsetY positive shrinks top extension).
-                        // For stack-mode ghost, layers use `filter: drop-shadow(0 4px 12px)`
-                        // → extends 12px left, 12-4=8px up.
-                        const isSingleMode = !!(ghost.classList && typeof ghost.classList.contains === 'function'
-                            && ghost.classList.contains('sp-drag-ghost-single'));
-                        const GHOST_SHADOW_LEFT_PAD = isSingleMode ? 24 : 12;
-                        const GHOST_SHADOW_TOP_PAD = isSingleMode ? 16 : 8;
-                        let offsetX = 12 + GHOST_SHADOW_LEFT_PAD;
-                        let offsetY = 12 + GHOST_SHADOW_TOP_PAD;
+                        let offsetX = 12;
+                        let offsetY = 12;
                         if (sourcesListEl && typeof sourcesListEl.querySelector === 'function') {
                             const originEl = sourcesListEl.querySelector(`[data-source-key="${cssEscape(key)}"]`);
                             const rect = originEl && typeof originEl.getBoundingClientRect === 'function'
                                 ? originEl.getBoundingClientRect()
                                 : null;
                             if (rect && typeof e.clientX === 'number' && typeof e.clientY === 'number') {
-                                const clickX = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
-                                const clickY = Math.max(0, Math.min(rect.height, e.clientY - rect.top));
-                                offsetX = GHOST_SHADOW_LEFT_PAD + clickX;
-                                offsetY = GHOST_SHADOW_TOP_PAD + clickY;
+                                offsetX = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
+                                offsetY = Math.max(0, Math.min(rect.height, e.clientY - rect.top));
                             }
                         }
                         try {
