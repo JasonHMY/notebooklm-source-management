@@ -1656,6 +1656,52 @@
                         siblingKeys,
                         rootElement: sourceListEl
                     });
+                    // Cross-host shift extension: when host is a group's children, the
+                    // dragged item's fold shrinks the group container's layout height,
+                    // so root-level siblings below it shift UP. Meanwhile the group's
+                    // own children get translateY(+slotHeight) from the reflow above —
+                    // they visually overflow past the group container's edge and
+                    // overlap with the next group's header. To keep the list visually
+                    // static below the cursor, also shift every "subsequent sibling of
+                    // host's ancestor chain" (i.e. each level's siblings after the host
+                    // path, walking up until we reach #sources-list). This handles
+                    // nested groups too.
+                    if (intent.targetGroup && intent.hostGroupContainerEl
+                        && runtime.dragReflowSession && sourceListEl) {
+                        const _refSession = runtime.dragReflowSession;
+                        const _slotHeight = _refSession.totalDraggedHeight;
+                        if (typeof _slotHeight === 'number' && _slotHeight > 0) {
+                            // Walk up the host's DOM ancestor chain, shifting each level's
+                            // later DOM siblings. host group-container → .group-children
+                            // (skip) → ancestor group-container → ... → #sources-list (stop).
+                            let _cursorEl = intent.hostGroupContainerEl;
+                            while (_cursorEl && _cursorEl !== sourceListEl) {
+                                let _sibling = _cursorEl.nextElementSibling;
+                                while (_sibling) {
+                                    const _isSrc = _sibling.classList
+                                        && _sibling.classList.contains('source-item');
+                                    const _isGrp = _sibling.classList
+                                        && _sibling.classList.contains('group-container');
+                                    if (_isSrc || _isGrp) {
+                                        const _key = _isSrc
+                                            ? (_sibling.dataset && _sibling.dataset.sourceKey)
+                                            : (_sibling.dataset && _sibling.dataset.groupId);
+                                        if (_key && !_refSession.draggedKeys.has(_key) && !shifts.has(_key)) {
+                                            shifts.set(_key, _slotHeight);
+                                        }
+                                    }
+                                    _sibling = _sibling.nextElementSibling;
+                                }
+                                // Climb one layout level. host's parent is .group-children
+                                // (if nested) or #sources-list (if top-level). When parent
+                                // is #sources-list we've already shifted top-level siblings.
+                                const _parentEl = _cursorEl.parentElement;
+                                if (!_parentEl || _parentEl === sourceListEl) break;
+                                // parent is .group-children → climb to its enclosing .group-container.
+                                _cursorEl = _parentEl.parentElement;
+                            }
+                        }
+                    }
                     if (typeof dragReflow.applyReflow === 'function') {
                         dragReflow.applyReflow({
                             session: runtime.dragReflowSession,
