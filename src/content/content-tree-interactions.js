@@ -217,7 +217,7 @@
         //
         // Un-shifted bounds means `rect.top - extractInlineTranslateY(el)`: subtract any
         // active reflow shift so the detection is stable while siblings are translateY'd.
-        function computeDropIntent({ clientY, rootElement, state, groupsById, parentMap, activeDragContext }) {
+        function computeDropIntent({ clientX, clientY, rootElement, state, groupsById, parentMap, activeDragContext }) {
             if (typeof clientY !== 'number' || !rootElement || typeof rootElement.querySelectorAll !== 'function') {
                 return null;
             }
@@ -260,28 +260,44 @@
                 const rect = el.getBoundingClientRect();
                 if (!rect || typeof rect.top !== 'number' || typeof rect.height !== 'number') return null;
                 const shift = extractInlineTranslateY(el);
-                return { top: rect.top - shift, bottom: rect.bottom - shift, height: rect.height };
+                return {
+                    top: rect.top - shift,
+                    bottom: rect.bottom - shift,
+                    height: rect.height,
+                    left: typeof rect.left === 'number' ? rect.left : 0,
+                    width: typeof rect.width === 'number' ? rect.width : 0
+                };
             };
 
-            // Pick deepest container that contains pointer. For TOP-LEVEL containers we
-            // reserve an 8px "edge zone" at top and bottom of each container — cursor
-            // in this zone is treated as "in the root-level gap between containers", not
-            // inside the container. Without this, two adjacent top-level groups have
-            // virtually no Y-gap between their bounding rects (one ends where the next
-            // begins), so the user can never put the cursor "between" them — it always
-            // resolves to one or the other, and 600ms hover triggers an unwanted
-            // auto-expand. The edge zone gives a generous root-level corridor without
-            // making drops INTO groups noticeably harder (drop targets near the very top
-            // or very bottom of a group are unusual). Nested groups keep the full rect
-            // because their visual "gap" already lives inside the parent's children-area
-            // which has its own handling.
-            const EDGE_ZONE_PX = 8;
+            // Pick deepest container that contains pointer.
+            //
+            // For TOP-LEVEL group containers, apply a left/right X-split rule:
+            // - cursor in the LEFT HALF (X < container.left + container.width / 2) is
+            //   treated as OUTSIDE the container — user is signalling "this folder should
+            //   sibling-reorder, I'm not trying to enter it". chosenContainer = null →
+            //   root-level slot detection → source goes to ungrouped, group is reordered.
+            // - cursor in the RIGHT HALF (X >= midX) is INSIDE — user wants into-group /
+            //   inside-children behavior. hover-expand timer arms normally.
+            //
+            // Rationale: top-level groups span the full panel width (~350-450px), so a
+            // left/right split gives the user a generous physical corridor on the left to
+            // express "between groups" / "at root level". The previous attempt (8px edge
+            // zones at top/bottom of each container) was too small — most of the group's
+            // Y-range was still "inside" and the user kept triggering hover-expand by
+            // accident. X-split makes the active "outside zone" cover half the visual
+            // area regardless of cursor Y position within the group.
+            //
+            // Nested groups keep the full-rect rule (no X-split). They sit inside their
+            // parent's already-indented children-area where additional left-half carving
+            // would conflict with the parent's gutter. Cursor inside a nested rect is
+            // unambiguously "in the nested group" by design.
             const _isTopLevelGroup = (gid) => {
                 if (!gid) return false;
                 if (!parentMap || typeof parentMap.get !== 'function') return true;
                 const p = parentMap.get(gid);
                 return !p;
             };
+            const _hasClientX = typeof clientX === 'number';
             let chosenContainer = null;
             let chosenDepth = -1;
             for (const container of containerList) {
@@ -289,10 +305,12 @@
                 if (container.classList && container.classList.contains('sp-drag-folded')) continue;
                 const r = unshiftedRect(container);
                 if (!r) continue;
+                if (clientY < r.top || clientY >= r.bottom) continue;
                 const _isTopLevel = _isTopLevelGroup(container.dataset.groupId);
-                const _top = _isTopLevel ? r.top + EDGE_ZONE_PX : r.top;
-                const _bottom = _isTopLevel ? r.bottom - EDGE_ZONE_PX : r.bottom;
-                if (clientY < _top || clientY >= _bottom) continue;
+                if (_isTopLevel && _hasClientX && r.width > 0) {
+                    const _midX = r.left + r.width / 2;
+                    if (clientX < _midX) continue; // left half → user wants sibling-reorder
+                }
                 const d = getDepth(container.dataset.groupId);
                 if (d > chosenDepth) {
                     chosenContainer = container;
@@ -1702,6 +1720,7 @@
             e.preventDefault();
             const sourceListEl = getSourceListContainer();
             const intent = computeDropIntent({
+                clientX: e.clientX,
                 clientY: e.clientY,
                 rootElement: sourceListEl,
                 state: getState(),
@@ -2198,6 +2217,7 @@
                     : null;
                 if (!intent) {
                     intent = computeDropIntent({
+                        clientX: e.clientX,
                         clientY: e.clientY,
                         rootElement: getSourceListContainer(),
                         state,
