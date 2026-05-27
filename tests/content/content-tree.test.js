@@ -3278,6 +3278,64 @@ describe('handleDrop reflow cleanup', () => {
         expect(runtime.dragReflowSession).toBeNull();
     });
 
+    it('applies drop landing + flash classes to the landed element after a successful drop', () => {
+        const state = { groups: [], ungrouped: ['source-1', 'source-2'] };
+        const saveState = jest.fn();
+        const render = jest.fn();
+        // sourcesListEl needs a working querySelector so applyDropLandingAndFlash can find the landed element.
+        const landedEl = { classList: createClassList(['source-item']), addEventListener: jest.fn() };
+        const sourcesListEl = {
+            id: 'sources-list',
+            querySelector: jest.fn((selector) => {
+                if (selector === '[data-source-key="source-1"]') return landedEl;
+                return null;
+            })
+        };
+        const shadowRoot = {
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => []),
+            getElementById: jest.fn((id) => (id === 'sources-list' ? sourcesListEl : null))
+        };
+        const dropTarget = {
+            dataset: { sourceKey: 'source-2' },
+            classList: createClassList(['source-item'])
+        };
+        const session = {
+            draggedKeys: new Set(['source-1']),
+            currentIntent: {
+                kind: 'after-source',
+                targetGroup: null,
+                targetList: state.ungrouped,
+                insertIndex: 2,
+                targetGroupId: null,
+                slotKey: 'source-2'
+            },
+            shiftedItems: new Map()
+        };
+        const runtime = { dragReflowSession: session };
+        const dragReflow = makeDragReflowMock();
+
+        const interactions = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getParentMap: () => new Map(),
+            getShadowRoot: () => shadowRoot,
+            saveState,
+            render,
+            dragMulti: createContentDragMulti({}),
+            dragReflow
+        });
+
+        interactions.handleDrop(createDropEvent({ dropTarget, sourceKey: 'source-1' }));
+
+        // Both landing (scaleY) and flash (accent outline) classes applied to the landed element.
+        expect(landedEl.classList.add).toHaveBeenCalledWith('sp-drop-landing');
+        expect(landedEl.classList.add).toHaveBeenCalledWith('sp-drop-landed');
+        // animationend listener attached so the helper can self-cleanup when CSS animation completes.
+        expect(landedEl.addEventListener).toHaveBeenCalledWith('animationend', expect.any(Function));
+    });
+
     it('clears reflow and unfolds dragged items on an invalid drop (no DOM mutation)', () => {
         // Invalid: dropping a group into its own descendant — handleDrop returns early without mutation.
         const childGroup = { id: 'child', children: [] };

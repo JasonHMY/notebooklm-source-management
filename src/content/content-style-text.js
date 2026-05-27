@@ -2575,6 +2575,35 @@
                 will-change: transform;
             }
 
+            /* Drop landing: dropped items animate from scaleY(0) + opacity 0 to natural,
+               giving a "settling into place" feel instead of an instant snap. transform-origin
+               is top so the expansion grows downward into the slot the sibling reflow opened. */
+            .sp-drop-landing {
+                animation: sp-drop-landing-anim 200ms cubic-bezier(0.2, 0, 0, 1) both;
+                transform-origin: top;
+            }
+            @keyframes sp-drop-landing-anim {
+                from { transform: scaleY(0); opacity: 0; }
+                to   { transform: scaleY(1); opacity: 1; }
+            }
+
+            /* Drop landing flash: 600ms accent outline so the user's eye catches the new
+               position. Runs concurrently with the landing animation. */
+            .sp-drop-landed {
+                animation: sp-drop-landed-flash 600ms ease-out both;
+            }
+            @keyframes sp-drop-landed-flash {
+                0%   { box-shadow: 0 0 0 2px var(--sp-accent); }
+                100% { box-shadow: 0 0 0 0 transparent; }
+            }
+
+            @media (prefers-reduced-motion: reduce) {
+                .sp-drop-landing,
+                .sp-drop-landed {
+                    animation: none !important;
+                }
+            }
+
             .group-container.drag-into > .group-header {
                 background-color: var(--sp-drag-into-bg);
                 border-radius: 12px;

@@ -2022,6 +2022,7 @@
                             render();
                             showToast(getMessage('ui_batch_moved_sources_toast', [String(result.moved)]));
                             disposeHoverOpenedGroupsAfterDrop(intent, augmentedIntent);
+                            applyDropLandingAndFlash(Array.isArray(keys) ? keys : []);
                         }
                         clearDragFeedback();
                         return;
@@ -2086,8 +2087,49 @@
                 saveState({ immediate: true, critical: true });
                 disposeHoverOpenedGroupsAfterDrop(intent, augmentedIntent);
                 clearDragFeedback();
+                applyDropLandingAndFlash(sourceKey ? [sourceKey] : (draggedGroupId ? [draggedGroupId] : []));
             } finally {
                 finalizeReflow();
+            }
+        }
+
+        // Drop landing visual feedback: after render() places the dropped items in their
+        // new DOM positions, briefly animate them in (scaleY 0→1, opacity 0→1 over 200ms)
+        // and flash an accent outline (600ms fade) so the user's eye catches the new
+        // location. CSS handles the animation; this helper only manages the classes +
+        // cleanup. Safe no-op when reduced-motion is on (CSS suppresses animation; the
+        // setTimeout backstop still removes the classes).
+        function applyDropLandingAndFlash(landedKeys) {
+            if (!Array.isArray(landedKeys) || landedKeys.length === 0) return;
+            const rootElement = getSourceListContainer();
+            if (!rootElement || typeof rootElement.querySelector !== 'function') return;
+            const setTimeoutFn = getSetTimeout();
+            for (const key of landedKeys) {
+                if (typeof key !== 'string' || !key) continue;
+                const safe = key.replace(/"/g, '\\"');
+                const el = rootElement.querySelector(`[data-source-key="${safe}"]`)
+                    || rootElement.querySelector(`[data-group-id="${safe}"]`);
+                if (!el || !el.classList || typeof el.classList.add !== 'function') continue;
+                el.classList.add('sp-drop-landing');
+                el.classList.add('sp-drop-landed');
+                const cleanup = () => {
+                    if (el.classList && typeof el.classList.remove === 'function') {
+                        el.classList.remove('sp-drop-landing');
+                        el.classList.remove('sp-drop-landed');
+                    }
+                };
+                const onEnd = (ev) => {
+                    if (ev && ev.animationName === 'sp-drop-landed-flash') {
+                        cleanup();
+                        if (typeof el.removeEventListener === 'function') {
+                            el.removeEventListener('animationend', onEnd);
+                        }
+                    }
+                };
+                if (typeof el.addEventListener === 'function') {
+                    el.addEventListener('animationend', onEnd);
+                }
+                if (typeof setTimeoutFn === 'function') setTimeoutFn(cleanup, 800);
             }
         }
 
