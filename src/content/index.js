@@ -1098,7 +1098,6 @@
         handleDrop,
         handleDragEnd,
         clearDragFeedback,
-        getDropIntent,
         getSourceTreePosition,
         getGroupTreePosition,
         isNoopTreeMove
@@ -4563,7 +4562,6 @@
             _getSearchHighlightTermsForTest: getSearchHighlightTerms,
             _collectSearchExpandedGroupIdsForTest: collectSearchExpandedGroupIds,
             _clearDragFeedbackForTest: clearDragFeedback,
-            _getDropIntentForTest: getDropIntent,
             _getSourceTreePositionForTest: getSourceTreePosition,
             _getGroupTreePositionForTest: getGroupTreePosition,
             _isNoopTreeMoveForTest: isNoopTreeMove,

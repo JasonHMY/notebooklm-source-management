@@ -11,6 +11,7 @@
 - **拖拽 ghost 简化 (Drag Ghost Simplification)**: `.sp-drag-ghost` 移除 `drag_indicator` 图标，仅显示拖动数量数字；单源拖拽（count=1）也启用自定义 ghost，与多源视觉统一。
 - **拖拽 Ghost = Source 行克隆 (Drag Ghost = Source-Item Clone)**: ghost 从“数字 pill”改为真实 source-item 行的 1:1 视觉克隆（含 icon / 标题 / 标签），整个 ghost scale 0.95 模拟“抓起”手感。多源拖拽时堆叠前 3 项克隆（错位 + 旋转 + 阴影），右上角圆形 badge 显示总数 N。setDragImage offset 基于鼠标在原行内的实际位置，让 ghost 在指针下自然对齐。
 - **无效拖放视觉 (Invalid Drop Visual)**: 非法 drop 的红色提示从被悬停整项的 box-shadow 改为目标空槽顶部项的 `.drag-invalid` outline 描边，避免被行 `:hover` 阴影覆盖；分组 into-group 仍保留 `.group-container.drag-invalid > .group-header` 红色头部高亮。
+- **拖拽插入位置改为 slot-based 几何检测 (Slot-Based Drop-Intent Detection)**: 用 pointer-Y → list → slot 的几何映射替代 closest()-based dropTarget 识别，根治 reflow shift 反馈循环导致的 sibling 抽搐，并修复嵌套 group 场景下 group-container 覆盖 source-item 导致空隙不打开的 regression。新增 `computeDropIntent` helper（一次性查询 root，按 parentMap depth 选最深 group-container，所有 rect.top 都减去 `extractInlineTranslateY` 得到未偏移布局位置）；删除旧的 `getDropIntent` / `findStableDropTarget` / `computeDropPositionStable` / `computeDropPosition` / `normalizeIntentKind` 与 deadzone hysteresis state；`extractInlineTranslateY` 移到 `content-drag-reflow.js` 导出，便于跨模块共用。`computeIsInvalidDrop` 的 source-single 分支补齐 top-level before-group / after-group 拒绝，与 source-multi 对称，避免单源 drop 到根级 group 间隙时插入索引落空。
 
 ### Removed
 - **蓝条插入指示 (Blue Bar Insertion Indicator)**: 删除 `.drag-over-top` / `.drag-over-bottom` 蓝条 CSS 规则与对应 JS add/remove 逻辑；让位空槽本身即为插入位置指示。

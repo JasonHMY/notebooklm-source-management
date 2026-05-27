@@ -122,6 +122,17 @@
             session.shiftedItems.clear();
         }
 
+        // Extract translateY pixel offset from an inline `transform: translateY(Npx)` value.
+        // Returns 0 when absent or unparseable. Used by drop-intent detection so an active
+        // reflow shift on a sibling does not influence which slot the pointer is mapped to.
+        function extractInlineTranslateY(el) {
+            if (!el || !el.style) return 0;
+            const t = el.style.transform || '';
+            if (!t) return 0;
+            const m = t.match(/translateY\((-?\d+(?:\.\d+)?)px\)/);
+            return m ? parseFloat(m[1]) : 0;
+        }
+
         return {
             TRANSITION_MS: DEFAULT_TRANSITION_MS,
             createDragSession,
@@ -130,7 +141,8 @@
             unfoldDraggedItems,
             computeReflow,
             applyReflow,
-            clearReflow
+            clearReflow,
+            extractInlineTranslateY
         };
     }
 

@@ -14,6 +14,179 @@ const {
     createTreeEl
 } = require('../helpers/content-test-harness');
 
+// Shared mock factory for the #sources-list element and its shadow-root host.
+// Supports the queries that computeDropIntent makes:
+//   - rootElement.querySelectorAll('.group-container')   → all containers recursively
+//   - rootElement.querySelectorAll(':scope > .group-container, :scope > .source-item') → root direct children
+//   - rootElement.querySelector(`[data-source-key="..."]`) → element lookup for highlight
+//   - rootElement.querySelectorAll('.drag-into, .drag-invalid') → cleanup sweep
+//   - container.querySelector('.group-header'/.group-children) → bounds detection
+//   - container's `.group-children`.querySelectorAll(':scope > .group-container, :scope > .source-item')
+//     → slot scan inside a group
+//
+// items: top-level entries; each is:
+//   { kind: 'source', key, top, height? }
+//   { kind: 'group', id, top, headerHeight?, childrenStart?, childrenEnd?, children? }
+//
+// `top` is viewport-Y of the element's top. For groups, `childrenStart` / `childrenEnd`
+// default to `top + headerHeight` / `childrenStart` respectively (empty children band).
+function makeMockClassList(initial = []) {
+    const classes = new Set(initial);
+    return {
+        add: jest.fn((...cs) => cs.forEach((c) => classes.add(c))),
+        remove: jest.fn((...cs) => cs.forEach((c) => classes.delete(c))),
+        contains: (c) => classes.has(c),
+        has: (c) => classes.has(c)
+    };
+}
+function makeMockShadowList({ items = [], listRect = { top: 0, bottom: 1000, height: 1000 } } = {}) {
+    const elementMap = new Map();
+    const rootChildren = [];
+    const allContainers = [];
+
+    function buildSource(item) {
+        const height = typeof item.height === 'number' ? item.height : 40;
+        const top = item.top;
+        const bottom = top + height;
+        const el = {
+            classList: makeMockClassList(['source-item']),
+            dataset: { sourceKey: item.key },
+            style: typeof item.transform === 'string' ? { transform: item.transform } : {},
+            rect: { top, bottom, height, left: 0, right: 200, width: 200 },
+            getBoundingClientRect() { return this.rect; }
+        };
+        elementMap.set('source:' + item.key, el);
+        return el;
+    }
+
+    function buildGroup(item) {
+        const headerHeight = typeof item.headerHeight === 'number' ? item.headerHeight : 32;
+        const top = item.top;
+        const childrenStart = typeof item.childrenStart === 'number' ? item.childrenStart : (top + headerHeight);
+        const childrenEnd = typeof item.childrenEnd === 'number' ? item.childrenEnd : childrenStart;
+        const bottom = childrenEnd;
+
+        const childElements = [];
+        (Array.isArray(item.children) ? item.children : []).forEach((child) => {
+            const childEl = build(child);
+            if (childEl) childElements.push(childEl);
+        });
+
+        const headerEl = {
+            classList: makeMockClassList(['group-header']),
+            style: {},
+            rect: { top, bottom: childrenStart, height: childrenStart - top, left: 0, right: 200, width: 200 },
+            getBoundingClientRect() { return this.rect; }
+        };
+        const childrenEl = {
+            classList: makeMockClassList(['group-children']),
+            style: {},
+            rect: { top: childrenStart, bottom: childrenEnd, height: childrenEnd - childrenStart, left: 0, right: 200, width: 200 },
+            getBoundingClientRect() { return this.rect; },
+            querySelectorAll(selector) {
+                if (selector === ':scope > .group-container, :scope > .source-item') {
+                    return childElements;
+                }
+                return [];
+            }
+        };
+        const container = {
+            classList: makeMockClassList(['group-container']),
+            dataset: { groupId: item.id },
+            style: typeof item.transform === 'string' ? { transform: item.transform } : {},
+            rect: { top, bottom, height: bottom - top, left: 0, right: 200, width: 200 },
+            getBoundingClientRect() { return this.rect; },
+            querySelector(selector) {
+                if (selector === '.group-header') return headerEl;
+                if (selector === '.group-children') return childrenEl;
+                return null;
+            },
+            querySelectorAll() { return []; },
+            _children: childElements
+        };
+        elementMap.set('group:' + item.id, container);
+        allContainers.push(container);
+        return container;
+    }
+
+    function build(item) {
+        if (!item) return null;
+        if (item.kind === 'source') return buildSource(item);
+        if (item.kind === 'group') return buildGroup(item);
+        return null;
+    }
+
+    items.forEach((item) => {
+        const el = build(item);
+        if (el) rootChildren.push(el);
+    });
+
+    function recurseContainers(els) {
+        els.forEach((el) => {
+            if (el.classList && el.classList.contains('group-container')) {
+                if (el._children) recurseContainers(el._children);
+            }
+        });
+    }
+    recurseContainers(rootChildren);
+
+    const sourcesListEl = {
+        id: 'sources-list',
+        getBoundingClientRect: () => ({
+            top: listRect.top,
+            bottom: listRect.bottom,
+            height: listRect.height,
+            left: 0,
+            right: 200,
+            width: 200
+        }),
+        querySelector(selector) {
+            let m = selector.match(/\[data-source-key="([^"]+)"\]/);
+            if (m) return elementMap.get('source:' + m[1]) || null;
+            m = selector.match(/\[data-group-id="([^"]+)"\]/);
+            if (m) return elementMap.get('group:' + m[1]) || null;
+            return null;
+        },
+        querySelectorAll(selector) {
+            if (selector === '.group-container') return allContainers.slice();
+            if (selector === ':scope > .group-container, :scope > .source-item') return rootChildren.slice();
+            if (selector === '.drag-into, .drag-invalid') {
+                const out = [];
+                allContainers.forEach((c) => {
+                    if (c.classList.has('drag-into') || c.classList.has('drag-invalid')) out.push(c);
+                });
+                rootChildren.forEach((c) => {
+                    if (c.classList && c.classList.has && (c.classList.has('drag-into') || c.classList.has('drag-invalid'))) {
+                        if (!out.includes(c)) out.push(c);
+                    }
+                });
+                return out;
+            }
+            if (selector === '.drag-invalid') {
+                const out = [];
+                allContainers.forEach((c) => {
+                    if (c.classList.has('drag-invalid')) out.push(c);
+                });
+                rootChildren.forEach((c) => {
+                    if (c.classList && c.classList.has && c.classList.has('drag-invalid')) {
+                        if (!out.includes(c)) out.push(c);
+                    }
+                });
+                return out;
+            }
+            return [];
+        }
+    };
+
+    const shadowRoot = {
+        getElementById: (id) => (id === 'sources-list' ? sourcesListEl : null),
+        querySelector: () => null,
+        querySelectorAll: () => []
+    };
+
+    return { sourcesListEl, shadowRoot, elementMap, rootChildren, allContainers };
+}
+
 describe('areAllAncestorsEnabled', () => {
     let areAllAncestorsEnabled, parentMap, groupsById;
 
@@ -288,7 +461,15 @@ describe('drag and drop ordering guards', () => {
         const runtime = {
             dragReflowSession: {
                 draggedKeys: new Set(['source-1']),
-                currentIntent: { kind: 'before-source' }
+                currentIntent: {
+                    kind: 'before-source',
+                    targetGroup: null,
+                    targetList: state.ungrouped,
+                    insertIndex: 0,
+                    targetGroupId: null,
+                    slotKey: 'source-1'
+                },
+                shiftedItems: new Map()
             }
         };
         const interactions = createContentTreeInteractions({
@@ -319,7 +500,15 @@ describe('drag and drop ordering guards', () => {
         const runtime = {
             dragReflowSession: {
                 draggedKeys: new Set(['source-1']),
-                currentIntent: { kind: 'after-source' }
+                currentIntent: {
+                    kind: 'after-source',
+                    targetGroup: null,
+                    targetList: state.ungrouped,
+                    insertIndex: 2,
+                    targetGroupId: null,
+                    slotKey: 'source-2'
+                },
+                shiftedItems: new Map()
             }
         };
         const interactions = createContentTreeInteractions({
@@ -718,6 +907,15 @@ describe('drop routes multi vs single source', () => {
 
     afterEach(teardownGlobalMocks);
 
+    function makeShadowRootWithList() {
+        const list = { id: 'sources-list', querySelector: () => null, querySelectorAll: () => [] };
+        return {
+            getElementById: (id) => (id === 'sources-list' ? list : null),
+            querySelector: () => null,
+            querySelectorAll: () => []
+        };
+    }
+
     it('routes multi-key drops through applyMultiSourceDrop, exits batch mode, saves, renders, and toasts', () => {
         const group = { id: 'g1', children: [] };
         const state = { isBatchMode: true, ungrouped: ['A', 'B', 'C', 'D'], groups: ['g1'] };
@@ -738,13 +936,28 @@ describe('drop routes multi vs single source', () => {
             dataset: { groupId: 'g1' },
             classList: createClassList(['group-container', 'drag-into'])
         };
+        const runtime = {
+            dragReflowSession: {
+                draggedKeys: new Set(['A', 'B', 'C']),
+                currentIntent: {
+                    kind: 'into-group',
+                    targetGroup: group,
+                    targetList: group.children,
+                    insertIndex: -1,
+                    targetGroupId: 'g1',
+                    slotKey: null
+                },
+                shiftedItems: new Map()
+            }
+        };
         const interactions = createContentTreeInteractions({
+            runtime,
             getState: () => state,
             getGroupsById: () => groupsById,
             getSourcesByKey: () => sourcesByKey,
             getParentMap: () => new Map(),
             getPendingBatchKeys: () => pendingBatchKeys,
-            getShadowRoot: () => ({ querySelectorAll: jest.fn(() => []) }),
+            getShadowRoot: makeShadowRootWithList,
             saveState,
             render,
             showToast,
@@ -795,7 +1008,15 @@ describe('drop routes multi vs single source', () => {
         const runtime = {
             dragReflowSession: {
                 draggedKeys: new Set(['A', 'B']),
-                currentIntent: { kind: 'before-source' }
+                currentIntent: {
+                    kind: 'before-source',
+                    targetGroup: null,
+                    targetList: state.ungrouped,
+                    insertIndex: 0,
+                    targetGroupId: null,
+                    slotKey: 'A'
+                },
+                shiftedItems: new Map()
             }
         };
         const interactions = createContentTreeInteractions({
@@ -805,7 +1026,7 @@ describe('drop routes multi vs single source', () => {
             getSourcesByKey: () => sourcesByKey,
             getParentMap: () => new Map(),
             getPendingBatchKeys: () => pendingBatchKeys,
-            getShadowRoot: () => ({ querySelectorAll: jest.fn(() => []) }),
+            getShadowRoot: makeShadowRootWithList,
             saveState,
             render,
             showToast,
@@ -844,13 +1065,28 @@ describe('drop routes multi vs single source', () => {
             dataset: { groupId: 'g1' },
             classList: createClassList(['group-container', 'drag-into'])
         };
+        const runtime = {
+            dragReflowSession: {
+                draggedKeys: new Set(['A']),
+                currentIntent: {
+                    kind: 'into-group',
+                    targetGroup: group,
+                    targetList: group.children,
+                    insertIndex: -1,
+                    targetGroupId: 'g1',
+                    slotKey: null
+                },
+                shiftedItems: new Map()
+            }
+        };
         const interactions = createContentTreeInteractions({
+            runtime,
             getState: () => state,
             getGroupsById: () => groupsById,
             getSourcesByKey: () => sourcesByKey,
             getParentMap: () => new Map(),
             getPendingBatchKeys: () => new Set(),
-            getShadowRoot: () => ({ querySelectorAll: jest.fn(() => []) }),
+            getShadowRoot: makeShadowRootWithList,
             saveState,
             render,
             showToast,
@@ -887,13 +1123,28 @@ describe('drop routes multi vs single source', () => {
             dataset: { groupId: 'g1' },
             classList: createClassList(['group-container', 'drag-into'])
         };
+        const runtime = {
+            dragReflowSession: {
+                draggedKeys: new Set(['A', 'B', 'C']),
+                currentIntent: {
+                    kind: 'into-group',
+                    targetGroup: group,
+                    targetList: group.children,
+                    insertIndex: -1,
+                    targetGroupId: 'g1',
+                    slotKey: null
+                },
+                shiftedItems: new Map()
+            }
+        };
         const interactions = createContentTreeInteractions({
+            runtime,
             getState: () => state,
             getGroupsById: () => groupsById,
             getSourcesByKey: () => sourcesByKey,
             getParentMap: () => new Map(),
             getPendingBatchKeys: () => pendingBatchKeys,
-            getShadowRoot: () => ({ querySelectorAll: jest.fn(() => []) }),
+            getShadowRoot: makeShadowRootWithList,
             saveState: jest.fn(),
             render: jest.fn(),
             showToast: jest.fn(),
@@ -942,7 +1193,15 @@ describe('drop routes multi vs single source', () => {
         const runtime = {
             dragReflowSession: {
                 draggedKeys: new Set(['A', 'B']),
-                currentIntent: { kind: 'before-group' }
+                currentIntent: {
+                    kind: 'before-group',
+                    targetGroup: null,
+                    targetList: state.groups,
+                    insertIndex: 0,
+                    targetGroupId: null,
+                    slotKey: 'g1'
+                },
+                shiftedItems: new Map()
             }
         };
         const interactions = createContentTreeInteractions({
@@ -952,7 +1211,7 @@ describe('drop routes multi vs single source', () => {
             getSourcesByKey: () => sourcesByKey,
             getParentMap: () => new Map(),
             getPendingBatchKeys: () => pendingBatchKeys,
-            getShadowRoot: () => ({ querySelectorAll: jest.fn(() => []) }),
+            getShadowRoot: makeShadowRootWithList,
             saveState,
             render,
             showToast,
@@ -1646,18 +1905,7 @@ describe('handleDragOver invalid-drop feedback', () => {
     let createContentTreeInteractions;
     let createContentDragMulti;
 
-    function makeClassList(initial = []) {
-        const classes = new Set(initial);
-        const api = {
-            add: (...cs) => cs.forEach((c) => classes.add(c)),
-            remove: (...cs) => cs.forEach((c) => classes.delete(c)),
-            contains: (c) => classes.has(c),
-            has: (c) => classes.has(c)
-        };
-        return api;
-    }
-
-    function setupTreeInteractionsTestContext({ state, pendingBatchKeys, groups }) {
+    function setupCtx({ state, pendingBatchKeys, groups, parentMap, items }) {
         const runtime = {};
         const groupsById = new Map();
         if (groups && typeof groups === 'object') {
@@ -1666,94 +1914,18 @@ describe('handleDragOver invalid-drop feedback', () => {
                 groupsById.set(id, { id, children: [], ...group });
             });
         }
-        const sourceItemElements = new Map();
-        function getOrCreateSlotEl(sourceKey) {
-            if (!sourceItemElements.has(sourceKey)) {
-                sourceItemElements.set(sourceKey, {
-                    dataset: { sourceKey },
-                    classList: makeClassList(['source-item'])
-                });
-            }
-            return sourceItemElements.get(sourceKey);
-        }
-        const sourcesListEl = {
-            id: 'sources-list',
-            querySelector: (selector) => {
-                const match = selector.match(/\[data-source-key="([^"]+)"\]/);
-                if (!match) return null;
-                return sourceItemElements.has(match[1]) ? sourceItemElements.get(match[1]) : null;
-            },
-            querySelectorAll: () => {
-                const matches = [];
-                sourceItemElements.forEach((el) => {
-                    if (el.classList.has('drag-invalid')) matches.push(el);
-                });
-                return matches;
-            }
-        };
-        const shadowRoot = {
-            getElementById: (id) => (id === 'sources-list' ? sourcesListEl : null),
-            querySelectorAll: () => []
-        };
-        const dragMulti = createContentDragMulti({});
+        const { sourcesListEl, shadowRoot, elementMap } = makeMockShadowList({ items });
         const tree = createContentTreeInteractions({
             runtime,
             getState: () => state,
             getGroupsById: () => groupsById,
             getPendingBatchKeys: () => pendingBatchKeys,
             getShadowRoot: () => shadowRoot,
-            getParentMap: () => new Map(),
+            getParentMap: () => (parentMap || new Map()),
             isDescendant: globalThis.isDescendant,
-            dragMulti
+            dragMulti: createContentDragMulti({})
         });
-
-        function makeSourceItemTarget(key, { intent } = {}) {
-            const rect = { top: 200, bottom: 240, height: 40 };
-            const slotEl = getOrCreateSlotEl(key);
-            const classList = slotEl.classList;
-            if (intent) classList.add(intent);
-            const target = {
-                dataset: { sourceKey: key },
-                classList,
-                rect,
-                getBoundingClientRect: () => ({ top: rect.top, bottom: rect.bottom, height: rect.height, left: 0, right: 200, width: 200 })
-            };
-            target.closest = (selector) => {
-                if (selector === '.group-container, .source-item') return target;
-                if (selector === '.source-item') return target;
-                if (selector === '.group-container') return null;
-                return null;
-            };
-            return target;
-        }
-
-        function makeGroupContainerTarget(groupId, { intent } = {}) {
-            const rect = { top: 200, bottom: 240, height: 40 };
-            const initial = ['group-container'];
-            const classList = makeClassList(initial);
-            if (intent) classList.add(intent);
-            const target = {
-                dataset: { groupId },
-                classList,
-                rect,
-                getBoundingClientRect: () => ({ top: rect.top, bottom: rect.bottom, height: rect.height, left: 0, right: 200, width: 200 })
-            };
-            target.closest = (selector) => {
-                if (selector === '.group-container, .source-item') return target;
-                if (selector === '.group-container') return target;
-                if (selector === '.source-item') return null;
-                return null;
-            };
-            return target;
-        }
-
-        return {
-            runtime,
-            tree,
-            helpers: { makeSourceItemTarget, makeGroupContainerTarget, getOrCreateSlotEl },
-            groupsById,
-            sourcesListEl
-        };
+        return { runtime, tree, sourcesListEl, elementMap, groupsById };
     }
 
     beforeEach(() => {
@@ -1766,104 +1938,141 @@ describe('handleDragOver invalid-drop feedback', () => {
 
     afterEach(teardownGlobalMocks);
 
-    it('marks drop target invalid when dragging a single source over itself', () => {
-        const ctx = setupTreeInteractionsTestContext({
+    it('marks slot source-item invalid when dragging a single source over its own slot', () => {
+        const ctx = setupCtx({
             state: { isBatchMode: false, ungrouped: ['A', 'B'], groups: [] },
-            pendingBatchKeys: new Set()
+            pendingBatchKeys: new Set(),
+            items: [
+                { kind: 'source', key: 'A', top: 100, height: 40 },
+                { kind: 'source', key: 'B', top: 140, height: 40 }
+            ]
         });
         ctx.runtime.activeDragContext = { kind: 'source-single', keys: ['A'] };
-        const target = ctx.helpers.makeSourceItemTarget('A');
         const dataTransfer = { dropEffect: 'move' };
         ctx.tree.handleDragOver({
-            target,
-            clientY: target.rect.top + 5,
+            target: { closest: () => null },
+            // pointer in A's upper half → before-source A → slotKey='A' (the dragged key) → invalid
+            clientY: 105,
             preventDefault: jest.fn(),
             dataTransfer
         });
-        expect(target.classList.has('drag-invalid')).toBe(true);
-        expect(target.classList.has('drag-over-top')).toBe(false);
-        expect(target.classList.has('drag-over-bottom')).toBe(false);
+        const slotEl = ctx.elementMap.get('source:A');
+        expect(slotEl.classList.has('drag-invalid')).toBe(true);
         expect(dataTransfer.dropEffect).toBe('none');
     });
 
-    it('marks drop target invalid when dragging a group over its own descendant', () => {
-        const ctx = setupTreeInteractionsTestContext({
+    it('marks group-container invalid when dragging a group over its own descendant', () => {
+        const ctx = setupCtx({
             state: { isBatchMode: false, ungrouped: [], groups: ['g1'] },
             pendingBatchKeys: new Set(),
             groups: {
                 g1: { id: 'g1', children: [{ type: 'group', id: 'g2' }] },
                 g2: { id: 'g2', children: [] }
-            }
+            },
+            parentMap: new Map([['g2', 'g1']]),
+            items: [
+                {
+                    kind: 'group', id: 'g1', top: 100, headerHeight: 30,
+                    childrenStart: 130, childrenEnd: 220,
+                    children: [
+                        { kind: 'group', id: 'g2', top: 130, headerHeight: 30, childrenStart: 160, childrenEnd: 220 }
+                    ]
+                }
+            ]
         });
         ctx.runtime.activeDragContext = { kind: 'group', draggedGroupId: 'g1' };
-        const target = ctx.helpers.makeGroupContainerTarget('g2');
         const dataTransfer = { dropEffect: 'move' };
         ctx.tree.handleDragOver({
-            target,
-            clientY: target.rect.top + target.rect.height / 2,
+            target: { closest: () => null },
+            // pointer in g2's header → into-group g2 → invalid (g2 is descendant of g1).
+            clientY: 145,
             preventDefault: jest.fn(),
             dataTransfer
         });
-        expect(target.classList.has('drag-invalid')).toBe(true);
+        const g2El = ctx.elementMap.get('group:g2');
+        expect(g2El.classList.has('drag-invalid')).toBe(true);
         expect(dataTransfer.dropEffect).toBe('none');
     });
 
-    it('marks drop target invalid when multi-source drag hovers over a member of the dragged set', () => {
-        const ctx = setupTreeInteractionsTestContext({
+    it('marks slot invalid when multi-source drag hovers a slot anchored to a member of the dragged set', () => {
+        const ctx = setupCtx({
             state: { isBatchMode: true, ungrouped: ['A', 'B', 'C'], groups: [] },
-            pendingBatchKeys: new Set(['A', 'B', 'C'])
+            pendingBatchKeys: new Set(['A', 'B', 'C']),
+            items: [
+                { kind: 'source', key: 'A', top: 100, height: 40 },
+                { kind: 'source', key: 'B', top: 140, height: 40 },
+                { kind: 'source', key: 'C', top: 180, height: 40 }
+            ]
         });
         ctx.runtime.activeDragContext = { kind: 'source-multi', keys: ['A', 'B', 'C'] };
-        const target = ctx.helpers.makeSourceItemTarget('B');
         const dataTransfer = { dropEffect: 'move' };
         ctx.tree.handleDragOver({
-            target,
-            clientY: target.rect.top + 5,
+            target: { closest: () => null },
+            // pointer in B's upper half → before-source B → slotKey='B' (in dragged set) → invalid
+            clientY: 145,
             preventDefault: jest.fn(),
             dataTransfer
         });
-        expect(target.classList.has('drag-invalid')).toBe(true);
+        const slotEl = ctx.elementMap.get('source:B');
+        expect(slotEl.classList.has('drag-invalid')).toBe(true);
         expect(dataTransfer.dropEffect).toBe('none');
     });
 
     it('sets dropEffect to none for multi-source drag with top-level before-group invalid intent', () => {
-        const ctx = setupTreeInteractionsTestContext({
-            state: { isBatchMode: true, ungrouped: ['A', 'B'], groups: ['g1'] },
+        const ctx = setupCtx({
+            state: { isBatchMode: true, ungrouped: [], groups: ['g1', 'g2'] },
             pendingBatchKeys: new Set(['A', 'B']),
-            groups: { g1: { id: 'g1', children: [] } }
+            groups: {
+                g1: { id: 'g1', children: [] },
+                g2: { id: 'g2', children: [] }
+            },
+            items: [
+                // g1 from 100..130 (header only, empty children-area collapsed),
+                // g2 from 200..230 — pointer in the gap will resolve to before-group g2.
+                { kind: 'group', id: 'g1', top: 100, headerHeight: 30, childrenStart: 130, childrenEnd: 130 },
+                { kind: 'group', id: 'g2', top: 200, headerHeight: 30, childrenStart: 230, childrenEnd: 230 }
+            ]
         });
         ctx.runtime.activeDragContext = { kind: 'source-multi', keys: ['A', 'B'] };
-        const target = ctx.helpers.makeGroupContainerTarget('g1');
         const dataTransfer = { dropEffect: 'move' };
         ctx.tree.handleDragOver({
-            target,
-            clientY: target.rect.top + 5,
+            target: { closest: () => null },
+            clientY: 150,
             preventDefault: jest.fn(),
             dataTransfer
         });
-        // The slot top is a group entry, not a source item — no [data-source-key] match → no red highlight applied.
-        // Group-container itself is not highlighted because intentKind is before-group, not into-group.
-        expect(target.classList.has('drag-invalid')).toBe(false);
+        const g1El = ctx.elementMap.get('group:g1');
+        const g2El = ctx.elementMap.get('group:g2');
+        // Pointer at y=150 maps to before-group g2 — invalid because multi-source drag would
+        // splice source keys into state.groups. Visual: red outline on the g2 slot element
+        // (the neighbor at the slot). g1 stays untouched.
+        expect(g1El.classList.has('drag-invalid')).toBe(false);
+        expect(g2El.classList.has('drag-invalid')).toBe(true);
         expect(dataTransfer.dropEffect).toBe('none');
     });
 
-    it('does not mark drop target invalid when single source drags over a different source', () => {
-        const ctx = setupTreeInteractionsTestContext({
+    it('does not mark slot invalid when single source drags over a different source slot', () => {
+        const ctx = setupCtx({
             state: { isBatchMode: false, ungrouped: ['A', 'B'], groups: [] },
-            pendingBatchKeys: new Set()
+            pendingBatchKeys: new Set(),
+            items: [
+                { kind: 'source', key: 'A', top: 100, height: 40 },
+                { kind: 'source', key: 'B', top: 140, height: 40 }
+            ]
         });
         ctx.runtime.activeDragContext = { kind: 'source-single', keys: ['A'] };
-        const target = ctx.helpers.makeSourceItemTarget('B');
         const dataTransfer = { dropEffect: 'move' };
         ctx.tree.handleDragOver({
-            target,
-            clientY: target.rect.top + 5,
+            target: { closest: () => null },
+            // pointer in B's upper half → before-source B → slotKey='B' (not the dragged 'A') → valid.
+            clientY: 145,
             preventDefault: jest.fn(),
             dataTransfer
         });
-        expect(target.classList.has('drag-invalid')).toBe(false);
-        expect(target.classList.has('drag-over-top')).toBe(false);
-        expect(target.classList.has('drag-over-bottom')).toBe(false);
+        const slotElA = ctx.elementMap.get('source:A');
+        const slotElB = ctx.elementMap.get('source:B');
+        expect(slotElA.classList.has('drag-invalid')).toBe(false);
+        expect(slotElB.classList.has('drag-invalid')).toBe(false);
         expect(dataTransfer.dropEffect).toBe('move');
     });
 });
@@ -1872,17 +2081,7 @@ describe('handleDragOver physical reflow', () => {
     let createContentTreeInteractions;
     let createContentDragMulti;
 
-    function makeClassList(initial = []) {
-        const classes = new Set(initial);
-        return {
-            add: jest.fn((...cs) => cs.forEach((c) => classes.add(c))),
-            remove: jest.fn((...cs) => cs.forEach((c) => classes.delete(c))),
-            contains: (c) => classes.has(c),
-            has: (c) => classes.has(c)
-        };
-    }
-
-    function setupCtx({ state, pendingBatchKeys, groups, dragReflow }) {
+    function setupCtx({ state, pendingBatchKeys, groups, dragReflow, items }) {
         const groupsById = new Map();
         const runtime = {};
         if (groups && typeof groups === 'object') {
@@ -1891,12 +2090,7 @@ describe('handleDragOver physical reflow', () => {
                 groupsById.set(id, { id, children: [], ...group });
             });
         }
-        const sourcesListEl = { id: 'sources-list' };
-        const shadowRoot = {
-            querySelector: () => null,
-            querySelectorAll: () => [],
-            getElementById: (id) => (id === 'sources-list' ? sourcesListEl : null)
-        };
+        const { sourcesListEl, shadowRoot, elementMap } = makeMockShadowList({ items });
         const tree = createContentTreeInteractions({
             runtime,
             getState: () => state,
@@ -1908,49 +2102,7 @@ describe('handleDragOver physical reflow', () => {
             dragMulti: createContentDragMulti({}),
             dragReflow
         });
-
-        function makeSourceItemTarget(key) {
-            const rect = { top: 200, bottom: 240, height: 40 };
-            const classList = makeClassList(['source-item']);
-            const target = {
-                dataset: { sourceKey: key },
-                classList,
-                rect,
-                getBoundingClientRect: () => ({ top: rect.top, bottom: rect.bottom, height: rect.height, left: 0, right: 200, width: 200 })
-            };
-            target.closest = (selector) => {
-                if (selector === '.group-container, .source-item') return target;
-                if (selector === '.source-item') return target;
-                if (selector === '.group-container') return null;
-                return null;
-            };
-            return target;
-        }
-
-        function makeGroupContainerTarget(groupId) {
-            const rect = { top: 200, bottom: 240, height: 40 };
-            const classList = makeClassList(['group-container']);
-            const target = {
-                dataset: { groupId },
-                classList,
-                rect,
-                getBoundingClientRect: () => ({ top: rect.top, bottom: rect.bottom, height: rect.height, left: 0, right: 200, width: 200 })
-            };
-            target.closest = (selector) => {
-                if (selector === '.group-container, .source-item') return target;
-                if (selector === '.group-container') return target;
-                if (selector === '.source-item') return null;
-                return null;
-            };
-            return target;
-        }
-
-        return {
-            runtime,
-            tree,
-            sourcesListEl,
-            helpers: { makeSourceItemTarget, makeGroupContainerTarget }
-        };
+        return { runtime, tree, sourcesListEl, elementMap };
     }
 
     function makeDragReflowMock() {
@@ -1960,7 +2112,8 @@ describe('handleDragOver physical reflow', () => {
             clearReflow: jest.fn(),
             prepareDragSession: jest.fn(),
             foldDraggedItems: jest.fn(),
-            unfoldDraggedItems: jest.fn()
+            unfoldDraggedItems: jest.fn(),
+            extractInlineTranslateY: () => 0
         };
     }
 
@@ -1974,12 +2127,16 @@ describe('handleDragOver physical reflow', () => {
 
     afterEach(teardownGlobalMocks);
 
-    it('calls applyReflow with shifts when dragging over a source-item (no blue bar classes added)', () => {
+    it('calls applyReflow with shifts when dragging over a source-item slot (no blue bar classes added)', () => {
         const dragReflow = makeDragReflowMock();
         const ctx = setupCtx({
             state: { isBatchMode: false, ungrouped: ['A', 'B'], groups: [] },
             pendingBatchKeys: new Set(),
-            dragReflow
+            dragReflow,
+            items: [
+                { kind: 'source', key: 'A', top: 100, height: 40 },
+                { kind: 'source', key: 'B', top: 140, height: 40 }
+            ]
         });
         ctx.runtime.activeDragContext = { kind: 'source-single', keys: ['A'] };
         ctx.runtime.dragReflowSession = {
@@ -1990,10 +2147,10 @@ describe('handleDragOver physical reflow', () => {
             shiftedItems: new Map()
         };
 
-        const target = ctx.helpers.makeSourceItemTarget('B');
+        // pointer y=145 — upper half of B (140..180, mid=160) → before-source B, insertIndex=1.
         ctx.tree.handleDragOver({
-            target,
-            clientY: target.rect.top + 5,
+            target: { closest: () => null },
+            clientY: 145,
             preventDefault: jest.fn(),
             dataTransfer: { dropEffect: 'move' }
         });
@@ -2002,9 +2159,7 @@ describe('handleDragOver physical reflow', () => {
         expect(dragReflow.applyReflow).toHaveBeenCalledTimes(1);
         const computeArgs = dragReflow.computeReflow.mock.calls[0][0];
         expect(computeArgs.session).toBe(ctx.runtime.dragReflowSession);
-        // Hover over upper half of 'B' (index 1) → before-source → insertIndex = 1
         expect(computeArgs.insertIndex).toBe(1);
-        // siblingKeys should reflect the targetList resolved from getDropIntent — here ungrouped is ['A', 'B'].
         expect(computeArgs.siblingKeys).toEqual(['A', 'B']);
         expect(computeArgs.rootElement).toBe(ctx.sourcesListEl);
         const applyArgs = dragReflow.applyReflow.mock.calls[0][0];
@@ -2012,11 +2167,10 @@ describe('handleDragOver physical reflow', () => {
         expect(applyArgs.shifts).toBeInstanceOf(Map);
         expect(applyArgs.rootElement).toBe(ctx.sourcesListEl);
 
-        // No blue-bar classes should be added
-        expect(target.classList.add).not.toHaveBeenCalledWith('drag-over-top');
-        expect(target.classList.add).not.toHaveBeenCalledWith('drag-over-bottom');
-        expect(target.classList.has('drag-over-top')).toBe(false);
-        expect(target.classList.has('drag-over-bottom')).toBe(false);
+        // No blue-bar classes should ever be added to the slot element
+        const slotElB = ctx.elementMap.get('source:B');
+        expect(slotElB.classList.has('drag-over-top')).toBe(false);
+        expect(slotElB.classList.has('drag-over-bottom')).toBe(false);
     });
 
     it('updates session.currentIntent with intent kind on dragover', () => {
@@ -2024,7 +2178,11 @@ describe('handleDragOver physical reflow', () => {
         const ctx = setupCtx({
             state: { isBatchMode: false, ungrouped: ['A', 'B'], groups: [] },
             pendingBatchKeys: new Set(),
-            dragReflow
+            dragReflow,
+            items: [
+                { kind: 'source', key: 'A', top: 100, height: 40 },
+                { kind: 'source', key: 'B', top: 140, height: 40 }
+            ]
         });
         ctx.runtime.activeDragContext = { kind: 'source-single', keys: ['A'] };
         ctx.runtime.dragReflowSession = {
@@ -2035,11 +2193,10 @@ describe('handleDragOver physical reflow', () => {
             shiftedItems: new Map()
         };
 
-        const target = ctx.helpers.makeSourceItemTarget('B');
         ctx.tree.handleDragOver({
-            target,
-            // upper half → before-source
-            clientY: target.rect.top + 5,
+            target: { closest: () => null },
+            // upper half of B → before-source
+            clientY: 145,
             preventDefault: jest.fn(),
             dataTransfer: { dropEffect: 'move' }
         });
@@ -2048,12 +2205,16 @@ describe('handleDragOver physical reflow', () => {
         expect(ctx.runtime.dragReflowSession.currentIntent.kind).toBe('before-source');
     });
 
-    it('records after-source kind when pointer is on the lower half of a source-item', () => {
+    it('records after-source kind when pointer is past the last source mid-Y', () => {
         const dragReflow = makeDragReflowMock();
         const ctx = setupCtx({
             state: { isBatchMode: false, ungrouped: ['A', 'B'], groups: [] },
             pendingBatchKeys: new Set(),
-            dragReflow
+            dragReflow,
+            items: [
+                { kind: 'source', key: 'A', top: 100, height: 40 },
+                { kind: 'source', key: 'B', top: 140, height: 40 }
+            ]
         });
         ctx.runtime.activeDragContext = { kind: 'source-single', keys: ['A'] };
         ctx.runtime.dragReflowSession = {
@@ -2064,11 +2225,10 @@ describe('handleDragOver physical reflow', () => {
             shiftedItems: new Map()
         };
 
-        const target = ctx.helpers.makeSourceItemTarget('B');
+        // Lower half of B (mid=160) → past B's mid → after-source B.
         ctx.tree.handleDragOver({
-            target,
-            // lower half → after-source
-            clientY: target.rect.top + 35,
+            target: { closest: () => null },
+            clientY: 175,
             preventDefault: jest.fn(),
             dataTransfer: { dropEffect: 'move' }
         });
@@ -2076,13 +2236,14 @@ describe('handleDragOver physical reflow', () => {
         expect(ctx.runtime.dragReflowSession.currentIntent.kind).toBe('after-source');
     });
 
-    it('records into-group kind and adds drag-into class when pointer is in middle of group-container', () => {
+    it('records into-group kind and adds drag-into class when pointer is on group-header band', () => {
         const dragReflow = makeDragReflowMock();
         const ctx = setupCtx({
             state: { isBatchMode: false, ungrouped: [], groups: ['g1'] },
             pendingBatchKeys: new Set(),
             groups: { g1: { id: 'g1', children: [] } },
-            dragReflow
+            dragReflow,
+            items: [{ kind: 'group', id: 'g1', top: 100, headerHeight: 40, childrenStart: 140, childrenEnd: 140 }]
         });
         ctx.runtime.activeDragContext = { kind: 'source-single', keys: ['A'] };
         ctx.runtime.dragReflowSession = {
@@ -2093,18 +2254,18 @@ describe('handleDragOver physical reflow', () => {
             shiftedItems: new Map()
         };
 
-        const target = ctx.helpers.makeGroupContainerTarget('g1');
+        // Middle of g1's header (100..140, mid=120) → into-group.
         ctx.tree.handleDragOver({
-            target,
-            // middle of group → into-group
-            clientY: target.rect.top + target.rect.height / 2,
+            target: { closest: () => null },
+            clientY: 120,
             preventDefault: jest.fn(),
             dataTransfer: { dropEffect: 'move' }
         });
 
-        expect(target.classList.has('drag-into')).toBe(true);
-        expect(target.classList.has('drag-over-top')).toBe(false);
-        expect(target.classList.has('drag-over-bottom')).toBe(false);
+        const g1El = ctx.elementMap.get('group:g1');
+        expect(g1El.classList.has('drag-into')).toBe(true);
+        expect(g1El.classList.has('drag-over-top')).toBe(false);
+        expect(g1El.classList.has('drag-over-bottom')).toBe(false);
         expect(ctx.runtime.dragReflowSession.currentIntent.kind).toBe('into-group');
     });
 
@@ -2112,20 +2273,23 @@ describe('handleDragOver physical reflow', () => {
         const ctx = setupCtx({
             state: { isBatchMode: false, ungrouped: ['A', 'B'], groups: [] },
             pendingBatchKeys: new Set(),
-            dragReflow: null
+            dragReflow: null,
+            items: [
+                { kind: 'source', key: 'A', top: 100, height: 40 },
+                { kind: 'source', key: 'B', top: 140, height: 40 }
+            ]
         });
         ctx.runtime.activeDragContext = { kind: 'source-single', keys: ['A'] };
 
-        const target = ctx.helpers.makeSourceItemTarget('B');
         expect(() => ctx.tree.handleDragOver({
-            target,
-            clientY: target.rect.top + 5,
+            target: { closest: () => null },
+            clientY: 145,
             preventDefault: jest.fn(),
             dataTransfer: { dropEffect: 'move' }
         })).not.toThrow();
-        // No blue-bar classes even without dragReflow
-        expect(target.classList.has('drag-over-top')).toBe(false);
-        expect(target.classList.has('drag-over-bottom')).toBe(false);
+        const slotElB = ctx.elementMap.get('source:B');
+        expect(slotElB.classList.has('drag-over-top')).toBe(false);
+        expect(slotElB.classList.has('drag-over-bottom')).toBe(false);
     });
 });
 
@@ -2190,25 +2354,300 @@ describe('resolveSiblingKeys helper', () => {
     });
 });
 
+describe('computeDropIntent', () => {
+    let createContentTreeInteractions;
+
+    beforeEach(() => {
+        jest.resetModules();
+        setupGlobalMocks();
+        require('../../src/content/content-native-checkbox-sync.js');
+        createContentTreeInteractions = require('../../src/content/content-tree-interactions.js');
+    });
+
+    afterEach(teardownGlobalMocks);
+
+    function buildTree({ state, groupsById, parentMap }) {
+        return createContentTreeInteractions({
+            getState: () => state,
+            getGroupsById: () => (groupsById || new Map()),
+            getParentMap: () => (parentMap || new Map())
+        });
+    }
+
+    it('returns a before-source intent when the pointer is in the upper half of a root source-item', () => {
+        const state = { ungrouped: ['A', 'B'], groups: [] };
+        const tree = buildTree({ state });
+        const { sourcesListEl } = makeMockShadowList({
+            items: [
+                { kind: 'source', key: 'A', top: 100, height: 40 },
+                { kind: 'source', key: 'B', top: 140, height: 40 }
+            ]
+        });
+
+        // pointer at y=145 — upper half of B (midY=160) → before-source B at insertIndex=1
+        const intent = tree.computeDropIntent({
+            clientY: 145,
+            rootElement: sourcesListEl,
+            state,
+            groupsById: new Map(),
+            parentMap: new Map()
+        });
+        expect(intent).toBeTruthy();
+        expect(intent.kind).toBe('before-source');
+        expect(intent.targetList).toBe(state.ungrouped);
+        expect(intent.insertIndex).toBe(1);
+        expect(intent.slotKey).toBe('B');
+        expect(intent.targetGroup).toBeNull();
+    });
+
+    it('returns a before-group intent when the pointer is above a root group-container slot', () => {
+        const state = { ungrouped: [], groups: ['g1', 'g2'] };
+        const groupsById = new Map([
+            ['g1', { id: 'g1', children: [] }],
+            ['g2', { id: 'g2', children: [] }]
+        ]);
+        const tree = buildTree({ state, groupsById });
+        const { sourcesListEl } = makeMockShadowList({
+            items: [
+                // g1 header from 100..130, no children band (empty group, but we put pointer outside container)
+                { kind: 'group', id: 'g1', top: 100, headerHeight: 30, childrenStart: 130, childrenEnd: 130 },
+                { kind: 'group', id: 'g2', top: 200, headerHeight: 30, childrenStart: 230, childrenEnd: 230 }
+            ]
+        });
+        // pointer at y=205 — above g2's midY=215 but g2 contains it… Actually need pointer in a gap
+        // between g1 and g2 where no container encloses.
+        // g1 spans 100..130, g2 spans 200..230. Pointer at y=150 falls in neither.
+        const intent = tree.computeDropIntent({
+            clientY: 150,
+            rootElement: sourcesListEl,
+            state,
+            groupsById,
+            parentMap: new Map()
+        });
+        expect(intent).toBeTruthy();
+        // Slot midY scan: g1 mid=115 < 150 (skip), g2 mid=215 > 150 → before-group g2.
+        expect(intent.kind).toBe('before-group');
+        expect(intent.targetList).toBe(state.groups);
+        expect(intent.insertIndex).toBe(1); // index of g2 in state.groups
+        expect(intent.slotKey).toBe('g2');
+        expect(intent.targetGroup).toBeNull();
+    });
+
+    it('returns into-group with insertIndex=-1 when the pointer is on a group-header band', () => {
+        const state = { ungrouped: [], groups: ['g1'] };
+        const groupsById = new Map([
+            ['g1', { id: 'g1', children: [{ type: 'source', key: 'X' }] }]
+        ]);
+        const tree = buildTree({ state, groupsById });
+        const { sourcesListEl } = makeMockShadowList({
+            items: [{ kind: 'group', id: 'g1', top: 100, headerHeight: 30, childrenStart: 130, childrenEnd: 170 }]
+        });
+
+        // Pointer at y=115 — inside g1's header (100..130).
+        const intent = tree.computeDropIntent({
+            clientY: 115,
+            rootElement: sourcesListEl,
+            state,
+            groupsById,
+            parentMap: new Map()
+        });
+        expect(intent).toBeTruthy();
+        expect(intent.kind).toBe('into-group');
+        expect(intent.insertIndex).toBe(-1);
+        expect(intent.targetGroup).toBe(groupsById.get('g1'));
+        expect(intent.targetList).toBe(groupsById.get('g1').children);
+    });
+
+    it('routes to the deepest group when nested groups both contain the pointer', () => {
+        const state = { ungrouped: [], groups: ['outer'] };
+        const groupsById = new Map([
+            ['outer', { id: 'outer', children: [{ type: 'group', id: 'inner' }] }],
+            ['inner', { id: 'inner', children: [{ type: 'source', key: 'X' }] }]
+        ]);
+        const parentMap = new Map([['inner', 'outer']]);
+        const tree = buildTree({ state, groupsById, parentMap });
+        const { sourcesListEl } = makeMockShadowList({
+            items: [
+                {
+                    kind: 'group', id: 'outer', top: 100, headerHeight: 30,
+                    childrenStart: 130, childrenEnd: 260,
+                    children: [
+                        {
+                            kind: 'group', id: 'inner', top: 130, headerHeight: 30,
+                            childrenStart: 160, childrenEnd: 220,
+                            children: [{ kind: 'source', key: 'X', top: 160, height: 40 }]
+                        }
+                    ]
+                }
+            ]
+        });
+
+        // pointer at y=170 — inside inner's children-area (160..220), source X at 160..200.
+        // Should resolve to host = inner.children, not outer's children band.
+        const intent = tree.computeDropIntent({
+            clientY: 175,
+            rootElement: sourcesListEl,
+            state,
+            groupsById,
+            parentMap
+        });
+        expect(intent).toBeTruthy();
+        // X midY = 180, pointer at 175 → before-source X.
+        expect(intent.kind).toBe('before-source');
+        expect(intent.targetGroup).toBe(groupsById.get('inner'));
+        expect(intent.targetList).toBe(groupsById.get('inner').children);
+        expect(intent.insertIndex).toBe(0);
+        expect(intent.slotKey).toBe('X');
+    });
+
+    it('returns into-group when pointer is in an empty group children-area', () => {
+        const state = { ungrouped: [], groups: ['g1'] };
+        const groupsById = new Map([['g1', { id: 'g1', children: [] }]]);
+        const tree = buildTree({ state, groupsById });
+        const { sourcesListEl } = makeMockShadowList({
+            items: [{ kind: 'group', id: 'g1', top: 100, headerHeight: 30, childrenStart: 130, childrenEnd: 200 }]
+        });
+        const intent = tree.computeDropIntent({
+            clientY: 160,
+            rootElement: sourcesListEl,
+            state,
+            groupsById,
+            parentMap: new Map()
+        });
+        expect(intent).toBeTruthy();
+        expect(intent.kind).toBe('into-group');
+        expect(intent.insertIndex).toBe(-1);
+        expect(intent.targetGroup).toBe(groupsById.get('g1'));
+        expect(intent.hostGroupContainerEl).toBeTruthy();
+    });
+
+    it('ignores a sibling\'s inline translateY shift when mapping pointer-Y to slot', () => {
+        const state = { ungrouped: ['A', 'B'], groups: [] };
+        const tree = buildTree({ state });
+        // B is visually shifted DOWN by translateY(40px) during reflow, but its un-shifted layout
+        // top is still 140. The pointer at the un-shifted mid-Y (160) should still resolve to before-source B.
+        const { sourcesListEl } = makeMockShadowList({
+            items: [
+                { kind: 'source', key: 'A', top: 100, height: 40 },
+                // simulate post-reflow rect: top reads 180 in the live layout, but inline transform offsets by +40.
+                { kind: 'source', key: 'B', top: 180, height: 40, transform: 'translateY(40px)' }
+            ]
+        });
+        const intent = tree.computeDropIntent({
+            clientY: 150, // mid-Y of B's un-shifted layout band (140..180), upper half
+            rootElement: sourcesListEl,
+            state,
+            groupsById: new Map(),
+            parentMap: new Map()
+        });
+        expect(intent).toBeTruthy();
+        expect(intent.kind).toBe('before-source');
+        expect(intent.slotKey).toBe('B');
+    });
+
+    // P1+P2: pointer outside the sources-list viewport must return null so the caller bails.
+    it('returns null when the pointer is outside the sources-list viewport', () => {
+        const state = { ungrouped: ['A'], groups: [] };
+        const tree = buildTree({ state });
+        const { sourcesListEl } = makeMockShadowList({
+            items: [{ kind: 'source', key: 'A', top: 100, height: 40 }]
+        });
+        // Force the list's own rect so we can probe above + below it.
+        sourcesListEl.getBoundingClientRect = () => ({ top: 50, bottom: 300, height: 250, left: 0, right: 400, width: 400 });
+
+        const aboveIntent = tree.computeDropIntent({
+            clientY: 10, // far above list top (50)
+            rootElement: sourcesListEl,
+            state, groupsById: new Map(), parentMap: new Map()
+        });
+        expect(aboveIntent).toBeNull();
+
+        const belowIntent = tree.computeDropIntent({
+            clientY: 500, // far below list bottom (300)
+            rootElement: sourcesListEl,
+            state, groupsById: new Map(), parentMap: new Map()
+        });
+        expect(belowIntent).toBeNull();
+    });
+
+    // P3(B): source drag landing in a root group-typed slot auto-routes to the nearest ungrouped neighbor.
+    it('auto-routes a source drag away from a root group slot to the nearest ungrouped neighbor', () => {
+        const state = { ungrouped: ['SrcA', 'SrcB'], groups: ['g1'] };
+        const groupsById = new Map([['g1', { id: 'g1', children: [] }]]);
+        const tree = buildTree({ state, groupsById });
+        // DOM order: SrcA (top 100..140), SrcB (140..180), g1 group-container header (200..230, no children band)
+        const { sourcesListEl } = makeMockShadowList({
+            items: [
+                { kind: 'source', key: 'SrcA', top: 100, height: 40 },
+                { kind: 'source', key: 'SrcB', top: 140, height: 40 },
+                { kind: 'group', id: 'g1', top: 200, headerHeight: 30, childrenStart: 230, childrenEnd: 230 }
+            ]
+        });
+        // Pointer at y=190 — between SrcB (mid 160) and g1 container (top 200). No group contains pointer,
+        // so root host. Slot detection: SrcA midY=120 < 190, SrcB midY=160 < 190, g1 midY varies but
+        // first midY > 190 hits g1. beforeIndex points at the group → would normally return before-group.
+        // With activeDragContext source-single → auto-route to nearest ungrouped neighbor (SrcB above).
+        const intent = tree.computeDropIntent({
+            clientY: 190,
+            rootElement: sourcesListEl,
+            state, groupsById, parentMap: new Map(),
+            activeDragContext: { kind: 'source-single', keys: ['external'] }
+        });
+        expect(intent).toBeTruthy();
+        expect(intent.targetList).toBe(state.ungrouped);
+        // SrcB is the closer ungrouped neighbor (above) → after-source SrcB at insertIndex 2 (end of ungrouped).
+        expect(intent.kind).toBe('after-source');
+        expect(intent.slotKey).toBe('SrcB');
+        expect(intent.insertIndex).toBe(2);
+
+        // Same pointer with group drag should NOT auto-route — group reorder is valid in state.groups.
+        const groupIntent = tree.computeDropIntent({
+            clientY: 190,
+            rootElement: sourcesListEl,
+            state, groupsById, parentMap: new Map(),
+            activeDragContext: { kind: 'group', draggedGroupId: 'external' }
+        });
+        expect(groupIntent).toBeTruthy();
+        expect(groupIntent.kind).toBe('before-group');
+        expect(groupIntent.targetList).toBe(state.groups);
+    });
+
+    // P3(B): when no ungrouped neighbors exist at root (groups-only), source drag falls through to
+    // before/after-group (which computeIsInvalidDrop will then flag as invalid + apply red outline).
+    it('does not auto-route when root has no ungrouped neighbors', () => {
+        const state = { ungrouped: [], groups: ['g1', 'g2'] };
+        const groupsById = new Map([
+            ['g1', { id: 'g1', children: [] }],
+            ['g2', { id: 'g2', children: [] }]
+        ]);
+        const tree = buildTree({ state, groupsById });
+        const { sourcesListEl } = makeMockShadowList({
+            items: [
+                { kind: 'group', id: 'g1', top: 100, headerHeight: 30, childrenStart: 130, childrenEnd: 130 },
+                { kind: 'group', id: 'g2', top: 200, headerHeight: 30, childrenStart: 230, childrenEnd: 230 }
+            ]
+        });
+        const intent = tree.computeDropIntent({
+            clientY: 170, // between g1 (100..130 header only) and g2 (200..230) — neither group contains pointer.
+            rootElement: sourcesListEl,
+            state, groupsById, parentMap: new Map(),
+            activeDragContext: { kind: 'source-single', keys: ['external'] }
+        });
+        expect(intent).toBeTruthy();
+        expect(intent.kind).toBe('before-group');
+        expect(intent.targetList).toBe(state.groups);
+        expect(intent.slotKey).toBe('g2');
+        // Note: handleDragOver will pass this through computeIsInvalidDrop and surface the red outline.
+    });
+});
+
 describe('handleDragOver hover-expand', () => {
     let createContentTreeInteractions;
     let createContentDragMulti;
 
-    function makeClassList(initial = []) {
-        const classes = new Set(initial);
-        const api = {
-            add: (...cs) => cs.forEach((c) => classes.add(c)),
-            remove: (...cs) => cs.forEach((c) => classes.delete(c)),
-            contains: (c) => classes.has(c),
-            has: (c) => classes.has(c)
-        };
-        return api;
-    }
-
-    function setupTreeInteractionsTestContext({ state, pendingBatchKeys, groups, parentMap }) {
+    function setupTreeInteractionsTestContext({ state, pendingBatchKeys, groups, parentMap, items }) {
         const groupsById = new Map();
         const runtime = { groupsById };
-        const containersByGroupId = new Map();
         if (groups && typeof groups === 'object') {
             Object.keys(groups).forEach((id) => {
                 const group = groups[id];
@@ -2216,10 +2655,15 @@ describe('handleDragOver hover-expand', () => {
             });
         }
         const resolvedParentMap = parentMap instanceof Map ? parentMap : new Map();
+        const { sourcesListEl, elementMap } = makeMockShadowList({ items: items || [] });
+
+        // Augment shadowRoot.querySelector to also resolve `.group-container[data-group-id="..."]`
+        // (used by executeHoverExpand/executeHoverCollapse to find the container DOM).
         const shadowRoot = {
+            getElementById: (id) => (id === 'sources-list' ? sourcesListEl : null),
             querySelector: (selector) => {
-                const match = /^\.group-container\[data-group-id="([^"]+)"\]$/.exec(selector);
-                if (match) return containersByGroupId.get(match[1]) || null;
+                const m = /^\.group-container\[data-group-id="([^"]+)"\]$/.exec(selector);
+                if (m) return elementMap.get('group:' + m[1]) || null;
                 return null;
             },
             querySelectorAll: () => []
@@ -2237,32 +2681,30 @@ describe('handleDragOver hover-expand', () => {
             dragMulti
         });
 
-        function makeGroupContainerTarget(groupId, { intent } = {}) {
-            const rect = { top: 200, bottom: 240, height: 40 };
-            const initial = ['group-container'];
-            const classList = makeClassList(initial);
-            if (intent) classList.add(intent);
-            const target = {
-                dataset: { groupId },
-                classList,
-                rect,
-                querySelector: () => null,
-                getBoundingClientRect: () => ({ top: rect.top, bottom: rect.bottom, height: rect.height, left: 0, right: 200, width: 200 })
-            };
-            target.closest = (selector) => {
-                if (selector === '.group-container, .source-item') return target;
-                if (selector === '.group-container') return target;
-                if (selector === '.source-item') return null;
-                return null;
-            };
-            containersByGroupId.set(groupId, target);
-            return target;
+        // Compatibility shim: dragOverFor(groupId) sends a synthetic dragover whose pointer
+        // lands inside the group's header band → into-group intent (matches the old behavior
+        // where target was the group-container).
+        function dragOverFor(groupId, clientYOverride) {
+            const el = elementMap.get('group:' + groupId);
+            const r = el ? el.rect : { top: 0, height: 40 };
+            const headerEl = el && typeof el.querySelector === 'function' ? el.querySelector('.group-header') : null;
+            const headerRect = headerEl ? headerEl.rect : r;
+            const clientY = typeof clientYOverride === 'number'
+                ? clientYOverride
+                : headerRect.top + headerRect.height / 2;
+            tree.handleDragOver({
+                target: { closest: () => null },
+                clientY,
+                preventDefault: jest.fn(),
+                dataTransfer: { dropEffect: 'move' }
+            });
         }
 
-        function makeDropEvent({ data, target }) {
+        function makeDropEvent({ data, sourceKey }) {
             return {
-                target,
+                target: { closest: () => null },
                 preventDefault: jest.fn(),
+                clientY: 0,
                 dataTransfer: {
                     getData: (key) => (data && Object.prototype.hasOwnProperty.call(data, key) ? data[key] : ''),
                     dropEffect: 'move'
@@ -2270,29 +2712,12 @@ describe('handleDragOver hover-expand', () => {
             };
         }
 
-        function makeSourceRowTarget(sourceKey) {
-            const rect = { top: 200, bottom: 240, height: 40 };
-            const classList = makeClassList(['source-item']);
-            const target = {
-                dataset: { sourceKey },
-                classList,
-                rect,
-                getBoundingClientRect: () => ({ top: rect.top, bottom: rect.bottom, height: rect.height, left: 0, right: 200, width: 200 })
-            };
-            target.closest = (selector) => {
-                if (selector === '.group-container, .source-item') return target;
-                if (selector === '.source-item') return target;
-                if (selector === '.group-container') return null;
-                return null;
-            };
-            return target;
-        }
-
         return {
             runtime,
             tree,
-            helpers: { makeGroupContainerTarget, makeDropEvent, makeSourceRowTarget },
-            groupsById
+            helpers: { dragOverFor, makeDropEvent },
+            groupsById,
+            elementMap
         };
     }
 
@@ -2314,16 +2739,10 @@ describe('handleDragOver hover-expand', () => {
         const ctx = setupTreeInteractionsTestContext({
             state: { isBatchMode: false, ungrouped: [], groups: ['g1'] },
             pendingBatchKeys: new Set(),
-            groups: { g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: true } }
+            groups: { g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: true } },
+            items: [{ kind: 'group', id: 'g1', top: 100, headerHeight: 40, childrenStart: 140, childrenEnd: 140 }]
         });
-        const target = ctx.helpers.makeGroupContainerTarget('g1', { intent: 'drag-into' });
-        const event = {
-            target,
-            clientY: target.rect.top + target.rect.height / 2,
-            preventDefault: jest.fn(),
-            dataTransfer: { dropEffect: 'move' }
-        };
-        ctx.tree.handleDragOver(event);
+        ctx.helpers.dragOverFor('g1');
         jest.advanceTimersByTime(600);
         expect(ctx.groupsById.get('g1').collapsed).toBe(false);
     });
@@ -2335,23 +2754,15 @@ describe('handleDragOver hover-expand', () => {
             groups: {
                 g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: true },
                 g2: { id: 'g2', children: [{ type: 'source', key: 'Y' }], collapsed: true }
-            }
+            },
+            items: [
+                { kind: 'group', id: 'g1', top: 100, headerHeight: 40, childrenStart: 140, childrenEnd: 140 },
+                { kind: 'group', id: 'g2', top: 200, headerHeight: 40, childrenStart: 240, childrenEnd: 240 }
+            ]
         });
-        const target1 = ctx.helpers.makeGroupContainerTarget('g1', { intent: 'drag-into' });
-        const target2 = ctx.helpers.makeGroupContainerTarget('g2', { intent: 'drag-into' });
-        ctx.tree.handleDragOver({
-            target: target1,
-            clientY: target1.rect.top + target1.rect.height / 2,
-            preventDefault: jest.fn(),
-            dataTransfer: { dropEffect: 'move' }
-        });
+        ctx.helpers.dragOverFor('g1');
         jest.advanceTimersByTime(300);
-        ctx.tree.handleDragOver({
-            target: target2,
-            clientY: target2.rect.top + target2.rect.height / 2,
-            preventDefault: jest.fn(),
-            dataTransfer: { dropEffect: 'move' }
-        });
+        ctx.helpers.dragOverFor('g2');
         jest.advanceTimersByTime(600);
         expect(ctx.groupsById.get('g1').collapsed).toBe(true);
     });
@@ -2360,15 +2771,10 @@ describe('handleDragOver hover-expand', () => {
         const ctx = setupTreeInteractionsTestContext({
             state: { isBatchMode: false, ungrouped: [], groups: ['g1'] },
             pendingBatchKeys: new Set(),
-            groups: { g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: false } }
+            groups: { g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: false } },
+            items: [{ kind: 'group', id: 'g1', top: 100, headerHeight: 40, childrenStart: 140, childrenEnd: 200 }]
         });
-        const target = ctx.helpers.makeGroupContainerTarget('g1', { intent: 'drag-into' });
-        ctx.tree.handleDragOver({
-            target,
-            clientY: target.rect.top + target.rect.height / 2,
-            preventDefault: jest.fn(),
-            dataTransfer: { dropEffect: 'move' }
-        });
+        ctx.helpers.dragOverFor('g1');
         jest.advanceTimersByTime(1000);
         expect(ctx.groupsById.get('g1').collapsed).toBe(false);
     });
@@ -2377,15 +2783,10 @@ describe('handleDragOver hover-expand', () => {
         const ctx = setupTreeInteractionsTestContext({
             state: { isBatchMode: false, ungrouped: [], groups: ['g1'] },
             pendingBatchKeys: new Set(),
-            groups: { g1: { id: 'g1', children: [], collapsed: true } }
+            groups: { g1: { id: 'g1', children: [], collapsed: true } },
+            items: [{ kind: 'group', id: 'g1', top: 100, headerHeight: 40, childrenStart: 140, childrenEnd: 140 }]
         });
-        const target = ctx.helpers.makeGroupContainerTarget('g1', { intent: 'drag-into' });
-        ctx.tree.handleDragOver({
-            target,
-            clientY: target.rect.top + target.rect.height / 2,
-            preventDefault: jest.fn(),
-            dataTransfer: { dropEffect: 'move' }
-        });
+        ctx.helpers.dragOverFor('g1');
         jest.advanceTimersByTime(1000);
         expect(ctx.groupsById.get('g1').collapsed).toBe(true);
     });
@@ -2394,15 +2795,10 @@ describe('handleDragOver hover-expand', () => {
         const ctx = setupTreeInteractionsTestContext({
             state: { isBatchMode: false, ungrouped: [], groups: ['g1'] },
             pendingBatchKeys: new Set(),
-            groups: { g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: true } }
+            groups: { g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: true } },
+            items: [{ kind: 'group', id: 'g1', top: 100, headerHeight: 40, childrenStart: 140, childrenEnd: 140 }]
         });
-        const target = ctx.helpers.makeGroupContainerTarget('g1', { intent: 'drag-into' });
-        ctx.tree.handleDragOver({
-            target,
-            clientY: target.rect.top + target.rect.height / 2,
-            preventDefault: jest.fn(),
-            dataTransfer: { dropEffect: 'move' }
-        });
+        ctx.helpers.dragOverFor('g1');
         jest.advanceTimersByTime(300);
         ctx.tree.handleDragLeave({ target: { id: 'sources-list', closest: () => null } });
         jest.advanceTimersByTime(600);
@@ -2413,17 +2809,12 @@ describe('handleDragOver hover-expand', () => {
         const ctx = setupTreeInteractionsTestContext({
             state: { isBatchMode: false, ungrouped: [], groups: ['g1'] },
             pendingBatchKeys: new Set(),
-            groups: { g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: true } }
+            groups: { g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: true } },
+            items: [{ kind: 'group', id: 'g1', top: 100, headerHeight: 40, childrenStart: 140, childrenEnd: 140 }]
         });
-        const target = ctx.helpers.makeGroupContainerTarget('g1', { intent: 'drag-into' });
-        ctx.tree.handleDragOver({
-            target,
-            clientY: target.rect.top + target.rect.height / 2,
-            preventDefault: jest.fn(),
-            dataTransfer: { dropEffect: 'move' }
-        });
+        ctx.helpers.dragOverFor('g1');
         jest.advanceTimersByTime(300);
-        ctx.tree.handleDragEnd({ target });
+        ctx.tree.handleDragEnd({ target: { closest: () => null } });
         jest.advanceTimersByTime(600);
         expect(ctx.groupsById.get('g1').collapsed).toBe(true);
     });
@@ -2432,21 +2823,14 @@ describe('handleDragOver hover-expand', () => {
         const ctx = setupTreeInteractionsTestContext({
             state: { isBatchMode: false, ungrouped: ['A'], groups: ['g1'] },
             pendingBatchKeys: new Set(),
-            groups: { g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: true } }
+            groups: { g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: true } },
+            items: [{ kind: 'group', id: 'g1', top: 100, headerHeight: 40, childrenStart: 140, childrenEnd: 140 }]
         });
-        const target = ctx.helpers.makeGroupContainerTarget('g1', { intent: 'drag-into' });
-        ctx.tree.handleDragOver({
-            target,
-            clientY: target.rect.top + target.rect.height / 2,
-            preventDefault: jest.fn(),
-            dataTransfer: { dropEffect: 'move' }
-        });
+        ctx.helpers.dragOverFor('g1');
         jest.advanceTimersByTime(300);
-        const dropEvent = ctx.helpers.makeDropEvent({
-            data: { 'application/source-key': 'A' },
-            target
-        });
-        ctx.tree.handleDrop(dropEvent);
+        ctx.tree.handleDrop(ctx.helpers.makeDropEvent({
+            data: { 'application/source-key': 'A' }
+        }));
         jest.advanceTimersByTime(600);
         expect(ctx.groupsById.get('g1').collapsed).toBe(true);
     });
@@ -2474,15 +2858,10 @@ describe('handleDragOver hover-expand', () => {
             const ctx = setupTreeInteractionsTestContext({
                 state: { isBatchMode: false, ungrouped: [], groups: ['g1'] },
                 pendingBatchKeys: new Set(),
-                groups: { g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: true } }
+                groups: { g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: true } },
+                items: [{ kind: 'group', id: 'g1', top: 100, headerHeight: 40, childrenStart: 140, childrenEnd: 140 }]
             });
-            const target = ctx.helpers.makeGroupContainerTarget('g1', { intent: 'drag-into' });
-            ctx.tree.handleDragOver({
-                target,
-                clientY: target.rect.top + target.rect.height / 2,
-                preventDefault: jest.fn(),
-                dataTransfer: { dropEffect: 'move' }
-            });
+            ctx.helpers.dragOverFor('g1');
             jest.advanceTimersByTime(600);
             expect(ctx.runtime.hoverExpandedGroupIds.has('g1')).toBe(true);
             expect(ctx.runtime.groupsById.get('g1').collapsed).toBe(false);
@@ -2523,28 +2902,20 @@ describe('handleDragOver hover-expand', () => {
                 groups: {
                     A: { id: 'A', children: [{ type: 'source', key: 'X' }], collapsed: true },
                     B: { id: 'B', children: [{ type: 'source', key: 'Y' }], collapsed: true }
-                }
+                },
+                items: [
+                    { kind: 'group', id: 'A', top: 100, headerHeight: 40, childrenStart: 140, childrenEnd: 140 },
+                    { kind: 'group', id: 'B', top: 200, headerHeight: 40, childrenStart: 240, childrenEnd: 240 }
+                ]
             });
 
-            const targetA = ctx.helpers.makeGroupContainerTarget('A', { intent: 'drag-into' });
-            ctx.tree.handleDragOver({
-                target: targetA,
-                clientY: targetA.rect.top + targetA.rect.height / 2,
-                preventDefault: jest.fn(),
-                dataTransfer: { dropEffect: 'move' }
-            });
+            ctx.helpers.dragOverFor('A');
             jest.advanceTimersByTime(600);
             expect(ctx.runtime.groupsById.get('A').collapsed).toBe(false);
             expect(ctx.runtime.hoverExpandedGroupIds.has('A')).toBe(true);
 
-            // Now move pointer to a sibling B (not in A's chain).
-            const targetB = ctx.helpers.makeGroupContainerTarget('B', { intent: 'drag-into' });
-            ctx.tree.handleDragOver({
-                target: targetB,
-                clientY: targetB.rect.top + targetB.rect.height / 2,
-                preventDefault: jest.fn(),
-                dataTransfer: { dropEffect: 'move' }
-            });
+            // Move pointer to a sibling B (not in A's chain).
+            ctx.helpers.dragOverFor('B');
 
             // A should now have a pending collapse timer.
             expect(ctx.runtime.hoverExpandTimers.get('A')).toMatchObject({ kind: 'collapse' });
@@ -2562,33 +2933,24 @@ describe('handleDragOver hover-expand', () => {
                 groups: {
                     A: { id: 'A', children: [{ type: 'source', key: 'X' }], collapsed: false },
                     B: { id: 'B', children: [{ type: 'source', key: 'Y' }], collapsed: false }
-                }
+                },
+                items: [
+                    { kind: 'group', id: 'A', top: 100, headerHeight: 40, childrenStart: 140, childrenEnd: 200 },
+                    { kind: 'group', id: 'B', top: 200, headerHeight: 40, childrenStart: 240, childrenEnd: 300 }
+                ]
             });
             ctx.runtime.hoverExpandedGroupIds.add('A');
 
             // Pointer on B (not in A's chain) → arm collapse timer for A.
-            const targetB = ctx.helpers.makeGroupContainerTarget('B', { intent: 'drag-into' });
-            ctx.tree.handleDragOver({
-                target: targetB,
-                clientY: targetB.rect.top + targetB.rect.height / 2,
-                preventDefault: jest.fn(),
-                dataTransfer: { dropEffect: 'move' }
-            });
+            ctx.helpers.dragOverFor('B');
             expect(ctx.runtime.hoverExpandTimers.get('A')).toMatchObject({ kind: 'collapse' });
             jest.advanceTimersByTime(300);
 
             // Pointer returns to A → cancel collapse timer.
-            const targetA = ctx.helpers.makeGroupContainerTarget('A', { intent: 'drag-into' });
-            ctx.tree.handleDragOver({
-                target: targetA,
-                clientY: targetA.rect.top + targetA.rect.height / 2,
-                preventDefault: jest.fn(),
-                dataTransfer: { dropEffect: 'move' }
-            });
+            ctx.helpers.dragOverFor('A');
             expect(ctx.runtime.hoverExpandTimers.get('A')).toBeUndefined();
 
             jest.advanceTimersByTime(600);
-            // A is still expanded.
             expect(ctx.runtime.groupsById.get('A').collapsed).toBe(false);
             expect(ctx.runtime.hoverExpandedGroupIds.has('A')).toBe(true);
         });
@@ -2601,18 +2963,21 @@ describe('handleDragOver hover-expand', () => {
                     A: { id: 'A', children: [{ type: 'group', id: 'B' }], collapsed: false },
                     B: { id: 'B', children: [{ type: 'source', key: 'X' }], collapsed: false }
                 },
-                parentMap: new Map([['B', 'A']])
+                parentMap: new Map([['B', 'A']]),
+                items: [
+                    {
+                        kind: 'group', id: 'A', top: 100, headerHeight: 40,
+                        childrenStart: 140, childrenEnd: 280,
+                        children: [
+                            { kind: 'group', id: 'B', top: 140, headerHeight: 40, childrenStart: 180, childrenEnd: 240 }
+                        ]
+                    }
+                ]
             });
             ctx.runtime.hoverExpandedGroupIds.add('A');
 
             // Pointer enters B (descendant of A).
-            const targetB = ctx.helpers.makeGroupContainerTarget('B', { intent: 'drag-into' });
-            ctx.tree.handleDragOver({
-                target: targetB,
-                clientY: targetB.rect.top + targetB.rect.height / 2,
-                preventDefault: jest.fn(),
-                dataTransfer: { dropEffect: 'move' }
-            });
+            ctx.helpers.dragOverFor('B');
 
             // A should NOT have a collapse timer.
             expect(ctx.runtime.hoverExpandTimers.get('A')).toBeUndefined();
@@ -2634,42 +2999,65 @@ describe('handleDragOver hover-expand', () => {
             const ctx = setupTreeInteractionsTestContext({
                 state: { isBatchMode: false, ungrouped: ['A'], groups: ['g1'] },
                 pendingBatchKeys: new Set(),
-                groups: { g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: false } }
+                groups: { g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: false } },
+                items: [{ kind: 'group', id: 'g1', top: 100, headerHeight: 40, childrenStart: 140, childrenEnd: 200 }]
             });
             ctx.runtime.hoverExpandedGroupIds.add('g1');
-
-            const target = ctx.helpers.makeGroupContainerTarget('g1', { intent: 'drag-into' });
-            const dropEvent = ctx.helpers.makeDropEvent({
-                data: { 'application/source-key': 'A' },
-                target
-            });
-            ctx.tree.handleDrop(dropEvent);
+            // Pre-populate intent (mimics dragover preceding the drop).
+            ctx.runtime.dragReflowSession = {
+                draggedKeys: new Set(['A']),
+                currentIntent: {
+                    kind: 'into-group',
+                    targetGroup: ctx.groupsById.get('g1'),
+                    targetList: ctx.groupsById.get('g1').children,
+                    insertIndex: -1,
+                    targetGroupId: 'g1',
+                    hostGroupContainerEl: ctx.elementMap.get('group:g1'),
+                    slotKey: null
+                },
+                shiftedItems: new Map()
+            };
+            ctx.tree.handleDrop(ctx.helpers.makeDropEvent({
+                data: { 'application/source-key': 'A' }
+            }));
 
             expect(ctx.runtime.groupsById.get('g1').collapsed).toBe(false);
             expect(ctx.runtime.hoverExpandedGroupIds.has('g1')).toBe(false);
         });
 
         it('collapses the hover-opened group when drop lands outside its subtree', () => {
+            const g2Group = { id: 'g2', children: [], collapsed: false };
             const ctx = setupTreeInteractionsTestContext({
                 state: { isBatchMode: false, ungrouped: ['A'], groups: ['g1', 'g2'] },
                 pendingBatchKeys: new Set(),
                 groups: {
                     g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: false },
-                    g2: { id: 'g2', children: [], collapsed: false }
-                }
+                    g2: g2Group
+                },
+                items: [
+                    { kind: 'group', id: 'g1', top: 100, headerHeight: 40, childrenStart: 140, childrenEnd: 200 },
+                    { kind: 'group', id: 'g2', top: 220, headerHeight: 40, childrenStart: 260, childrenEnd: 260 }
+                ]
             });
             ctx.runtime.hoverExpandedGroupIds.add('g1');
 
-            // Pre-register g1's container so executeHoverCollapse can locate it.
-            ctx.helpers.makeGroupContainerTarget('g1', { intent: 'drag-into' });
-
             // Drop into g2 (sibling, not in g1's chain).
-            const target = ctx.helpers.makeGroupContainerTarget('g2', { intent: 'drag-into' });
-            const dropEvent = ctx.helpers.makeDropEvent({
-                data: { 'application/source-key': 'A' },
-                target
-            });
-            ctx.tree.handleDrop(dropEvent);
+            ctx.runtime.dragReflowSession = {
+                draggedKeys: new Set(['A']),
+                currentIntent: {
+                    kind: 'into-group',
+                    targetGroup: ctx.groupsById.get('g2'),
+                    targetList: ctx.groupsById.get('g2').children,
+                    insertIndex: -1,
+                    targetGroupId: 'g2',
+                    hostGroupContainerEl: ctx.elementMap.get('group:g2'),
+                    slotKey: null
+                },
+                shiftedItems: new Map()
+            };
+            ctx.tree.handleDrop(ctx.helpers.makeDropEvent({
+                data: { 'application/source-key': 'A' }
+            }));
 
             expect(ctx.runtime.groupsById.get('g1').collapsed).toBe(true);
             expect(ctx.runtime.hoverExpandedGroupIds.has('g1')).toBe(false);
@@ -2679,14 +3067,12 @@ describe('handleDragOver hover-expand', () => {
             const ctx = setupTreeInteractionsTestContext({
                 state: { isBatchMode: false, ungrouped: ['A'], groups: ['g1'] },
                 pendingBatchKeys: new Set(),
-                groups: { g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: false } }
+                groups: { g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: false } },
+                items: [{ kind: 'group', id: 'g1', top: 100, headerHeight: 40, childrenStart: 140, childrenEnd: 200 }]
             });
             ctx.runtime.hoverExpandedGroupIds.add('g1');
 
-            // Pre-register g1's container so executeHoverCollapse can locate it.
-            ctx.helpers.makeGroupContainerTarget('g1', { intent: 'drag-into' });
-
-            ctx.tree.handleDragEnd({ target: ctx.helpers.makeSourceRowTarget('A') });
+            ctx.tree.handleDragEnd({ target: { closest: () => null } });
 
             expect(ctx.runtime.groupsById.get('g1').collapsed).toBe(true);
             expect(ctx.runtime.hoverExpandedGroupIds.size).toBe(0);
@@ -2701,22 +3087,36 @@ describe('handleDragOver hover-expand', () => {
                     g3: { id: 'g3', children: [], collapsed: false },
                     gD: { id: 'gD', children: [], collapsed: false }
                 },
-                parentMap: new Map([['g3', 'g1']])
+                parentMap: new Map([['g3', 'g1']]),
+                items: [
+                    {
+                        kind: 'group', id: 'g1', top: 100, headerHeight: 40, childrenStart: 140, childrenEnd: 220,
+                        children: [
+                            { kind: 'group', id: 'g3', top: 140, headerHeight: 40, childrenStart: 180, childrenEnd: 180 }
+                        ]
+                    },
+                    { kind: 'group', id: 'gD', top: 300, headerHeight: 40, childrenStart: 340, childrenEnd: 340 }
+                ]
             });
             ctx.runtime.hoverExpandedGroupIds.add('g1');
 
-            // Simulate dropping gD above g3 (which is inside g1).
-            // intent.targetGroup = g1 (the parent of g3), intent.kind = 'before-group'.
-            const target = ctx.helpers.makeGroupContainerTarget('g3');
+            // Drop intent: dropping gD above g3 (inside g1). targetGroup = g1.
             ctx.runtime.dragReflowSession = {
                 draggedKeys: new Set(['gD']),
-                currentIntent: { kind: 'before-group' }
+                currentIntent: {
+                    kind: 'before-group',
+                    targetGroup: ctx.groupsById.get('g1'),
+                    targetList: ctx.groupsById.get('g1').children,
+                    insertIndex: 0,
+                    targetGroupId: 'g1',
+                    hostGroupContainerEl: ctx.elementMap.get('group:g1'),
+                    slotKey: 'g3'
+                },
+                shiftedItems: new Map()
             };
-            const dropEvent = ctx.helpers.makeDropEvent({
-                data: { 'application/group-id': 'gD' },
-                target
-            });
-            ctx.tree.handleDrop(dropEvent);
+            ctx.tree.handleDrop(ctx.helpers.makeDropEvent({
+                data: { 'application/group-id': 'gD' }
+            }));
 
             // g1 should stay open because the drop landed inside g1's subtree.
             expect(ctx.runtime.groupsById.get('g1').collapsed).toBe(false);
@@ -2794,7 +3194,14 @@ describe('handleDrop reflow cleanup', () => {
         };
         const session = {
             draggedKeys: new Set(['source-1']),
-            currentIntent: { kind: 'after-source' },
+            currentIntent: {
+                kind: 'after-source',
+                targetGroup: null,
+                targetList: state.ungrouped,
+                insertIndex: 2,
+                targetGroupId: null,
+                slotKey: 'source-2'
+            },
             shiftedItems: new Map()
         };
         const runtime = { dragReflowSession: session };
@@ -2842,10 +3249,11 @@ describe('handleDrop reflow cleanup', () => {
 
     it('clears reflow and unfolds dragged items on an invalid drop (no DOM mutation)', () => {
         // Invalid: dropping a group into its own descendant — handleDrop returns early without mutation.
+        const childGroup = { id: 'child', children: [] };
         const state = { groups: ['root'], ungrouped: [] };
         const groupsById = new Map([
             ['root', { id: 'root', children: [{ type: 'group', id: 'child' }] }],
-            ['child', { id: 'child', children: [] }]
+            ['child', childGroup]
         ]);
         const parentMap = new Map([['child', 'root']]);
         const saveState = jest.fn();
@@ -2862,7 +3270,14 @@ describe('handleDrop reflow cleanup', () => {
         };
         const session = {
             draggedKeys: new Set(['root']),
-            currentIntent: { kind: 'into-group' },
+            currentIntent: {
+                kind: 'into-group',
+                targetGroup: childGroup,
+                targetList: childGroup.children,
+                insertIndex: -1,
+                targetGroupId: 'child',
+                slotKey: null
+            },
             shiftedItems: new Map()
         };
         const runtime = { dragReflowSession: session };
@@ -2910,7 +3325,14 @@ describe('handleDrop reflow cleanup', () => {
         };
         const session = {
             draggedKeys: new Set(['source-1']),
-            currentIntent: { kind: 'before-source' },
+            currentIntent: {
+                kind: 'before-source',
+                targetGroup: null,
+                targetList: state.ungrouped,
+                insertIndex: 0,
+                targetGroupId: null,
+                slotKey: 'source-1'
+            },
             shiftedItems: new Map()
         };
         const runtime = { dragReflowSession: session };
@@ -2960,7 +3382,14 @@ describe('handleDrop reflow cleanup', () => {
         };
         const session = {
             draggedKeys: new Set(['A', 'B', 'C']),
-            currentIntent: { kind: 'into-group' },
+            currentIntent: {
+                kind: 'into-group',
+                targetGroup: group,
+                targetList: group.children,
+                insertIndex: -1,
+                targetGroupId: 'g1',
+                slotKey: null
+            },
             shiftedItems: new Map()
         };
         const runtime = { dragReflowSession: session };

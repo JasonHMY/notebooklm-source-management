@@ -191,21 +191,419 @@
             }).filter(Boolean);
         }
 
-        function computeDropPosition(dropTarget, clientY) {
-            if (!dropTarget || typeof dropTarget.getBoundingClientRect !== 'function') {
-                return { isAbove: false, isInto: false };
+        const extractInlineTranslateY = dragReflow && typeof dragReflow.extractInlineTranslateY === 'function'
+            ? dragReflow.extractInlineTranslateY
+            : function fallbackExtractInlineTranslateY(el) {
+                if (!el || !el.style) return 0;
+                const t = el.style.transform || '';
+                if (!t) return 0;
+                const m = t.match(/translateY\((-?\d+(?:\.\d+)?)px\)/);
+                return m ? parseFloat(m[1]) : 0;
+            };
+
+        // Resolve drop-intent geometrically from pointer-Y, independent of e.target.closest().
+        // Returns null when no list / no candidates match.
+        //
+        // Algorithm:
+        //   1. One pass query for `.group-container` + `.source-item` under rootElement.
+        //   2. Pick the deepest group-container whose un-shifted bounds enclose clientY.
+        //      - If pointer in its `.group-header` band → kind='into-group', insertIndex=-1.
+        //      - If pointer in its `.group-children` band AND children empty → kind='into-group'.
+        //      - Otherwise host = group.children, find slot within children DOM.
+        //   3. If no group contains the pointer → host = root list (state.groups + ungrouped).
+        //   4. Slot detection: for each non-folded child element, compare its un-shifted
+        //      mid-Y against clientY; the first whose mid-Y > clientY becomes the insert slot.
+        //      All elements past clientY → insertIndex = childCount.
+        //
+        // Un-shifted bounds means `rect.top - extractInlineTranslateY(el)`: subtract any
+        // active reflow shift so the detection is stable while siblings are translateY'd.
+        function computeDropIntent({ clientY, rootElement, state, groupsById, parentMap, activeDragContext }) {
+            if (typeof clientY !== 'number' || !rootElement || typeof rootElement.querySelectorAll !== 'function') {
+                return null;
             }
-            const rect = dropTarget.getBoundingClientRect();
-            const offsetY = typeof clientY === 'number' ? clientY - rect.top : 0;
-            const isGroupContainer = dropTarget.classList
-                && typeof dropTarget.classList.contains === 'function'
-                && dropTarget.classList.contains('group-container');
-            if (isGroupContainer) {
-                if (offsetY < rect.height * 0.25) return { isAbove: true, isInto: false };
-                if (offsetY > rect.height * 0.75) return { isAbove: false, isInto: false };
-                return { isAbove: false, isInto: true };
+            // Reject cursors outside the source-list viewport entirely — handleDragOver bubbles
+            // up from anywhere in the panel; without this we'd compute a phantom slot when the
+            // cursor is over the chat / studio / outer chrome.
+            if (typeof rootElement.getBoundingClientRect === 'function') {
+                const rootRect = rootElement.getBoundingClientRect();
+                if (rootRect && (clientY < rootRect.top || clientY >= rootRect.bottom)) {
+                    return null;
+                }
             }
-            return { isAbove: offsetY < rect.height / 2, isInto: false };
+            const stateObj = state || {};
+            const groups = stateObj.groups = Array.isArray(stateObj.groups) ? stateObj.groups : [];
+            const ungrouped = stateObj.ungrouped = Array.isArray(stateObj.ungrouped) ? stateObj.ungrouped : [];
+
+            // Find the deepest group-container whose children-area encloses clientY.
+            const containers = rootElement.querySelectorAll('.group-container');
+            const containerList = containers && typeof containers.forEach === 'function'
+                ? Array.from(containers)
+                : (Array.isArray(containers) ? containers : []);
+
+            const getDepth = (groupId) => {
+                if (!groupId || !parentMap || typeof parentMap.get !== 'function') return 0;
+                let depth = 0;
+                let cursor = groupId;
+                const seen = new Set([cursor]);
+                while (true) {
+                    const p = parentMap.get(cursor);
+                    if (!p || seen.has(p)) break;
+                    seen.add(p);
+                    depth += 1;
+                    cursor = p;
+                }
+                return depth;
+            };
+
+            const unshiftedRect = (el) => {
+                if (!el || typeof el.getBoundingClientRect !== 'function') return null;
+                const rect = el.getBoundingClientRect();
+                if (!rect || typeof rect.top !== 'number' || typeof rect.height !== 'number') return null;
+                const shift = extractInlineTranslateY(el);
+                return { top: rect.top - shift, bottom: rect.bottom - shift, height: rect.height };
+            };
+
+            // Pick deepest container that contains pointer.
+            let chosenContainer = null;
+            let chosenDepth = -1;
+            for (const container of containerList) {
+                if (!container || !container.dataset) continue;
+                if (container.classList && container.classList.contains('sp-drag-folded')) continue;
+                const r = unshiftedRect(container);
+                if (!r) continue;
+                if (clientY < r.top || clientY >= r.bottom) continue;
+                const d = getDepth(container.dataset.groupId);
+                if (d > chosenDepth) {
+                    chosenContainer = container;
+                    chosenDepth = d;
+                }
+            }
+
+            let host = null;
+            let hostGroup = null;
+            let hostContainerEl = null;
+
+            if (chosenContainer) {
+                const groupId = chosenContainer.dataset && chosenContainer.dataset.groupId;
+                const groupObj = groupId && groupsById && typeof groupsById.get === 'function'
+                    ? groupsById.get(groupId)
+                    : null;
+                if (!groupObj) return null;
+
+                const headerEl = typeof chosenContainer.querySelector === 'function'
+                    ? chosenContainer.querySelector('.group-header')
+                    : null;
+                const childrenEl = typeof chosenContainer.querySelector === 'function'
+                    ? chosenContainer.querySelector('.group-children')
+                    : null;
+
+                // Pointer in group-header → into-group sentinel.
+                if (headerEl) {
+                    const headerR = unshiftedRect(headerEl);
+                    if (headerR && clientY >= headerR.top && clientY < headerR.bottom) {
+                        return {
+                            kind: 'into-group',
+                            targetGroup: groupObj,
+                            targetList: Array.isArray(groupObj.children) ? groupObj.children : (groupObj.children = []),
+                            insertIndex: -1,
+                            targetGroupId: groupObj.id,
+                            hostGroupContainerEl: chosenContainer,
+                            slotKey: null
+                        };
+                    }
+                }
+
+                // Pointer in group-children band.
+                if (childrenEl) {
+                    const childrenR = unshiftedRect(childrenEl);
+                    if (childrenR && clientY >= childrenR.top && clientY < childrenR.bottom) {
+                        const groupChildren = Array.isArray(groupObj.children) ? groupObj.children : (groupObj.children = []);
+                        // Empty children area → user clearly wants 'into-group'.
+                        if (groupChildren.length === 0) {
+                            return {
+                                kind: 'into-group',
+                                targetGroup: groupObj,
+                                targetList: groupChildren,
+                                insertIndex: -1,
+                                targetGroupId: groupObj.id,
+                                hostGroupContainerEl: chosenContainer,
+                                slotKey: null
+                            };
+                        }
+                        host = groupChildren;
+                        hostGroup = groupObj;
+                        hostContainerEl = chosenContainer;
+                    } else {
+                        // Pointer is inside container but not header / not children-area.
+                        // Treat as into-group (gap between header and children).
+                        const groupChildren = Array.isArray(groupObj.children) ? groupObj.children : (groupObj.children = []);
+                        return {
+                            kind: 'into-group',
+                            targetGroup: groupObj,
+                            targetList: groupChildren,
+                            insertIndex: -1,
+                            targetGroupId: groupObj.id,
+                            hostGroupContainerEl: chosenContainer,
+                            slotKey: null
+                        };
+                    }
+                } else {
+                    // No children-area element; treat container as into-group sentinel.
+                    const groupChildren = Array.isArray(groupObj.children) ? groupObj.children : (groupObj.children = []);
+                    return {
+                        kind: 'into-group',
+                        targetGroup: groupObj,
+                        targetList: groupChildren,
+                        insertIndex: -1,
+                        targetGroupId: groupObj.id,
+                        hostGroupContainerEl: chosenContainer,
+                        slotKey: null
+                    };
+                }
+            }
+
+            // Build the DOM children list for slot detection.
+            let childElements;
+            if (host) {
+                // Inside a group: direct children of .group-children — both .source-item and .group-container at depth+1.
+                const groupChildrenEl = hostContainerEl && typeof hostContainerEl.querySelector === 'function'
+                    ? hostContainerEl.querySelector('.group-children')
+                    : null;
+                if (!groupChildrenEl || typeof groupChildrenEl.querySelectorAll !== 'function') {
+                    childElements = [];
+                } else {
+                    // Use selector that matches direct children only via :scope > * if available;
+                    // fall back to all descendants but filter to entries owned by this group via dataset checks.
+                    const allDesc = groupChildrenEl.querySelectorAll(':scope > .group-container, :scope > .source-item');
+                    childElements = allDesc && typeof allDesc.forEach === 'function'
+                        ? Array.from(allDesc)
+                        : (Array.isArray(allDesc) ? allDesc : []);
+                }
+            } else {
+                // Root host. The state model has groups and ungrouped as two separate lists.
+                // Use the children directly under rootElement.
+                const rootChildren = typeof rootElement.querySelectorAll === 'function'
+                    ? rootElement.querySelectorAll(':scope > .group-container, :scope > .source-item')
+                    : [];
+                childElements = rootChildren && typeof rootChildren.forEach === 'function'
+                    ? Array.from(rootChildren)
+                    : (Array.isArray(rootChildren) ? rootChildren : []);
+            }
+
+            // Filter out folded items (they have height 0 / no meaningful position) and
+            // resolve a stable per-element key + kind. Tracking children flat so the index
+            // we use for downstream reflow matches the host array (parent.children) ordering.
+            const candidates = [];
+            for (const el of childElements) {
+                if (!el || typeof el.getBoundingClientRect !== 'function') continue;
+                if (el.classList && el.classList.contains('sp-drag-folded')) continue;
+                const isSrc = el.classList && el.classList.contains('source-item');
+                const isGrp = el.classList && el.classList.contains('group-container');
+                if (!isSrc && !isGrp) continue;
+                const key = isSrc
+                    ? (el.dataset ? el.dataset.sourceKey : null)
+                    : (el.dataset ? el.dataset.groupId : null);
+                if (!key) continue;
+                candidates.push({ el, key, kind: isSrc ? 'source' : 'group' });
+            }
+
+            // Slot match: first candidate whose un-shifted mid-Y > clientY → insert before it.
+            let beforeIndex = -1;
+            for (let i = 0; i < candidates.length; i += 1) {
+                const r = unshiftedRect(candidates[i].el);
+                if (!r) continue;
+                const midY = r.top + r.height / 2;
+                if (midY > clientY) {
+                    beforeIndex = i;
+                    break;
+                }
+            }
+
+            // Resolve insertIndex against the actual targetList (state.groups / state.ungrouped / group.children).
+            // For group host: insert position in host array is the index of the slot key (or list length for after-last).
+            // For root host: insertIndex is in state.groups or state.ungrouped depending on slot kind.
+            if (host) {
+                if (candidates.length === 0) {
+                    return {
+                        kind: 'into-group',
+                        targetGroup: hostGroup,
+                        targetList: host,
+                        insertIndex: -1,
+                        targetGroupId: hostGroup.id,
+                        hostGroupContainerEl: hostContainerEl,
+                        slotKey: null
+                    };
+                }
+                if (beforeIndex >= 0) {
+                    const slot = candidates[beforeIndex];
+                    const slotKind = slot.kind === 'source' ? 'before-source' : 'before-group';
+                    // Find slot's index in host array (group.children).
+                    let hostIndex = -1;
+                    for (let i = 0; i < host.length; i += 1) {
+                        const entry = host[i];
+                        if (!entry) continue;
+                        if (slot.kind === 'source' && entry.type === 'source' && entry.key === slot.key) { hostIndex = i; break; }
+                        if (slot.kind === 'group' && entry.type === 'group' && entry.id === slot.key) { hostIndex = i; break; }
+                    }
+                    return {
+                        kind: slotKind,
+                        targetGroup: hostGroup,
+                        targetList: host,
+                        insertIndex: hostIndex >= 0 ? hostIndex : 0,
+                        targetGroupId: hostGroup.id,
+                        hostGroupContainerEl: hostContainerEl,
+                        slotKey: slot.key
+                    };
+                }
+                // pointer past all children → after-last
+                const last = candidates[candidates.length - 1];
+                return {
+                    kind: last.kind === 'group' ? 'after-group' : 'after-source',
+                    targetGroup: hostGroup,
+                    targetList: host,
+                    insertIndex: host.length,
+                    targetGroupId: hostGroup.id,
+                    hostGroupContainerEl: hostContainerEl,
+                    slotKey: last.key
+                };
+            }
+
+            // Root host: targetList depends on slot neighbor type.
+            if (candidates.length === 0) {
+                return {
+                    kind: 'after-source',
+                    targetGroup: null,
+                    targetList: ungrouped,
+                    insertIndex: 0,
+                    targetGroupId: null,
+                    hostGroupContainerEl: null,
+                    slotKey: null
+                };
+            }
+            // For source drags landing on a group-typed slot at root, auto-route to the
+            // nearest ungrouped source neighbor so the drop lands somewhere sensible
+            // (otherwise dropping in a "between two groups" gap would be invalid and the
+            // user has no obvious target). Group drags don't auto-route — they target groups.
+            const isSourceDrag = activeDragContext
+                && (activeDragContext.kind === 'source-single' || activeDragContext.kind === 'source-multi');
+
+            if (beforeIndex >= 0) {
+                const slot = candidates[beforeIndex];
+                if (slot.kind === 'source') {
+                    const ungroupedIndex = ungrouped.indexOf(slot.key);
+                    return {
+                        kind: 'before-source',
+                        targetGroup: null,
+                        targetList: ungrouped,
+                        insertIndex: ungroupedIndex >= 0 ? ungroupedIndex : 0,
+                        targetGroupId: null,
+                        hostGroupContainerEl: null,
+                        slotKey: slot.key
+                    };
+                }
+                // slot.kind === 'group' — auto-route source drags to nearest ungrouped neighbor.
+                if (isSourceDrag) {
+                    const routed = routeSourceToUngroupedNeighbor({
+                        candidates, beforeIndex, ungrouped, clientY, unshiftedRect
+                    });
+                    if (routed) return routed;
+                }
+                const groupsIndex = groups.indexOf(slot.key);
+                return {
+                    kind: 'before-group',
+                    targetGroup: null,
+                    targetList: groups,
+                    insertIndex: groupsIndex >= 0 ? groupsIndex : 0,
+                    targetGroupId: null,
+                    hostGroupContainerEl: null,
+                    slotKey: slot.key
+                };
+            }
+
+            // After all root children.
+            const lastRoot = candidates[candidates.length - 1];
+            if (lastRoot.kind === 'group') {
+                if (isSourceDrag) {
+                    const routed = routeSourceToUngroupedNeighbor({
+                        candidates, beforeIndex: candidates.length, ungrouped, clientY, unshiftedRect
+                    });
+                    if (routed) return routed;
+                }
+                const groupsIndex = groups.indexOf(lastRoot.key);
+                return {
+                    kind: 'after-group',
+                    targetGroup: null,
+                    targetList: groups,
+                    insertIndex: groupsIndex >= 0 ? groupsIndex + 1 : groups.length,
+                    targetGroupId: null,
+                    hostGroupContainerEl: null,
+                    slotKey: lastRoot.key
+                };
+            }
+            const ungroupedIndex = ungrouped.indexOf(lastRoot.key);
+            return {
+                kind: 'after-source',
+                targetGroup: null,
+                targetList: ungrouped,
+                insertIndex: ungroupedIndex >= 0 ? ungroupedIndex + 1 : ungrouped.length,
+                targetGroupId: null,
+                hostGroupContainerEl: null,
+                slotKey: lastRoot.key
+            };
+        }
+
+        // Find the nearest ungrouped source neighbor (by distance from cursor to the
+        // neighbor's vertical mid-Y) and produce a before/after-source intent. Returns
+        // null when there are no ungrouped neighbors at root (caller falls back to
+        // before/after-group which will be flagged invalid for source drags).
+        function routeSourceToUngroupedNeighbor({ candidates, beforeIndex, ungrouped, clientY, unshiftedRect }) {
+            if (!candidates || candidates.length === 0) return null;
+            if (!Array.isArray(ungrouped) || ungrouped.length === 0) return null;
+            // Walk upward from beforeIndex-1 and downward from beforeIndex to find the
+            // closest 'source' candidate. Pick whichever has smaller |midY - clientY|.
+            let upHit = null;
+            for (let i = beforeIndex - 1; i >= 0; i -= 1) {
+                if (candidates[i] && candidates[i].kind === 'source') { upHit = { idx: i, candidate: candidates[i] }; break; }
+            }
+            let downHit = null;
+            for (let i = beforeIndex; i < candidates.length; i += 1) {
+                if (candidates[i] && candidates[i].kind === 'source') { downHit = { idx: i, candidate: candidates[i] }; break; }
+            }
+            const dist = (hit) => {
+                if (!hit) return Infinity;
+                const r = unshiftedRect(hit.candidate.el);
+                if (!r) return Infinity;
+                return Math.abs((r.top + r.height / 2) - clientY);
+            };
+            const upDist = dist(upHit);
+            const downDist = dist(downHit);
+            if (!upHit && !downHit) return null;
+            // Prefer the closer neighbor. Up-neighbor → after-source (route to slot just below it);
+            // Down-neighbor → before-source (route to slot just above it).
+            if (upHit && (!downHit || upDist <= downDist)) {
+                const key = upHit.candidate.key;
+                const idx = ungrouped.indexOf(key);
+                return {
+                    kind: 'after-source',
+                    targetGroup: null,
+                    targetList: ungrouped,
+                    insertIndex: idx >= 0 ? idx + 1 : ungrouped.length,
+                    targetGroupId: null,
+                    hostGroupContainerEl: null,
+                    slotKey: key
+                };
+            }
+            const key = downHit.candidate.key;
+            const idx = ungrouped.indexOf(key);
+            return {
+                kind: 'before-source',
+                targetGroup: null,
+                targetList: ungrouped,
+                insertIndex: idx >= 0 ? idx : 0,
+                targetGroupId: null,
+                hostGroupContainerEl: null,
+                slotKey: key
+            };
         }
 
         if (typeof runtime.activeDragContext === 'undefined') {
@@ -1053,15 +1451,22 @@
             }
         }
 
-        function computeIsInvalidDrop({ dropTarget, intent, dragContext }) {
-            if (!dropTarget || !dragContext) return false;
-            if (!intent || typeof intent !== 'object') return false;
+        function computeIsInvalidDrop({ intent, dragContext }) {
+            if (!intent || typeof intent !== 'object' || !dragContext) return false;
 
             if (dragContext.kind === 'source-single') {
                 const draggedKey = Array.isArray(dragContext.keys) ? dragContext.keys[0] : null;
                 if (!draggedKey) return false;
-                const targetKey = dropTarget.dataset ? dropTarget.dataset.sourceKey : null;
-                return Boolean(targetKey) && targetKey === draggedKey;
+                if (intent.kind === 'before-source' || intent.kind === 'after-source') {
+                    return intent.slotKey === draggedKey;
+                }
+                // Top-level before-group / after-group — would splice the source key into
+                // state.groups at an index computed against state.groups (semantically wrong).
+                // Reject symmetrically with the source-multi guard below.
+                const isAtTopLevel = intent.targetGroup == null;
+                const isBeforeOrAfter = intent.kind === 'before-group' || intent.kind === 'after-group';
+                if (isAtTopLevel && isBeforeOrAfter) return true;
+                return false;
             }
 
             if (dragContext.kind === 'source-multi') {
@@ -1069,16 +1474,13 @@
                 if (keys.length === 0) return false;
                 const draggedSet = new Set(keys);
 
-                // Member of dragged set
-                const targetKey = dropTarget.dataset ? dropTarget.dataset.sourceKey : null;
-                if (targetKey && draggedSet.has(targetKey)) return true;
-
+                if (intent.kind === 'before-source' || intent.kind === 'after-source') {
+                    return draggedSet.has(intent.slotKey);
+                }
                 // Top-level before-group / after-group intent — would splice source keys into state.groups
-                const isGroupContainer = dropTarget.classList && typeof dropTarget.classList.contains === 'function'
-                    && dropTarget.classList.contains('group-container');
                 const isAtTopLevel = intent.targetGroup == null;
                 const isBeforeOrAfter = intent.kind === 'before-group' || intent.kind === 'after-group';
-                if (isGroupContainer && isAtTopLevel && isBeforeOrAfter) return true;
+                if (isAtTopLevel && isBeforeOrAfter) return true;
 
                 return false;
             }
@@ -1100,96 +1502,90 @@
 
         function handleDragOver(e) {
             e.preventDefault();
-            const dropTarget = e.target.closest('.group-container, .source-item');
-            if (dropTarget) {
-                const { isInto, isAbove } = computeDropPosition(dropTarget, e.clientY);
+            const sourceListEl = getSourceListContainer();
+            const intent = computeDropIntent({
+                clientY: e.clientY,
+                rootElement: sourceListEl,
+                state: getState(),
+                groupsById: getGroupsById(),
+                parentMap: getParentMap(),
+                activeDragContext: runtime.activeDragContext
+            });
 
-                if (dropTarget.classList && typeof dropTarget.classList.remove === 'function') {
-                    dropTarget.classList.remove('drag-into');
-                }
-                if (isInto && dropTarget.classList && typeof dropTarget.classList.add === 'function') {
-                    dropTarget.classList.add('drag-into');
-                }
-
-                const intentKindForCheck = normalizeIntentKind(isInto, isAbove, dropTarget);
-                const baseIntent = getDropIntent(dropTarget, isInto, isAbove);
-                const intentForInvalidCheck = baseIntent
-                    ? { ...baseIntent, kind: intentKindForCheck }
-                    : { kind: intentKindForCheck, targetGroup: null };
+            if (intent) {
                 const isInvalid = computeIsInvalidDrop({
-                    dropTarget,
-                    intent: intentForInvalidCheck,
+                    intent,
                     dragContext: runtime.activeDragContext
                 });
 
-                // Clear any prior .drag-invalid markers from the source list before re-applying.
-                const sourceListEl = getSourceListContainer();
+                // Single sweep to clear stale .drag-into / .drag-invalid markers.
                 if (sourceListEl && typeof sourceListEl.querySelectorAll === 'function') {
-                    const stale = sourceListEl.querySelectorAll('.drag-invalid');
+                    const stale = sourceListEl.querySelectorAll('.drag-into, .drag-invalid');
                     if (stale && typeof stale.forEach === 'function') {
                         stale.forEach((node) => {
                             if (node && node.classList && typeof node.classList.remove === 'function') {
-                                node.classList.remove('drag-invalid');
+                                node.classList.remove('drag-into', 'drag-invalid');
                             }
                         });
                     }
                 }
-                if (dropTarget.classList && typeof dropTarget.classList.remove === 'function') {
-                    dropTarget.classList.remove('drag-invalid');
-                }
 
+                // Apply current frame's markers.
+                if (intent.kind === 'into-group' && intent.hostGroupContainerEl
+                    && intent.hostGroupContainerEl.classList
+                    && typeof intent.hostGroupContainerEl.classList.add === 'function') {
+                    intent.hostGroupContainerEl.classList.add('drag-into');
+                }
                 if (isInvalid) {
                     if (e.dataTransfer) e.dataTransfer.dropEffect = 'none';
-                    if (intentKindForCheck === 'into-group') {
-                        // Preserve existing group-header invalid highlight via .group-container.drag-invalid > .group-header.
-                        if (dropTarget.classList && typeof dropTarget.classList.add === 'function') {
-                            dropTarget.classList.add('drag-invalid');
+                    if (intent.kind === 'into-group') {
+                        if (intent.hostGroupContainerEl && intent.hostGroupContainerEl.classList
+                            && typeof intent.hostGroupContainerEl.classList.add === 'function') {
+                            intent.hostGroupContainerEl.classList.add('drag-invalid');
                         }
-                    } else if (baseIntent) {
-                        // Highlight the target slot top item (first sibling shifted down by reflow).
-                        const insertIndex = typeof baseIntent.insertIndex === 'number' ? baseIntent.insertIndex : 0;
-                        const siblingKeys = resolveSiblingKeys(baseIntent);
-                        const targetSlotKey = siblingKeys[insertIndex];
-                        if (targetSlotKey && sourceListEl && typeof sourceListEl.querySelector === 'function') {
-                            const slotEl = sourceListEl.querySelector(`[data-source-key="${cssEscape(targetSlotKey)}"]`);
-                            if (slotEl && slotEl.classList && typeof slotEl.classList.add === 'function') {
-                                slotEl.classList.add('drag-invalid');
-                            }
+                    } else if (intent.slotKey && sourceListEl && typeof sourceListEl.querySelector === 'function') {
+                        // before-/after-source uses data-source-key; before-/after-group uses data-group-id.
+                        const slotAttr = (intent.kind === 'before-group' || intent.kind === 'after-group')
+                            ? 'data-group-id'
+                            : 'data-source-key';
+                        const slotEl = sourceListEl.querySelector(`[${slotAttr}="${cssEscape(intent.slotKey)}"]`);
+                        if (slotEl && slotEl.classList && typeof slotEl.classList.add === 'function') {
+                            slotEl.classList.add('drag-invalid');
                         }
                     }
                 }
 
-                if (dragReflow && runtime.dragReflowSession && baseIntent && typeof dragReflow.computeReflow === 'function') {
-                    const insertIndex = typeof baseIntent.insertIndex === 'number' ? baseIntent.insertIndex : 0;
-                    const siblingKeys = resolveSiblingKeys(baseIntent);
-                    const rootElement = getSourceListContainer();
+                // Reflow: compute sibling shifts from host list, push them to the layout.
+                if (dragReflow && runtime.dragReflowSession && typeof dragReflow.computeReflow === 'function') {
+                    const siblingKeys = resolveSiblingKeys(intent);
+                    const insertIndexForReflow = intent.kind === 'into-group'
+                        ? siblingKeys.length
+                        : (typeof intent.insertIndex === 'number' && intent.insertIndex >= 0
+                            ? intent.insertIndex
+                            : siblingKeys.length);
                     const shifts = dragReflow.computeReflow({
                         session: runtime.dragReflowSession,
-                        insertIndex,
+                        insertIndex: insertIndexForReflow,
                         siblingKeys,
-                        rootElement
+                        rootElement: sourceListEl
                     });
                     if (typeof dragReflow.applyReflow === 'function') {
                         dragReflow.applyReflow({
                             session: runtime.dragReflowSession,
                             shifts,
-                            rootElement
+                            rootElement: sourceListEl
                         });
                     }
-                    runtime.dragReflowSession.currentIntent = { ...intentForInvalidCheck };
+                    runtime.dragReflowSession.currentIntent = { ...intent };
                 }
 
-                // Compute the pointer's current group and ancestry chain.
-                const pointerGroupContainer = e.target && typeof e.target.closest === 'function'
-                    ? e.target.closest('.group-container')
-                    : null;
-                const pointerGroupId = pointerGroupContainer && pointerGroupContainer.dataset
-                    ? pointerGroupContainer.dataset.groupId
+                // Hover-expand: derive pointerGroupId from the host group-container we already resolved.
+                const pointerGroupId = intent.hostGroupContainerEl && intent.hostGroupContainerEl.dataset
+                    ? intent.hostGroupContainerEl.dataset.groupId
                     : null;
                 const ancestorChain = pointerGroupId ? getGroupAncestorChain(pointerGroupId) : [];
                 const ancestorSet = new Set(ancestorChain);
 
-                // Dispatch collapse-timer state for every hover-opened group.
                 if (runtime.hoverExpandedGroupIds.size > 0) {
                     const openedIds = Array.from(runtime.hoverExpandedGroupIds);
                     for (const G of openedIds) {
@@ -1201,7 +1597,6 @@
                     }
                 }
 
-                // Arm expand timer for a collapsed-with-children group under the pointer.
                 if (pointerGroupId) {
                     const groupsById = getGroupsById();
                     const pointerGroup = groupsById.get(pointerGroupId);
@@ -1475,73 +1870,6 @@
             return originalPosition.list === targetList && originalPosition.index === nextIndex;
         }
 
-        function getDropIntent(dropTarget, isInto, isAbove) {
-            const state = getState();
-            const groupsById = getGroupsById();
-            const parentMap = getParentMap();
-
-            if (dropTarget.classList.contains('group-container')) {
-                const targetGroupId = dropTarget.dataset.groupId;
-                const targetGroup = groupsById.get(targetGroupId);
-                if (!targetGroup) return null;
-
-                if (isInto) {
-                    return {
-                        targetGroup,
-                        targetList: targetGroup.children,
-                        insertIndex: -1
-                    };
-                }
-
-                const parentId = parentMap.get(targetGroupId);
-                if (parentId) {
-                    const parentGroup = groupsById.get(parentId);
-                    if (!parentGroup) return null;
-                    let insertIndex = parentGroup.children.findIndex((child) => child.type === 'group' && child.id === targetGroupId);
-                    if (!isAbove && insertIndex !== -1) insertIndex += 1;
-                    return {
-                        targetGroup: parentGroup,
-                        targetList: parentGroup.children,
-                        insertIndex
-                    };
-                }
-
-                state.groups = Array.isArray(state.groups) ? state.groups : [];
-                let insertIndex = state.groups.indexOf(targetGroupId);
-                if (!isAbove && insertIndex !== -1) insertIndex += 1;
-                return {
-                    targetGroup: null,
-                    targetList: state.groups,
-                    insertIndex
-                };
-            }
-
-            if (dropTarget.classList.contains('source-item')) {
-                const targetSourceKey = dropTarget.dataset.sourceKey;
-                const targetGroup = findParentGroupOfSource(targetSourceKey);
-                const targetList = targetGroup
-                    ? targetGroup.children
-                    : (state.ungrouped = Array.isArray(state.ungrouped) ? state.ungrouped : []);
-                let insertIndex = targetGroup
-                    ? targetGroup.children.findIndex((child) => child.type === 'source' && child.key === targetSourceKey)
-                    : targetList.indexOf(targetSourceKey);
-                if (!isAbove && insertIndex !== -1) insertIndex += 1;
-                return {
-                    targetGroup,
-                    targetList,
-                    insertIndex
-                };
-            }
-
-            return null;
-        }
-
-        function normalizeIntentKind(isInto, isAbove, dropTarget) {
-            if (isInto && dropTarget.classList.contains('group-container')) return 'into-group';
-            if (dropTarget.classList.contains('group-container')) return isAbove ? 'before-group' : 'after-group';
-            return isAbove ? 'before-source' : 'after-source';
-        }
-
         function cleanupReflowSession() {
             if (dragReflow && runtime.dragReflowSession) {
                 if (typeof dragReflow.clearReflow === 'function') {
@@ -1595,36 +1923,32 @@
                 const groupsById = getGroupsById();
                 const sourcesByKey = getSourcesByKey();
                 const pendingBatchKeys = getPendingBatchKeys();
-                const dropTarget = e.target.closest('.group-container, .source-item');
-                if (!dropTarget) {
-                    clearDragFeedback();
-                    return;
-                }
                 e.preventDefault();
 
-                const currentIntent = runtime.dragReflowSession && runtime.dragReflowSession.currentIntent;
-                let isInto;
-                let isAbove;
-                if (currentIntent && typeof currentIntent.kind === 'string') {
-                    isInto = currentIntent.kind === 'into-group';
-                    isAbove = currentIntent.kind === 'before-source' || currentIntent.kind === 'before-group';
-                } else {
-                    const pos = computeDropPosition(dropTarget, e.clientY);
-                    isInto = pos.isInto || (dropTarget.classList
-                        && typeof dropTarget.classList.contains === 'function'
-                        && dropTarget.classList.contains('drag-into'));
-                    isAbove = pos.isAbove;
+                // Prefer the intent computed during the last dragover (set on currentIntent);
+                // fall back to a one-shot computeDropIntent against e.clientY if absent.
+                let intent = runtime.dragReflowSession && runtime.dragReflowSession.currentIntent
+                    ? runtime.dragReflowSession.currentIntent
+                    : null;
+                if (!intent) {
+                    intent = computeDropIntent({
+                        clientY: e.clientY,
+                        rootElement: getSourceListContainer(),
+                        state,
+                        groupsById,
+                        parentMap: getParentMap(),
+                        activeDragContext: runtime.activeDragContext
+                    });
                 }
-                const intentKind = normalizeIntentKind(isInto, isAbove, dropTarget);
-                const intent = getDropIntent(dropTarget, isInto, isAbove);
-
-                const sourceKey = e.dataTransfer.getData('application/source-key');
-                const sourceKeysRaw = e.dataTransfer.getData('application/source-keys');
-                const draggedGroupId = e.dataTransfer.getData('application/group-id');
                 if (!intent) {
                     clearDragFeedback();
                     return;
                 }
+                const intentKind = intent.kind;
+
+                const sourceKey = e.dataTransfer.getData('application/source-key');
+                const sourceKeysRaw = e.dataTransfer.getData('application/source-keys');
+                const draggedGroupId = e.dataTransfer.getData('application/group-id');
 
                 if (sourceKeysRaw && dragMulti && typeof dragMulti.applyMultiSourceDrop === 'function') {
                     let keys = null;
@@ -1778,13 +2102,12 @@
             handleDrop,
             handleDragEnd,
             clearDragFeedback,
-            getDropIntent,
             getSourceTreePosition,
             getGroupTreePosition,
             isNoopTreeMove,
             getGroupAncestorChain,
             resolveSiblingKeys,
-            computeDropPosition
+            computeDropIntent
         };
     }
 
