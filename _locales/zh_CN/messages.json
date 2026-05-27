@@ -506,6 +506,24 @@
     "ui_settings_developer_mode_failed": {
         "message": "无法更新开发者模式"
     },
+    "ui_settings_appearance_title": {
+        "message": "外观自定义"
+    },
+    "ui_settings_appearance_hover_spotlight_title": {
+        "message": "悬浮光晕"
+    },
+    "ui_settings_appearance_hover_spotlight_body": {
+        "message": "鼠标悬浮在来源上时显示柔和的蓝色光晕。"
+    },
+    "ui_settings_appearance_hover_spotlight_enabled": {
+        "message": "已开启悬浮光晕"
+    },
+    "ui_settings_appearance_hover_spotlight_disabled": {
+        "message": "已关闭悬浮光晕"
+    },
+    "ui_settings_appearance_hover_spotlight_failed": {
+        "message": "无法更新悬浮光晕设置"
+    },
     "ui_settings_developer_logs_copied": {
         "message": "开发者日志已复制"
     },

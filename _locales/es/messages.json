@@ -506,6 +506,24 @@
     "ui_settings_developer_mode_failed": {
         "message": "No se pudo actualizar el modo de desarrollador"
     },
+    "ui_settings_appearance_title": {
+        "message": "Apariencia"
+    },
+    "ui_settings_appearance_hover_spotlight_title": {
+        "message": "Resaltado al pasar el cursor"
+    },
+    "ui_settings_appearance_hover_spotlight_body": {
+        "message": "Muestra un suave resplandor azul debajo de la fuente cuando pasas el cursor sobre ella."
+    },
+    "ui_settings_appearance_hover_spotlight_enabled": {
+        "message": "Resaltado al pasar el cursor activado"
+    },
+    "ui_settings_appearance_hover_spotlight_disabled": {
+        "message": "Resaltado al pasar el cursor desactivado"
+    },
+    "ui_settings_appearance_hover_spotlight_failed": {
+        "message": "No se pudo actualizar el resaltado"
+    },
     "ui_settings_developer_logs_copied": {
         "message": "Logs de desarrollador copiados"
     },

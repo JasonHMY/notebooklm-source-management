@@ -506,6 +506,24 @@
     "ui_settings_developer_mode_failed": {
         "message": "Could not update developer mode"
     },
+    "ui_settings_appearance_title": {
+        "message": "Appearance"
+    },
+    "ui_settings_appearance_hover_spotlight_title": {
+        "message": "Hover spotlight"
+    },
+    "ui_settings_appearance_hover_spotlight_body": {
+        "message": "Show a soft blue glow under the source when your cursor hovers over it."
+    },
+    "ui_settings_appearance_hover_spotlight_enabled": {
+        "message": "Hover spotlight enabled"
+    },
+    "ui_settings_appearance_hover_spotlight_disabled": {
+        "message": "Hover spotlight disabled"
+    },
+    "ui_settings_appearance_hover_spotlight_failed": {
+        "message": "Could not update hover spotlight"
+    },
     "ui_settings_developer_logs_copied": {
         "message": "Developer logs copied"
     },
