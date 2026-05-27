@@ -2131,14 +2131,18 @@
                 if (!el || !el.classList || typeof el.classList.add !== 'function') continue;
 
                 const cleanup = () => {
-                    if (el.classList && typeof el.classList.remove === 'function') {
-                        el.classList.remove('sp-drop-landing');
-                        el.classList.remove('sp-drop-landed');
-                        el.classList.remove('sp-drop-flying');
-                    }
+                    if (!el.classList || typeof el.classList.remove !== 'function') return;
+                    el.classList.remove('sp-drop-landing');
+                    el.classList.remove('sp-drop-landed');
+                    el.classList.remove('sp-drop-flying');
+                    // Do NOT clear inline transform / opacity here. Fly-in already cleared
+                    // them to '' immediately after adding .sp-drop-flying (the transition
+                    // animates from the pre-class translate value back to the post-class
+                    // empty value, so by the time we reach cleanup they are already ''
+                    // unless a subsequent drag has written new reflow/fold values on this
+                    // same element — in which case we MUST NOT clobber those writes.
+                    // transformOrigin is owned by fly-in (set to 'top left'), safe to clear.
                     if (el.style) {
-                        el.style.transform = '';
-                        el.style.opacity = '';
                         el.style.transformOrigin = '';
                     }
                 };
