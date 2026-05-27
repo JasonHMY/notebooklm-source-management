@@ -1364,13 +1364,12 @@
             // they're owned by the previous transition or the new fold about to run.
             const _preflightList = getSourceListContainer();
             if (_preflightList && typeof _preflightList.querySelectorAll === 'function') {
-                const stale = _preflightList.querySelectorAll('.sp-drop-flying, .sp-drop-landing, .sp-drop-landed, .sp-drag-unfolding, .sp-pseudo-hover');
+                const stale = _preflightList.querySelectorAll('.sp-drop-flying, .sp-drop-landing, .sp-drag-unfolding, .sp-pseudo-hover');
                 if (stale && typeof stale.forEach === 'function') {
                     stale.forEach((node) => {
                         if (!node || !node.classList || typeof node.classList.remove !== 'function') return;
                         node.classList.remove('sp-drop-flying');
                         node.classList.remove('sp-drop-landing');
-                        node.classList.remove('sp-drop-landed');
                         node.classList.remove('sp-drag-unfolding');
                         node.classList.remove('sp-pseudo-hover');
                     });
@@ -2231,10 +2230,11 @@
         //     fly-in from one cursor point would visually scatter N elements which is
         //     more confusing than helpful for batch drag).
         //
-        // .sp-drop-landed runs concurrently in both cases (600ms accent outline flash).
-        // Both cleanup on animationend with a setTimeout(800ms) backstop. Reduced-motion
-        // is handled in CSS (transition/animation become no-op; setTimeout still removes
-        // classes).
+        // No accent-outline flash on the landed element — the fly-in / scaleY motion plus
+        // the sibling FLIP below already provide enough visual continuity to catch the
+        // eye, and the extra box-shadow flash was perceived as a "blink". Cleanup runs on
+        // a setTimeout(800ms) backstop. Reduced-motion is handled in CSS (transition /
+        // animation become no-op; setTimeout still removes classes).
         function applyDropLandingAndFlash(landedKeys, cursorX, cursorY, preRects) {
             if (!Array.isArray(landedKeys) || landedKeys.length === 0) return;
             const rootElement = getSourceListContainer();
@@ -2294,7 +2294,6 @@
                 const cleanup = () => {
                     if (!el.classList || typeof el.classList.remove !== 'function') return;
                     el.classList.remove('sp-drop-landing');
-                    el.classList.remove('sp-drop-landed');
                     el.classList.remove('sp-drop-flying');
                     // Do NOT clear inline transform / opacity here. Fly-in already cleared
                     // them to '' immediately after adding .sp-drop-flying (the transition
@@ -2305,14 +2304,6 @@
                     // transformOrigin is owned by fly-in (set to 'top left'), safe to clear.
                     if (el.style) {
                         el.style.transformOrigin = '';
-                    }
-                };
-                const onEnd = (ev) => {
-                    if (ev && ev.animationName === 'sp-drop-landed-flash') {
-                        cleanup();
-                        if (typeof el.removeEventListener === 'function') {
-                            el.removeEventListener('animationend', onEnd);
-                        }
                     }
                 };
 
@@ -2328,8 +2319,7 @@
                     // Force a layout flush so the initial transform is applied before the
                     // transition kicks in. Without this the browser may coalesce both writes
                     // and skip the animation.
-                    // eslint-disable-next-line no-unused-expressions
-                    el.offsetHeight;
+                    void el.offsetHeight;
                     el.classList.add('sp-drop-flying');
                     el.style.transform = '';
                     el.style.opacity = '';
@@ -2338,11 +2328,6 @@
                     el.classList.add('sp-drop-landing');
                 }
 
-                el.classList.add('sp-drop-landed');
-
-                if (typeof el.addEventListener === 'function') {
-                    el.addEventListener('animationend', onEnd);
-                }
                 if (typeof setTimeoutFn === 'function') setTimeoutFn(cleanup, 800);
             }
         }

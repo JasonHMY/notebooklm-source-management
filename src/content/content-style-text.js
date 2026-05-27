@@ -2658,17 +2658,6 @@
                 will-change: transform, opacity;
             }
 
-            /* Drop landing flash: 600ms accent outline so the user's eye catches the new
-               position. Runs concurrently with the landing animation. Easing matches the
-               rest of the drag system (cubic-bezier(0.2, 0, 0, 1)) for visual cohesion. */
-            .sp-drop-landed {
-                animation: sp-drop-landed-flash 600ms cubic-bezier(0.2, 0, 0, 1) both;
-            }
-            @keyframes sp-drop-landed-flash {
-                0%   { box-shadow: 0 0 0 2px var(--sp-accent); }
-                100% { box-shadow: 0 0 0 0 transparent; }
-            }
-
             /* Dragend cancel (esc / drop outside): smoothly grow the dragged item back from
                height 0 to its cached natural height. Padding / border-width / margin animate
                in parallel — they were forced to 0 by .sp-drag-folded's !important, so
@@ -2686,8 +2675,7 @@
             }
 
             @media (prefers-reduced-motion: reduce) {
-                .sp-drop-landing,
-                .sp-drop-landed {
+                .sp-drop-landing {
                     animation: none !important;
                 }
                 .sp-drop-flying,

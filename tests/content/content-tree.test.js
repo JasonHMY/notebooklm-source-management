@@ -3363,17 +3363,16 @@ describe('handleDrop reflow cleanup', () => {
         dropEvent.clientY = 220;
         interactions.handleDrop(dropEvent);
 
-        // FLIP path took: fly-in class + flash, NOT scaleY landing.
+        // FLIP path took: fly-in class only, NOT scaleY landing. Accent-outline flash
+        // (.sp-drop-landed) has been removed — the fly-in motion alone provides the
+        // visual cue and the extra box-shadow blink was perceived as a "flash".
         expect(landedEl.classList.add).toHaveBeenCalledWith('sp-drop-flying');
-        expect(landedEl.classList.add).toHaveBeenCalledWith('sp-drop-landed');
+        expect(landedEl.classList.add).not.toHaveBeenCalledWith('sp-drop-landed');
         expect(landedEl.classList.add).not.toHaveBeenCalledWith('sp-drop-landing');
 
         // FLIP transform sequence: first translate(60px, 20px), then cleared ''.
         expect(transformWrites).toEqual(['translate(60px, 20px)', '']);
         expect(opacityWrites).toEqual(['0.85', '']);
-
-        // animationend listener attached for cleanup.
-        expect(landedEl.addEventListener).toHaveBeenCalledWith('animationend', expect.any(Function));
     });
 
     it('uses scaleY landing (no fly-in) for multi-source drops', () => {
@@ -3444,12 +3443,12 @@ describe('handleDrop reflow cleanup', () => {
         dropEvent.clientY = 220;
         interactions.handleDrop(dropEvent);
 
-        // Both landed elements get scaleY landing + flash, no fly-in.
+        // Both landed elements get scaleY landing (no fly-in, no accent flash).
         expect(landedA.classList.add).toHaveBeenCalledWith('sp-drop-landing');
-        expect(landedA.classList.add).toHaveBeenCalledWith('sp-drop-landed');
+        expect(landedA.classList.add).not.toHaveBeenCalledWith('sp-drop-landed');
         expect(landedA.classList.add).not.toHaveBeenCalledWith('sp-drop-flying');
         expect(landedB.classList.add).toHaveBeenCalledWith('sp-drop-landing');
-        expect(landedB.classList.add).toHaveBeenCalledWith('sp-drop-landed');
+        expect(landedB.classList.add).not.toHaveBeenCalledWith('sp-drop-landed');
     });
 
     it('clears reflow and unfolds dragged items on an invalid drop (no DOM mutation)', () => {
