@@ -263,7 +263,25 @@
                 return { top: rect.top - shift, bottom: rect.bottom - shift, height: rect.height };
             };
 
-            // Pick deepest container that contains pointer.
+            // Pick deepest container that contains pointer. For TOP-LEVEL containers we
+            // reserve an 8px "edge zone" at top and bottom of each container — cursor
+            // in this zone is treated as "in the root-level gap between containers", not
+            // inside the container. Without this, two adjacent top-level groups have
+            // virtually no Y-gap between their bounding rects (one ends where the next
+            // begins), so the user can never put the cursor "between" them — it always
+            // resolves to one or the other, and 600ms hover triggers an unwanted
+            // auto-expand. The edge zone gives a generous root-level corridor without
+            // making drops INTO groups noticeably harder (drop targets near the very top
+            // or very bottom of a group are unusual). Nested groups keep the full rect
+            // because their visual "gap" already lives inside the parent's children-area
+            // which has its own handling.
+            const EDGE_ZONE_PX = 8;
+            const _isTopLevelGroup = (gid) => {
+                if (!gid) return false;
+                if (!parentMap || typeof parentMap.get !== 'function') return true;
+                const p = parentMap.get(gid);
+                return !p;
+            };
             let chosenContainer = null;
             let chosenDepth = -1;
             for (const container of containerList) {
@@ -271,7 +289,10 @@
                 if (container.classList && container.classList.contains('sp-drag-folded')) continue;
                 const r = unshiftedRect(container);
                 if (!r) continue;
-                if (clientY < r.top || clientY >= r.bottom) continue;
+                const _isTopLevel = _isTopLevelGroup(container.dataset.groupId);
+                const _top = _isTopLevel ? r.top + EDGE_ZONE_PX : r.top;
+                const _bottom = _isTopLevel ? r.bottom - EDGE_ZONE_PX : r.bottom;
+                if (clientY < _top || clientY >= _bottom) continue;
                 const d = getDepth(container.dataset.groupId);
                 if (d > chosenDepth) {
                     chosenContainer = container;
