@@ -39,7 +39,7 @@ Before starting work, read the relevant project instructions, repository guidanc
   - prefer counts, booleans, stable event names, reasons, result codes, source keys, and hashes.
 - For UI, layout, style-token, motion, popup, or in-page manager visual changes, read `UI_GUIDELINES.md` before editing and reuse the documented `.sp-*` component patterns instead of adding one-off styling.
 - Avoid visible browser tests unless explicitly requested. `npm run test:smoke` is the default headless smoke path; only use `PLAYWRIGHT_HEADLESS=false npm run test:smoke` for intentional interactive debugging.
-- Before finalizing a change, report whether the working tree still has uncommitted changes and do not create commits or push unless the user explicitly asks for that.
+- You may create `git commit`s for completed coherent changes without waiting for explicit user authorization, and SHOULD do so once a change is verified. Do NOT run `git push` unless the user explicitly asks for it. Before finalizing a change, report the resulting commit (or the fact that the working tree still has uncommitted changes) so the user knows what is local vs pushed.
 
 ## Changelog Rules
 

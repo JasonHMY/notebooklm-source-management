@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Read these BEFORE making any change. They override anything below.
 
-- **[AGENTS.md](AGENTS.md)** — required maintenance + workflow rules (CHANGELOG and PROJECT_DIRECTORY sync, helper file sync for new content modules, verification matrix per change type, NotebookLM native DOM safety, no `innerHTML`/`eval`, no auto-commits).
+- **[AGENTS.md](AGENTS.md)** — required maintenance + workflow rules (CHANGELOG and PROJECT_DIRECTORY sync, helper file sync for new content modules, verification matrix per change type, NotebookLM native DOM safety, no `innerHTML`/`eval`, auto-commit OK but no auto-push).
 - **[docs/PROJECT_DIRECTORY.md](docs/PROJECT_DIRECTORY.md)** — the project map. Section 3 (功能域树) is the fastest way to locate code for any feature area; Section 2 is the canonical content-script load order.
 - **`Changelog Writing Guidelines`** at the top of [CHANGELOG.md](CHANGELOG.md) — bilingual title format `**中文标题 (English Title)**: 说明`, fixed category headings, no marketing language.
 - **[UI_GUIDELINES.md](UI_GUIDELINES.md)** — required reading before any UI / token / style-text / motion / popup change. Reuse `.sp-*` component patterns.
@@ -107,6 +107,6 @@ A 2-arg call silently coerces level/category to fallback strings and discards yo
 
 ## Project conventions
 
-- Default branch is `main`. AGENTS.md prohibits auto-commits — wait for explicit user request to run `git commit` or `git push`. Commit messages should end with the `Co-Authored-By` footer matching the user's global CLAUDE.md when Claude is involved.
+- Default branch is `main`. Auto-`git commit` is allowed (and expected) for verified coherent changes; auto-`git push` is NOT — wait for explicit user request before pushing. Commit messages should end with the `Co-Authored-By` footer matching the user's global CLAUDE.md when Claude is involved.
 - `docs/superpowers/plans/` is gitignored (implementation plans are local working docs). `docs/superpowers/specs/` IS tracked.
 - Project-local memory at `~/.claude/projects/-Users-hmy-Desktop-notebooklm-source-management-main/memory/` holds tribal knowledge collected across sessions — `update-checklist.md` has the per-change file update checklist.
