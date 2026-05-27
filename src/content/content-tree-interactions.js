@@ -2264,6 +2264,29 @@
                 }
             }
 
+            // Suppress the `.source-item` / `.group-header` base CSS transition on transform
+            // (`transform var(--sp-motion-base) var(--sp-ease-standard)` = 180ms) for EVERY
+            // visible row before any further style changes. Why: `clearReflowBeforeMutation`
+            // earlier cleared sibling inline `transform: translateY(N)` to '', which is a
+            // computed-value change that the base CSS transition rule would auto-animate.
+            // For siblings whose new layout exactly matches their drag-time visual (delta = 0,
+            // skipped by sibling FLIP below), this auto-transition makes them visually slide
+            // translateY(N) → 0 over 180ms — the "microscopic upward slide" the user reports
+            // as "all sources micro-move after drop". Setting inline `transition: none` here
+            // takes precedence over the CSS rule and squashes that auto-transition. The two
+            // animation paths we DO want (sibling FLIP and dragged fly-in/scaleY) explicitly
+            // restore inline `transition` to '' on the rows they animate, so .sp-drop-shift /
+            // .sp-drop-flying class transitions can take effect. After paint, an RAF callback
+            // restores inline transition on all rows so future hover/etc. transitions work.
+            const _suppressedRows = [];
+            if (typeof rootElement.querySelectorAll === 'function') {
+                rootElement.querySelectorAll('[data-source-key], [data-group-id]').forEach((row) => {
+                    if (!row || !row.style) return;
+                    row.style.transition = 'none';
+                    _suppressedRows.push(row);
+                });
+            }
+
             // Sibling FLIP: animate non-landed elements from their pre-drop visual
             // position (captured BEFORE state mutation + render) to their new layout
             // position. Without this, when render() rebuilds the DOM, sibling elements
@@ -2290,9 +2313,14 @@
                     // FLIP: jump back to pre-drop visual position, force a reflow, then
                     // clear the inline transform with .sp-drop-shift's 200ms transition
                     // active — element animates from its old visual spot to the new layout.
+                    // Note: inline `transition: none` was set on this element above; the
+                    // initial translateY(delta) is therefore an instant jump (no auto
+                    // animation), then we restore inline transition to '' so .sp-drop-shift's
+                    // CSS rule takes effect for the subsequent transform = '' change.
                     _flipEl.style.transform = `translateY(${_delta}px)`;
-                    void _flipEl.offsetHeight; // force layout flush
+                    void _flipEl.offsetHeight; // force layout flush + commit intermediate
                     _flipEl.classList.add('sp-drop-shift');
+                    _flipEl.style.transition = ''; // restore so .sp-drop-shift rule applies
                     _flipEl.style.transform = '';
                     if (typeof setTimeoutFn === 'function') {
                         const _flipCleanup = ((target) => () => {
@@ -2329,7 +2357,9 @@
 
                 if (useFlyIn && el.style && typeof el.getBoundingClientRect === 'function') {
                     // FLIP: read destination rect, offset element to cursor position, then
-                    // animate transform back to (0, 0) via the transition class.
+                    // animate transform back to (0, 0) via the transition class. Inline
+                    // `transition: none` was applied above to all rows; restore it before
+                    // adding the .sp-drop-flying class so its transition rule takes effect.
                     const destRect = el.getBoundingClientRect();
                     const dx = cursorX - destRect.left;
                     const dy = cursorY - destRect.top;
@@ -2341,14 +2371,43 @@
                     // and skip the animation.
                     void el.offsetHeight;
                     el.classList.add('sp-drop-flying');
+                    el.style.transition = ''; // restore so .sp-drop-flying rule applies
                     el.style.transform = '';
                     el.style.opacity = '';
                 } else {
-                    // Multi-source (or no cursor info): scaleY landing.
+                    // Multi-source (or no cursor info): scaleY landing. Restore inline
+                    // transition so the .sp-drop-landing animation can take effect (the
+                    // animation property is on the class, separate from transition, so
+                    // strictly only needed if animation references transition timing —
+                    // restored defensively).
+                    el.style.transition = '';
                     el.classList.add('sp-drop-landing');
                 }
 
                 if (typeof setTimeoutFn === 'function') setTimeoutFn(cleanup, 800);
+            }
+
+            // After sync code completes and the browser paints once, restore inline
+            // transition='' on rows that did NOT get FLIP/fly-in applied (delta=0 siblings,
+            // newly-inserted rows, etc.). They've been frozen at their layout positions
+            // with no spurious base-transition animation. After paint, they should respond
+            // to future hover/focus/etc. with the default CSS transitions again.
+            const _rafRestore = typeof globalThis.requestAnimationFrame === 'function'
+                ? globalThis.requestAnimationFrame
+                : null;
+            const _restoreFn = () => {
+                for (const _row of _suppressedRows) {
+                    if (_row && _row.style && _row.style.transition === 'none') {
+                        _row.style.transition = '';
+                    }
+                }
+            };
+            if (_rafRestore) {
+                // Double-RAF: first ensures the suppression paint commits; second ensures
+                // we don't race with a transition that started in this paint.
+                _rafRestore(() => _rafRestore(_restoreFn));
+            } else if (typeof setTimeoutFn === 'function') {
+                setTimeoutFn(_restoreFn, 30);
             }
         }
 
