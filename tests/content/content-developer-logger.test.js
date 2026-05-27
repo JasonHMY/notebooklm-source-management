@@ -305,4 +305,69 @@ describe('content developer logger', () => {
 
         expect(logger.getLanguageOverride()).toBe('auto');
     });
+
+    describe('appearance preferences', () => {
+        it('defaults hoverSpotlightEnabled to true before preferences are loaded', () => {
+            const { chromeApi } = createRuntimeMock();
+            const logger = createContentDeveloperLogger({
+                chrome: chromeApi,
+                getProjectId: () => 'project-dev'
+            });
+            expect(logger.getHoverSpotlightEnabled()).toBe(true);
+        });
+
+        it('loadDeveloperPreferences applies appearance.hoverSpotlightEnabled from background response', async () => {
+            // Mock LOAD_PREFERENCES returning appearance.hoverSpotlightEnabled: false via a custom sendMessage
+            const sendMessage = jest.fn((message, cb) => {
+                if (message?.type === 'LOAD_PREFERENCES') {
+                    cb?.({
+                        success: true,
+                        preferences: { appearance: { hoverSpotlightEnabled: false } },
+                        usageState: { hasExistingPluginData: false, hasStoredPreferences: false }
+                    });
+                    return;
+                }
+                cb?.({ success: false, errorCode: 'unexpected_message' });
+            });
+            const logger = createContentDeveloperLogger({
+                chrome: { runtime: { sendMessage, lastError: null } },
+                getProjectId: () => 'project-dev'
+            });
+            await logger.loadDeveloperPreferences();
+            expect(logger.getHoverSpotlightEnabled()).toBe(false);
+        });
+
+        it('setHoverSpotlightEnabled optimistically updates and persists via SAVE_PREFERENCES', async () => {
+            const sent = [];
+            const sendMessage = jest.fn((message, cb) => {
+                sent.push(message);
+                if (message?.type === 'SAVE_PREFERENCES') {
+                    cb?.({ success: true, preferences: { appearance: { hoverSpotlightEnabled: false } } });
+                    return;
+                }
+                cb?.({ success: false, errorCode: 'unexpected_message' });
+            });
+            const logger = createContentDeveloperLogger({
+                chrome: { runtime: { sendMessage, lastError: null } },
+                getProjectId: () => 'project-dev'
+            });
+            const result = await logger.setHoverSpotlightEnabled(false);
+            expect(result).toBe(false);
+            expect(logger.getHoverSpotlightEnabled()).toBe(false);
+            const saveMessage = sent.find((m) => m?.type === 'SAVE_PREFERENCES');
+            expect(saveMessage?.preferences?.appearance?.hoverSpotlightEnabled).toBe(false);
+        });
+
+        it('setHoverSpotlightEnabled rolls back optimistic update when save fails', async () => {
+            const { chromeApi } = createRuntimeMock({
+                savePreferencesResponse: { success: false, errorCode: 'runtime_failure' }
+            });
+            const logger = createContentDeveloperLogger({
+                chrome: chromeApi,
+                getProjectId: () => 'project-dev'
+            });
+            await expect(logger.setHoverSpotlightEnabled(false)).rejects.toThrow();
+            expect(logger.getHoverSpotlightEnabled()).toBe(true);
+        });
+    });
 });

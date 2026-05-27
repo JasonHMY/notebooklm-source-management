@@ -38,6 +38,7 @@
         let languageOverride = 'auto';
         let commandShortcuts = {};
         let visibleQuickViewKinds = [...QUICK_VIEW_BUTTON_KINDS];
+        let appearancePreferences = { hoverSpotlightEnabled: true };
         let developerLogs = [];
         let nextLogSequence = 1;
 
@@ -192,6 +193,7 @@
             languageOverride = normalizeLanguageOverride(preferences?.languageOverride);
             commandShortcuts = normalizeCommandShortcuts(preferences?.commandShortcuts);
             visibleQuickViewKinds = normalizeVisibleQuickViewKinds(preferences?.visibleQuickViewKinds);
+            appearancePreferences = normalizeAppearancePreferences(preferences?.appearance);
         }
 
         function applyLoadedPreferenceUsageState(usageState = {}) {
@@ -363,6 +365,23 @@
             return getVisibleQuickViewKinds();
         }
 
+        async function setHoverSpotlightEnabled(enabled) {
+            const previousValue = appearancePreferences.hoverSpotlightEnabled;
+            const nextValue = enabled !== false;
+            appearancePreferences = { ...appearancePreferences, hoverSpotlightEnabled: nextValue };
+            try {
+                await savePreferences({ appearance: { hoverSpotlightEnabled: nextValue } });
+            } catch (error) {
+                appearancePreferences = { ...appearancePreferences, hoverSpotlightEnabled: previousValue };
+                throw error;
+            }
+            return appearancePreferences.hoverSpotlightEnabled;
+        }
+
+        function getHoverSpotlightEnabled() {
+            return appearancePreferences.hoverSpotlightEnabled !== false;
+        }
+
         async function loadDeveloperLogs() {
             const key = getDeveloperLogKey();
             if (!key) {
@@ -506,6 +525,13 @@
             return QUICK_VIEW_BUTTON_KINDS.filter((kind) => requestedKinds.has(kind));
         }
 
+        function normalizeAppearancePreferences(value) {
+            const source = value && typeof value === 'object' ? value : {};
+            return {
+                hoverSpotlightEnabled: source.hoverSpotlightEnabled !== false
+            };
+        }
+
         function cloneCommandShortcuts(shortcuts = commandShortcuts) {
             return Object.assign({}, normalizeCommandShortcuts(shortcuts));
         }
@@ -613,6 +639,8 @@
             setCommandShortcut,
             getVisibleQuickViewKinds,
             setVisibleQuickViewKinds,
+            getHoverSpotlightEnabled,
+            setHoverSpotlightEnabled,
             loadDeveloperPreferences,
             loadDeveloperLogs,
             getDeveloperLogs,
