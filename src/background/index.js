@@ -455,6 +455,12 @@ function mergePreferences(existingPreferences = {}, nextPreferences = {}) {
     if (Object.prototype.hasOwnProperty.call(nextPreferences || {}, 'visibleQuickViewKinds')) {
         merged.visibleQuickViewKinds = normalizeVisibleQuickViewKinds(nextPreferences.visibleQuickViewKinds);
     }
+    if (Object.prototype.hasOwnProperty.call(nextPreferences || {}, 'appearance')) {
+        const incomingAppearance = nextPreferences.appearance && typeof nextPreferences.appearance === 'object' ? nextPreferences.appearance : {};
+        merged.appearance = normalizeAppearancePreferences(
+            Object.assign({}, merged.appearance, incomingAppearance)
+        );
+    }
     return normalizePreferences(merged);
 }
 
@@ -1307,6 +1313,8 @@ if (typeof module !== 'undefined' && module.exports) {
         getExtensionEnabled,
         setExtensionEnabled,
         normalizePreferences,
+        normalizeAppearancePreferences,
+        mergePreferences,
         isValidDeveloperLogKey,
         normalizeDeveloperLogEntry,
         trimDeveloperLogs,

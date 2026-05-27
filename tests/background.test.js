@@ -1798,3 +1798,58 @@ describe('appearance preference normalization', () => {
         expect(normalizePreferences({ appearance: { hoverSpotlightEnabled: true } }).appearance.hoverSpotlightEnabled).toBe(true);
     });
 });
+
+describe('mergePreferences deep-merges appearance', () => {
+    let mergePreferences;
+
+    beforeEach(() => {
+        global.chrome = {
+            runtime: {
+                id: 'abcdefghijklmnopabcdefghijklmnop',
+                onMessage: { addListener: jest.fn() },
+                getManifest: jest.fn(() => ({})),
+                lastError: undefined
+            },
+            tabs: {
+                query: jest.fn(),
+                update: jest.fn(),
+                sendMessage: jest.fn(),
+                create: jest.fn()
+            },
+            windows: { update: jest.fn() },
+            storage: { local: { set: jest.fn(), get: jest.fn() } }
+        };
+        jest.isolateModules(() => {
+            ({ mergePreferences } = require('../src/background/index.js'));
+        });
+    });
+
+    afterEach(() => {
+        delete global.chrome;
+    });
+
+    it('preserves existing appearance fields when partial appearance is set', () => {
+        const merged = mergePreferences(
+            { appearance: { hoverSpotlightEnabled: false } },
+            { appearance: {} }
+        );
+        expect(merged.appearance.hoverSpotlightEnabled).toBe(false);
+    });
+
+    it('overwrites hoverSpotlightEnabled when explicitly provided', () => {
+        const merged = mergePreferences(
+            { appearance: { hoverSpotlightEnabled: true } },
+            { appearance: { hoverSpotlightEnabled: false } }
+        );
+        expect(merged.appearance.hoverSpotlightEnabled).toBe(false);
+    });
+
+    it('does not touch appearance when next has no appearance key', () => {
+        const merged = mergePreferences(
+            { appearance: { hoverSpotlightEnabled: false } },
+            { developerModeEnabled: true }
+        );
+        expect(merged.appearance.hoverSpotlightEnabled).toBe(false);
+        expect(merged.developerModeEnabled).toBe(true);
+    });
+});
