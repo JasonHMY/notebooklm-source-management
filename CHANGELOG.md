@@ -16,6 +16,7 @@
 
 ### Removed
 - **蓝条插入指示 (Blue Bar Insertion Indicator)**: 删除 `.drag-over-top` / `.drag-over-bottom` 蓝条 CSS 规则与对应 JS add/remove 逻辑；让位空槽本身即为插入位置指示。
+- **`.dragging` 视觉残留 (.dragging Visual Leftovers)**: 旧的 `.source-item.dragging` / `.group-header.dragging` 规则中残留的 `opacity: 0.95` / `transform: scale(1.03) translateY(-2px)` / `box-shadow` / `border` / `background-color` / `z-index` 全部移除。当前架构下被拖项靠 `.sp-drag-folded`（inline `height: 0` + `opacity: 0`）完全消失，旧的 lift 效果只是早期"原地半透明"模式遗留，如果 fold 因任何原因没生效（例如 dragReflow factory 未加载）会显式留下"半透明 lift"残影，与"完全消失"的设计契约冲突。现在 `.dragging` 只保留 `cursor: grabbing` 和 `transition: none`。
 
 ## Changelog Writing Guidelines (写作规范)
 

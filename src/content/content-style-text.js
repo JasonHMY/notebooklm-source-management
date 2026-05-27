@@ -2542,14 +2542,15 @@
                 letter-spacing: 0.05em;
             }
 
+            /* .dragging is a state marker the dragstart handler sets on the originating row
+               (via setTimeout 0 so the native drag image is captured first). The dragged
+               source's visual reaction lives entirely in .sp-drag-folded — element collapses
+               to height/opacity 0. This rule intentionally has NO opacity / transform / shadow
+               so we don't leave a "half-transparent lift" artifact if fold ever fails to run.
+               cursor: grabbing is mostly cosmetic (native drag overrides cursor); transition:
+               none prevents any inherited transitions from animating mid-drag. */
             .source-item.dragging,
             .group-header.dragging {
-                opacity: 0.95;
-                background-color: var(--sp-bg-button);
-                transform: scale(1.03) translateY(-2px);
-                box-shadow: var(--sp-shadow-toast);
-                border: 1px solid var(--sp-accent);
-                z-index: 10;
                 cursor: grabbing;
                 transition: none;
             }
