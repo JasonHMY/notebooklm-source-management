@@ -313,8 +313,33 @@
                     }
                 }
 
-                // Pointer in group-children band.
-                if (childrenEl) {
+                // Group drag override: cursor inside another group's body (but NOT on its
+                // header) should mean "reorder at THAT group's sibling level", NOT "nest
+                // dragged group inside it". Without this, dragging a folder over another
+                // folder always nested — users couldn't reorder folders by drag. Header
+                // drops still nest (handled above). Resolve host as chosenContainer's parent
+                // group (or root if chosenContainer is top-level), then fall through to slot
+                // detection so the chosen container itself becomes a slot candidate.
+                const _isGroupDrag = activeDragContext && activeDragContext.kind === 'group';
+                if (_isGroupDrag) {
+                    const _parentGroupId = parentMap && typeof parentMap.get === 'function'
+                        ? parentMap.get(groupId)
+                        : null;
+                    if (_parentGroupId) {
+                        const _parentGroup = groupsById && typeof groupsById.get === 'function'
+                            ? groupsById.get(_parentGroupId)
+                            : null;
+                        if (_parentGroup) {
+                            host = Array.isArray(_parentGroup.children) ? _parentGroup.children : (_parentGroup.children = []);
+                            hostGroup = _parentGroup;
+                            hostContainerEl = typeof rootElement.querySelector === 'function'
+                                ? rootElement.querySelector('[data-group-id="' + String(_parentGroupId).replace(/"/g, '\\"') + '"]')
+                                : null;
+                        }
+                    }
+                    // else: chosenContainer is top-level → host stays null → slot detection
+                    // below uses root list (state.ungrouped + state.groups view via DOM).
+                } else if (childrenEl) {
                     const childrenR = unshiftedRect(childrenEl);
                     if (childrenR && clientY >= childrenR.top && clientY < childrenR.bottom) {
                         const groupChildren = Array.isArray(groupObj.children) ? groupObj.children : (groupObj.children = []);
@@ -1526,6 +1551,39 @@
                     const _groupSourcesListEl = getSourceListContainer();
                     if (_groupSourcesListEl && _groupSourcesListEl.classList && typeof _groupSourcesListEl.classList.add === 'function') {
                         _groupSourcesListEl.classList.add('sp-drag-active');
+                    }
+                    // Initialize drag-reflow session for group drag too. The session lets
+                    // dragover apply sibling translateY shifts ("open a slot for the
+                    // dragged group") and dragend cleanup unfold it. Without this block,
+                    // group drags had no avoid animation — siblings would not move out of
+                    // the dragged group's way at all. Find the group-container element by
+                    // its data-group-id and pass its id as the draggedKey; prepareDragSession
+                    // measures its full offsetHeight (header + children area).
+                    if (dragReflow && typeof dragReflow.prepareDragSession === 'function') {
+                        const rootElement = getSourceListContainer();
+                        const session = dragReflow.prepareDragSession({
+                            draggedKeys: [key],
+                            rootElement
+                        });
+                        runtime.dragReflowSession = session;
+                        // RAF-deferred fold (same reason as source branch — sync fold would
+                        // turn the drag source into a 0×0 box during dragstart, which Chrome
+                        // can cancel as "invalid drag source").
+                        const raf = typeof globalThis.requestAnimationFrame === 'function'
+                            ? globalThis.requestAnimationFrame
+                            : null;
+                        if (raf) {
+                            raf(() => {
+                                if (dragReflow.foldDraggedItems) {
+                                    dragReflow.foldDraggedItems({
+                                        session,
+                                        rootElement: getSourceListContainer()
+                                    });
+                                }
+                            });
+                        } else if (typeof dragReflow.foldDraggedItems === 'function') {
+                            dragReflow.foldDraggedItems({ session, rootElement });
+                        }
                     }
                 }
             }
