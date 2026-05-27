@@ -929,6 +929,19 @@
                 transform: scale(1.01);
                 box-shadow: var(--sp-shadow-hover-item);
             }
+            /* JS-managed pseudo-hover for the post-drop window: when drop finishes,
+               Chrome's native :hover stays stuck on whichever DOM element was under the
+               cursor at dragstart (regardless of layout changes), and we can't reliably
+               force it to refresh. Instead handleDragEnd keeps .sp-drag-active on
+               #sources-list (suppressing the stale native :hover via the rule below)
+               and adds .sp-pseudo-hover to whatever element the cursor is actually over
+               now. Both classes are cleared the first time the user moves the mouse. */
+            .source-item.sp-pseudo-hover, .group-header.sp-pseudo-hover {
+                background-color: var(--sp-bg-hover);
+                z-index: 4;
+                transform: scale(1.01);
+                box-shadow: var(--sp-shadow-hover-item);
+            }
             /* During an active drag, suppress :hover transform/background/shadow on
                source rows and group headers. Two reasons:
                  1. Jitter: cursor often brushes shifted siblings as ghost moves; their

@@ -1364,7 +1364,7 @@
             // they're owned by the previous transition or the new fold about to run.
             const _preflightList = getSourceListContainer();
             if (_preflightList && typeof _preflightList.querySelectorAll === 'function') {
-                const stale = _preflightList.querySelectorAll('.sp-drop-flying, .sp-drop-landing, .sp-drop-landed, .sp-drag-unfolding');
+                const stale = _preflightList.querySelectorAll('.sp-drop-flying, .sp-drop-landing, .sp-drop-landed, .sp-drag-unfolding, .sp-pseudo-hover');
                 if (stale && typeof stale.forEach === 'function') {
                     stale.forEach((node) => {
                         if (!node || !node.classList || typeof node.classList.remove !== 'function') return;
@@ -1372,6 +1372,7 @@
                         node.classList.remove('sp-drop-landing');
                         node.classList.remove('sp-drop-landed');
                         node.classList.remove('sp-drag-unfolding');
+                        node.classList.remove('sp-pseudo-hover');
                     });
                 }
             }
@@ -2263,52 +2264,55 @@
             }
             runtime.activeDragContext = null;
             cleanupReflowSession();
-            // Drag is over — restore :hover visuals and force Chrome to invalidate its
-            // hit-test cache (otherwise :hover stays stuck on whichever row the cursor
-            // was over at dragstart, because layout has since changed underneath it).
-            // Toggling pointer-events for one frame is the canonical trick.
+            // Drop hover-state fix — JS-driven instead of trying to convince Chrome's
+            // native :hover state to refresh. Chrome freezes :hover at the element under
+            // the cursor at dragstart time and does NOT refresh it after drop, even with
+            // pointer-events toggling or synthetic mousemove dispatch (tried — doesn't
+            // work). Strategy:
+            //   1. Keep .sp-drag-active on #sources-list so the CSS rule keeps suppressing
+            //      the stale :hover visual on the wrong (originally-cursor'd) element.
+            //   2. Manually add .sp-pseudo-hover to whatever element the cursor is ACTUALLY
+            //      over now, so the user sees the correct row highlighted without moving
+            //      the mouse.
+            //   3. Register a one-shot mousemove listener on the document — the first real
+            //      mouse movement removes both .sp-drag-active (releasing :hover) and any
+            //      .sp-pseudo-hover (letting real :hover take over).
             const _endList = getSourceListContainer();
-            if (_endList && _endList.classList && typeof _endList.classList.remove === 'function') {
-                _endList.classList.remove('sp-drag-active');
-            }
-            if (_endList && _endList.style) {
-                const _prevPE = _endList.style.pointerEvents;
-                _endList.style.pointerEvents = 'none';
-                const _restore = () => {
-                    if (_endList.style) _endList.style.pointerEvents = _prevPE;
-                    // After restoring pointer-events, force Chrome to re-evaluate :hover
-                    // at the cursor's current position. pointer-events toggle alone is
-                    // not always enough to invalidate the hover-state cache — synthetic
-                    // mousemove explicitly walks through Chrome's hover-update path.
-                    // Try shadow-root elementFromPoint first (cursor is over our Shadow
-                    // DOM panel) then fall back to document.elementFromPoint.
-                    if (typeof e.clientX !== 'number' || typeof e.clientY !== 'number') return;
-                    const _shadow = typeof getShadowRoot === 'function' ? getShadowRoot() : null;
-                    const _doc = typeof getDocument === 'function' ? getDocument() : null;
-                    let _target = null;
-                    if (_shadow && typeof _shadow.elementFromPoint === 'function') {
-                        _target = _shadow.elementFromPoint(e.clientX, e.clientY);
-                    }
-                    if (!_target && _doc && typeof _doc.elementFromPoint === 'function') {
-                        _target = _doc.elementFromPoint(e.clientX, e.clientY);
-                    }
-                    if (_target && typeof _target.dispatchEvent === 'function' && typeof MouseEvent === 'function') {
-                        try {
-                            _target.dispatchEvent(new MouseEvent('mousemove', {
-                                clientX: e.clientX,
-                                clientY: e.clientY,
-                                bubbles: true,
-                                cancelable: true
-                            }));
-                        } catch (_) { /* ignore synthetic event failure */ }
-                    }
-                };
-                const _raf = typeof globalThis.requestAnimationFrame === 'function'
-                    ? globalThis.requestAnimationFrame
+            if (_endList && typeof e.clientX === 'number' && typeof e.clientY === 'number') {
+                const _shadow = typeof getShadowRoot === 'function' ? getShadowRoot() : null;
+                const _doc = typeof getDocument === 'function' ? getDocument() : null;
+                let _target = null;
+                if (_shadow && typeof _shadow.elementFromPoint === 'function') {
+                    _target = _shadow.elementFromPoint(e.clientX, e.clientY);
+                }
+                if (!_target && _doc && typeof _doc.elementFromPoint === 'function') {
+                    _target = _doc.elementFromPoint(e.clientX, e.clientY);
+                }
+                const _hoverable = _target && typeof _target.closest === 'function'
+                    ? _target.closest('.source-item, .group-header')
                     : null;
-                const _setTimeoutEnd = getSetTimeout();
-                if (_raf) _raf(_restore);
-                else if (typeof _setTimeoutEnd === 'function') _setTimeoutEnd(_restore, 0);
+                if (_hoverable && _hoverable.classList && typeof _hoverable.classList.add === 'function') {
+                    _hoverable.classList.add('sp-pseudo-hover');
+                }
+                if (_doc && typeof _doc.addEventListener === 'function') {
+                    const _onFirstMove = () => {
+                        try { _doc.removeEventListener('mousemove', _onFirstMove, true); } catch (_) {}
+                        if (_endList && _endList.classList && typeof _endList.classList.remove === 'function') {
+                            _endList.classList.remove('sp-drag-active');
+                        }
+                        if (_endList && typeof _endList.querySelectorAll === 'function') {
+                            const _stale = _endList.querySelectorAll('.sp-pseudo-hover');
+                            if (_stale && typeof _stale.forEach === 'function') {
+                                _stale.forEach((node) => {
+                                    if (node && node.classList && typeof node.classList.remove === 'function') {
+                                        node.classList.remove('sp-pseudo-hover');
+                                    }
+                                });
+                            }
+                        }
+                    };
+                    _doc.addEventListener('mousemove', _onFirstMove, true);
+                }
             }
         }
 
