@@ -2021,7 +2021,7 @@ describe('handleDragOver invalid-drop feedback', () => {
         expect(dataTransfer.dropEffect).toBe('none');
     });
 
-    it('sets dropEffect to none for multi-source drag with top-level before-group invalid intent', () => {
+    it('auto-routes multi-source drag between groups to ungrouped tail (valid, no invalid outline)', () => {
         const ctx = setupCtx({
             state: { isBatchMode: true, ungrouped: [], groups: ['g1', 'g2'] },
             pendingBatchKeys: new Set(['A', 'B']),
@@ -2030,8 +2030,6 @@ describe('handleDragOver invalid-drop feedback', () => {
                 g2: { id: 'g2', children: [] }
             },
             items: [
-                // g1 from 100..130 (header only, empty children-area collapsed),
-                // g2 from 200..230 — pointer in the gap will resolve to before-group g2.
                 { kind: 'group', id: 'g1', top: 100, headerHeight: 30, childrenStart: 130, childrenEnd: 130 },
                 { kind: 'group', id: 'g2', top: 200, headerHeight: 30, childrenStart: 230, childrenEnd: 230 }
             ]
@@ -2046,12 +2044,14 @@ describe('handleDragOver invalid-drop feedback', () => {
         });
         const g1El = ctx.elementMap.get('group:g1');
         const g2El = ctx.elementMap.get('group:g2');
-        // Pointer at y=150 maps to before-group g2 — invalid because multi-source drag would
-        // splice source keys into state.groups. Visual: red outline on the g2 slot element
-        // (the neighbor at the slot). g1 stays untouched.
+        // Pointer at y=150 sits between g1 and g2. With the empty-ungrouped fallback in
+        // routeToNearestNeighborKind, this resolves to after-source intent against the
+        // empty state.ungrouped array (insertIndex 0) — valid: handleDrop will splice
+        // the multi-source keys into state.ungrouped instead of silently rejecting.
+        // No red invalid outline, dropEffect stays 'move'.
         expect(g1El.classList.has('drag-invalid')).toBe(false);
-        expect(g2El.classList.has('drag-invalid')).toBe(true);
-        expect(dataTransfer.dropEffect).toBe('none');
+        expect(g2El.classList.has('drag-invalid')).toBe(false);
+        expect(dataTransfer.dropEffect).toBe('move');
     });
 
     it('does not mark slot invalid when single source drags over a different source slot', () => {
@@ -2656,7 +2656,7 @@ describe('computeDropIntent', () => {
 
     // P3(B): when no ungrouped neighbors exist at root (groups-only), source drag falls through to
     // before/after-group (which computeIsInvalidDrop will then flag as invalid + apply red outline).
-    it('does not auto-route when root has no ungrouped neighbors', () => {
+    it('falls back to ungrouped-tail when source dragged between groups with empty ungrouped list', () => {
         const state = { ungrouped: [], groups: ['g1', 'g2'] };
         const groupsById = new Map([
             ['g1', { id: 'g1', children: [] }],
@@ -2675,11 +2675,17 @@ describe('computeDropIntent', () => {
             state, groupsById, parentMap: new Map(),
             activeDragContext: { kind: 'source-single', keys: ['external'] }
         });
+        // Previously this returned `before-group` (which `computeIsInvalidDrop` would
+        // flag — silently rejecting the drop). Now `routeToNearestNeighborKind` falls
+        // back to an "after-source" intent targeting the empty `state.ungrouped` array
+        // so handleDrop can splice the source into the ungrouped list. The drop will
+        // visually land wherever the ungrouped region renders rather than between the
+        // two groups, but at least the drop succeeds.
         expect(intent).toBeTruthy();
-        expect(intent.kind).toBe('before-group');
-        expect(intent.targetList).toBe(state.groups);
-        expect(intent.slotKey).toBe('g2');
-        // Note: handleDragOver will pass this through computeIsInvalidDrop and surface the red outline.
+        expect(intent.kind).toBe('after-source');
+        expect(intent.targetList).toBe(state.ungrouped);
+        expect(intent.insertIndex).toBe(0);
+        expect(intent.slotKey).toBeNull();
     });
 });
 

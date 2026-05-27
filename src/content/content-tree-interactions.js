@@ -618,7 +618,27 @@
         // will then flag as invalid.
         function routeToNearestNeighborKind({ candidates, beforeIndex, targetCandidateKind, targetList, clientY, unshiftedRect }) {
             if (!candidates || candidates.length === 0) return null;
-            if (!Array.isArray(targetList) || targetList.length === 0) return null;
+            if (!Array.isArray(targetList)) return null;
+            const isSourceKindEarly = targetCandidateKind === 'source';
+            // Empty target list (e.g. user drags a source between two top-level groups but
+            // state.ungrouped is empty so there's no nearest-source neighbor). Without this
+            // fallback the route returns null → caller falls to before-group/after-group
+            // intent → computeIsInvalidDrop flags it invalid → drop is silently rejected.
+            // Instead, return a slotKey-less intent that splices into the (empty) targetList
+            // at index 0. handleDrop will then place the source into state.ungrouped, even
+            // if that means it visually lands wherever the ungrouped region renders rather
+            // than where the cursor was — a successful drop is better than a silent reject.
+            if (targetList.length === 0) {
+                return {
+                    kind: isSourceKindEarly ? 'after-source' : 'after-group',
+                    targetGroup: null,
+                    targetList,
+                    insertIndex: 0,
+                    targetGroupId: null,
+                    hostGroupContainerEl: null,
+                    slotKey: null
+                };
+            }
             let upHit = null;
             for (let i = beforeIndex - 1; i >= 0; i -= 1) {
                 if (candidates[i] && candidates[i].kind === targetCandidateKind) {
@@ -641,7 +661,20 @@
             };
             const upDist = dist(upHit);
             const downDist = dist(downHit);
-            if (!upHit && !downHit) return null;
+            if (!upHit && !downHit) {
+                // No same-kind neighbor in `candidates` but targetList isn't empty (some
+                // sources exist in state.ungrouped, just none in the rendered slot region).
+                // Append to targetList's end so drop still works.
+                return {
+                    kind: isSourceKindEarly ? 'after-source' : 'after-group',
+                    targetGroup: null,
+                    targetList,
+                    insertIndex: targetList.length,
+                    targetGroupId: null,
+                    hostGroupContainerEl: null,
+                    slotKey: null
+                };
+            }
             const isSourceKind = targetCandidateKind === 'source';
             // Up-neighbor → after; down-neighbor → before. Prefer the closer one.
             if (upHit && (!downHit || upDist <= downDist)) {
