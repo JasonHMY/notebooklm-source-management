@@ -379,7 +379,7 @@
         }
 
         function getHoverSpotlightEnabled() {
-            return appearancePreferences.hoverSpotlightEnabled !== false;
+            return appearancePreferences.hoverSpotlightEnabled;
         }
 
         async function loadDeveloperLogs() {

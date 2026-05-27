@@ -369,5 +369,21 @@ describe('content developer logger', () => {
             await expect(logger.setHoverSpotlightEnabled(false)).rejects.toThrow();
             expect(logger.getHoverSpotlightEnabled()).toBe(true);
         });
+
+        it('setHoverSpotlightEnabled treats undefined as true (only strict false opts out)', async () => {
+            const { chromeApi } = createRuntimeMock({
+                savePreferencesResponse: {
+                    success: true,
+                    preferences: { appearance: { hoverSpotlightEnabled: true } }
+                }
+            });
+            const logger = createContentDeveloperLogger({
+                chrome: chromeApi,
+                getProjectId: () => 'project-dev'
+            });
+            const result = await logger.setHoverSpotlightEnabled(undefined);
+            expect(result).toBe(true);
+            expect(logger.getHoverSpotlightEnabled()).toBe(true);
+        });
     });
 });
