@@ -2524,20 +2524,28 @@ describe('computeDropIntent', () => {
         expect(intent.hostGroupContainerEl).toBeTruthy();
     });
 
-    it('ignores a sibling\'s inline translateY shift when mapping pointer-Y to slot', () => {
+    it('uses visual mid-Y so a shifted sibling avoids upward when cursor enters its visual zone', () => {
         const state = { ungrouped: ['A', 'B'], groups: [] };
         const tree = buildTree({ state });
-        // B is visually shifted DOWN by translateY(40px) during reflow, but its un-shifted layout
-        // top is still 140. The pointer at the un-shifted mid-Y (160) should still resolve to before-source B.
+        // B has been translateY'd +40 to "open" a slot above it. Its visual band is now
+        // 180..220 (visual mid 200); its un-shifted layout band is 140..180 (layout mid 160).
+        // Cursor at 170 falls BETWEEN un-shifted mid (160) and visual mid (200) — i.e.,
+        // visually it sits inside B's upper half. Slot detection should resolve to
+        // before-source B (insert above B), so that on the next frame B keeps its shift
+        // and the slot above it stays open — matching what the user sees.
+        //
+        // (Under the previous un-shifted-mid behavior, cursor 170 > layout mid 160 would
+        // have resolved to after-source B and immediately collapsed the slot, forcing the
+        // user to push the cursor much further upward — past 160 — before re-triggering
+        // the shift. That asymmetry between up- and down-avoidance is now fixed.)
         const { sourcesListEl } = makeMockShadowList({
             items: [
                 { kind: 'source', key: 'A', top: 100, height: 40 },
-                // simulate post-reflow rect: top reads 180 in the live layout, but inline transform offsets by +40.
                 { kind: 'source', key: 'B', top: 180, height: 40, transform: 'translateY(40px)' }
             ]
         });
         const intent = tree.computeDropIntent({
-            clientY: 150, // mid-Y of B's un-shifted layout band (140..180), upper half
+            clientY: 170,
             rootElement: sourcesListEl,
             state,
             groupsById: new Map(),

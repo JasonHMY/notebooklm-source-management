@@ -2573,11 +2573,13 @@
                 transition: none;
             }
 
-            /* fold is instant (no transition) so the dragged item leaves layout in one frame —
-               otherwise the dragged-item height transition runs in parallel with the sibling
-               reflow translateY transition and the two animations don't cancel perfectly,
-               producing visible jitter. The sibling .sp-drop-shift transition provides the
-               visible smooth motion; fold itself does not need to animate. */
+            /* fold animates 200ms (same duration + easing as .sp-drag-unfolding and
+               .sp-drop-shift) so the origin row's space closes smoothly while sibling
+               reflow opens the new slot in sync. Earlier design used instant fold to
+               avoid sibling-position jitter from fold-height transition fighting
+               reflow-translateY transition, but slot-based geometric detection (which
+               does not depend on layout reflow) eliminates that feedback loop, so the
+               animated fold is now safe and provides a much more coherent UX. */
             .sp-drag-folded {
                 overflow: hidden;
                 pointer-events: none;
@@ -2587,6 +2589,12 @@
                 margin-bottom: 0 !important;
                 border-top-width: 0 !important;
                 border-bottom-width: 0 !important;
+                transition:
+                    height 200ms cubic-bezier(0.2, 0, 0, 1),
+                    opacity 200ms cubic-bezier(0.2, 0, 0, 1),
+                    padding 200ms cubic-bezier(0.2, 0, 0, 1),
+                    margin 200ms cubic-bezier(0.2, 0, 0, 1),
+                    border-width 200ms cubic-bezier(0.2, 0, 0, 1);
             }
 
             .sp-drop-shift {

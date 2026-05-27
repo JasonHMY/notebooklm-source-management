@@ -407,12 +407,21 @@
                 candidates.push({ el, key, kind: isSrc ? 'source' : 'group' });
             }
 
-            // Slot match: first candidate whose un-shifted mid-Y > clientY → insert before it.
+            // Slot match: first candidate whose VISUAL mid-Y > clientY → insert before it.
+            // Uses raw rect (no shift subtraction) so when a sibling has been translateY'd
+            // down to "open" a slot above it, the pointer crosses its new visual mid sooner
+            // — symmetric with the downward-avoidance case. Stability: a sibling only has
+            // shift != 0 when intent.insertIndex routes through (or before) it; once cursor
+            // crosses its visual mid moving down, intent flips, sibling unshifts on the
+            // next frame, its visual mid returns to layout mid (no longer > clientY) —
+            // single latching transition per shift state, no oscillation.
             let beforeIndex = -1;
             for (let i = 0; i < candidates.length; i += 1) {
-                const r = unshiftedRect(candidates[i].el);
-                if (!r) continue;
-                const midY = r.top + r.height / 2;
+                const el = candidates[i].el;
+                if (!el || typeof el.getBoundingClientRect !== 'function') continue;
+                const rect = el.getBoundingClientRect();
+                if (!rect || typeof rect.top !== 'number' || typeof rect.height !== 'number') continue;
+                const midY = rect.top + rect.height / 2;
                 if (midY > clientY) {
                     beforeIndex = i;
                     break;
@@ -2267,6 +2276,32 @@
                 _endList.style.pointerEvents = 'none';
                 const _restore = () => {
                     if (_endList.style) _endList.style.pointerEvents = _prevPE;
+                    // After restoring pointer-events, force Chrome to re-evaluate :hover
+                    // at the cursor's current position. pointer-events toggle alone is
+                    // not always enough to invalidate the hover-state cache — synthetic
+                    // mousemove explicitly walks through Chrome's hover-update path.
+                    // Try shadow-root elementFromPoint first (cursor is over our Shadow
+                    // DOM panel) then fall back to document.elementFromPoint.
+                    if (typeof e.clientX !== 'number' || typeof e.clientY !== 'number') return;
+                    const _shadow = typeof getShadowRoot === 'function' ? getShadowRoot() : null;
+                    const _doc = typeof getDocument === 'function' ? getDocument() : null;
+                    let _target = null;
+                    if (_shadow && typeof _shadow.elementFromPoint === 'function') {
+                        _target = _shadow.elementFromPoint(e.clientX, e.clientY);
+                    }
+                    if (!_target && _doc && typeof _doc.elementFromPoint === 'function') {
+                        _target = _doc.elementFromPoint(e.clientX, e.clientY);
+                    }
+                    if (_target && typeof _target.dispatchEvent === 'function' && typeof MouseEvent === 'function') {
+                        try {
+                            _target.dispatchEvent(new MouseEvent('mousemove', {
+                                clientX: e.clientX,
+                                clientY: e.clientY,
+                                bubbles: true,
+                                cancelable: true
+                            }));
+                        } catch (_) { /* ignore synthetic event failure */ }
+                    }
                 };
                 const _raf = typeof globalThis.requestAnimationFrame === 'function'
                     ? globalThis.requestAnimationFrame
