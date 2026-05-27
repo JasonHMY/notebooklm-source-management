@@ -1,7 +1,7 @@
 # 物理拖拽让位 (Physical Drag Reflow) — 设计 Spec
 
 **日期：** 2026-05-27
-**状态：** Draft
+**状态：** 已实现 (Implemented)。本文档为当时的设计意图快照，部分 API（`getDropIntent`、`createMultiDragGhost(count)`、`unfoldDraggedItems` 签名等）和视觉行为（折叠/反向展开过渡）已在后续重构中演进；当前实际行为以 [CHANGELOG.md](../../../CHANGELOG.md) 与 [UI_GUIDELINES.md](../../../UI_GUIDELINES.md) §13.4 为准。
 
 ## 目标
 

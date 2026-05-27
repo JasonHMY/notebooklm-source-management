@@ -1,7 +1,7 @@
 # 拖拽 Ghost 改为 Source 行克隆 — 设计 Spec
 
 **日期：** 2026-05-27
-**状态：** Draft
+**状态：** 已实现 (Implemented)。本文档为当时的设计意图快照；后续动画收尾（`.sp-drag-unfolding` 平滑反向展开、fly-in / scaleY landing / flash 等）请参阅 [CHANGELOG.md](../../../CHANGELOG.md) 与 [UI_GUIDELINES.md](../../../UI_GUIDELINES.md) §13.4。
 
 ## 目标
 
