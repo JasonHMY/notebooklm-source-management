@@ -929,6 +929,24 @@
                 transform: scale(1.01);
                 box-shadow: var(--sp-shadow-hover-item);
             }
+            /* During an active drag, suppress :hover transform/background/shadow on
+               source rows and group headers. Two reasons:
+                 1. Jitter: cursor often brushes shifted siblings as ghost moves; their
+                    :hover would briefly add scale(1.01) + box-shadow which read as a
+                    1px popping artifact alongside the reflow translateY.
+                 2. Post-drop hover stuck: Chrome freezes :hover at the dragstart-time
+                    element under cursor and does not refresh after drop changes layout.
+                    Suppressing the visual at least keeps the "wrong" row from looking
+                    selected; pairing with handleDragEnd's pointer-events flicker forces
+                    Chrome to rebuild its hit-test cache so :hover snaps to where the
+                    cursor actually is now. */
+            #sources-list.sp-drag-active .source-item:hover,
+            #sources-list.sp-drag-active .group-header:hover {
+                background-color: transparent;
+                transform: none;
+                box-shadow: none;
+                z-index: 1;
+            }
             .source-item.sp-spotlight-surface:hover::before,
             .source-item.sp-spotlight-surface:focus-within::before,
             .source-item.sp-spotlight-surface.is-spotlight-active::before,

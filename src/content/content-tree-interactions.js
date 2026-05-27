@@ -1449,21 +1449,22 @@
                         rootElement
                     });
                     runtime.dragReflowSession = session;
-                    const raf = typeof globalThis.requestAnimationFrame === 'function'
-                        ? globalThis.requestAnimationFrame
-                        : null;
-                    if (raf) {
-                        raf(() => {
-                            if (dragReflow.foldDraggedItems) {
-                                dragReflow.foldDraggedItems({
-                                    session,
-                                    rootElement: getSourceListContainer()
-                                });
-                            }
-                        });
-                    } else if (typeof dragReflow.foldDraggedItems === 'function') {
+                    // Sync fold (NOT inside RAF): same paint as setDragImage so the ghost
+                    // — which renders at cursor position = origin row's slot — lands in the
+                    // already-empty space instead of visually overlapping the original row
+                    // for one frame. Ghost is a detached cloneNode in document.body, so
+                    // folding the origin row's inline height does NOT affect ghost contents.
+                    if (typeof dragReflow.foldDraggedItems === 'function') {
                         dragReflow.foldDraggedItems({ session, rootElement });
                     }
+                }
+                // Mark the list as drag-active so :hover rules suppress their
+                // transform/background/shadow (prevents both mid-drag jitter from cursor
+                // brushing siblings, and post-drop "hover stuck on the old row" effect).
+                // Removed in handleDragEnd.
+                const _sourcesListEl = getSourceListContainer();
+                if (_sourcesListEl && _sourcesListEl.classList && typeof _sourcesListEl.classList.add === 'function') {
+                    _sourcesListEl.classList.add('sp-drag-active');
                 }
 
                 if (typeof setTimeoutFn === 'function') {
@@ -1496,6 +1497,11 @@
                     e.dataTransfer.effectAllowed = 'move';
                     if (typeof setTimeoutFn === 'function') {
                         setTimeoutFn(() => groupTarget.classList.add('dragging'), 0);
+                    }
+                    // Same as the source branch: mark drag-active for :hover suppression.
+                    const _groupSourcesListEl = getSourceListContainer();
+                    if (_groupSourcesListEl && _groupSourcesListEl.classList && typeof _groupSourcesListEl.classList.add === 'function') {
+                        _groupSourcesListEl.classList.add('sp-drag-active');
                     }
                 }
             }
@@ -2233,6 +2239,27 @@
             }
             runtime.activeDragContext = null;
             cleanupReflowSession();
+            // Drag is over — restore :hover visuals and force Chrome to invalidate its
+            // hit-test cache (otherwise :hover stays stuck on whichever row the cursor
+            // was over at dragstart, because layout has since changed underneath it).
+            // Toggling pointer-events for one frame is the canonical trick.
+            const _endList = getSourceListContainer();
+            if (_endList && _endList.classList && typeof _endList.classList.remove === 'function') {
+                _endList.classList.remove('sp-drag-active');
+            }
+            if (_endList && _endList.style) {
+                const _prevPE = _endList.style.pointerEvents;
+                _endList.style.pointerEvents = 'none';
+                const _restore = () => {
+                    if (_endList.style) _endList.style.pointerEvents = _prevPE;
+                };
+                const _raf = typeof globalThis.requestAnimationFrame === 'function'
+                    ? globalThis.requestAnimationFrame
+                    : null;
+                const _setTimeoutEnd = getSetTimeout();
+                if (_raf) _raf(_restore);
+                else if (typeof _setTimeoutEnd === 'function') _setTimeoutEnd(_restore, 0);
+            }
         }
 
         return {
