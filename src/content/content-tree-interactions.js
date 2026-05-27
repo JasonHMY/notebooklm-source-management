@@ -177,6 +177,97 @@
             return root && typeof root.getElementById === 'function' ? root.getElementById('sources-list') : null;
         }
 
+        // Optimistic group-count updates during drag. When the user is mid-drag, the
+        // source group's badge ` x / y ` shows (x - N) / y and the predicted-target group's
+        // badge shows (x + N) / y, where N = number of dragged sources from / going into
+        // that group. On dragend/drop or when the prediction changes, badges are restored
+        // from the snapshot captured on first call. Total `y` is intentionally left
+        // unchanged (matches user spec). Direct DOM text mutation — no re-render needed.
+        function updateOptimisticGroupCounts({ intent, draggedKeys, rootElement }) {
+            if (!rootElement || typeof rootElement.querySelector !== 'function') return;
+            if (!intent || !Array.isArray(draggedKeys) || draggedKeys.length === 0) {
+                restoreOptimisticGroupCounts();
+                return;
+            }
+            // Skip for group drag — spec only describes source counts.
+            if (runtime.activeDragContext && runtime.activeDragContext.kind === 'group') {
+                restoreOptimisticGroupCounts();
+                return;
+            }
+            if (!runtime.dragCountSnapshot) runtime.dragCountSnapshot = new Map();
+
+            // Tally per source group: count of dragged keys originally in that group.
+            const sourceGroupCounts = new Map();
+            for (const k of draggedKeys) {
+                if (typeof k !== 'string' || !k) continue;
+                const safeKey = String(k).replace(/"/g, '\\"');
+                const srcRowEl = rootElement.querySelector(`[data-source-key="${safeKey}"]`);
+                if (!srcRowEl || typeof srcRowEl.closest !== 'function') continue;
+                const containerEl = srcRowEl.closest('.group-container');
+                if (!containerEl || !containerEl.dataset || !containerEl.dataset.groupId) continue;
+                const sg = containerEl.dataset.groupId;
+                sourceGroupCounts.set(sg, (sourceGroupCounts.get(sg) || 0) + 1);
+            }
+            const targetGroupId = intent.targetGroupId || null;
+            // If a source group equals the target group, the net change is 0; skip.
+            const effectiveSourceCounts = new Map();
+            for (const [sg, n] of sourceGroupCounts) {
+                if (sg !== targetGroupId) effectiveSourceCounts.set(sg, n);
+            }
+            const effectiveTargetIncrement = targetGroupId
+                ? draggedKeys.length - (sourceGroupCounts.get(targetGroupId) || 0)
+                : 0;
+
+            const groupsToUpdate = new Set(effectiveSourceCounts.keys());
+            if (targetGroupId && effectiveTargetIncrement !== 0) groupsToUpdate.add(targetGroupId);
+
+            // Restore badges that were touched last frame but are no longer affected.
+            for (const [groupId, originalText] of runtime.dragCountSnapshot) {
+                if (!groupsToUpdate.has(groupId)) {
+                    const safeGid = String(groupId).replace(/"/g, '\\"');
+                    const container = rootElement.querySelector(`.group-container[data-group-id="${safeGid}"]`);
+                    const badge = container ? container.querySelector(':scope > .group-header > .badge') : null;
+                    if (badge) badge.textContent = originalText;
+                    runtime.dragCountSnapshot.delete(groupId);
+                }
+            }
+
+            // Apply (or re-apply) updates for currently-affected groups.
+            for (const groupId of groupsToUpdate) {
+                const safeGid = String(groupId).replace(/"/g, '\\"');
+                const container = rootElement.querySelector(`.group-container[data-group-id="${safeGid}"]`);
+                if (!container) continue;
+                const badge = container.querySelector(':scope > .group-header > .badge');
+                if (!badge) continue;
+                if (!runtime.dragCountSnapshot.has(groupId)) {
+                    runtime.dragCountSnapshot.set(groupId, badge.textContent);
+                }
+                const original = runtime.dragCountSnapshot.get(groupId);
+                const m = original.match(/(\d+)\s*\/\s*(\d+)/);
+                if (!m) continue;
+                const x = parseInt(m[1], 10);
+                const y = parseInt(m[2], 10);
+                let newX = x;
+                if (effectiveSourceCounts.has(groupId)) newX -= effectiveSourceCounts.get(groupId);
+                if (groupId === targetGroupId) newX += effectiveTargetIncrement;
+                badge.textContent = ` ${newX} / ${y} `;
+            }
+        }
+
+        function restoreOptimisticGroupCounts() {
+            if (!runtime.dragCountSnapshot || runtime.dragCountSnapshot.size === 0) return;
+            const rootElement = getSourceListContainer();
+            if (rootElement && typeof rootElement.querySelector === 'function') {
+                for (const [groupId, originalText] of runtime.dragCountSnapshot) {
+                    const safeGid = String(groupId).replace(/"/g, '\\"');
+                    const container = rootElement.querySelector(`.group-container[data-group-id="${safeGid}"]`);
+                    const badge = container ? container.querySelector(':scope > .group-header > .badge') : null;
+                    if (badge) badge.textContent = originalText;
+                }
+            }
+            runtime.dragCountSnapshot.clear();
+        }
+
         function resolveSiblingKeys(intent) {
             if (!intent) return [];
             const list = Array.isArray(intent.targetList) ? intent.targetList : null;
@@ -217,7 +308,7 @@
         //
         // Un-shifted bounds means `rect.top - extractInlineTranslateY(el)`: subtract any
         // active reflow shift so the detection is stable while siblings are translateY'd.
-        function computeDropIntent({ clientY, rootElement, state, groupsById, parentMap, activeDragContext }) {
+        function computeDropIntent({ clientX, clientY, rootElement, state, groupsById, parentMap, activeDragContext }) {
             if (typeof clientY !== 'number' || !rootElement || typeof rootElement.querySelectorAll !== 'function') {
                 return null;
             }
@@ -263,15 +354,39 @@
                 return { top: rect.top - shift, bottom: rect.bottom - shift, height: rect.height };
             };
 
-            // Pick deepest container that contains pointer.
+            // Pick deepest container that contains pointer (with X-coordinate check).
+            // A nested sub-group's Y-band always falls inside its parent's Y-band, so Y
+            // enclosure alone always picks the deepest. X enclosure is what lets the user
+            // distinguish "drop into parent" vs "drop into nested sub-group" — sub-groups
+            // are indented (`.group-children { margin-left: 18px; padding-left: 8px }` per
+            // nesting level), so cursor X to the LEFT of a container's content area means
+            // the user is at the PARENT level, not inside the nested one. When clientX is
+            // provided, only consider containers whose `.group-children` left edge is at or
+            // left of clientX. Fall back to Y-only when clientX is unavailable.
             let chosenContainer = null;
             let chosenDepth = -1;
+            const _hasClientX = typeof clientX === 'number';
             for (const container of containerList) {
                 if (!container || !container.dataset) continue;
                 if (container.classList && container.classList.contains('sp-drag-folded')) continue;
                 const r = unshiftedRect(container);
                 if (!r) continue;
                 if (clientY < r.top || clientY >= r.bottom) continue;
+                if (_hasClientX) {
+                    // Use .group-children's left edge as the container's "content left
+                    // boundary". Cursor must be inside (X >= contentLeft) to qualify as
+                    // "inside this container's body". This naturally rejects nested
+                    // containers when cursor is in the parent's gutter area.
+                    const _childrenEl = typeof container.querySelector === 'function'
+                        ? container.querySelector('.group-children')
+                        : null;
+                    if (_childrenEl && typeof _childrenEl.getBoundingClientRect === 'function') {
+                        const _childrenRect = _childrenEl.getBoundingClientRect();
+                        if (_childrenRect && typeof _childrenRect.left === 'number' && clientX < _childrenRect.left) {
+                            continue; // cursor to the left of this container's body → not eligible (likely parent level)
+                        }
+                    }
+                }
                 const d = getDepth(container.dataset.groupId);
                 if (d > chosenDepth) {
                     chosenContainer = container;
@@ -1667,6 +1782,7 @@
             e.preventDefault();
             const sourceListEl = getSourceListContainer();
             const intent = computeDropIntent({
+                clientX: e.clientX,
                 clientY: e.clientY,
                 rootElement: sourceListEl,
                 state: getState(),
@@ -1788,6 +1904,14 @@
                     runtime.dragReflowSession.currentIntent = { ...intent };
                 }
 
+                // Optimistic group-count update: show the user the predicted "(x±N) / y"
+                // on the source group(s) and target group as they hover.
+                {
+                    const _ctx = runtime.activeDragContext;
+                    const _draggedKeys = _ctx && Array.isArray(_ctx.keys) ? _ctx.keys : [];
+                    updateOptimisticGroupCounts({ intent, draggedKeys: _draggedKeys, rootElement: sourceListEl });
+                }
+
                 // Hover-expand: derive pointerGroupId from the host group-container we already resolved.
                 const pointerGroupId = intent.hostGroupContainerEl && intent.hostGroupContainerEl.dataset
                     ? intent.hostGroupContainerEl.dataset.groupId
@@ -1817,6 +1941,8 @@
                 }
             } else {
                 cancelAllHoverTimers();
+                // Cursor outside list / no intent: restore any optimistic count changes.
+                restoreOptimisticGroupCounts();
             }
 
             if (autoScrollController && dragMulti && typeof dragMulti.computeAutoScrollVelocity === 'function') {
@@ -2163,6 +2289,7 @@
                     : null;
                 if (!intent) {
                     intent = computeDropIntent({
+                        clientX: e.clientX,
                         clientY: e.clientY,
                         rootElement: getSourceListContainer(),
                         state,
@@ -2497,6 +2624,12 @@
                 }
                 runtime.hoverExpandedGroupIds.clear();
             }
+            // Restore any optimistic group-count text changes. If drop succeeded,
+            // render() rebuilt the badges with the real new counts, so this restore
+            // is a no-op DOM-wise but still clears the snapshot Map for the next drag.
+            // If drop didn't happen (cancel via esc / drop outside), this puts the
+            // badges back to pre-drag values.
+            restoreOptimisticGroupCounts();
             clearDragFeedback();
             if (autoScrollController) autoScrollController.stop();
             if (runtime.activeDragGhost && dragMulti && typeof dragMulti.destroyMultiDragGhost === 'function') {
