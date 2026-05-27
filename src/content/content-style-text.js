@@ -984,6 +984,10 @@
             .group-header.sp-spotlight-surface.is-spotlight-active::before {
                 opacity: 1;
             }
+            :host(.sp-appearance-no-spotlight) .source-item.sp-spotlight-surface::before,
+            :host(.sp-appearance-no-spotlight) .group-header.sp-spotlight-surface::before {
+                display: none;
+            }
             .source-item:active, .group-header:active {
                 transform: scale(0.995);
             }
