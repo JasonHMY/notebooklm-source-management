@@ -2244,6 +2244,26 @@
                 && typeof cursorX === 'number'
                 && typeof cursorY === 'number';
 
+            // Suppress `.sp-list-item-enter` on the just-rendered list. That class triggers
+            // a staggered (index * 18ms delay) opacity 0→1 + scale(0.985)→1 entrance
+            // animation per row — fine for first list mount, but render() reapplies it to
+            // EVERY row after drop's patchNode rewrites their class attribute, producing a
+            // visible "all sources shimmer slightly" effect that reads as a flash. Drop is
+            // a reorder (no genuinely-new rows), so silencing this animation is correct:
+            // the dragged element's fly-in / scaleY landing carries the only motion the
+            // user needs to see. Done synchronously before paint so the animation never
+            // actually starts.
+            if (typeof rootElement.querySelectorAll === 'function') {
+                const _enterEls = rootElement.querySelectorAll('.sp-list-item-enter');
+                if (_enterEls && typeof _enterEls.forEach === 'function') {
+                    _enterEls.forEach((node) => {
+                        if (node && node.classList && typeof node.classList.remove === 'function') {
+                            node.classList.remove('sp-list-item-enter');
+                        }
+                    });
+                }
+            }
+
             // Sibling FLIP: animate non-landed elements from their pre-drop visual
             // position (captured BEFORE state mutation + render) to their new layout
             // position. Without this, when render() rebuilds the DOM, sibling elements
