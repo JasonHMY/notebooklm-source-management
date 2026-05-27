@@ -485,7 +485,8 @@ describe('background.js message listener', () => {
                     historyRetentionLimit: 20,
                     languageOverride: 'auto',
                     commandShortcuts: {},
-                    visibleQuickViewKinds: DEFAULT_VISIBLE_QUICK_VIEW_KINDS
+                    visibleQuickViewKinds: DEFAULT_VISIBLE_QUICK_VIEW_KINDS,
+                    appearance: { hoverSpotlightEnabled: true }
                 }
             },
             expect.any(Function)
@@ -499,7 +500,8 @@ describe('background.js message listener', () => {
                 historyRetentionLimit: 20,
                 languageOverride: 'auto',
                 commandShortcuts: {},
-                visibleQuickViewKinds: DEFAULT_VISIBLE_QUICK_VIEW_KINDS
+                visibleQuickViewKinds: DEFAULT_VISIBLE_QUICK_VIEW_KINDS,
+                appearance: { hoverSpotlightEnabled: true }
             }
         });
 
@@ -523,7 +525,8 @@ describe('background.js message listener', () => {
                 historyRetentionLimit: 20,
                 languageOverride: 'auto',
                 commandShortcuts: {},
-                visibleQuickViewKinds: DEFAULT_VISIBLE_QUICK_VIEW_KINDS
+                visibleQuickViewKinds: DEFAULT_VISIBLE_QUICK_VIEW_KINDS,
+                appearance: { hoverSpotlightEnabled: true }
             },
             usageState: {
                 hasExistingPluginData: true,
@@ -590,7 +593,8 @@ describe('background.js message listener', () => {
                     historyRetentionLimit: 20,
                     languageOverride: 'auto',
                     commandShortcuts: {},
-                    visibleQuickViewKinds: DEFAULT_VISIBLE_QUICK_VIEW_KINDS
+                    visibleQuickViewKinds: DEFAULT_VISIBLE_QUICK_VIEW_KINDS,
+                    appearance: { hoverSpotlightEnabled: true }
                 }
             },
             expect.any(Function)
@@ -604,7 +608,8 @@ describe('background.js message listener', () => {
                 historyRetentionLimit: 20,
                 languageOverride: 'auto',
                 commandShortcuts: {},
-                visibleQuickViewKinds: DEFAULT_VISIBLE_QUICK_VIEW_KINDS
+                visibleQuickViewKinds: DEFAULT_VISIBLE_QUICK_VIEW_KINDS,
+                appearance: { hoverSpotlightEnabled: true }
             }
         });
     });
@@ -640,7 +645,8 @@ describe('background.js message listener', () => {
                     historyRetentionLimit: 50,
                     languageOverride: 'zh_CN',
                     commandShortcuts: {},
-                    visibleQuickViewKinds: DEFAULT_VISIBLE_QUICK_VIEW_KINDS
+                    visibleQuickViewKinds: DEFAULT_VISIBLE_QUICK_VIEW_KINDS,
+                    appearance: { hoverSpotlightEnabled: true }
                 }
             },
             expect.any(Function)
@@ -685,7 +691,8 @@ describe('background.js message listener', () => {
                     commandShortcuts: {
                         'quick-view-issues': 'Ctrl+Alt+I'
                     },
-                    visibleQuickViewKinds: DEFAULT_VISIBLE_QUICK_VIEW_KINDS
+                    visibleQuickViewKinds: DEFAULT_VISIBLE_QUICK_VIEW_KINDS,
+                    appearance: { hoverSpotlightEnabled: true }
                 }
             },
             expect.any(Function)
@@ -727,7 +734,8 @@ describe('background.js message listener', () => {
                     commandShortcuts: {
                         'quick-view-recent': 'Meta+Shift+R'
                     },
-                    visibleQuickViewKinds: ['all', 'issues']
+                    visibleQuickViewKinds: ['all', 'issues'],
+                    appearance: { hoverSpotlightEnabled: true }
                 }
             },
             expect.any(Function)
@@ -1731,5 +1739,62 @@ describe('background.js message listener', () => {
             url: 'https://notebooklm.google.com/'
         });
         expect(result).toBe(true);
+    });
+});
+
+describe('appearance preference normalization', () => {
+    let normalizePreferences;
+
+    beforeAll(() => {
+        global.chrome = {
+            runtime: {
+                id: 'abcdefghijklmnopabcdefghijklmnop',
+                onMessage: { addListener: jest.fn() },
+                getManifest: jest.fn(() => ({})),
+                lastError: undefined
+            },
+            tabs: {
+                query: jest.fn(),
+                update: jest.fn(),
+                sendMessage: jest.fn(),
+                create: jest.fn()
+            },
+            windows: { update: jest.fn() },
+            storage: { local: { set: jest.fn(), get: jest.fn() } }
+        };
+        jest.isolateModules(() => {
+            ({ normalizePreferences } = require('../src/background/index.js'));
+        });
+    });
+
+    afterAll(() => {
+        delete global.chrome;
+    });
+
+    it('defaults appearance.hoverSpotlightEnabled to true when preferences are empty', () => {
+        expect(normalizePreferences({}).appearance).toEqual({ hoverSpotlightEnabled: true });
+    });
+
+    it('defaults appearance.hoverSpotlightEnabled to true when appearance is null', () => {
+        expect(normalizePreferences({ appearance: null }).appearance).toEqual({ hoverSpotlightEnabled: true });
+    });
+
+    it('defaults appearance.hoverSpotlightEnabled to true when appearance is not an object', () => {
+        expect(normalizePreferences({ appearance: 'yes' }).appearance).toEqual({ hoverSpotlightEnabled: true });
+    });
+
+    it('returns false only when hoverSpotlightEnabled is strictly false', () => {
+        expect(normalizePreferences({ appearance: { hoverSpotlightEnabled: false } }).appearance.hoverSpotlightEnabled).toBe(false);
+    });
+
+    it('returns true when hoverSpotlightEnabled is a non-boolean truthy/falsy value (default-true fallback)', () => {
+        expect(normalizePreferences({ appearance: { hoverSpotlightEnabled: 0 } }).appearance.hoverSpotlightEnabled).toBe(true);
+        expect(normalizePreferences({ appearance: { hoverSpotlightEnabled: '' } }).appearance.hoverSpotlightEnabled).toBe(true);
+        expect(normalizePreferences({ appearance: { hoverSpotlightEnabled: 'no' } }).appearance.hoverSpotlightEnabled).toBe(true);
+        expect(normalizePreferences({ appearance: { hoverSpotlightEnabled: undefined } }).appearance.hoverSpotlightEnabled).toBe(true);
+    });
+
+    it('returns true when hoverSpotlightEnabled is strictly true', () => {
+        expect(normalizePreferences({ appearance: { hoverSpotlightEnabled: true } }).appearance.hoverSpotlightEnabled).toBe(true);
     });
 });

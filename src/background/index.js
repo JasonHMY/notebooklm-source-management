@@ -268,7 +268,8 @@ function normalizePreferences(preferences = {}) {
         historyRetentionLimit: normalizeHistoryRetentionLimit(preferences?.historyRetentionLimit),
         languageOverride: normalizeLanguageOverride(preferences?.languageOverride),
         commandShortcuts: normalizeCommandShortcuts(preferences?.commandShortcuts),
-        visibleQuickViewKinds: normalizeVisibleQuickViewKinds(preferences?.visibleQuickViewKinds)
+        visibleQuickViewKinds: normalizeVisibleQuickViewKinds(preferences?.visibleQuickViewKinds),
+        appearance: normalizeAppearancePreferences(preferences?.appearance)
     };
 }
 
@@ -306,6 +307,13 @@ function createPreferenceUsageState(storageData = {}) {
 function normalizeHistoryRetentionLimit(value) {
     const limit = Number(value);
     return HISTORY_RETENTION_LIMIT_OPTIONS.includes(limit) ? limit : STATE_HISTORY_LIMIT;
+}
+
+function normalizeAppearancePreferences(value) {
+    const source = value && typeof value === 'object' ? value : {};
+    return {
+        hoverSpotlightEnabled: source.hoverSpotlightEnabled === false ? false : true
+    };
 }
 
 function normalizeLanguageOverride(value) {
