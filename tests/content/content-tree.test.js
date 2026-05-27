@@ -2612,6 +2612,37 @@ describe('computeDropIntent', () => {
         expect(groupIntent.targetList).toBe(state.groups);
     });
 
+    // Group drag landing on a root source slot auto-routes to the nearest group neighbor.
+    it('auto-routes a group drag away from a root source slot to the nearest group neighbor', () => {
+        const state = { ungrouped: ['SrcA'], groups: ['g1', 'g2'] };
+        const groupsById = new Map([
+            ['g1', { id: 'g1', children: [] }],
+            ['g2', { id: 'g2', children: [] }]
+        ]);
+        const tree = buildTree({ state, groupsById });
+        // DOM order at root: g1 (100..130), g2 (200..230), then SrcA (300..340).
+        // (Groups render before ungrouped, matching content-render.js.)
+        const { sourcesListEl } = makeMockShadowList({
+            items: [
+                { kind: 'group', id: 'g1', top: 100, headerHeight: 30, childrenStart: 130, childrenEnd: 130 },
+                { kind: 'group', id: 'g2', top: 200, headerHeight: 30, childrenStart: 230, childrenEnd: 230 },
+                { kind: 'source', key: 'SrcA', top: 300, height: 40 }
+            ]
+        });
+        const intent = tree.computeDropIntent({
+            clientY: 315, // mid-Y of SrcA (320), upper half → before-source SrcA
+            rootElement: sourcesListEl,
+            state, groupsById, parentMap: new Map(),
+            activeDragContext: { kind: 'group', draggedGroupId: 'external' }
+        });
+        expect(intent).toBeTruthy();
+        // Group drag should auto-route away from SrcA to nearest group (g2 above).
+        expect(intent.targetList).toBe(state.groups);
+        expect(intent.kind).toBe('after-group');
+        expect(intent.slotKey).toBe('g2');
+        expect(intent.insertIndex).toBe(2); // after g2
+    });
+
     // P3(B): when no ungrouped neighbors exist at root (groups-only), source drag falls through to
     // before/after-group (which computeIsInvalidDrop will then flag as invalid + apply red outline).
     it('does not auto-route when root has no ungrouped neighbors', () => {

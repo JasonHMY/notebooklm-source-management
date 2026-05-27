@@ -480,16 +480,29 @@
                     slotKey: null
                 };
             }
-            // For source drags landing on a group-typed slot at root, auto-route to the
-            // nearest ungrouped source neighbor so the drop lands somewhere sensible
-            // (otherwise dropping in a "between two groups" gap would be invalid and the
-            // user has no obvious target). Group drags don't auto-route — they target groups.
+            // Auto-route across slot/drag-kind mismatch at the root.
+            //
+            // Root contains both ungrouped sources (state.ungrouped: string[]) and groups
+            // (state.groups: string[]) — they live in separate state arrays. When the
+            // cursor lands in a "wrong-kind" slot for the drag (e.g. source drag over a
+            // group slot, or group drag over an ungrouped source slot), we auto-route to
+            // the nearest same-kind neighbor so the drop lands somewhere sensible. Without
+            // routing the drop would be invalid (splice mismatched id into the wrong array).
             const isSourceDrag = activeDragContext
                 && (activeDragContext.kind === 'source-single' || activeDragContext.kind === 'source-multi');
+            const isGroupDrag = activeDragContext && activeDragContext.kind === 'group';
 
             if (beforeIndex >= 0) {
                 const slot = candidates[beforeIndex];
                 if (slot.kind === 'source') {
+                    if (isGroupDrag) {
+                        // Group drag over a source slot — route to nearest group neighbor.
+                        const routed = routeToNearestNeighborKind({
+                            candidates, beforeIndex, targetCandidateKind: 'group',
+                            targetList: groups, clientY, unshiftedRect
+                        });
+                        if (routed) return routed;
+                    }
                     const ungroupedIndex = ungrouped.indexOf(slot.key);
                     return {
                         kind: 'before-source',
@@ -501,10 +514,11 @@
                         slotKey: slot.key
                     };
                 }
-                // slot.kind === 'group' — auto-route source drags to nearest ungrouped neighbor.
+                // slot.kind === 'group'
                 if (isSourceDrag) {
-                    const routed = routeSourceToUngroupedNeighbor({
-                        candidates, beforeIndex, ungrouped, clientY, unshiftedRect
+                    const routed = routeToNearestNeighborKind({
+                        candidates, beforeIndex, targetCandidateKind: 'source',
+                        targetList: ungrouped, clientY, unshiftedRect
                     });
                     if (routed) return routed;
                 }
@@ -524,8 +538,9 @@
             const lastRoot = candidates[candidates.length - 1];
             if (lastRoot.kind === 'group') {
                 if (isSourceDrag) {
-                    const routed = routeSourceToUngroupedNeighbor({
-                        candidates, beforeIndex: candidates.length, ungrouped, clientY, unshiftedRect
+                    const routed = routeToNearestNeighborKind({
+                        candidates, beforeIndex: candidates.length, targetCandidateKind: 'source',
+                        targetList: ungrouped, clientY, unshiftedRect
                     });
                     if (routed) return routed;
                 }
@@ -540,6 +555,14 @@
                     slotKey: lastRoot.key
                 };
             }
+            // lastRoot.kind === 'source'
+            if (isGroupDrag) {
+                const routed = routeToNearestNeighborKind({
+                    candidates, beforeIndex: candidates.length, targetCandidateKind: 'group',
+                    targetList: groups, clientY, unshiftedRect
+                });
+                if (routed) return routed;
+            }
             const ungroupedIndex = ungrouped.indexOf(lastRoot.key);
             return {
                 kind: 'after-source',
@@ -552,53 +575,60 @@
             };
         }
 
-        // Find the nearest ungrouped source neighbor (by distance from cursor to the
-        // neighbor's vertical mid-Y) and produce a before/after-source intent. Returns
-        // null when there are no ungrouped neighbors at root (caller falls back to
-        // before/after-group which will be flagged invalid for source drags).
-        function routeSourceToUngroupedNeighbor({ candidates, beforeIndex, ungrouped, clientY, unshiftedRect }) {
+        // Find the nearest candidate of a given kind at root (by distance from cursor to
+        // its un-shifted vertical mid-Y) and produce a before/after intent against the
+        // correct state list. Used by computeDropIntent to auto-route across
+        // source-slot / group-slot mismatches at the root (where ungrouped and groups
+        // live in separate arrays). Returns null when no candidate of the requested kind
+        // exists — caller falls through to a same-kind intent that computeIsInvalidDrop
+        // will then flag as invalid.
+        function routeToNearestNeighborKind({ candidates, beforeIndex, targetCandidateKind, targetList, clientY, unshiftedRect }) {
             if (!candidates || candidates.length === 0) return null;
-            if (!Array.isArray(ungrouped) || ungrouped.length === 0) return null;
-            // Walk upward from beforeIndex-1 and downward from beforeIndex to find the
-            // closest 'source' candidate. Pick whichever has smaller |midY - clientY|.
+            if (!Array.isArray(targetList) || targetList.length === 0) return null;
             let upHit = null;
             for (let i = beforeIndex - 1; i >= 0; i -= 1) {
-                if (candidates[i] && candidates[i].kind === 'source') { upHit = { idx: i, candidate: candidates[i] }; break; }
+                if (candidates[i] && candidates[i].kind === targetCandidateKind) {
+                    upHit = candidates[i];
+                    break;
+                }
             }
             let downHit = null;
             for (let i = beforeIndex; i < candidates.length; i += 1) {
-                if (candidates[i] && candidates[i].kind === 'source') { downHit = { idx: i, candidate: candidates[i] }; break; }
+                if (candidates[i] && candidates[i].kind === targetCandidateKind) {
+                    downHit = candidates[i];
+                    break;
+                }
             }
             const dist = (hit) => {
                 if (!hit) return Infinity;
-                const r = unshiftedRect(hit.candidate.el);
+                const r = unshiftedRect(hit.el);
                 if (!r) return Infinity;
                 return Math.abs((r.top + r.height / 2) - clientY);
             };
             const upDist = dist(upHit);
             const downDist = dist(downHit);
             if (!upHit && !downHit) return null;
-            // Prefer the closer neighbor. Up-neighbor → after-source (route to slot just below it);
-            // Down-neighbor → before-source (route to slot just above it).
+            const isSourceKind = targetCandidateKind === 'source';
+            // Up-neighbor → after; down-neighbor → before. Prefer the closer one.
             if (upHit && (!downHit || upDist <= downDist)) {
-                const key = upHit.candidate.key;
-                const idx = ungrouped.indexOf(key);
+                const key = upHit.key;
+                const idx = targetList.indexOf(key);
                 return {
-                    kind: 'after-source',
+                    kind: isSourceKind ? 'after-source' : 'after-group',
                     targetGroup: null,
-                    targetList: ungrouped,
-                    insertIndex: idx >= 0 ? idx + 1 : ungrouped.length,
+                    targetList,
+                    insertIndex: idx >= 0 ? idx + 1 : targetList.length,
                     targetGroupId: null,
                     hostGroupContainerEl: null,
                     slotKey: key
                 };
             }
-            const key = downHit.candidate.key;
-            const idx = ungrouped.indexOf(key);
+            const key = downHit.key;
+            const idx = targetList.indexOf(key);
             return {
-                kind: 'before-source',
+                kind: isSourceKind ? 'before-source' : 'before-group',
                 targetGroup: null,
-                targetList: ungrouped,
+                targetList,
                 insertIndex: idx >= 0 ? idx : 0,
                 targetGroupId: null,
                 hostGroupContainerEl: null,
@@ -1489,7 +1519,13 @@
                 const draggedGroupId = dragContext.draggedGroupId;
                 if (!draggedGroupId) return false;
                 const targetGroup = intent.targetGroup;
-                if (!targetGroup) return false;
+                if (!targetGroup) {
+                    // Root host. Source-typed slots would splice the group id into
+                    // state.ungrouped (string[]) using an index computed against ungrouped —
+                    // schema mismatch. Reject so the user sees the invalid outline.
+                    if (intent.kind === 'before-source' || intent.kind === 'after-source') return true;
+                    return false;
+                }
                 if (targetGroup.id === draggedGroupId) return true;
                 const groupsById = getGroupsById();
                 const draggedGroup = groupsById.get(draggedGroupId);
