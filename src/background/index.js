@@ -312,7 +312,7 @@ function normalizeHistoryRetentionLimit(value) {
 function normalizeAppearancePreferences(value) {
     const source = value && typeof value === 'object' ? value : {};
     return {
-        hoverSpotlightEnabled: source.hoverSpotlightEnabled === false ? false : true
+        hoverSpotlightEnabled: source.hoverSpotlightEnabled !== false
     };
 }
 

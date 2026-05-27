@@ -1745,7 +1745,7 @@ describe('background.js message listener', () => {
 describe('appearance preference normalization', () => {
     let normalizePreferences;
 
-    beforeAll(() => {
+    beforeEach(() => {
         global.chrome = {
             runtime: {
                 id: 'abcdefghijklmnopabcdefghijklmnop',
@@ -1767,7 +1767,7 @@ describe('appearance preference normalization', () => {
         });
     });
 
-    afterAll(() => {
+    afterEach(() => {
         delete global.chrome;
     });
 
