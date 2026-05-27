@@ -3252,11 +3252,8 @@
                         border-radius: 8px;
                     }
                     .sp-drag-ghost-single > .sp-drag-ghost-layer {
-                        /* "picked up" feel: slight scale + rotate + heavier shadow + lowered
-                           opacity so target rows underneath remain readable. */
-                        transform: scale(1.02) rotate(1.5deg);
-                        opacity: 0.7;
-                        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+                        transform: scale(0.95);
+                        filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.15));
                     }
                     .sp-drag-ghost-stack {
                         position: relative;
