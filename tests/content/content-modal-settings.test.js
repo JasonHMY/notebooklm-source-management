@@ -86,6 +86,8 @@ function createDeps(overrides = {}) {
         setVisibleQuickViewKinds: jest.fn(() => Promise.resolve()),
         getDeveloperModeEnabled: jest.fn(() => false),
         setDeveloperModeEnabled: jest.fn(() => Promise.resolve(false)),
+        getHoverSpotlightEnabled: jest.fn(() => true),
+        setHoverSpotlightEnabled: jest.fn(() => Promise.resolve(true)),
         clearDeveloperLogs: jest.fn(() => Promise.resolve(false)),
         getStateHistoryEntries: jest.fn(() => []),
         restoreStateHistoryEntry: jest.fn(() => Promise.resolve(false)),
@@ -282,6 +284,56 @@ describe('content modal settings', () => {
             expect(win.prompt).toHaveBeenCalled();
             expect(deps.showToast).not.toHaveBeenCalled();
             expect(deps.removeModalNode).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('appearance settings section', () => {
+        it('renders the appearance section with a hover spotlight toggle', () => {
+            const deps = createDeps();
+            const helper = createContentModalSettings(deps);
+            helper.renderSettingsModal();
+            const shadowRoot = deps.getShadowRoot();
+            expect(shadowRoot.querySelector('.sp-settings-appearance-section')).toBeTruthy();
+            expect(shadowRoot.querySelector('.sp-settings-appearance-hover-spotlight-toggle')).toBeTruthy();
+        });
+
+        it('initial checkbox checked state mirrors getHoverSpotlightEnabled', () => {
+            const deps = createDeps({ getHoverSpotlightEnabled: () => false });
+            const helper = createContentModalSettings(deps);
+            helper.renderSettingsModal();
+            const shadowRoot = deps.getShadowRoot();
+            const toggle = shadowRoot.querySelector('.sp-settings-appearance-hover-spotlight-toggle');
+            expect(toggle.attrs.checked).toBe(false);
+        });
+
+        it('toggling the checkbox invokes setHoverSpotlightEnabled with the new value', async () => {
+            const setHoverSpotlightEnabled = jest.fn(() => Promise.resolve(false));
+            const deps = createDeps({ setHoverSpotlightEnabled });
+            const helper = createContentModalSettings(deps);
+            helper.renderSettingsModal();
+            const shadowRoot = deps.getShadowRoot();
+            const toggle = shadowRoot.querySelector('.sp-settings-appearance-hover-spotlight-toggle');
+            toggle.attrs.checked = false;
+            toggle.listeners.change.forEach((handler) => handler({ target: toggle }));
+            await Promise.resolve();
+            expect(setHoverSpotlightEnabled).toHaveBeenCalledWith(false);
+        });
+
+        it('rolls back checkbox and shows error toast when setter rejects', async () => {
+            const setHoverSpotlightEnabled = jest.fn(() => Promise.reject(new Error('boom')));
+            const showToast = jest.fn();
+            const deps = createDeps({ setHoverSpotlightEnabled, showToast });
+            const helper = createContentModalSettings(deps);
+            helper.renderSettingsModal();
+            const shadowRoot = deps.getShadowRoot();
+            const toggle = shadowRoot.querySelector('.sp-settings-appearance-hover-spotlight-toggle');
+            const originalChecked = toggle.attrs.checked;
+            toggle.attrs.checked = !originalChecked;
+            toggle.listeners.change.forEach((handler) => handler({ target: toggle }));
+            await Promise.resolve();
+            await Promise.resolve();
+            expect(toggle.attrs.checked).toBe(originalChecked);
+            expect(showToast).toHaveBeenCalledWith('ui_settings_appearance_hover_spotlight_failed', expect.objectContaining({ variant: 'error' }));
         });
     });
 });

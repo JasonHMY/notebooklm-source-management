@@ -25,6 +25,8 @@
             setVisibleQuickViewKinds = () => Promise.resolve(),
             getDeveloperModeEnabled = () => false,
             setDeveloperModeEnabled = () => Promise.resolve(false),
+            getHoverSpotlightEnabled = () => true,
+            setHoverSpotlightEnabled = () => Promise.resolve(true),
             clearDeveloperLogs = () => Promise.resolve(false),
             getStateHistoryEntries = () => [],
             restoreStateHistoryEntry = () => Promise.resolve(false),
@@ -207,6 +209,47 @@
                     ])
                 ])
             ]);
+        }
+
+        function createAppearanceSettingsSection() {
+            const hoverSpotlightToggle = el('input', {
+                type: 'checkbox',
+                className: 'sp-settings-appearance-hover-spotlight-toggle',
+                checked: getHoverSpotlightEnabled(),
+                'aria-label': getMessage('ui_settings_appearance_hover_spotlight_title')
+            });
+
+            const hoverSpotlightRow = el('label', { className: 'sp-settings-action-row sp-settings-appearance-toggle-row' }, [
+                hoverSpotlightToggle,
+                el('span', { className: 'sp-settings-helper-text' }, [getMessage('ui_settings_appearance_hover_spotlight_title')])
+            ]);
+
+            return el('section', { className: 'sp-settings-section sp-settings-appearance-section' }, [
+                el('div', { className: 'sp-settings-section-header' }, [
+                    el('h4', { className: 'sp-settings-section-title' }, [getMessage('ui_settings_appearance_title')]),
+                    hoverSpotlightRow
+                ]),
+                el('p', { className: 'sp-settings-helper-text sp-settings-appearance-body' }, [
+                    getMessage('ui_settings_appearance_hover_spotlight_body')
+                ])
+            ]);
+        }
+
+        function bindAppearanceSettingsActions(container) {
+            const toggle = container.querySelector('.sp-settings-appearance-hover-spotlight-toggle');
+            if (!toggle) return;
+            toggle.addEventListener('change', (event) => {
+                const next = Boolean(event?.target?.checked ?? toggle.checked);
+                Promise.resolve(setHoverSpotlightEnabled(next))
+                    .then(() => {
+                        showToast(getMessage(next ? 'ui_settings_appearance_hover_spotlight_enabled' : 'ui_settings_appearance_hover_spotlight_disabled'), { variant: 'success' });
+                    })
+                    .catch(() => {
+                        toggle.checked = !next;
+                        if (toggle.attrs) toggle.attrs.checked = !next;
+                        showToast(getMessage('ui_settings_appearance_hover_spotlight_failed'), { variant: 'error' });
+                    });
+            });
         }
 
         function bindDeveloperSettingsActions(container) {
@@ -438,6 +481,9 @@
             });
             content.appendChild(backupSection.section);
             content.appendChild(createLanguagePreferenceSection());
+            const appearanceSection = createAppearanceSettingsSection();
+            content.appendChild(appearanceSection);
+            bindAppearanceSettingsActions(appearanceSection);
 
             const sourceRepairReport = getSourceRepairReport();
             const sourceRepairIssueCount = (sourceRepairReport?.unmatchedSources || 0) + (sourceRepairReport?.ambiguousSources || 0);
