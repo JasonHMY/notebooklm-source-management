@@ -52,15 +52,51 @@
             }
         }
 
-        function unfoldDraggedItems({ session, rootElement }) {
+        // animated=true smoothly unfolds the dragged item from height 0 back to its cached
+        // natural height (200ms cubic-bezier, paired with .sp-drag-unfolding CSS rule).
+        // Used by dragend / esc cancel so the dragged row doesn't "snap" back into the list.
+        // animated=false (default) does an instant restore — used by drop where render()
+        // already rebuilt the DOM so transition would be a no-op anyway.
+        function unfoldDraggedItems({ session, rootElement, animated }) {
             if (!session || !rootElement) return;
+            const win = (typeof globalThis !== 'undefined' && typeof globalThis.setTimeout === 'function')
+                ? globalThis
+                : null;
             for (const key of session.draggedKeys) {
                 const el = findItemElement(rootElement, key);
                 if (!el || !el.style) continue;
+                const isFolded = el.classList && typeof el.classList.contains === 'function'
+                    && el.classList.contains('sp-drag-folded');
+                const cachedHeight = session.itemHeights && typeof session.itemHeights.get === 'function'
+                    ? session.itemHeights.get(key)
+                    : null;
+                if (animated && isFolded && typeof cachedHeight === 'number' && cachedHeight > 0) {
+                    // Smooth path: swap fold class → unfolding class, set explicit pixel height +
+                    // opacity 1 so transition rules have well-defined from/to values.
+                    if (el.classList && typeof el.classList.add === 'function') {
+                        el.classList.add('sp-drag-unfolding');
+                    }
+                    el.classList.remove('sp-drag-folded');
+                    el.style.height = `${cachedHeight}px`;
+                    el.style.opacity = '1';
+                    const cleanup = () => {
+                        if (el.classList && typeof el.classList.remove === 'function') {
+                            el.classList.remove('sp-drag-unfolding');
+                        }
+                        if (el.style) {
+                            el.style.height = '';
+                            el.style.opacity = '';
+                        }
+                    };
+                    if (win) win.setTimeout(cleanup, 240);
+                    continue;
+                }
+                // Instant path: drop scenario, or no cached height to animate to.
                 el.style.height = '';
                 el.style.opacity = '';
                 if (el.classList && typeof el.classList.remove === 'function') {
                     el.classList.remove('sp-drag-folded');
+                    el.classList.remove('sp-drag-unfolding');
                 }
             }
         }

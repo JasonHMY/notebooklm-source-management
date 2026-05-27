@@ -1347,6 +1347,26 @@
             cancelAllHoverTimers();
             runtime.hoverExpandedGroupIds.clear();
 
+            // Preflight clean: a previous drop's landing/flash classes may linger if the user
+            // starts a new drag within the 800ms cleanup window. The lingering .sp-drop-flying
+            // transition rule (covers transform + opacity) would slow this drag's fold from
+            // instant to 200ms, which causes visible jitter. Strip them now so the new drag
+            // starts from a clean visual state. Don't touch inline transform/opacity here —
+            // they're owned by the previous transition or the new fold about to run.
+            const _preflightList = getSourceListContainer();
+            if (_preflightList && typeof _preflightList.querySelectorAll === 'function') {
+                const stale = _preflightList.querySelectorAll('.sp-drop-flying, .sp-drop-landing, .sp-drop-landed, .sp-drag-unfolding');
+                if (stale && typeof stale.forEach === 'function') {
+                    stale.forEach((node) => {
+                        if (!node || !node.classList || typeof node.classList.remove !== 'function') return;
+                        node.classList.remove('sp-drop-flying');
+                        node.classList.remove('sp-drop-landing');
+                        node.classList.remove('sp-drop-landed');
+                        node.classList.remove('sp-drag-unfolding');
+                    });
+                }
+            }
+
             if (sourceTarget) {
                 const key = sourceTarget.dataset.sourceKey;
                 if (!key) return;
@@ -1915,9 +1935,13 @@
                     });
                 }
                 if (typeof dragReflow.unfoldDraggedItems === 'function') {
+                    // animated:true → smooth 200ms grow-back. Pairs with clearReflow's
+                    // sibling translateY transition so cancel (esc / drop outside) feels
+                    // like the row "settles" back into the list instead of snapping.
                     dragReflow.unfoldDraggedItems({
                         session: runtime.dragReflowSession,
-                        rootElement: getSourceListContainer()
+                        rootElement: getSourceListContainer(),
+                        animated: true
                     });
                 }
                 runtime.dragReflowSession = null;

@@ -2598,19 +2598,36 @@
                targets transform + opacity. */
             .sp-drop-flying {
                 transition:
-                    transform 280ms cubic-bezier(0.2, 0, 0, 1),
-                    opacity 280ms cubic-bezier(0.2, 0, 0, 1);
+                    transform 200ms cubic-bezier(0.2, 0, 0, 1),
+                    opacity 200ms cubic-bezier(0.2, 0, 0, 1);
                 will-change: transform, opacity;
             }
 
             /* Drop landing flash: 600ms accent outline so the user's eye catches the new
-               position. Runs concurrently with the landing animation. */
+               position. Runs concurrently with the landing animation. Easing matches the
+               rest of the drag system (cubic-bezier(0.2, 0, 0, 1)) for visual cohesion. */
             .sp-drop-landed {
-                animation: sp-drop-landed-flash 600ms ease-out both;
+                animation: sp-drop-landed-flash 600ms cubic-bezier(0.2, 0, 0, 1) both;
             }
             @keyframes sp-drop-landed-flash {
                 0%   { box-shadow: 0 0 0 2px var(--sp-accent); }
                 100% { box-shadow: 0 0 0 0 transparent; }
+            }
+
+            /* Dragend cancel (esc / drop outside): smoothly grow the dragged item back from
+               height 0 to its cached natural height. Padding / border-width / margin animate
+               in parallel — they were forced to 0 by .sp-drag-folded's !important, so
+               removing that class lets them transition to their .source-item baseline.
+               Pairs with clearReflow's translateY transition on shifted siblings so the
+               dragged item growth and sibling slide-back stay visually synchronized. */
+            .sp-drag-unfolding {
+                transition:
+                    height 200ms cubic-bezier(0.2, 0, 0, 1),
+                    opacity 200ms cubic-bezier(0.2, 0, 0, 1),
+                    padding 200ms cubic-bezier(0.2, 0, 0, 1),
+                    border-width 200ms cubic-bezier(0.2, 0, 0, 1),
+                    margin 200ms cubic-bezier(0.2, 0, 0, 1);
+                overflow: hidden;
             }
 
             @media (prefers-reduced-motion: reduce) {
@@ -2618,7 +2635,9 @@
                 .sp-drop-landed {
                     animation: none !important;
                 }
-                .sp-drop-flying {
+                .sp-drop-flying,
+                .sp-drop-shift,
+                .sp-drag-unfolding {
                     transition: none !important;
                 }
             }
