@@ -3198,6 +3198,16 @@
                     /* Layer wrapper isolates stack/single transforms from the cloned source-item's
                        inline cssText (written by inlineStylesRecursive) which would otherwise
                        win specificity over class selectors. */
+                    /* Opaque backdrop so the rasterized dragImage doesn't bleed through to
+                       underlying rows. The cloned .source-item has transparent computed
+                       background (it visually depends on #sources-list parent's --sp-panel-bg),
+                       so once the clone is appended to document.body the captured bitmap is
+                       see-through. Hardcode the resolved --sp-panel-bg value here + dark-mode
+                       override; values mirror :host token definitions at content-style-text.js lines 79/157. */
+                    .sp-drag-ghost-layer {
+                        background: #f6f7f9;
+                        border-radius: 8px;
+                    }
                     .sp-drag-ghost-single > .sp-drag-ghost-layer {
                         transform: scale(0.95);
                         filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.15));
@@ -3243,6 +3253,9 @@
                         z-index: 10;
                     }
                     @media (prefers-color-scheme: dark) {
+                        .sp-drag-ghost-layer {
+                            background: #272c33;
+                        }
                         .sp-drag-ghost-badge {
                             background: #0A84FF;
                         }
