@@ -1618,7 +1618,7 @@ describe('handleDragStart reflow session + unified ghost', () => {
         expect(runtime.dragReflowSession.draggedKeys.has('A')).toBe(true);
     });
 
-    it('calls foldDraggedItems synchronously after prepare (no RAF)', () => {
+    it('schedules foldDraggedItems via requestAnimationFrame after prepare', () => {
         const runtime = {};
         const state = { isBatchMode: false, ungrouped: ['A'], groups: [] };
         const pendingBatchKeys = new Set();
@@ -1648,9 +1648,15 @@ describe('handleDragStart reflow session + unified ghost', () => {
             dataTransfer: createDataTransfer()
         });
 
-        // Fold runs synchronously in the dragstart handler so the origin row's
-        // space is yielded in the same paint as setDragImage — otherwise the
-        // ghost would visually overlap the origin row for one frame before fold.
+        // foldDraggedItems should not be called synchronously — running fold inside
+        // dragstart turns the drag source into a 0×0 + pointer-events:none box before
+        // Chrome finalizes drag initiation, and Chrome silently cancels the drag.
+        // The RAF defer keeps fold off the dragstart paint, so drag starts cleanly.
+        expect(dragReflow.foldDraggedItems).not.toHaveBeenCalled();
+        expect(global.__rafCallbacks.length).toBeGreaterThan(0);
+
+        // Flush the queued RAF — foldDraggedItems should fire
+        global.__rafCallbacks.forEach((cb) => cb && cb());
         expect(dragReflow.foldDraggedItems).toHaveBeenCalledTimes(1);
         const foldArgs = dragReflow.foldDraggedItems.mock.calls[0][0];
         expect(foldArgs.session).toBe(runtime.dragReflowSession);

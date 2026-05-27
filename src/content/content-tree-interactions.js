@@ -1449,12 +1449,27 @@
                         rootElement
                     });
                     runtime.dragReflowSession = session;
-                    // Sync fold (NOT inside RAF): same paint as setDragImage so the ghost
-                    // — which renders at cursor position = origin row's slot — lands in the
-                    // already-empty space instead of visually overlapping the original row
-                    // for one frame. Ghost is a detached cloneNode in document.body, so
-                    // folding the origin row's inline height does NOT affect ghost contents.
-                    if (typeof dragReflow.foldDraggedItems === 'function') {
+                    // Fold MUST be deferred to next frame via RAF (NOT sync) — running fold
+                    // inside the dragstart handler turns the drag source into a 0×0 box
+                    // (.sp-drag-folded has pointer-events: none + padding/margin/border 0,
+                    // plus we set inline height:0 opacity:0) before Chrome finalizes drag
+                    // initiation, and Chrome silently cancels the drag operation when the
+                    // source rect is zero. RAF defers fold until after Chrome has captured
+                    // the ghost + seeded the drag, at which point the source is safe to hide.
+                    // Accepted trade-off: one-frame visual overlap of ghost over origin row.
+                    const raf = typeof globalThis.requestAnimationFrame === 'function'
+                        ? globalThis.requestAnimationFrame
+                        : null;
+                    if (raf) {
+                        raf(() => {
+                            if (dragReflow.foldDraggedItems) {
+                                dragReflow.foldDraggedItems({
+                                    session,
+                                    rootElement: getSourceListContainer()
+                                });
+                            }
+                        });
+                    } else if (typeof dragReflow.foldDraggedItems === 'function') {
                         dragReflow.foldDraggedItems({ session, rootElement });
                     }
                 }
