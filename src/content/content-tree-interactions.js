@@ -2062,6 +2062,24 @@
                 const pendingBatchKeys = getPendingBatchKeys();
                 e.preventDefault();
 
+                // Snapshot every visible source-item / group-container's pre-drop
+                // visual top (reflects current inline transform shift from reflow).
+                // Used by applyDropLandingAndFlash to FLIP siblings smoothly from
+                // their drop-time positions to the new layout after render(),
+                // eliminating the visible "snap" frame.
+                const _preDropRoot = getSourceListContainer();
+                const _preDropRects = new Map();
+                if (_preDropRoot && typeof _preDropRoot.querySelectorAll === 'function') {
+                    const _preEls = _preDropRoot.querySelectorAll('[data-source-key], [data-group-id]');
+                    for (const _pEl of _preEls) {
+                        if (!_pEl || typeof _pEl.getBoundingClientRect !== 'function') continue;
+                        const _pKey = _pEl.dataset && (_pEl.dataset.sourceKey || _pEl.dataset.groupId);
+                        if (!_pKey) continue;
+                        const _pRect = _pEl.getBoundingClientRect();
+                        if (_pRect) _preDropRects.set(_pKey, _pRect.top);
+                    }
+                }
+
                 // Prefer the intent computed during the last dragover (set on currentIntent);
                 // fall back to a one-shot computeDropIntent against e.clientY if absent.
                 let intent = runtime.dragReflowSession && runtime.dragReflowSession.currentIntent
@@ -2123,7 +2141,7 @@
                             render();
                             showToast(getMessage('ui_batch_moved_sources_toast', [String(result.moved)]));
                             disposeHoverOpenedGroupsAfterDrop(intent, augmentedIntent);
-                            applyDropLandingAndFlash(Array.isArray(keys) ? keys : [], e.clientX, e.clientY);
+                            applyDropLandingAndFlash(Array.isArray(keys) ? keys : [], e.clientX, e.clientY, _preDropRects);
                         }
                         clearDragFeedback();
                         return;
@@ -2190,7 +2208,8 @@
                 clearDragFeedback();
                 applyDropLandingAndFlash(
                     sourceKey ? [sourceKey] : (draggedGroupId ? [draggedGroupId] : []),
-                    e.clientX, e.clientY
+                    e.clientX, e.clientY,
+                    _preDropRects
                 );
             } finally {
                 finalizeReflow();
@@ -2216,7 +2235,7 @@
         // Both cleanup on animationend with a setTimeout(800ms) backstop. Reduced-motion
         // is handled in CSS (transition/animation become no-op; setTimeout still removes
         // classes).
-        function applyDropLandingAndFlash(landedKeys, cursorX, cursorY) {
+        function applyDropLandingAndFlash(landedKeys, cursorX, cursorY, preRects) {
             if (!Array.isArray(landedKeys) || landedKeys.length === 0) return;
             const rootElement = getSourceListContainer();
             if (!rootElement || typeof rootElement.querySelector !== 'function') return;
@@ -2224,6 +2243,47 @@
             const useFlyIn = landedKeys.length === 1
                 && typeof cursorX === 'number'
                 && typeof cursorY === 'number';
+
+            // Sibling FLIP: animate non-landed elements from their pre-drop visual
+            // position (captured BEFORE state mutation + render) to their new layout
+            // position. Without this, when render() rebuilds the DOM, sibling elements
+            // that had reflow translateY shift visually SNAP from "shifted" to "layout"
+            // — perceived as a jank frame at drop time, even though the dragged item
+            // itself is already animating smoothly via fly-in. This block makes every
+            // visible row's drop-time motion smooth, in parallel with the dragged
+            // element's fly-in/scaleY animation.
+            const _landedSet = new Set(Array.isArray(landedKeys) ? landedKeys : []);
+            if (preRects && typeof preRects.get === 'function' && typeof rootElement.querySelectorAll === 'function') {
+                const _flipEls = rootElement.querySelectorAll('[data-source-key], [data-group-id]');
+                for (const _flipEl of _flipEls) {
+                    if (!_flipEl || !_flipEl.classList || !_flipEl.style) continue;
+                    const _flipKey = _flipEl.dataset && (_flipEl.dataset.sourceKey || _flipEl.dataset.groupId);
+                    if (!_flipKey) continue;
+                    if (_landedSet.has(_flipKey)) continue; // landed items use fly-in / scaleY below
+                    if (typeof _flipEl.getBoundingClientRect !== 'function') continue;
+                    const _oldTop = preRects.get(_flipKey);
+                    if (typeof _oldTop !== 'number') continue; // newly inserted / no snapshot
+                    const _newRect = _flipEl.getBoundingClientRect();
+                    if (!_newRect) continue;
+                    const _delta = _oldTop - _newRect.top;
+                    if (Math.abs(_delta) < 1) continue;
+                    // FLIP: jump back to pre-drop visual position, force a reflow, then
+                    // clear the inline transform with .sp-drop-shift's 200ms transition
+                    // active — element animates from its old visual spot to the new layout.
+                    _flipEl.style.transform = `translateY(${_delta}px)`;
+                    void _flipEl.offsetHeight; // force layout flush
+                    _flipEl.classList.add('sp-drop-shift');
+                    _flipEl.style.transform = '';
+                    if (typeof setTimeoutFn === 'function') {
+                        const _flipCleanup = ((target) => () => {
+                            if (target && target.classList && typeof target.classList.remove === 'function') {
+                                target.classList.remove('sp-drop-shift');
+                            }
+                        })(_flipEl);
+                        setTimeoutFn(_flipCleanup, 240);
+                    }
+                }
+            }
             for (const key of landedKeys) {
                 if (typeof key !== 'string' || !key) continue;
                 const safe = key.replace(/"/g, '\\"');
