@@ -3289,7 +3289,7 @@ describe('handleDrop reflow cleanup', () => {
         expect(runtime.dragReflowSession).toBeNull();
     });
 
-    it('flies the landed element from cursor position back to its slot on a single-source drop (FLIP)', () => {
+    it('does NOT animate the landed element on a single-source drop (fly-in animation removed)', () => {
         const state = { groups: [], ungrouped: ['source-1', 'source-2'] };
         const saveState = jest.fn();
         const render = jest.fn();
@@ -3363,19 +3363,18 @@ describe('handleDrop reflow cleanup', () => {
         dropEvent.clientY = 220;
         interactions.handleDrop(dropEvent);
 
-        // FLIP path took: fly-in class only, NOT scaleY landing. Accent-outline flash
-        // (.sp-drop-landed) has been removed — the fly-in motion alone provides the
-        // visual cue and the extra box-shadow blink was perceived as a "flash".
-        expect(landedEl.classList.add).toHaveBeenCalledWith('sp-drop-flying');
+        // Landed-element animation has been removed (per user UX feedback that the
+        // fly-in looked like the source "slid in from the right" when cursor was off
+        // to the side). The dropped row should NOT receive any of the animation
+        // classes, and the FLIP transform sequence should never run.
+        expect(landedEl.classList.add).not.toHaveBeenCalledWith('sp-drop-flying');
         expect(landedEl.classList.add).not.toHaveBeenCalledWith('sp-drop-landed');
         expect(landedEl.classList.add).not.toHaveBeenCalledWith('sp-drop-landing');
-
-        // FLIP transform sequence: first translate(60px, 20px), then cleared ''.
-        expect(transformWrites).toEqual(['translate(60px, 20px)', '']);
-        expect(opacityWrites).toEqual(['0.85', '']);
+        expect(transformWrites).toEqual([]);
+        expect(opacityWrites).toEqual([]);
     });
 
-    it('uses scaleY landing (no fly-in) for multi-source drops', () => {
+    it('does NOT animate landed elements on a multi-source drop (scaleY landing removed)', () => {
         const state = { groups: [], ungrouped: ['source-1', 'source-2', 'source-3'] };
         const saveState = jest.fn();
         const render = jest.fn();
@@ -3443,12 +3442,15 @@ describe('handleDrop reflow cleanup', () => {
         dropEvent.clientY = 220;
         interactions.handleDrop(dropEvent);
 
-        // Both landed elements get scaleY landing (no fly-in, no accent flash).
-        expect(landedA.classList.add).toHaveBeenCalledWith('sp-drop-landing');
+        // Drop landing animation removed entirely — multi-source landed elements should
+        // get neither fly-in nor scaleY landing nor accent flash. Sibling FLIP for the
+        // rest of the list is still in effect (verified in other tests).
+        expect(landedA.classList.add).not.toHaveBeenCalledWith('sp-drop-landing');
         expect(landedA.classList.add).not.toHaveBeenCalledWith('sp-drop-landed');
         expect(landedA.classList.add).not.toHaveBeenCalledWith('sp-drop-flying');
-        expect(landedB.classList.add).toHaveBeenCalledWith('sp-drop-landing');
+        expect(landedB.classList.add).not.toHaveBeenCalledWith('sp-drop-landing');
         expect(landedB.classList.add).not.toHaveBeenCalledWith('sp-drop-landed');
+        expect(landedB.classList.add).not.toHaveBeenCalledWith('sp-drop-flying');
     });
 
     it('clears reflow and unfolds dragged items on an invalid drop (no DOM mutation)', () => {

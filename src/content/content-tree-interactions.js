@@ -2273,34 +2273,21 @@
             }
         }
 
-        // Drop landing visual feedback: after render() places the dropped items in their
-        // new DOM positions, animate them in and flash an accent outline (600ms fade) so
-        // the user's eye catches the new location. Two animation strategies:
-        //
-        //   - Single-source with a valid cursor position: FLIP fly-in. Read the landed
-        //     element's destination rect, set inline `transform: translate(dx, dy)` where
-        //     (dx, dy) = cursor pointer offset from the destination top-left, force a
-        //     reflow, then add the .sp-drop-flying transition class and clear the inline
-        //     transform — the element animates from the cursor's drop position to the
-        //     slot (looks like the source "snaps" from where the user released to its
-        //     final spot).
-        //   - Multi-source / missing cursor: .sp-drop-landing scaleY animation (a single
-        //     fly-in from one cursor point would visually scatter N elements which is
-        //     more confusing than helpful for batch drag).
-        //
-        // No accent-outline flash on the landed element — the fly-in / scaleY motion plus
-        // the sibling FLIP below already provide enough visual continuity to catch the
-        // eye, and the extra box-shadow flash was perceived as a "blink". Cleanup runs on
-        // a setTimeout(800ms) backstop. Reduced-motion is handled in CSS (transition /
-        // animation become no-op; setTimeout still removes classes).
-        function applyDropLandingAndFlash(landedKeys, cursorX, cursorY, preRects) {
+        // Drop visual feedback: dropped rows no longer animate in. Previously single-source
+        // drops ran a FLIP `sp-drop-flying` from the cursor-release position into the
+        // slot — when the cursor was to the right of the row this looked like the row
+        // "slides in from the right", which the user disliked. Multi-source `sp-drop-landing`
+        // scaleY-from-zero was also removed for consistency. The dropped row now simply
+        // appears at its new layout position via the normal DOM update from render().
+        // Sibling FLIP below still smoothly slides the rest of the list so the overall
+        // drop remains coherent. cursorX / cursorY parameters retained for backward
+        // compatibility with callers but are now unused (intentional — no fly-in to
+        // compute deltas for).
+        function applyDropLandingAndFlash(landedKeys, _cursorX, _cursorY, preRects) {
             if (!Array.isArray(landedKeys) || landedKeys.length === 0) return;
             const rootElement = getSourceListContainer();
             if (!rootElement || typeof rootElement.querySelector !== 'function') return;
             const setTimeoutFn = getSetTimeout();
-            const useFlyIn = landedKeys.length === 1
-                && typeof cursorX === 'number'
-                && typeof cursorY === 'number';
 
             // Suppress `.sp-list-item-enter` on the just-rendered list. That class triggers
             // a staggered (index * 18ms delay) opacity 0→1 + scale(0.985)→1 entrance
@@ -2390,59 +2377,23 @@
                     }
                 }
             }
+            // Landed-element drop animation has been removed (user UX feedback):
+            // the previous single-source `sp-drop-flying` FLIP animated the dropped row
+            // from its cursor-release position to the slot — when cursor was to the right
+            // of the row this looked like "from the right slides in", which the user
+            // disliked. The multi-source `sp-drop-landing` scaleY-from-zero was also a
+            // visible jump. Now the dropped row simply appears at its new layout position
+            // (rendered by the regular DOM update), no animation. Sibling FLIP above still
+            // smoothly slides the rest of the list so the overall drop remains coherent.
+            // Restore inline transition='' on each landed row so its future hover / focus
+            // transitions still work (this loop runs even with no animation work).
             for (const key of landedKeys) {
                 if (typeof key !== 'string' || !key) continue;
                 const safe = key.replace(/"/g, '\\"');
                 const el = rootElement.querySelector(`[data-source-key="${safe}"]`)
                     || rootElement.querySelector(`[data-group-id="${safe}"]`);
-                if (!el || !el.classList || typeof el.classList.add !== 'function') continue;
-
-                const cleanup = () => {
-                    if (!el.classList || typeof el.classList.remove !== 'function') return;
-                    el.classList.remove('sp-drop-landing');
-                    el.classList.remove('sp-drop-flying');
-                    // Do NOT clear inline transform / opacity here. Fly-in already cleared
-                    // them to '' immediately after adding .sp-drop-flying (the transition
-                    // animates from the pre-class translate value back to the post-class
-                    // empty value, so by the time we reach cleanup they are already ''
-                    // unless a subsequent drag has written new reflow/fold values on this
-                    // same element — in which case we MUST NOT clobber those writes.
-                    // transformOrigin is owned by fly-in (set to 'top left'), safe to clear.
-                    if (el.style) {
-                        el.style.transformOrigin = '';
-                    }
-                };
-
-                if (useFlyIn && el.style && typeof el.getBoundingClientRect === 'function') {
-                    // FLIP: read destination rect, offset element to cursor position, then
-                    // animate transform back to (0, 0) via the transition class. Inline
-                    // `transition: none` was applied above to all rows; restore it before
-                    // adding the .sp-drop-flying class so its transition rule takes effect.
-                    const destRect = el.getBoundingClientRect();
-                    const dx = cursorX - destRect.left;
-                    const dy = cursorY - destRect.top;
-                    el.style.transformOrigin = 'top left';
-                    el.style.transform = `translate(${dx}px, ${dy}px)`;
-                    el.style.opacity = '0.85';
-                    // Force a layout flush so the initial transform is applied before the
-                    // transition kicks in. Without this the browser may coalesce both writes
-                    // and skip the animation.
-                    void el.offsetHeight;
-                    el.classList.add('sp-drop-flying');
-                    el.style.transition = ''; // restore so .sp-drop-flying rule applies
-                    el.style.transform = '';
-                    el.style.opacity = '';
-                } else {
-                    // Multi-source (or no cursor info): scaleY landing. Restore inline
-                    // transition so the .sp-drop-landing animation can take effect (the
-                    // animation property is on the class, separate from transition, so
-                    // strictly only needed if animation references transition timing —
-                    // restored defensively).
-                    el.style.transition = '';
-                    el.classList.add('sp-drop-landing');
-                }
-
-                if (typeof setTimeoutFn === 'function') setTimeoutFn(cleanup, 800);
+                if (!el || !el.style) continue;
+                el.style.transition = '';
             }
 
             // After sync code completes and the browser paints once, restore inline
