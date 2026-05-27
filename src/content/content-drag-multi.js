@@ -1,8 +1,8 @@
 (function () {
     'use strict';
 
-    const DEFAULT_AUTO_SCROLL_EDGE_PX = 60;
-    const DEFAULT_AUTO_SCROLL_MAX_SPEED = 14;
+    const DEFAULT_AUTO_SCROLL_EDGE_PX = 40;
+    const DEFAULT_AUTO_SCROLL_MAX_SPEED = 8;
 
     function createContentDragMulti(deps = {}) {
         const ctx = deps && typeof deps === 'object' ? deps : {};
