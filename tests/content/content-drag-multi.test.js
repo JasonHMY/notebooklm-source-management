@@ -395,7 +395,7 @@ describe('content-drag-multi factory', () => {
             };
         }
 
-        it('moves three sources into a group, preserving relative order', () => {
+        it('moves three sources into a group at the TOP, preserving relative order', () => {
             const state = makeState();
             const helpers = makeHelpers(state);
             const helper = createContentDragMulti();
@@ -407,7 +407,10 @@ describe('content-drag-multi factory', () => {
             });
             expect(result.moved).toBe(3);
             expect(state.ungrouped).toEqual(['B']);
-            expect(state.groups[0].children.map((c) => c.key)).toEqual(['E', 'F', 'A', 'C', 'D']);
+            // Dragged batch lands at the TOP (index 0..N) preserving A→C→D order;
+            // existing children E, F follow. Matches single-source header-drop
+            // semantics where the dropped source appears at the top of the folder.
+            expect(state.groups[0].children.map((c) => c.key)).toEqual(['A', 'C', 'D', 'E', 'F']);
         });
 
         it('skips keys that no longer exist in state', () => {

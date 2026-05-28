@@ -1237,6 +1237,138 @@ describe('drop routes multi vs single source', () => {
         expect(showToast).not.toHaveBeenCalled();
         expect(developerLog).not.toHaveBeenCalled();
     });
+
+    it('single-source drop on folder header lands source at the TOP of existing children (index 0, not end)', () => {
+        // Pre-existing folder with two children — we want the dragged source to
+        // appear at index 0 (above X1), not appended after X2. This matches the
+        // user's mental model of "I dropped this source ON the folder, so it
+        // should be the first thing I see when the folder opens".
+        const group = { id: 'g1', children: [{ type: 'source', key: 'X1' }, { type: 'source', key: 'X2' }] };
+        const state = { isBatchMode: false, ungrouped: ['A'], groups: ['g1'] };
+        const groupsById = new Map([['g1', group]]);
+        const sourcesByKey = new Map([
+            ['A', { key: 'A' }],
+            ['X1', { key: 'X1' }],
+            ['X2', { key: 'X2' }]
+        ]);
+        const pendingBatchKeys = new Set();
+        const saveState = jest.fn();
+        const render = jest.fn();
+        const dropTarget = {
+            dataset: { groupId: 'g1' },
+            classList: createClassList(['group-container', 'drag-into'])
+        };
+        const runtime = {
+            // Mimics the intent computed during dragover when cursor is on g1's header.
+            dragReflowSession: {
+                draggedKeys: new Set(['A']),
+                currentIntent: {
+                    kind: 'into-group',
+                    targetGroup: group,
+                    targetList: group.children,
+                    insertIndex: 0,
+                    targetGroupId: 'g1',
+                    slotKey: null
+                },
+                shiftedItems: new Map()
+            }
+        };
+        const interactions = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getSourcesByKey: () => sourcesByKey,
+            getParentMap: () => new Map(),
+            getPendingBatchKeys: () => pendingBatchKeys,
+            getShadowRoot: makeShadowRootWithList,
+            saveState,
+            render,
+            showToast: jest.fn(),
+            buildParentMap: jest.fn(),
+            developerLog: jest.fn(),
+            dragMulti: createContentDragMulti({}),
+            getMessage: (key, args = []) => `${key}:${args.join(',')}`
+        });
+
+        interactions.handleDrop(createDropEvent({
+            dropTarget,
+            sourceKey: 'A'
+        }));
+
+        // A landed at the TOP of g1's children — index 0, before X1 and X2.
+        expect(group.children).toEqual([
+            { type: 'source', key: 'A' },
+            { type: 'source', key: 'X1' },
+            { type: 'source', key: 'X2' }
+        ]);
+        expect(state.ungrouped).toEqual([]);
+    });
+
+    it('multi-source drop on folder header lands batch sources at the TOP preserving their order', () => {
+        // Batch of three sources dropped into a folder with one existing child.
+        // Expected: A, B, C all land at the TOP (before X), preserving A→B→C order.
+        const group = { id: 'g1', children: [{ type: 'source', key: 'X' }] };
+        const state = { isBatchMode: true, ungrouped: ['A', 'B', 'C'], groups: ['g1'] };
+        const groupsById = new Map([['g1', group]]);
+        const sourcesByKey = new Map([
+            ['A', { key: 'A' }],
+            ['B', { key: 'B' }],
+            ['C', { key: 'C' }],
+            ['X', { key: 'X' }]
+        ]);
+        const pendingBatchKeys = new Set(['A', 'B', 'C']);
+        const saveState = jest.fn();
+        const render = jest.fn();
+        const dropTarget = {
+            dataset: { groupId: 'g1' },
+            classList: createClassList(['group-container', 'drag-into'])
+        };
+        const runtime = {
+            dragReflowSession: {
+                draggedKeys: new Set(['A', 'B', 'C']),
+                currentIntent: {
+                    kind: 'into-group',
+                    targetGroup: group,
+                    targetList: group.children,
+                    insertIndex: 0,
+                    targetGroupId: 'g1',
+                    slotKey: null
+                },
+                shiftedItems: new Map()
+            }
+        };
+        const interactions = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getSourcesByKey: () => sourcesByKey,
+            getParentMap: () => new Map(),
+            getPendingBatchKeys: () => pendingBatchKeys,
+            getShadowRoot: makeShadowRootWithList,
+            saveState,
+            render,
+            showToast: jest.fn(),
+            buildParentMap: jest.fn(),
+            developerLog: jest.fn(),
+            dragMulti: createContentDragMulti({}),
+            getMessage: (key, args = []) => `${key}:${args.join(',')}`
+        });
+
+        interactions.handleDrop(createDropEvent({
+            dropTarget,
+            sourceKey: 'A',
+            sourceKeysJson: JSON.stringify(['A', 'B', 'C'])
+        }));
+
+        // Batch lands at top in the order A→B→C (preserved), with X following.
+        expect(group.children).toEqual([
+            { type: 'source', key: 'A' },
+            { type: 'source', key: 'B' },
+            { type: 'source', key: 'C' },
+            { type: 'source', key: 'X' }
+        ]);
+        expect(state.ungrouped).toEqual([]);
+    });
 });
 
 describe('drag auto-scroll integration', () => {
@@ -2511,7 +2643,7 @@ describe('computeDropIntent', () => {
         expect(intent.targetGroup).toBeNull();
     });
 
-    it('returns into-group with insertIndex=-1 when the pointer is on a group-header band', () => {
+    it('returns into-group with insertIndex=0 (top of folder) when the pointer is on a group-header band', () => {
         const state = { ungrouped: [], groups: ['g1'] };
         const groupsById = new Map([
             ['g1', { id: 'g1', children: [{ type: 'source', key: 'X' }] }]
@@ -2531,7 +2663,10 @@ describe('computeDropIntent', () => {
         });
         expect(intent).toBeTruthy();
         expect(intent.kind).toBe('into-group');
-        expect(intent.insertIndex).toBe(-1);
+        // Header drop places the source at the TOP of the folder's children so the
+        // user sees it immediately when the folder is expanded (matches the user's
+        // mental model of "I added this source to this folder").
+        expect(intent.insertIndex).toBe(0);
         expect(intent.targetGroup).toBe(groupsById.get('g1'));
         expect(intent.targetList).toBe(groupsById.get('g1').children);
     });
@@ -2594,7 +2729,9 @@ describe('computeDropIntent', () => {
         });
         expect(intent).toBeTruthy();
         expect(intent.kind).toBe('into-group');
-        expect(intent.insertIndex).toBe(-1);
+        // Empty children area = only one valid drop position, but kept at 0 for
+        // consistency with header-drop semantics (handleDrop splices at this index).
+        expect(intent.insertIndex).toBe(0);
         expect(intent.targetGroup).toBe(groupsById.get('g1'));
         expect(intent.hostGroupContainerEl).toBeTruthy();
     });

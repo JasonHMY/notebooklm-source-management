@@ -207,8 +207,12 @@
         // Algorithm:
         //   1. One pass query for `.group-container` + `.source-item` under rootElement.
         //   2. Pick the deepest group-container whose un-shifted bounds enclose clientY.
-        //      - If pointer in its `.group-header` band → kind='into-group', insertIndex=-1.
-        //      - If pointer in its `.group-children` band AND children empty → kind='into-group'.
+        //      - If pointer in its `.group-header` band → kind='into-group', insertIndex=0
+        //        (source lands at the TOP of the folder so the user sees it immediately
+        //        when the folder is expanded — matches user intuition of "I added this
+        //        source to this folder, where is it?").
+        //      - If pointer in its `.group-children` band AND children empty → kind='into-group',
+        //        insertIndex=0 (only one position possible).
         //      - Otherwise host = group.children, find slot within children DOM.
         //   3. If no group contains the pointer → host = root list (state.groups + ungrouped).
         //   4. Slot detection: for each non-folded child element, compare its un-shifted
@@ -417,7 +421,7 @@
                             kind: 'into-group',
                             targetGroup: groupObj,
                             targetList: Array.isArray(groupObj.children) ? groupObj.children : (groupObj.children = []),
-                            insertIndex: -1,
+                            insertIndex: 0,
                             targetGroupId: groupObj.id,
                             hostGroupContainerEl: chosenContainer,
                             slotKey: null
@@ -461,7 +465,7 @@
                                 kind: 'into-group',
                                 targetGroup: groupObj,
                                 targetList: groupChildren,
-                                insertIndex: -1,
+                                insertIndex: 0,
                                 targetGroupId: groupObj.id,
                                 hostGroupContainerEl: chosenContainer,
                                 slotKey: null
@@ -478,7 +482,7 @@
                             kind: 'into-group',
                             targetGroup: groupObj,
                             targetList: groupChildren,
-                            insertIndex: -1,
+                            insertIndex: 0,
                             targetGroupId: groupObj.id,
                             hostGroupContainerEl: chosenContainer,
                             slotKey: null
@@ -491,7 +495,7 @@
                         kind: 'into-group',
                         targetGroup: groupObj,
                         targetList: groupChildren,
-                        insertIndex: -1,
+                        insertIndex: 0,
                         targetGroupId: groupObj.id,
                         hostGroupContainerEl: chosenContainer,
                         slotKey: null
@@ -574,7 +578,7 @@
                         kind: 'into-group',
                         targetGroup: hostGroup,
                         targetList: host,
-                        insertIndex: -1,
+                        insertIndex: 0,
                         targetGroupId: hostGroup.id,
                         hostGroupContainerEl: hostContainerEl,
                         slotKey: null
@@ -1924,11 +1928,13 @@
                 // Reflow: compute sibling shifts from host list, push them to the layout.
                 if (dragReflow && runtime.dragReflowSession && typeof dragReflow.computeReflow === 'function') {
                     const siblingKeys = resolveSiblingKeys(intent);
-                    const insertIndexForReflow = intent.kind === 'into-group'
-                        ? siblingKeys.length
-                        : (typeof intent.insertIndex === 'number' && intent.insertIndex >= 0
-                            ? intent.insertIndex
-                            : siblingKeys.length);
+                    // intent.insertIndex is now an actual index (0 for into-group = top of
+                    // folder, slot index for before/after-source). No longer need the
+                    // special-case for into-group since 0 is a valid index that opens the
+                    // slot at the top of children — matching the drop position.
+                    const insertIndexForReflow = typeof intent.insertIndex === 'number' && intent.insertIndex >= 0
+                        ? intent.insertIndex
+                        : siblingKeys.length;
                     const shifts = dragReflow.computeReflow({
                         session: runtime.dragReflowSession,
                         insertIndex: insertIndexForReflow,

@@ -148,10 +148,20 @@
                 if (!group) return { moved: 0, skipped: keys.length };
                 if (!Array.isArray(group.children)) group.children = [];
 
+                // Remove first (in case any dragged source was already in this group's
+                // children — the filter-based removeSourceFromParent reassigns the array
+                // ref, so re-fetch group.children below before splicing).
                 for (const key of validKeys) {
                     if (typeof helpers.removeSourceFromParent === 'function') helpers.removeSourceFromParent(key);
-                    group.children.push({ type: 'source', key });
                 }
+                // Insert at the TOP of the folder (index 0) preserving validKeys order
+                // — matches the single-source into-group behavior (drop on folder header
+                // → source at top so user sees it immediately). Bulk splice at 0 keeps
+                // the relative order of the dragged sources; pushing one-by-one to
+                // index 0 would reverse them.
+                if (!Array.isArray(group.children)) group.children = [];
+                const entries = validKeys.map((key) => ({ type: 'source', key }));
+                group.children.splice(0, 0, ...entries);
                 return { moved: validKeys.length, skipped };
             }
 
