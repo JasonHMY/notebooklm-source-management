@@ -15,7 +15,7 @@ chrome.storage.local
 ├── sourcesPlusHistory_<projectId>
 │   └── Per-notebook bounded history snapshots.
 ├── sourcesPlusPreferences
-│   └── Global preferences: developer mode, onboarding/update dismissal, history retention, language override, command shortcuts, and quick view button visibility.
+│   └── Global preferences: developer mode, onboarding/update dismissal, history retention, language override, command shortcuts, quick view button visibility, and appearance customization.
 └── sourcesPlusDeveloperLogs_<projectId>
     └── Per-notebook bounded developer logs.
 ```
@@ -36,7 +36,10 @@ chrome.storage.local
   "commandShortcuts": {
     "quick-view-recent": "Meta+Shift+R"
   },
-  "visibleQuickViewKinds": ["all", "ungrouped", "disabled", "tag", "recent", "issues"]
+  "visibleQuickViewKinds": ["all", "ungrouped", "disabled", "tag", "recent", "issues"],
+  "appearance": {
+    "hoverSpotlightEnabled": true
+  }
 }
 ```
 
@@ -47,6 +50,7 @@ chrome.storage.local
 - `languageOverride` controls extension UI language. Valid values are `auto`, `en`, `es`, and `zh_CN`; `auto` follows Chrome UI language.
 - `commandShortcuts` stores user-defined command palette shortcuts by command id. There are no default shortcuts; invalid command ids or malformed combos are ignored, and assigning a combo to one command removes the same combo from another command.
 - `visibleQuickViewKinds` controls which quick view rail buttons render in the source panel. Valid values are `all`, `ungrouped`, `disabled`, `tag`, `recent`, and `issues`; an empty array hides the rail while command palette actions and custom shortcuts remain available.
+- `appearance.hoverSpotlightEnabled` 控制 source / group header 悬浮时的蓝色 spotlight 光晕。默认 `true`，仅在显式 `false` 时关闭（只有严格 boolean false 才生效）。
 
 `LOAD_PREFERENCES` also returns derived `usageState` booleans. They are not stored inside `sourcesPlusPreferences`; the background derives them from whether `sourcesPlusPreferences`, `sourcesPlusState_*`, `sourcesPlusHistory_*`, or `sourcesPlusDeveloperLogs_*` already exists in local storage.
 

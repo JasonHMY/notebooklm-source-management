@@ -447,6 +447,21 @@ manifest.json
 │       ├── tests/content/content-persistence.test.js
 │       ├── tests/content/content-state-reconcile.test.js
 │       └── tests/content/content-source-sync.test.js
+├── 外观偏好（appearance customization）
+│   ├── 负责
+│   │   ├── 设置 modal「外观自定义」分区渲染
+│   │   ├── hoverSpotlightEnabled runtime 状态与 setter
+│   │   ├── host class 应用（`sp-appearance-no-spotlight`）
+│   │   └── appearance 偏好持久化与深合并
+│   ├── 先看
+│   │   ├── src/content/content-modal-settings.js（section 渲染）
+│   │   ├── src/content/content-developer-logger.js（runtime state + setter）
+│   │   ├── src/content/content-style-text.js（`:host(.sp-appearance-no-spotlight)` 规则）
+│   │   └── src/content/index.js（`applyAppearancePreferencesToHost()`）
+│   ├── storage 字段
+│   │   └── PREFERENCES_KEY.appearance.hoverSpotlightEnabled
+│   └── 测试
+│       └── tests/content/content-modal-settings.test.js
 ├── 持久化 / 恢复 / 状态修复
 │   ├── 负责
 │   │   ├── buildPersistableState

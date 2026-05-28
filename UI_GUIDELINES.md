@@ -1166,7 +1166,16 @@ For future work:
 - If you must override, leave a short comment explaining why.
 - If a selector already exists twice, consolidate it when touching that area.
 
-## 20. Recommended PR Checklist for UI Work
+## 20. Appearance Preferences Namespace
+
+### Appearance Preferences Namespace
+
+`PREFERENCES_KEY.appearance.*` 是纯视觉开关的命名空间。当前包含：
+- `hoverSpotlightEnabled` — source/group header 悬浮蓝色光晕开关
+
+新增视觉开关请放在该命名空间下，遵守：默认值保留当前已发布行为，归一化只在严格 `false` 时关闭。CSS gate 通过给 `#sources-plus-root` shadow host 加/移 `sp-appearance-*` class 实现。
+
+## 21. Recommended PR Checklist for UI Work
 
 Before merging a UI change, check:
 
@@ -1181,7 +1190,7 @@ Before merging a UI change, check:
 - Does it stay inside the documented z-index system?
 - Does it visually look like the same product?
 
-## 21. Recommended Future Cleanup
+## 22. Recommended Future Cleanup
 
 This section is not mandatory for feature work, but it is worth doing over time.
 
@@ -1191,7 +1200,7 @@ This section is not mandatory for feature work, but it is worth doing over time.
 4. Consider replacing the inline folder emoji in group titles with a formal icon element for stricter consistency.
 5. Keep popup and content-panel motion tokens aligned if either surface changes.
 
-## 22. Canonical File Map
+## 23. Canonical File Map
 
 Use this map when updating UI.
 

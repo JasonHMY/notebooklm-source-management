@@ -25,7 +25,9 @@ Notebook-scoped storage messages require a sender tab whose URL starts with `htt
 
 Global messages that are not notebook-state writes, such as extension enable/disable, preferences, tab focus/open, and web store feedback, are not tied to one notebook state key.
 
-`LOAD_PREFERENCES` returns `sourcesPlusPreferences` fields such as `developerModeEnabled`, `welcomeOnboardingSeenVersion`, `whatsNewSeenVersion`, `historyRetentionLimit`, `languageOverride`, `commandShortcuts`, and `visibleQuickViewKinds`. It also returns derived `usageState.hasExistingPluginData` and `usageState.hasStoredPreferences` booleans so content code can distinguish first-time users from users upgrading with existing local extension data. `SAVE_PREFERENCES` accepts partial preference updates and merges them with the existing stored object so toggling one preference does not clear the other stored preference fields.
+`LOAD_PREFERENCES` returns `sourcesPlusPreferences` fields such as `developerModeEnabled`, `welcomeOnboardingSeenVersion`, `whatsNewSeenVersion`, `historyRetentionLimit`, `languageOverride`, `commandShortcuts`, `visibleQuickViewKinds`, and `appearance`. It also returns derived `usageState.hasExistingPluginData` and `usageState.hasStoredPreferences` booleans so content code can distinguish first-time users from users upgrading with existing local extension data. `SAVE_PREFERENCES` accepts partial preference updates and merges them with the existing stored object so toggling one preference does not clear the other stored preference fields.
+
+`appearance` is a nested object containing visual customization preferences. Currently includes `hoverSpotlightEnabled` (boolean, default true). `SAVE_PREFERENCES` deep-merges partial `appearance` updates so the background SW preserves sibling keys when more are added.
 
 ## Storage message key rules
 
