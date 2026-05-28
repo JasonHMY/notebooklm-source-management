@@ -123,6 +123,12 @@
             return ghost;
         }
 
+        // CROSS-REF: third path in the drag-ghost cleanup contract. Removes the
+        // multi-source ghost element built by createMultiDragGhost. Idempotent
+        // and tolerant of detach races. The other two paths are in
+        // content-tree-interactions.js: handleDragEnd (primary) and
+        // clearDragFeedback (backstop). Modifying any of the three requires
+        // checking the others — see CLAUDE.md "Non-obvious gotchas".
         function destroyMultiDragGhost(ghost) {
             if (!ghost) return;
             const parent = ghost.parentNode;

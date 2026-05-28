@@ -221,6 +221,16 @@
         //
         // Un-shifted bounds means `rect.top - extractInlineTranslateY(el)`: subtract any
         // active reflow shift so the detection is stable while siblings are translateY'd.
+        //
+        // RETURNS: { targetGroup, targetList, insertIndex, targetGroupId, kind, ... } | null
+        //   INVARIANT — `targetList` is HETEROGENEOUS, shape depends on target:
+        //     - state.ungrouped   → string[] of source keys
+        //     - group.children    → object[] of { type: 'source', key } | { type: 'group', id }
+        //     - state.groups      → string[] of root-level group IDs
+        //   Callers that splice into targetList MUST pick entry shape per target.
+        //   NEVER splice a source key into state.groups — it corrupts the root tree.
+        //   See CLAUDE.md "Non-obvious gotchas" and resolveSiblingKeys above for
+        //   an example of polymorphic targetList consumption.
         function computeDropIntent({ clientX, clientY, rootElement, state, groupsById, parentMap, activeDragContext }) {
             if (typeof clientY !== 'number' || !rootElement || typeof rootElement.querySelectorAll !== 'function') {
                 return null;
@@ -2168,6 +2178,13 @@
             }
         }
 
+        // BACKSTOP path of the drag-ghost cleanup contract — invoked by
+        // handleDragEnd (primary) AND directly on edge-case terminations
+        // (e.g. dragexit, error fall-through). Idempotent. Tears down visual
+        // feedback (.dragging/.drag-into/.drag-invalid), stops autoscroll,
+        // cancels pending dragover RAF, clears activeDragContext + hover
+        // state. The third cleanup path is in content-drag-multi.js
+        // destroyMultiDragGhost (called from handleDragEnd below).
         function clearDragFeedback(root = getShadowRoot()) {
             let count = 0;
             if (root && typeof root.querySelectorAll === 'function') {
@@ -2870,6 +2887,13 @@
             }
         }
 
+        // CROSS-REF: PRIMARY path of the drag-ghost cleanup contract (3 paths).
+        // This function handles the normal dragend lifecycle. The other two:
+        //   - clearDragFeedback (above) — backstop, idempotent, used both
+        //     standalone and as part of this function's body.
+        //   - content-drag-multi.destroyMultiDragGhost — multi-source ghost
+        //     teardown, invoked below via dragMulti.destroyMultiDragGhost.
+        // Modifying any of the three requires checking the other two.
         function handleDragEnd(e) {
             // Flush any dragover RAF so the upcoming clearDragFeedback /
             // unfoldDraggedItems path reads a fully-applied reflow state.

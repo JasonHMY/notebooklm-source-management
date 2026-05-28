@@ -1,6 +1,12 @@
 (function () {
     'use strict';
 
+    // SECURITY: every value this module extracts from NotebookLM DOM (title,
+    // aria-label, icon URL, attributes, row identity) is UNTRUSTED input.
+    // Consumers MUST render strings via el() text-node path — never innerHTML,
+    // eval, or dynamic Function. Icon URLs must pass the trusted-host check
+    // below before being put in <img src>. See docs/SECURITY_THREAT_MODEL.md.
+
     const contentConfig = globalThis.NSM_CONTENT_CONFIG;
 
     if (!contentConfig || !contentConfig.DEPS) {

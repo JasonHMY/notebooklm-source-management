@@ -101,8 +101,12 @@
     } = sourceDescriptorHelpers;
 
     // --- State Management ---
+    // INVARIANT: state.groups is string[] of root-level group IDs — NEVER group
+    // objects. Resolve a group via groupsById.get(id). Splicing a source key
+    // into state.groups corrupts the root tree. state.ungrouped is string[] of
+    // bare source keys at root level. See CLAUDE.md "State shape" + getDropIntent.
     let state = {
-        groups: [], // Holds top-level group IDs
+        groups: [], // Top-level group IDs (string[]), not group objects.
         ungrouped: [],
         filterQuery: '',
         isBatchMode: false,
@@ -4326,6 +4330,11 @@
         });
     }
 
+    // NotebookLM is a SPA — switching notebooks does NOT trigger a full reload.
+    // On route change, the content script tears down + reinitializes in place
+    // via teardown() + the route-changed handler above. Full reload is only
+    // the last-resort fallback after repeated reattach retries fail. See
+    // handleRouteChanged + scheduleReinitialize, CLAUDE.md "Non-obvious gotchas".
     // Monitor for SPA route changes via History API interception
     const onRouteChange = () => {
         const nextUrl = getCurrentLocationHref();
