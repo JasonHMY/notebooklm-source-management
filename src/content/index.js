@@ -423,6 +423,8 @@
         developerLog,
         getDeveloperModeEnabled,
         setDeveloperModeEnabled,
+        getHoverSpotlightEnabled,
+        setHoverSpotlightEnabled,
         getWelcomeOnboardingSeenVersion,
         setWelcomeOnboardingSeenVersion,
         getWhatsNewSeenVersion,
@@ -639,6 +641,12 @@
         getDiagnosticsText: (...args) => getDiagnosticsText(...args),
         getDeveloperModeEnabled: (...args) => getDeveloperModeEnabled(...args),
         setDeveloperModeEnabled: (...args) => setDeveloperModeEnabled(...args),
+        getHoverSpotlightEnabled,
+        setHoverSpotlightEnabled: async (enabled) => {
+            const result = await setHoverSpotlightEnabled(enabled);
+            applyAppearancePreferencesToHost();
+            return result;
+        },
         markWelcomeOnboardingSeen: () => markWelcomeOnboardingSeen(),
         getDeveloperLogExportText: (...args) => getDeveloperLogExportText(...args),
         clearDeveloperLogs: (...args) => clearDeveloperLogs(...args),
@@ -1580,6 +1588,15 @@
             : null;
     }
 
+    function applyAppearancePreferencesToHost() {
+        if (!extensionHost || !extensionHost.classList) return;
+        if (getHoverSpotlightEnabled()) {
+            extensionHost.classList.remove('sp-appearance-no-spotlight');
+        } else {
+            extensionHost.classList.add('sp-appearance-no-spotlight');
+        }
+    }
+
     function applyLanguageOverrideFromPreferences() {
         const setLocaleOverride = getMessageLocaleSetter();
         if (!setLocaleOverride) return Promise.resolve(getLanguageOverride());
@@ -1625,6 +1642,7 @@
         if (!developerPreferencesLoadPromise) {
             developerPreferencesLoadPromise = Promise.resolve(loadDeveloperPreferences())
                 .then(() => applyLanguageOverrideFromPreferences())
+                .then(() => { applyAppearancePreferencesToHost(); })
                 .then(() => {
                     refreshLocalizedStaticUi();
                     return getDeveloperModeEnabled();
@@ -4086,6 +4104,7 @@
         const initialDisplayViewInfo = getSourceDisplayViewInfo(sourcePanel, initialSourceViewInfo);
         extensionHost = extensionRoot;
         shadowRoot = extensionRoot.attachShadow({ mode: 'open' });
+        applyAppearancePreferencesToHost();
         managerStatusReason = 'manager_not_ready';
         const style = document.createElement('style');
         style.textContent = contentStyleText;
