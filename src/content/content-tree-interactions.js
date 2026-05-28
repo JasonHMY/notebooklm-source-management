@@ -1832,6 +1832,41 @@
                             }
                         }
                     }
+                    // Root-level visual shift: when intent has no targetGroup (cursor is in
+                    // root-level corridor, e.g. left-half of a top-level group, or in the gap
+                    // between groups, or above an empty ungrouped section) the host array can
+                    // be empty (e.g. source dragged but state.ungrouped is []) so the per-host
+                    // sibling shifts above produced an empty Map. Without any shifts the user
+                    // sees no avoidance — the groups stay flush together and there's no
+                    // visible "slot" being opened. Iterate the sources-list direct children
+                    // here and shift every one whose visual mid-Y is below the cursor by
+                    // +slotHeight. Result: cursor in top half of group A → A, B, C all push
+                    // down (slot opens above A). Cursor in bottom half of group A → only B,
+                    // C push down (slot opens between A and B). Matches user intuition:
+                    // "wherever I hover, everything below shifts to make room".
+                    if (!intent.targetGroup && sourceListEl && runtime.dragReflowSession
+                        && typeof sourceListEl.querySelectorAll === 'function') {
+                        const _rootSession = runtime.dragReflowSession;
+                        const _rootSlotHeight = _rootSession.totalDraggedHeight;
+                        if (typeof _rootSlotHeight === 'number' && _rootSlotHeight > 0) {
+                            const _rootKids = sourceListEl.querySelectorAll(':scope > .source-item, :scope > .group-container');
+                            _rootKids.forEach((kid) => {
+                                if (!kid || !kid.classList) return;
+                                if (kid.classList.contains('sp-drag-folded')) return;
+                                if (typeof kid.getBoundingClientRect !== 'function') return;
+                                const _kr = kid.getBoundingClientRect();
+                                if (!_kr || typeof _kr.top !== 'number' || typeof _kr.height !== 'number') return;
+                                const _kMidY = _kr.top + _kr.height / 2;
+                                if (_kMidY <= e.clientY) return; // child is above cursor → not affected
+                                const _kIsSrc = kid.classList.contains('source-item');
+                                const _kKey = _kIsSrc
+                                    ? (kid.dataset && kid.dataset.sourceKey)
+                                    : (kid.dataset && kid.dataset.groupId);
+                                if (!_kKey || _rootSession.draggedKeys.has(_kKey)) return;
+                                if (!shifts.has(_kKey)) shifts.set(_kKey, _rootSlotHeight);
+                            });
+                        }
+                    }
                     if (typeof dragReflow.applyReflow === 'function') {
                         dragReflow.applyReflow({
                             session: runtime.dragReflowSession,
