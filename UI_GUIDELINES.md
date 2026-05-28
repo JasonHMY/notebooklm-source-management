@@ -1168,8 +1168,6 @@ For future work:
 
 ## 20. Appearance Preferences Namespace
 
-### Appearance Preferences Namespace
-
 `PREFERENCES_KEY.appearance.*` 是纯视觉开关的命名空间。当前包含：
 - `hoverSpotlightEnabled` — source/group header 悬浮蓝色光晕开关
 
