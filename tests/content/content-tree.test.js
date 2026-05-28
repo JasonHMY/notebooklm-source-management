@@ -2546,6 +2546,182 @@ describe('handleDragOver physical reflow', () => {
     });
 });
 
+describe('handleDragOver rAF coalescing', () => {
+    // dragover fires above 60Hz on some pointers; the handler defers the heavy
+    // path (computeDropIntent + reflow + auto-scroll) into a single per-frame
+    // batch. preventDefault must stay synchronous so the browser still treats
+    // the drop as accepted.
+    let createContentTreeInteractions;
+    let createContentDragMulti;
+    let pendingRafCallbacks;
+    let originalRaf;
+    let originalCancelRaf;
+
+    function installRafMock() {
+        pendingRafCallbacks = [];
+        originalRaf = globalThis.requestAnimationFrame;
+        originalCancelRaf = globalThis.cancelAnimationFrame;
+        globalThis.requestAnimationFrame = jest.fn((cb) => {
+            pendingRafCallbacks.push(cb);
+            return pendingRafCallbacks.length;
+        });
+        globalThis.cancelAnimationFrame = jest.fn((id) => {
+            if (id > 0 && id <= pendingRafCallbacks.length) {
+                pendingRafCallbacks[id - 1] = null;
+            }
+        });
+    }
+
+    function restoreRafMock() {
+        if (originalRaf === undefined) delete globalThis.requestAnimationFrame;
+        else globalThis.requestAnimationFrame = originalRaf;
+        if (originalCancelRaf === undefined) delete globalThis.cancelAnimationFrame;
+        else globalThis.cancelAnimationFrame = originalCancelRaf;
+    }
+
+    function flushRaf() {
+        const queue = pendingRafCallbacks.slice();
+        pendingRafCallbacks = [];
+        queue.forEach((cb) => { if (typeof cb === 'function') cb(); });
+    }
+
+    function makeDragReflowMock() {
+        return {
+            computeReflow: jest.fn(() => new Map()),
+            applyReflow: jest.fn(),
+            clearReflow: jest.fn(),
+            prepareDragSession: jest.fn(),
+            foldDraggedItems: jest.fn(),
+            unfoldDraggedItems: jest.fn(),
+            extractInlineTranslateY: () => 0
+        };
+    }
+
+    function setupCtx({ dragReflow, items }) {
+        const state = { isBatchMode: false, ungrouped: items.map((i) => i.key), groups: [] };
+        const { sourcesListEl, shadowRoot, elementMap } = makeMockShadowList({ items });
+        const runtime = {};
+        const tree = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getPendingBatchKeys: () => new Set(),
+            getShadowRoot: () => shadowRoot,
+            getParentMap: () => new Map(),
+            isDescendant: globalThis.isDescendant,
+            dragMulti: createContentDragMulti({}),
+            dragReflow
+        });
+        runtime.activeDragContext = { kind: 'source-single', keys: [items[0].key] };
+        runtime.dragReflowSession = {
+            draggedKeys: new Set([items[0].key]),
+            itemHeights: new Map([[items[0].key, items[0].height]]),
+            totalDraggedHeight: items[0].height,
+            currentIntent: null,
+            shiftedItems: new Map()
+        };
+        return { runtime, tree, sourcesListEl, elementMap };
+    }
+
+    function makeDragOverEvent(clientY) {
+        return {
+            target: { closest: () => null },
+            clientX: 50,
+            clientY,
+            preventDefault: jest.fn(),
+            dataTransfer: { dropEffect: 'move' }
+        };
+    }
+
+    beforeEach(() => {
+        jest.resetModules();
+        setupGlobalMocks();
+        installRafMock();
+        require('../../src/content/content-native-checkbox-sync.js');
+        createContentTreeInteractions = require('../../src/content/content-tree-interactions.js');
+        createContentDragMulti = require('../../src/content/content-drag-multi.js');
+    });
+
+    afterEach(() => {
+        restoreRafMock();
+        teardownGlobalMocks();
+    });
+
+    it('schedules a single rAF for many dragover events in the same frame', () => {
+        const dragReflow = makeDragReflowMock();
+        const ctx = setupCtx({
+            dragReflow,
+            items: [
+                { kind: 'source', key: 'A', top: 100, height: 40 },
+                { kind: 'source', key: 'B', top: 140, height: 40 }
+            ]
+        });
+
+        for (let i = 0; i < 5; i += 1) {
+            ctx.tree.handleDragOver(makeDragOverEvent(145 + i));
+        }
+
+        expect(globalThis.requestAnimationFrame).toHaveBeenCalledTimes(1);
+        expect(dragReflow.computeReflow).not.toHaveBeenCalled();
+
+        flushRaf();
+
+        expect(dragReflow.computeReflow).toHaveBeenCalledTimes(1);
+    });
+
+    it('always calls preventDefault synchronously so the browser accepts drop', () => {
+        const dragReflow = makeDragReflowMock();
+        const ctx = setupCtx({
+            dragReflow,
+            items: [
+                { kind: 'source', key: 'A', top: 100, height: 40 },
+                { kind: 'source', key: 'B', top: 140, height: 40 }
+            ]
+        });
+        const events = [makeDragOverEvent(110), makeDragOverEvent(150), makeDragOverEvent(170)];
+        events.forEach((event) => ctx.tree.handleDragOver(event));
+        events.forEach((event) => {
+            expect(event.preventDefault).toHaveBeenCalledTimes(1);
+        });
+    });
+
+    it('uses the latest snapshot when the frame flushes (not the first event)', () => {
+        const dragReflow = makeDragReflowMock();
+        const ctx = setupCtx({
+            dragReflow,
+            items: [
+                { kind: 'source', key: 'A', top: 100, height: 40 },
+                { kind: 'source', key: 'B', top: 140, height: 40 }
+            ]
+        });
+        ctx.tree.handleDragOver(makeDragOverEvent(110));
+        ctx.tree.handleDragOver(makeDragOverEvent(150));
+        ctx.tree.handleDragOver(makeDragOverEvent(170));
+        flushRaf();
+        // Slot at the upper half of B (140..180, mid 160) yields insertIndex=1.
+        // The third event y=170 is the lower half of B → insertIndex=2.
+        const arg = dragReflow.computeReflow.mock.calls[0][0];
+        expect(arg.insertIndex).toBe(2);
+    });
+
+    it('cancels the pending rAF when clearDragFeedback runs', () => {
+        const dragReflow = makeDragReflowMock();
+        const ctx = setupCtx({
+            dragReflow,
+            items: [
+                { kind: 'source', key: 'A', top: 100, height: 40 },
+                { kind: 'source', key: 'B', top: 140, height: 40 }
+            ]
+        });
+        ctx.tree.handleDragOver(makeDragOverEvent(145));
+        expect(globalThis.requestAnimationFrame).toHaveBeenCalledTimes(1);
+        ctx.tree.clearDragFeedback();
+        expect(globalThis.cancelAnimationFrame).toHaveBeenCalledTimes(1);
+        flushRaf();
+        expect(dragReflow.computeReflow).not.toHaveBeenCalled();
+    });
+});
+
 describe('resolveSiblingKeys helper', () => {
     let createContentTreeInteractions;
 

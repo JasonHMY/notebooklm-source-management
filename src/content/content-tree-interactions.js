@@ -1885,12 +1885,69 @@
             return false;
         }
 
+        // dragover can fire well above 60Hz; collapsing computeDropIntent + reflow
+        // + auto-scroll into per-frame batches keeps the main thread free on large
+        // / deeply-nested lists. preventDefault stays on the synchronous path —
+        // deferring it would set dropEffect='none' for the frame and suppress drop.
+        let _pendingDragOverArgs = null;
+        let _pendingDragOverRafId = null;
+        function _cancelPendingDragOver() {
+            if (_pendingDragOverRafId != null
+                && typeof globalThis.cancelAnimationFrame === 'function') {
+                try { globalThis.cancelAnimationFrame(_pendingDragOverRafId); } catch (_) { /* ignore */ }
+            }
+            _pendingDragOverRafId = null;
+            _pendingDragOverArgs = null;
+        }
+        // Drop / dragend are the terminus of the drag lifecycle and must see the
+        // latest computed intent + applied reflow before mutating state. If a
+        // dragover RAF is still pending (e.g. synthetic-event drag in smoke tests
+        // dispatches dragover→drop in the same tick), cancel it and run the
+        // computation synchronously now so handleDrop reads the up-to-date
+        // currentIntent / reflow.
+        function _flushPendingDragOver() {
+            if (_pendingDragOverArgs == null) return;
+            if (_pendingDragOverRafId != null
+                && typeof globalThis.cancelAnimationFrame === 'function') {
+                try { globalThis.cancelAnimationFrame(_pendingDragOverRafId); } catch (_) { /* ignore */ }
+            }
+            const args = _pendingDragOverArgs;
+            _pendingDragOverRafId = null;
+            _pendingDragOverArgs = null;
+            _processDragOver(args);
+        }
         function handleDragOver(e) {
             e.preventDefault();
-            const sourceListEl = getSourceListContainer();
-            const intent = computeDropIntent({
+            // Snapshot only the fields we read downstream. The DragEvent itself
+            // is not safe to retain past the current event tick.
+            _pendingDragOverArgs = {
                 clientX: e.clientX,
                 clientY: e.clientY,
+                dataTransfer: e.dataTransfer
+            };
+            if (_pendingDragOverRafId != null) return;
+            const raf = typeof globalThis.requestAnimationFrame === 'function'
+                ? globalThis.requestAnimationFrame
+                : null;
+            const flush = () => {
+                const args = _pendingDragOverArgs;
+                _pendingDragOverRafId = null;
+                _pendingDragOverArgs = null;
+                if (!args) return;
+                _processDragOver(args);
+            };
+            if (!raf) {
+                // No rAF (e.g. jsdom without polyfill) — run synchronously.
+                flush();
+            } else {
+                _pendingDragOverRafId = raf(flush);
+            }
+        }
+        function _processDragOver(args) {
+            const sourceListEl = getSourceListContainer();
+            const intent = computeDropIntent({
+                clientX: args.clientX,
+                clientY: args.clientY,
                 rootElement: sourceListEl,
                 state: getState(),
                 groupsById: getGroupsById(),
@@ -1923,7 +1980,9 @@
                     intent.hostGroupContainerEl.classList.add('drag-into');
                 }
                 if (isInvalid) {
-                    if (e.dataTransfer) e.dataTransfer.dropEffect = 'none';
+                    if (args.dataTransfer) {
+                        try { args.dataTransfer.dropEffect = 'none'; } catch (_) { /* dataTransfer may be finalized across the rAF gap; cursor stays default */ }
+                    }
                     if (intent.kind === 'into-group') {
                         if (intent.hostGroupContainerEl && intent.hostGroupContainerEl.classList
                             && typeof intent.hostGroupContainerEl.classList.add === 'function') {
@@ -2028,7 +2087,7 @@
                                 const _kr = kid.getBoundingClientRect();
                                 if (!_kr || typeof _kr.top !== 'number' || typeof _kr.height !== 'number') return;
                                 const _kMidY = _kr.top + _kr.height / 2;
-                                if (_kMidY <= e.clientY) return; // child is above cursor → not affected
+                                if (_kMidY <= args.clientY) return; // child is above cursor → not affected
                                 const _kIsSrc = kid.classList.contains('source-item');
                                 const _kKey = _kIsSrc
                                     ? (kid.dataset && kid.dataset.sourceKey)
@@ -2085,7 +2144,7 @@
                 if (list && typeof list.getBoundingClientRect === 'function') {
                     const listRect = list.getBoundingClientRect();
                     const velocity = dragMulti.computeAutoScrollVelocity({
-                        pointerY: e.clientY,
+                        pointerY: args.clientY,
                         containerTop: listRect.top,
                         containerBottom: listRect.bottom,
                         edgePx: dragMulti.EDGE_PX,
@@ -2121,6 +2180,9 @@
                 count = nodes.length;
             }
             if (autoScrollController) autoScrollController.stop();
+            // Drop any dragover work that was queued for the next frame — running
+            // it after the drag terminated would touch DOM with stale intent.
+            _cancelPendingDragOver();
             runtime.activeDragContext = null;
             cancelAllHoverTimers();
             if (runtime.hoverExpandedGroupIds.size > 0) {
@@ -2362,6 +2424,9 @@
         }
 
         function handleDrop(e) {
+            // Flush any dragover RAF still in flight so handleDrop reads the
+            // up-to-date intent + reflow rather than a one-frame-stale snapshot.
+            _flushPendingDragOver();
             let reflowClearedForMutation = false;
             const clearReflowBeforeMutation = () => {
                 if (reflowClearedForMutation) return;
@@ -2741,6 +2806,9 @@
         }
 
         function handleDragEnd(e) {
+            // Flush any dragover RAF so the upcoming clearDragFeedback /
+            // unfoldDraggedItems path reads a fully-applied reflow state.
+            _flushPendingDragOver();
             // clearDragFeedback is the single source of truth for cleanup that's
             // common to ALL drag terminations (drop, cancel, esc, dragend race):
             //   - cancelAllHoverTimers
