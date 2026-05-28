@@ -1008,6 +1008,39 @@ describe('background.js message listener', () => {
         }));
     });
 
+    it('allows a shrinking save even when over the critical quota threshold (no delete lock)', () => {
+        const key = 'sourcesPlusState_shrink';
+        // Large state already stored — well over the (tiny) quota.
+        const currentState = {
+            groups: ['g'],
+            groupsById: { g: { id: 'g', children: [] } },
+            sourceStateById: { big: { enabled: true, title: 'x'.repeat(5000) } },
+            _saveRevision: 1
+        };
+        global.chrome.storage.local.QUOTA_BYTES = 3400;
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({ [key]: currentState, [`${key}__backup`]: currentState });
+        });
+        const request = {
+            type: 'SAVE_STATE',
+            key,
+            baseRevision: 1,
+            data: {
+                // User deleted the big source → strictly smaller than current.
+                groups: ['g'],
+                groupsById: { g: { id: 'g', children: [] } },
+                sourceStateById: { small: { enabled: true, title: 'x'.repeat(3000) } }
+            }
+        };
+
+        listener(request, validSender, mockSendResponse);
+
+        // The shrinking write must go through even while critical — otherwise a user
+        // who filled their quota could never delete sources to recover (hard lock).
+        expect(global.chrome.storage.local.set).toHaveBeenCalled();
+        expect(mockSendResponse).toHaveBeenCalledWith(expect.objectContaining({ success: true }));
+    });
+
     it('should handle LOAD_STATE message successfully', () => {
         const request = {
             type: 'LOAD_STATE',

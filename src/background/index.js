@@ -888,14 +888,23 @@ function writeStateWithRevisionGuard(request, sendResponse) {
         });
         const payloadInfo = prepareStateStoragePayloadForQuota(initialPayloadInfo, historyKey);
         if (isStorageCritical(payloadInfo.usageInfo)) {
-            sendResponse(Object.assign({
-                success: false,
-                errorCode: ERROR_CODES.STORAGE_QUOTA_EXCEEDED
-            }, createStorageResponseFields(payloadInfo.usageInfo, {
-                historyEntryCount: payloadInfo.history.length,
-                historyTrimmed: Boolean(payloadInfo.historyTrimmed)
-            })));
-            return;
+            // Over the critical threshold — but reject ONLY writes that GROW the stored
+            // snapshot. A write that shrinks (or keeps) the state must go through, e.g.
+            // the user deleting a source to free space; otherwise quota exhaustion is a
+            // hard lock with no escape (history trimming above can't always recover it).
+            const incomingBytes = getSerializedByteLength(savedState);
+            const currentBytes = currentState ? getSerializedByteLength(currentState) : 0;
+            if (incomingBytes > currentBytes) {
+                sendResponse(Object.assign({
+                    success: false,
+                    errorCode: ERROR_CODES.STORAGE_QUOTA_EXCEEDED
+                }, createStorageResponseFields(payloadInfo.usageInfo, {
+                    historyEntryCount: payloadInfo.history.length,
+                    historyTrimmed: Boolean(payloadInfo.historyTrimmed)
+                })));
+                return;
+            }
+            // Shrinking/equal write: fall through to writePayload to let the user recover.
         }
 
         const writePayload = (nextPayloadInfo, didRetry = false) => chrome.storage.local.set(nextPayloadInfo.payload, () => {

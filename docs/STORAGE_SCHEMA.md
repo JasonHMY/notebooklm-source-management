@@ -136,6 +136,7 @@ Load paths normalize older schemas to the current runtime shape and mark `pendin
 - `sourcesPlusHistory_<projectId>` is bounded by `sourcesPlusPreferences.historyRetentionLimit` and used for version history and repair recovery.
 - History entries can include `label?: string` and `manual?: boolean` for named restore points. Automatic trimming preserves manual restore points before older automatic snapshots; if manual entries alone exceed the selected limit, the oldest manual entries are trimmed.
 - Page lifecycle recovery can write a session/local fallback snapshot, but normal primary writes should go through background `SAVE_STATE`.
+- Quota guard: when projected `chrome.storage.local` usage is over the critical ratio (`STORAGE_CRITICAL_RATIO`, 0.95), `SAVE_STATE` first trims history, then rejects writes that would **grow** the stored snapshot (`storage_quota_exceeded`). Writes that shrink or keep the snapshot size (e.g. deleting a source to free space) are allowed through even while critical, so quota exhaustion is never a hard lock the user cannot escape.
 
 ## Privacy boundary
 
