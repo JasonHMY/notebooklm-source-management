@@ -489,7 +489,7 @@
                             host = Array.isArray(_parentGroup.children) ? _parentGroup.children : (_parentGroup.children = []);
                             hostGroup = _parentGroup;
                             hostContainerEl = typeof rootElement.querySelector === 'function'
-                                ? rootElement.querySelector('[data-group-id="' + String(_parentGroupId).replace(/"/g, '\\"') + '"]')
+                                ? rootElement.querySelector('[data-group-id="' + cssEscape(_parentGroupId) + '"]')
                                 : null;
                         }
                     }
@@ -1605,7 +1605,7 @@
             const _preflightList = getSourceListContainer();
             if (_preflightList && typeof _preflightList.querySelectorAll === 'function') {
                 const stale = _preflightList.querySelectorAll(
-                    '.sp-drop-flying, .sp-drop-landing, .sp-drag-unfolding, .sp-pseudo-hover'
+                    '.sp-drop-flying, .sp-drop-landing, .sp-drag-unfolding, .sp-pseudo-hover, .sp-hover-expand-pending, .sp-drag-cancelled'
                 );
                 if (stale && typeof stale.forEach === 'function') {
                     stale.forEach((node) => {
@@ -1614,6 +1614,12 @@
                         node.classList.remove('sp-drop-landing');
                         node.classList.remove('sp-drag-unfolding');
                         node.classList.remove('sp-pseudo-hover');
+                        // Hover-expand build-up cue + cancel-shake cue: linger when a
+                        // prior drag was interrupted (tab-switch / blur) before their
+                        // own timers / setTimeout removed them — clear so the new drag
+                        // doesn't show a stale outline or replay a shake.
+                        node.classList.remove('sp-hover-expand-pending');
+                        node.classList.remove('sp-drag-cancelled');
                     });
                 }
 
@@ -1656,6 +1662,14 @@
                         node.classList.remove('drag-invalid');
                         node.classList.remove('dragging');
                     });
+                }
+
+                // (B4) .sp-drag-active lives on #sources-list itself (the host), not a
+                // descendant — it suppresses the frozen native :hover during a drag and
+                // is normally removed by _clearPseudo. If a prior drag ended via
+                // tab-switch / blur before that ran, it lingers; clear it on the host.
+                if (_preflightList.classList && typeof _preflightList.classList.remove === 'function') {
+                    _preflightList.classList.remove('sp-drag-active');
                 }
             }
 
@@ -2520,7 +2534,7 @@
                     && typeof _cancelRoot.querySelector === 'function') {
                     for (const key of runtime.dragReflowSession.draggedKeys) {
                         if (typeof key !== 'string' || !key) continue;
-                        const safe = key.replace(/"/g, '\\"');
+                        const safe = cssEscape(key);
                         const el = _cancelRoot.querySelector(`[data-source-key="${safe}"]`)
                             || _cancelRoot.querySelector(`[data-group-id="${safe}"]`);
                         if (el && el.classList && typeof el.classList.add === 'function') {
@@ -2892,7 +2906,7 @@
             //      regains effect for subsequent hover / focus changes.
             for (const key of landedKeys) {
                 if (typeof key !== 'string' || !key) continue;
-                const safe = key.replace(/"/g, '\\"');
+                const safe = cssEscape(key);
                 const el = rootElement.querySelector(`[data-source-key="${safe}"]`)
                     || rootElement.querySelector(`[data-group-id="${safe}"]`);
                 if (!el || !el.style) continue;

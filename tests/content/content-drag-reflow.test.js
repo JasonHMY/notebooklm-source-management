@@ -250,3 +250,31 @@ describe('applyReflow / clearReflow', () => {
         expect(session.shiftedItems.size).toBe(0);
     });
 });
+
+describe('findItemElement source-key escaping (security)', () => {
+    let originalCSS;
+    beforeEach(() => { originalCSS = globalThis.CSS; });
+    afterEach(() => {
+        if (originalCSS === undefined) delete globalThis.CSS;
+        else globalThis.CSS = originalCSS;
+    });
+
+    test('escapes the untrusted source key via CSS.escape, not a quote-only replace', () => {
+        // NotebookLM-derived source keys can contain ], backslashes, or leading
+        // digits that break a `[data-source-key="..."]` selector. A hand-rolled
+        // replace(/"/g) only escapes quotes; CSS.escape covers the full grammar.
+        // Sentinel-wrap CSS.escape so we can assert the selector is built from it.
+        globalThis.CSS = { escape: jest.fn((s) => `ESC<${s}>`) };
+        const api = createContentDragReflow();
+        const el = { style: { transform: '' }, classList: { add() {}, remove() {} } };
+        const querySelector = jest.fn(() => el);
+        // Empty session + non-empty shifts → Phase 2 actually resolves the element.
+        api.applyReflow({
+            session: { shiftedItems: new Map() },
+            shifts: new Map([['a]b', 40]]),
+            rootElement: { querySelector }
+        });
+        expect(globalThis.CSS.escape).toHaveBeenCalledWith('a]b');
+        expect(querySelector).toHaveBeenCalledWith('[data-source-key="ESC<a]b>"]');
+    });
+});

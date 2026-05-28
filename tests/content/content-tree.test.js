@@ -2280,6 +2280,57 @@ describe('handleDragStart reflow session + unified ghost', () => {
         expect(runtime.dragReflowSession.stale).not.toBe(true);
         expect(runtime.dragReflowSession.draggedKeys.has('A')).toBe(true);
     });
+
+    it('preflight strips lingering .sp-drag-active / .sp-hover-expand-pending / .sp-drag-cancelled', () => {
+        const runtime = { dragReflowSession: null };
+        const state = { isBatchMode: false, ungrouped: ['A'], groups: [] };
+        const pendingBatchKeys = new Set();
+        const sourceRowA = createSourceRow('A');
+
+        // Cues left armed when a prior drag was interrupted by tab-switch / blur:
+        // a group-container's hover-expand build-up + a source-item's cancel shake.
+        const stalePending = { classList: { contains: jest.fn(() => false), add: jest.fn(), remove: jest.fn() }, style: {} };
+        const staleCancelled = { classList: { contains: jest.fn(() => false), add: jest.fn(), remove: jest.fn() }, style: {} };
+
+        // .sp-drag-active lives on #sources-list itself (the host), not a descendant.
+        const listClassList = { contains: jest.fn(() => true), add: jest.fn(), remove: jest.fn() };
+        const sourcesListEl = {
+            id: 'sources-list',
+            classList: listClassList,
+            querySelectorAll: jest.fn((selector) => {
+                if (selector.includes('sp-hover-expand-pending')) return [stalePending, staleCancelled];
+                return [];
+            })
+        };
+        const shadowRoot = {
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => []),
+            getElementById: jest.fn((id) => (id === 'sources-list' ? sourcesListEl : null))
+        };
+
+        const interactions = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getPendingBatchKeys: () => pendingBatchKeys,
+            getShadowRoot: () => shadowRoot,
+            getDocument: () => null,
+            getSetTimeout: () => () => {},
+            dragMulti: createContentDragMulti({}),
+            dragReflow: createDragReflowMock()
+        });
+
+        interactions.handleDragStart({
+            target: createSourceRowTargetStub(sourceRowA),
+            dataTransfer: createDataTransfer()
+        });
+
+        // Descendant cues cleared via the preflight querySelectorAll sweep.
+        expect(stalePending.classList.remove).toHaveBeenCalledWith('sp-hover-expand-pending');
+        expect(staleCancelled.classList.remove).toHaveBeenCalledWith('sp-drag-cancelled');
+        // Host-level .sp-drag-active cleared directly on #sources-list.
+        expect(listClassList.remove).toHaveBeenCalledWith('sp-drag-active');
+    });
 });
 
 describe('handleDragOver invalid-drop feedback', () => {

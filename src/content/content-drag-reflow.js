@@ -33,9 +33,22 @@
             };
         }
 
+        // Local copy of the cssEscape helper in content-tree-interactions.js — this
+        // is a standalone IIFE module and cannot reach that closure-private fn.
+        // SECURITY: source keys are NotebookLM-derived (untrusted); ], backslashes,
+        // or leading digits would break a `[data-...="..."]` selector, so route
+        // through CSS.escape (falls back to escaping quotes + backslashes).
+        function cssEscape(value) {
+            const raw = typeof value === 'string' ? value : String(value ?? '');
+            if (typeof globalThis.CSS === 'object' && globalThis.CSS && typeof globalThis.CSS.escape === 'function') {
+                try { return globalThis.CSS.escape(raw); } catch (err) { /* fall through */ }
+            }
+            return raw.replace(/(["\\])/g, '\\$1');
+        }
+
         function findItemElement(rootElement, key) {
             if (!rootElement || typeof rootElement.querySelector !== 'function') return null;
-            const safe = String(key).replace(/"/g, '\\"');
+            const safe = cssEscape(key);
             return rootElement.querySelector(`[data-source-key="${safe}"]`)
                 || rootElement.querySelector(`[data-group-id="${safe}"]`);
         }
