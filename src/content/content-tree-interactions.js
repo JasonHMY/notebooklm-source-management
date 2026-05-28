@@ -2328,11 +2328,13 @@
             const setTimeoutFn = getSetTimeout();
             if (typeof setTimeoutFn !== 'function') return;
 
-            // Visual cue: paint a 600ms outline build-up on the host
+            // Visual cue: paint a 1000ms outline build-up on the host
             // group-container so the user sees "this group is about to open"
             // during the wait. The class is removed either when the timer
             // fires (executeHoverExpand) or when cancelHoverTimerForGroup
             // runs (pointer moved elsewhere) — see both call sites.
+            // Delay was raised from 600ms after users reported accidental
+            // hover-opens while dragging past collapsed folders.
             let _armContainerEl = null;
             const _armRoot = getShadowRoot();
             if (_armRoot && typeof _armRoot.querySelector === 'function') {
@@ -2343,7 +2345,7 @@
                 }
             }
 
-            const timeoutId = setTimeoutFn(() => executeHoverExpand(groupId), 600);
+            const timeoutId = setTimeoutFn(() => executeHoverExpand(groupId), 1000);
             runtime.hoverExpandTimers.set(groupId, { kind: 'expand', timeoutId, containerEl: _armContainerEl });
         }
 
@@ -2357,7 +2359,7 @@
 
             const setTimeoutFn = getSetTimeout();
             if (typeof setTimeoutFn !== 'function') return;
-            const timeoutId = setTimeoutFn(() => executeHoverCollapse(groupId), 600);
+            const timeoutId = setTimeoutFn(() => executeHoverCollapse(groupId), 1000);
             runtime.hoverExpandTimers.set(groupId, { kind: 'collapse', timeoutId });
         }
 

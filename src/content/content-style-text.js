@@ -2713,15 +2713,18 @@
             }
 
             /* Hover-expand pending cue (drag pointer dwelling on a collapsed
-               group): 600ms outline build-up that pairs with the hover-expand
+               group): 1000ms outline build-up that pairs with the hover-expand
                timer in armHoverExpandTimerForGroup. Inset box-shadow grows
                from transparent to the same blue used by .drag-into so the
                transition into the open state reads as continuous.
                'forwards' fill-mode keeps the peak ring at the end of the
                keyframe so there's no flash back to 0 if the JS class-remove
-               races the last paint. */
+               races the last paint.
+               Duration must match the setTimeout in
+               armHoverExpandTimerForGroup or users will see the outline finish
+               before / after the group actually opens. */
             .group-container.sp-hover-expand-pending > .group-header {
-                animation: sp-hover-expand-pending-build 600ms var(--sp-ease-standard) forwards;
+                animation: sp-hover-expand-pending-build 1000ms var(--sp-ease-standard) forwards;
             }
             @keyframes sp-hover-expand-pending-build {
                 0%   { box-shadow: inset 0 0 0 0 transparent; }

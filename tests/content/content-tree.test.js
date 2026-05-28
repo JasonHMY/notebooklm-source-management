@@ -3462,7 +3462,7 @@ describe('handleDragOver hover-expand', () => {
         teardownGlobalMocks();
     });
 
-    it('expands a collapsed group after 600ms of continuous hover', () => {
+    it('expands a collapsed group after 1000ms of continuous hover', () => {
         const ctx = setupTreeInteractionsTestContext({
             state: { isBatchMode: false, ungrouped: [], groups: ['g1'] },
             pendingBatchKeys: new Set(),
@@ -3470,11 +3470,11 @@ describe('handleDragOver hover-expand', () => {
             items: [{ kind: 'group', id: 'g1', top: 100, headerHeight: 40, childrenStart: 140, childrenEnd: 140 }]
         });
         ctx.helpers.dragOverFor('g1');
-        jest.advanceTimersByTime(600);
+        jest.advanceTimersByTime(1000);
         expect(ctx.groupsById.get('g1').collapsed).toBe(false);
     });
 
-    it('cancels the timer when the drop target changes before 600ms', () => {
+    it('cancels the timer when the drop target changes before 1000ms', () => {
         const ctx = setupTreeInteractionsTestContext({
             state: { isBatchMode: false, ungrouped: [], groups: ['g1', 'g2'] },
             pendingBatchKeys: new Set(),
@@ -3490,7 +3490,7 @@ describe('handleDragOver hover-expand', () => {
         ctx.helpers.dragOverFor('g1');
         jest.advanceTimersByTime(300);
         ctx.helpers.dragOverFor('g2');
-        jest.advanceTimersByTime(600);
+        jest.advanceTimersByTime(1000);
         expect(ctx.groupsById.get('g1').collapsed).toBe(true);
     });
 
@@ -3528,7 +3528,7 @@ describe('handleDragOver hover-expand', () => {
         ctx.helpers.dragOverFor('g1');
         jest.advanceTimersByTime(300);
         ctx.tree.handleDragLeave({ target: { id: 'sources-list', closest: () => null } });
-        jest.advanceTimersByTime(600);
+        jest.advanceTimersByTime(1000);
         expect(ctx.groupsById.get('g1').collapsed).toBe(true);
     });
 
@@ -3542,7 +3542,7 @@ describe('handleDragOver hover-expand', () => {
         ctx.helpers.dragOverFor('g1');
         jest.advanceTimersByTime(300);
         ctx.tree.handleDragEnd({ target: { closest: () => null } });
-        jest.advanceTimersByTime(600);
+        jest.advanceTimersByTime(1000);
         expect(ctx.groupsById.get('g1').collapsed).toBe(true);
     });
 
@@ -3558,14 +3558,14 @@ describe('handleDragOver hover-expand', () => {
         ctx.tree.handleDrop(ctx.helpers.makeDropEvent({
             data: { 'application/source-key': 'A' }
         }));
-        jest.advanceTimersByTime(600);
+        jest.advanceTimersByTime(1000);
         expect(ctx.groupsById.get('g1').collapsed).toBe(true);
     });
 
     // Pending-expand visual cue (.sp-hover-expand-pending): added on the host
-    // group-container when the 600ms hover timer arms, removed when the timer
+    // group-container when the 1000ms hover timer arms, removed when the timer
     // fires (= the group actually opens) or cancels (pointer moved off, drag
-    // ended, etc.). CSS turns this into a 600ms outline build-up so the user
+    // ended, etc.). CSS turns this into a 1000ms outline build-up so the user
     // sees "this group is about to open" during the wait.
     it('adds .sp-hover-expand-pending on the group-container while the expand timer is armed', () => {
         const ctx = setupTreeInteractionsTestContext({
@@ -3589,12 +3589,12 @@ describe('handleDragOver hover-expand', () => {
         ctx.helpers.dragOverFor('g1');
         const container = ctx.elementMap.get('group:g1');
         expect(container.classList.contains('sp-hover-expand-pending')).toBe(true);
-        jest.advanceTimersByTime(600);
+        jest.advanceTimersByTime(1000);
         expect(container.classList.contains('sp-hover-expand-pending')).toBe(false);
         expect(ctx.groupsById.get('g1').collapsed).toBe(false);
     });
 
-    it('removes .sp-hover-expand-pending when the pointer moves to a different group before 600ms', () => {
+    it('removes .sp-hover-expand-pending when the pointer moves to a different group before 1000ms', () => {
         const ctx = setupTreeInteractionsTestContext({
             state: { isBatchMode: false, ungrouped: [], groups: ['g1', 'g2'] },
             pendingBatchKeys: new Set(),
@@ -3610,7 +3610,7 @@ describe('handleDragOver hover-expand', () => {
         ctx.helpers.dragOverFor('g1');
         const c1 = ctx.elementMap.get('group:g1');
         expect(c1.classList.contains('sp-hover-expand-pending')).toBe(true);
-        // Pointer moves to g2 before g1's 600ms elapsed → g1 timer cancels.
+        // Pointer moves to g2 before g1's 1000ms elapsed → g1 timer cancels.
         jest.advanceTimersByTime(300);
         ctx.helpers.dragOverFor('g2');
         expect(c1.classList.contains('sp-hover-expand-pending')).toBe(false);
@@ -3645,7 +3645,7 @@ describe('handleDragOver hover-expand', () => {
                 items: [{ kind: 'group', id: 'g1', top: 100, headerHeight: 40, childrenStart: 140, childrenEnd: 140 }]
             });
             ctx.helpers.dragOverFor('g1');
-            jest.advanceTimersByTime(600);
+            jest.advanceTimersByTime(1000);
             expect(ctx.runtime.hoverExpandedGroupIds.has('g1')).toBe(true);
             expect(ctx.runtime.groupsById.get('g1').collapsed).toBe(false);
         });
@@ -3678,7 +3678,7 @@ describe('handleDragOver hover-expand', () => {
             jest.useRealTimers();
         });
 
-        it('collapses a hover-opened group 600ms after the pointer leaves its subtree', () => {
+        it('collapses a hover-opened group 1000ms after the pointer leaves its subtree', () => {
             const ctx = setupTreeInteractionsTestContext({
                 state: { isBatchMode: false, ungrouped: [], groups: ['A', 'B'] },
                 pendingBatchKeys: new Set(),
@@ -3693,7 +3693,7 @@ describe('handleDragOver hover-expand', () => {
             });
 
             ctx.helpers.dragOverFor('A');
-            jest.advanceTimersByTime(600);
+            jest.advanceTimersByTime(1000);
             expect(ctx.runtime.groupsById.get('A').collapsed).toBe(false);
             expect(ctx.runtime.hoverExpandedGroupIds.has('A')).toBe(true);
 
@@ -3703,13 +3703,13 @@ describe('handleDragOver hover-expand', () => {
             // A should now have a pending collapse timer.
             expect(ctx.runtime.hoverExpandTimers.get('A')).toMatchObject({ kind: 'collapse' });
 
-            // 600ms later, A collapses.
-            jest.advanceTimersByTime(600);
+            // 1000ms later, A collapses.
+            jest.advanceTimersByTime(1000);
             expect(ctx.runtime.groupsById.get('A').collapsed).toBe(true);
             expect(ctx.runtime.hoverExpandedGroupIds.has('A')).toBe(false);
         });
 
-        it('cancels the collapse timer when pointer returns within 600ms', () => {
+        it('cancels the collapse timer when pointer returns within 1000ms', () => {
             const ctx = setupTreeInteractionsTestContext({
                 state: { isBatchMode: false, ungrouped: [], groups: ['A', 'B'] },
                 pendingBatchKeys: new Set(),
@@ -3733,7 +3733,7 @@ describe('handleDragOver hover-expand', () => {
             ctx.helpers.dragOverFor('A');
             expect(ctx.runtime.hoverExpandTimers.get('A')).toBeUndefined();
 
-            jest.advanceTimersByTime(600);
+            jest.advanceTimersByTime(1000);
             expect(ctx.runtime.groupsById.get('A').collapsed).toBe(false);
             expect(ctx.runtime.hoverExpandedGroupIds.has('A')).toBe(true);
         });
@@ -3764,7 +3764,7 @@ describe('handleDragOver hover-expand', () => {
 
             // A should NOT have a collapse timer.
             expect(ctx.runtime.hoverExpandTimers.get('A')).toBeUndefined();
-            jest.advanceTimersByTime(600);
+            jest.advanceTimersByTime(1000);
             expect(ctx.runtime.groupsById.get('A').collapsed).toBe(false);
             expect(ctx.runtime.hoverExpandedGroupIds.has('A')).toBe(true);
         });
