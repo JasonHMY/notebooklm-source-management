@@ -1579,15 +1579,6 @@
                         dragReflow.foldDraggedItems({ session, rootElement });
                     }
                 }
-                // Mark the list as drag-active so :hover rules suppress their
-                // transform/background/shadow (prevents both mid-drag jitter from cursor
-                // brushing siblings, and post-drop "hover stuck on the old row" effect).
-                // Removed in handleDragEnd.
-                const _sourcesListEl = getSourceListContainer();
-                if (_sourcesListEl && _sourcesListEl.classList && typeof _sourcesListEl.classList.add === 'function') {
-                    _sourcesListEl.classList.add('sp-drag-active');
-                }
-
                 if (typeof setTimeoutFn === 'function') {
                     setTimeoutFn(() => {
                         if (selection.isMulti) {
@@ -1618,11 +1609,6 @@
                     e.dataTransfer.effectAllowed = 'move';
                     if (typeof setTimeoutFn === 'function') {
                         setTimeoutFn(() => groupTarget.classList.add('dragging'), 0);
-                    }
-                    // Same as the source branch: mark drag-active for :hover suppression.
-                    const _groupSourcesListEl = getSourceListContainer();
-                    if (_groupSourcesListEl && _groupSourcesListEl.classList && typeof _groupSourcesListEl.classList.add === 'function') {
-                        _groupSourcesListEl.classList.add('sp-drag-active');
                     }
                     // Initialize drag-reflow session for group drag too. The session lets
                     // dragover apply sibling translateY shifts ("open a slot for the
@@ -2377,6 +2363,24 @@
                     e.clientX, e.clientY,
                     _preDropRects
                 );
+                // Discoverability hint: when a source drop falls back to the ungrouped
+                // section via the root-corridor route (intent.slotKey === null is the
+                // routeToNearestNeighborKind fallback marker), the source lands in the
+                // ungrouped region — which render() places at the BOTTOM of the list,
+                // below all groups. User just dropped between two groups in the root
+                // corridor and now the source visually appears far below where their
+                // cursor was — confusing without a hint. Surface a toast + scroll the
+                // ungrouped header into view so user can find their source.
+                if (sourceKey && intent && intent.targetGroup == null && intent.slotKey == null) {
+                    try { showToast(getMessage('ui_keyboard_moved_ungrouped_toast')); } catch (_) {}
+                    const _listAfter = getSourceListContainer();
+                    if (_listAfter && typeof _listAfter.querySelector === 'function') {
+                        const _ungroupedHeader = _listAfter.querySelector('.ungrouped-header');
+                        if (_ungroupedHeader && typeof _ungroupedHeader.scrollIntoView === 'function') {
+                            try { _ungroupedHeader.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (_) {}
+                        }
+                    }
+                }
             } finally {
                 finalizeReflow();
             }
@@ -2552,19 +2556,16 @@
             }
             runtime.activeDragContext = null;
             cleanupReflowSession();
-            // Drop hover-state fix — JS-driven instead of trying to convince Chrome's
-            // native :hover state to refresh. Chrome freezes :hover at the element under
-            // the cursor at dragstart time and does NOT refresh it after drop, even with
-            // pointer-events toggling or synthetic mousemove dispatch (tried — doesn't
-            // work). Strategy:
-            //   1. Keep .sp-drag-active on #sources-list so the CSS rule keeps suppressing
-            //      the stale :hover visual on the wrong (originally-cursor'd) element.
-            //   2. Manually add .sp-pseudo-hover to whatever element the cursor is ACTUALLY
-            //      over now, so the user sees the correct row highlighted without moving
-            //      the mouse.
-            //   3. Register a one-shot mousemove listener on the document — the first real
-            //      mouse movement removes both .sp-drag-active (releasing :hover) and any
-            //      .sp-pseudo-hover (letting real :hover take over).
+            // Post-drop hover hint: Chrome's native :hover may briefly stay on the
+            // originally-cursor'd element after drag completes. We mark the element
+            // currently under the cursor with `.sp-pseudo-hover` so the user sees the
+            // correct row highlighted right away — and any of {mousemove, mouseover,
+            // mousedown} clears it (whichever fires first), at which point Chrome's
+            // real :hover takes over. Three listeners + a 1.5s setTimeout backstop
+            // ensure the pseudo class never gets stuck. (The previous `.sp-drag-active`
+            // global hover-suppression mechanism was removed — it gated on mousemove
+            // only and would leave hover broken until the user actually moved the mouse,
+            // which they often didn't right after a drop.)
             const _endList = getSourceListContainer();
             if (_endList && typeof e.clientX === 'number' && typeof e.clientY === 'number') {
                 const _shadow = typeof getShadowRoot === 'function' ? getShadowRoot() : null;
@@ -2582,24 +2583,33 @@
                 if (_hoverable && _hoverable.classList && typeof _hoverable.classList.add === 'function') {
                     _hoverable.classList.add('sp-pseudo-hover');
                 }
-                if (_doc && typeof _doc.addEventListener === 'function') {
-                    const _onFirstMove = () => {
-                        try { _doc.removeEventListener('mousemove', _onFirstMove, true); } catch (_) {}
-                        if (_endList && _endList.classList && typeof _endList.classList.remove === 'function') {
-                            _endList.classList.remove('sp-drag-active');
-                        }
-                        if (_endList && typeof _endList.querySelectorAll === 'function') {
-                            const _stale = _endList.querySelectorAll('.sp-pseudo-hover');
-                            if (_stale && typeof _stale.forEach === 'function') {
-                                _stale.forEach((node) => {
-                                    if (node && node.classList && typeof node.classList.remove === 'function') {
-                                        node.classList.remove('sp-pseudo-hover');
-                                    }
-                                });
+                const _clearPseudo = () => {
+                    if (!_endList || typeof _endList.querySelectorAll !== 'function') return;
+                    const _stale = _endList.querySelectorAll('.sp-pseudo-hover');
+                    if (_stale && typeof _stale.forEach === 'function') {
+                        _stale.forEach((node) => {
+                            if (node && node.classList && typeof node.classList.remove === 'function') {
+                                node.classList.remove('sp-pseudo-hover');
                             }
-                        }
+                        });
+                    }
+                };
+                if (_doc && typeof _doc.addEventListener === 'function') {
+                    const _onCleanup = () => {
+                        try {
+                            _doc.removeEventListener('mousemove', _onCleanup, true);
+                            _doc.removeEventListener('mouseover', _onCleanup, true);
+                            _doc.removeEventListener('mousedown', _onCleanup, true);
+                        } catch (_) {}
+                        _clearPseudo();
                     };
-                    _doc.addEventListener('mousemove', _onFirstMove, true);
+                    _doc.addEventListener('mousemove', _onCleanup, true);
+                    _doc.addEventListener('mouseover', _onCleanup, true);
+                    _doc.addEventListener('mousedown', _onCleanup, true);
+                }
+                const _setTimeoutEnd = typeof getSetTimeout === 'function' ? getSetTimeout() : null;
+                if (typeof _setTimeoutEnd === 'function') {
+                    _setTimeoutEnd(_clearPseudo, 1500);
                 }
             }
         }

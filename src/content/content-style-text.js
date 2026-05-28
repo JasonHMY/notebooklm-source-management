@@ -942,33 +942,6 @@
                 transform: scale(1.01);
                 box-shadow: var(--sp-shadow-hover-item);
             }
-            /* During an active drag, suppress :hover transform/background/shadow on
-               source rows and group headers. Two reasons:
-                 1. Jitter: cursor often brushes shifted siblings as ghost moves; their
-                    :hover would briefly add scale(1.01) + box-shadow which read as a
-                    1px popping artifact alongside the reflow translateY.
-                 2. Post-drop hover stuck: Chrome freezes :hover at the dragstart-time
-                    element under cursor and does not refresh after drop changes layout.
-                    Suppressing the visual at least keeps the "wrong" row from looking
-                    selected; pairing with handleDragEnd's pointer-events flicker forces
-                    Chrome to rebuild its hit-test cache so :hover snaps to where the
-                    cursor actually is now. */
-            #sources-list.sp-drag-active .source-item:hover,
-            #sources-list.sp-drag-active .group-header:hover {
-                background-color: transparent;
-                transform: none;
-                box-shadow: none;
-                z-index: 1;
-            }
-            /* Same drag-active window: kill the spotlight ::before radial-gradient glow
-               on the stale native :hover target. Without this, the blue spotlight halo
-               stays painted on the originally-cursor'd row after drop, separate from the
-               main bg/transform/shadow visuals we already suppress above. The companion
-               .sp-pseudo-hover::before rule below paints the glow on the correct row. */
-            #sources-list.sp-drag-active .source-item.sp-spotlight-surface:hover::before,
-            #sources-list.sp-drag-active .group-header.sp-spotlight-surface:hover::before {
-                opacity: 0;
-            }
             /* JS-managed pseudo-hover spotlight: mirrors :hover::before so the cursor's
                actual row shows the radial-gradient glow during the post-drop hover-stuck
                window, before the user's first real mousemove restores native :hover. */
