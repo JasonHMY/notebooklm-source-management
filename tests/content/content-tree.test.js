@@ -2687,6 +2687,53 @@ describe('computeDropIntent', () => {
         expect(intent.insertIndex).toBe(0);
         expect(intent.slotKey).toBeNull();
     });
+
+    // X-split corridor is restricted to the header strip's Y range. Cursor over a
+    // child source INSIDE the folder must not get excluded by left-half X even when
+    // clientX falls in the header's left half — the user is clearly operating on
+    // children, not on the folder-as-a-unit. Without this rule the dragged source
+    // would inexplicably escape to root level just because cursor X happened to land
+    // in the folder's left half while hovering over an existing child.
+    it('X-split applies only to the header Y range — cursor over a child inside the folder uses inside-folder slot detection regardless of X', () => {
+        const state = { ungrouped: [], groups: ['F'] };
+        const groupsById = new Map([
+            ['F', { id: 'F', children: [{ type: 'source', key: 'X' }] }]
+        ]);
+        const tree = buildTree({ state, groupsById });
+        // F: container 100..200, header 100..130, children 130..200. Width 200, midX=100.
+        // X (only child): top=130, height=40 → rect 130..170, visual midY=150.
+        const { sourcesListEl } = makeMockShadowList({
+            items: [
+                {
+                    kind: 'group', id: 'F', top: 100, headerHeight: 30,
+                    childrenStart: 130, childrenEnd: 200,
+                    children: [{ kind: 'source', key: 'X', top: 130, height: 40 }]
+                }
+            ]
+        });
+
+        // Cursor at (50, 145): clientX=50 is LEFT of header midX (100); clientY=145
+        // is in children area (130..200), NOT in header (100..130).
+        // Old behavior (X-split on full container): F's container Y range contains
+        // cursor + clientX<midX → F excluded → root-level slot → would not return X.
+        // New behavior (X-split on header only): cursor Y outside header → F NOT
+        // excluded → F chosen → host = F.children → slot detection → X midY=150 >
+        // clientY=145 → before-source X.
+        const intent = tree.computeDropIntent({
+            clientX: 50,
+            clientY: 145,
+            rootElement: sourcesListEl,
+            state,
+            groupsById,
+            parentMap: new Map(),
+            activeDragContext: { kind: 'source-single', keys: ['external'] }
+        });
+        expect(intent).toBeTruthy();
+        expect(intent.kind).toBe('before-source');
+        expect(intent.targetGroup).toBe(groupsById.get('F'));
+        expect(intent.targetList).toBe(groupsById.get('F').children);
+        expect(intent.slotKey).toBe('X');
+    });
 });
 
 describe('handleDragOver hover-expand', () => {

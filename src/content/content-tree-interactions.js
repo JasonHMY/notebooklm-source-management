@@ -271,28 +271,45 @@
 
             // Pick deepest container that contains pointer.
             //
-            // For TOP-LEVEL group containers, apply a left/right X-split rule:
-            // - cursor in the LEFT HALF (X < container.left + container.width / 2) is
-            //   treated as OUTSIDE the container — user is signalling "this folder should
-            //   sibling-reorder, I'm not trying to enter it". chosenContainer = null →
-            //   root-level slot detection → source goes to ungrouped, group is reordered.
-            // - cursor in the RIGHT HALF (X >= midX) is INSIDE — user wants into-group /
-            //   inside-children behavior. hover-expand timer arms normally.
+            // For TOP-LEVEL group containers, apply a left/right X-split rule
+            // RESTRICTED TO THE HEADER STRIP'S Y RANGE (not the full container):
+            // - cursor on header, LEFT HALF (X < header.left + header.width / 2) →
+            //   treated as OUTSIDE the container. User is signalling "this folder
+            //   should sibling-reorder, I'm not trying to enter it". chosenContainer
+            //   = null → root-level slot detection → source goes to ungrouped, group
+            //   is reordered.
+            // - cursor on header, RIGHT HALF (X >= midX) → INSIDE. User wants
+            //   into-group behavior. hover-expand timer arms normally.
+            // - cursor BELOW the header (in the children area or any gap inside the
+            //   container's Y range but outside the header's Y range) → X-split DOES
+            //   NOT APPLY. User is operating on the sources INSIDE the folder, so
+            //   slot detection within children (or into-group sentinel for empty
+            //   children) handles the cursor normally.
             //
-            // Rationale: top-level groups span the full panel width (~350-450px), so a
-            // left/right split gives the user a generous physical corridor on the left to
-            // express "between groups" / "at root level". The previous attempt (8px edge
-            // zones at top/bottom of each container) was too small — most of the group's
-            // Y-range was still "inside" and the user kept triggering hover-expand by
-            // accident. X-split makes the active "outside zone" cover half the visual
-            // area regardless of cursor Y position within the group.
+            // Why header-only: the X-split corridor is conceptually a gesture about
+            // the folder AS A UNIT — "I'm dragging near/around this folder, not into
+            // it". The header is the only part of the folder that visually represents
+            // it as a unit (it's the clickable expand/collapse strip with the folder
+            // name). When cursor descends into the children area, the user is clearly
+            // operating on individual sources inside, and applying the left-half
+            // "escape to root level" semantics there would let cursor X position
+            // override "I'm dragging over an existing child source" intent — the
+            // dragged source would inexplicably escape to root level just because
+            // cursor X happened to land in the folder's left half.
+            //
+            // Rationale for header X-split itself: top-level group headers span the
+            // full panel width (~350-450px), so a left/right split gives the user a
+            // generous physical corridor on the left to express "between groups" /
+            // "at root level". The previous attempt (8px edge zones at top/bottom of
+            // each container) was too small — most of the group's Y-range was still
+            // "inside" and the user kept triggering hover-expand by accident.
             //
             // Nested groups INHERIT their top-level ancestor's X-split exclusion: when
-            // a user moves cursor into the left-half corridor of a top-level group A,
-            // any nested group B inside A is also excluded (so cursor over B does NOT
-            // sneakily route into B). Without inheritance the user trying to "exit out"
-            // of A to root level would accidentally land in nested B whenever cursor Y
-            // overlapped B's rect — defeating the X-split corridor's intent.
+            // a user moves cursor into the left-half corridor of a top-level group A's
+            // header, any nested group B inside A is also excluded (so cursor over B
+            // does NOT sneakily route into B). Without inheritance the user trying to
+            // "exit out" of A to root level via header would accidentally land in
+            // nested B whenever cursor Y overlapped B's rect.
             const _isTopLevelGroup = (gid) => {
                 if (!gid) return false;
                 if (!parentMap || typeof parentMap.get !== 'function') return true;
@@ -302,8 +319,11 @@
             const _hasClientX = typeof clientX === 'number';
 
             // Pass 1: identify top-level groups whose X-split rule excludes them
-            // at the current cursor position. Cached so pass 2 can apply inheritance
-            // without re-querying ancestor rects.
+            // at the current cursor position. X-split is evaluated against the
+            // HEADER's rect, not the full container's rect — cursor must be in the
+            // header's Y range for the corridor exclusion to fire. Cached so pass 2
+            // can apply inheritance to nested groups without re-querying ancestor
+            // rects.
             const _xSplitExcludedTopIds = new Set();
             if (_hasClientX) {
                 for (const container of containerList) {
@@ -312,10 +332,14 @@
                     if (!_gid) continue;
                     if (!_isTopLevelGroup(_gid)) continue;
                     if (container.classList && container.classList.contains('sp-drag-folded')) continue;
-                    const _r = unshiftedRect(container);
-                    if (!_r || _r.width <= 0) continue;
-                    if (clientY < _r.top || clientY >= _r.bottom) continue;
-                    const _midX = _r.left + _r.width / 2;
+                    const _headerEl = typeof container.querySelector === 'function'
+                        ? container.querySelector('.group-header')
+                        : null;
+                    if (!_headerEl) continue;
+                    const _hr = unshiftedRect(_headerEl);
+                    if (!_hr || _hr.width <= 0) continue;
+                    if (clientY < _hr.top || clientY >= _hr.bottom) continue;
+                    const _midX = _hr.left + _hr.width / 2;
                     if (clientX < _midX) _xSplitExcludedTopIds.add(_gid);
                 }
             }
