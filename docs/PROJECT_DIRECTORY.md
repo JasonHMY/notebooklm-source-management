@@ -132,8 +132,10 @@ NotebookLM Source Management
 │   │   │   └── toolbar launcher；启用/禁用、聚焦 manager、切换来源视图
 │   │   └── styles.css
 │   ├── utils/
-│   │   └── index.js
-│   │       └── el/debounce/isDescendant/getMessage；`el()` 是 XSS 防护核心
+│   │   ├── index.js
+│   │   │   └── el/debounce/isDescendant/getMessage；`el()` 是 XSS 防护核心
+│   │   └── preference-normalizers.js
+│   │       └── 偏好归一化 (8 个 normalizeXxx)；content + background SW 共享，挂 `globalThis.NSM_PREFERENCE_NORMALIZERS`
 │   └── assets/
 │       ├── icons/
 │       └── fonts/
@@ -221,6 +223,7 @@ manifest.json
 │       └── src/popup/styles.css
 └── content_scripts on https://notebooklm.google.com/*
     ├── src/utils/index.js
+    ├── src/utils/preference-normalizers.js
     ├── src/content/content-config.js
     ├── src/content/source-descriptor-helpers.js
     ├── src/content/content-style-text.js

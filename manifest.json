@@ -43,6 +43,7 @@
       ],
       "js": [
         "src/utils/index.js",
+        "src/utils/preference-normalizers.js",
         "src/content/content-config.js",
         "src/content/source-descriptor-helpers.js",
         "src/content/content-style-text.js",

@@ -71,6 +71,23 @@
         let developerLogs = [];
         let nextLogSequence = 1;
 
+        // Phase 3: shared preference normalizers — loaded by manifest content_scripts
+        // before this file (or via test harness require). Identical destructuring lives
+        // in src/background/index.js so any normalize rule change touches only utils.
+        // normalizeCommandShortcutKey is used internally by normalizeCommandShortcutCombo
+        // (within the utils file itself), so it's intentionally omitted from this destructure.
+        const {
+            normalizePreferenceVersion,
+            normalizeWhatsNewSeenVersion,
+            normalizeHistoryRetentionLimit,
+            normalizeLanguageOverride,
+            normalizeCommandShortcutId,
+            normalizeCommandShortcutCombo,
+            normalizeCommandShortcuts,
+            normalizeVisibleQuickViewKinds,
+            normalizeAppearancePreferences
+        } = globalThis.NSM_PREFERENCE_NORMALIZERS;
+
         function getNotebookId() {
             return String(getProjectId() || '');
         }
@@ -438,127 +455,6 @@
 
         function getPreferenceUsageState() {
             return Object.assign({}, preferenceUsageState);
-        }
-
-        function normalizePreferenceVersion(value) {
-            const version = Number(value);
-            if (!Number.isFinite(version) || version < 0) return 0;
-            return Math.floor(version);
-        }
-
-        function normalizeWhatsNewSeenVersion(value) {
-            if (value == null) return '';
-            const text = String(value).trim();
-            if (!text) return '';
-            if (!/^\d+(?:\.\d+){0,3}$/.test(text)) return '';
-            return text.split('.')
-                .map((part) => String(Number(part)))
-                .join('.');
-        }
-
-        function normalizeHistoryRetentionLimit(value) {
-            const limit = Number(value);
-            return limit === 20 || limit === 50 || limit === 100 ? limit : 20;
-        }
-
-        function normalizeLanguageOverride(value) {
-            const normalized = String(value || 'auto').trim();
-            return normalized === 'auto' || normalized === 'en' || normalized === 'es' || normalized === 'zh_CN'
-                ? normalized
-                : 'auto';
-        }
-
-        function normalizeCommandShortcutId(value) {
-            const id = String(value || '').trim();
-            return /^[a-z0-9][a-z0-9-]{0,79}$/.test(id) ? id : '';
-        }
-
-        function normalizeCommandShortcutKey(value) {
-            const key = String(value || '').trim();
-            if (!key) return '';
-            if (key === ' ') return 'Space';
-            const aliases = {
-                esc: 'Escape',
-                escape: 'Escape',
-                spacebar: 'Space',
-                space: 'Space',
-                return: 'Enter',
-                enter: 'Enter',
-                del: 'Delete',
-                delete: 'Delete',
-                backspace: 'Backspace',
-                tab: 'Tab'
-            };
-            const lower = key.toLowerCase();
-            if (aliases[lower]) return aliases[lower];
-            if (/^f\d{1,2}$/i.test(key)) return key.toUpperCase();
-            if (key.length === 1) return key.toUpperCase();
-            return key.replace(/^\w/, (char) => char.toUpperCase()).slice(0, 32);
-        }
-
-        function normalizeCommandShortcutCombo(value) {
-            const parts = String(value || '')
-                .split('+')
-                .map((part) => part.trim())
-                .filter(Boolean);
-            if (parts.length < 2) return '';
-
-            const modifierAliases = new Map([
-                ['cmd', 'Meta'],
-                ['command', 'Meta'],
-                ['meta', 'Meta'],
-                ['ctrl', 'Ctrl'],
-                ['control', 'Ctrl'],
-                ['alt', 'Alt'],
-                ['option', 'Alt'],
-                ['shift', 'Shift']
-            ]);
-            const modifiers = new Set();
-            let shortcutKey = '';
-
-            parts.forEach((part, index) => {
-                const alias = modifierAliases.get(part.toLowerCase());
-                if (alias && index < parts.length - 1) {
-                    modifiers.add(alias);
-                    return;
-                }
-                shortcutKey = normalizeCommandShortcutKey(part);
-            });
-
-            if (!shortcutKey || modifiers.size === 0) return '';
-            return ['Meta', 'Ctrl', 'Alt', 'Shift']
-                .filter((modifier) => modifiers.has(modifier))
-                .concat(shortcutKey)
-                .join('+');
-        }
-
-        function normalizeCommandShortcuts(value) {
-            if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
-            return Object.entries(value).reduce((result, [rawId, rawCombo]) => {
-                const id = normalizeCommandShortcutId(rawId);
-                const combo = normalizeCommandShortcutCombo(rawCombo);
-                if (!id || !combo) return result;
-                Object.keys(result).forEach((existingId) => {
-                    if (result[existingId] === combo && existingId !== id) {
-                        delete result[existingId];
-                    }
-                });
-                result[id] = combo;
-                return result;
-            }, {});
-        }
-
-        function normalizeVisibleQuickViewKinds(value) {
-            if (!Array.isArray(value)) return [...QUICK_VIEW_BUTTON_KINDS];
-            const requestedKinds = new Set(value.map((kind) => String(kind || '').trim().toLowerCase()));
-            return QUICK_VIEW_BUTTON_KINDS.filter((kind) => requestedKinds.has(kind));
-        }
-
-        function normalizeAppearancePreferences(value) {
-            const source = value && typeof value === 'object' ? value : {};
-            return {
-                hoverSpotlightEnabled: source.hoverSpotlightEnabled !== false
-            };
         }
 
         function cloneCommandShortcuts(shortcuts = commandShortcuts) {

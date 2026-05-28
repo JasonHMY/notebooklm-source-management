@@ -20,6 +20,29 @@
  * 契约: docs/MESSAGE_CONTRACTS.md + docs/STORAGE_SCHEMA.md
  */
 
+// Phase 3: shared preference normalizers — 实际实现见 src/utils/preference-normalizers.js。
+// MV3 service worker 用 importScripts 同步加载;Node test 环境(tests/background.test.js
+// 直接 require 本文件)走 require fallback。两条路径都让 globalThis.NSM_PREFERENCE_NORMALIZERS
+// 就位,后面 28+ 处调用点的本地名字通过下方 destructuring 保持不变。
+if (typeof importScripts === 'function') {
+    importScripts('../utils/preference-normalizers.js');
+} else if (typeof require !== 'undefined') {
+    require('../utils/preference-normalizers.js');
+}
+// normalizeCommandShortcutKey is used internally by normalizeCommandShortcutCombo
+// (within the utils file itself), so it's intentionally omitted from this destructure.
+const {
+    normalizePreferenceVersion,
+    normalizeWhatsNewSeenVersion,
+    normalizeHistoryRetentionLimit,
+    normalizeLanguageOverride,
+    normalizeCommandShortcutId,
+    normalizeCommandShortcutCombo,
+    normalizeCommandShortcuts,
+    normalizeVisibleQuickViewKinds,
+    normalizeAppearancePreferences
+} = globalThis.NSM_PREFERENCE_NORMALIZERS;
+
 const NOTEBOOKLM_HOME_URL = 'https://notebooklm.google.com/';
 const NOTEBOOKLM_URL_PATTERN = 'https://notebooklm.google.com/*';
 const NOTEBOOKLM_NOTEBOOK_PREFIX = 'https://notebooklm.google.com/notebook/';
@@ -31,7 +54,6 @@ const STATE_HISTORY_KEY_PREFIX = 'sourcesPlusHistory_';
 const DEVELOPER_LOG_KEY_PREFIX = 'sourcesPlusDeveloperLogs_';
 const STATE_HISTORY_LIMIT = 20;
 const HISTORY_RETENTION_LIMIT_OPTIONS = [20, 50, 100];
-const QUICK_VIEW_BUTTON_KINDS = ['all', 'ungrouped', 'disabled', 'tag', 'recent', 'issues'];
 const DEVELOPER_LOG_LIMIT = 500;
 const DEVELOPER_LOG_MAX_BYTES = 512 * 1024;
 const DEFAULT_STORAGE_QUOTA_BYTES = 10 * 1024 * 1024;
@@ -295,22 +317,6 @@ function normalizePreferences(preferences = {}) {
     };
 }
 
-function normalizePreferenceVersion(value) {
-    const version = Number(value);
-    if (!Number.isFinite(version) || version < 0) return 0;
-    return Math.floor(version);
-}
-
-function normalizeWhatsNewSeenVersion(value) {
-    if (value == null) return '';
-    const text = String(value).trim();
-    if (!text) return '';
-    if (!/^\d+(?:\.\d+){0,3}$/.test(text)) return '';
-    return text.split('.')
-        .map((part) => String(Number(part)))
-        .join('.');
-}
-
 function createPreferenceUsageState(storageData = {}) {
     const data = storageData && typeof storageData === 'object' ? storageData : {};
     const keys = Object.keys(data);
@@ -324,111 +330,6 @@ function createPreferenceUsageState(storageData = {}) {
         hasExistingPluginData: hasStoredPreferences || hasNotebookData,
         hasStoredPreferences
     };
-}
-
-function normalizeHistoryRetentionLimit(value) {
-    const limit = Number(value);
-    return HISTORY_RETENTION_LIMIT_OPTIONS.includes(limit) ? limit : STATE_HISTORY_LIMIT;
-}
-
-function normalizeAppearancePreferences(value) {
-    const source = value && typeof value === 'object' ? value : {};
-    return {
-        hoverSpotlightEnabled: source.hoverSpotlightEnabled !== false
-    };
-}
-
-function normalizeLanguageOverride(value) {
-    const normalized = String(value || 'auto').trim();
-    return normalized === 'auto' || normalized === 'en' || normalized === 'es' || normalized === 'zh_CN'
-        ? normalized
-        : 'auto';
-}
-
-function normalizeCommandShortcutId(value) {
-    const id = String(value || '').trim();
-    return /^[a-z0-9][a-z0-9-]{0,79}$/.test(id) ? id : '';
-}
-
-function normalizeCommandShortcutKey(value) {
-    const key = String(value || '').trim();
-    if (!key) return '';
-    if (key === ' ') return 'Space';
-    const aliases = {
-        esc: 'Escape',
-        escape: 'Escape',
-        spacebar: 'Space',
-        space: 'Space',
-        return: 'Enter',
-        enter: 'Enter',
-        del: 'Delete',
-        delete: 'Delete',
-        backspace: 'Backspace',
-        tab: 'Tab'
-    };
-    const lower = key.toLowerCase();
-    if (aliases[lower]) return aliases[lower];
-    if (/^f\d{1,2}$/i.test(key)) return key.toUpperCase();
-    if (key.length === 1) return key.toUpperCase();
-    return key.replace(/^\w/, (char) => char.toUpperCase()).slice(0, 32);
-}
-
-function normalizeCommandShortcutCombo(value) {
-    const parts = String(value || '')
-        .split('+')
-        .map((part) => part.trim())
-        .filter(Boolean);
-    if (parts.length < 2) return '';
-
-    const modifierAliases = new Map([
-        ['cmd', 'Meta'],
-        ['command', 'Meta'],
-        ['meta', 'Meta'],
-        ['ctrl', 'Ctrl'],
-        ['control', 'Ctrl'],
-        ['alt', 'Alt'],
-        ['option', 'Alt'],
-        ['shift', 'Shift']
-    ]);
-    const modifiers = new Set();
-    let shortcutKey = '';
-
-    parts.forEach((part, index) => {
-        const alias = modifierAliases.get(part.toLowerCase());
-        if (alias && index < parts.length - 1) {
-            modifiers.add(alias);
-            return;
-        }
-        shortcutKey = normalizeCommandShortcutKey(part);
-    });
-
-    if (!shortcutKey || modifiers.size === 0) return '';
-    return ['Meta', 'Ctrl', 'Alt', 'Shift']
-        .filter((modifier) => modifiers.has(modifier))
-        .concat(shortcutKey)
-        .join('+');
-}
-
-function normalizeCommandShortcuts(value) {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
-    return Object.entries(value).reduce((result, [rawId, rawCombo]) => {
-        const id = normalizeCommandShortcutId(rawId);
-        const combo = normalizeCommandShortcutCombo(rawCombo);
-        if (!id || !combo) return result;
-        Object.keys(result).forEach((existingId) => {
-            if (result[existingId] === combo && existingId !== id) {
-                delete result[existingId];
-            }
-        });
-        result[id] = combo;
-        return result;
-    }, {});
-}
-
-function normalizeVisibleQuickViewKinds(value) {
-    if (!Array.isArray(value)) return [...QUICK_VIEW_BUTTON_KINDS];
-    const requestedKinds = new Set(value.map((kind) => String(kind || '').trim().toLowerCase()));
-    return QUICK_VIEW_BUTTON_KINDS.filter((kind) => requestedKinds.has(kind));
 }
 
 function mergeCommandShortcuts(existingShortcuts = {}, nextShortcuts = {}) {

@@ -1,3 +1,5 @@
+require('../src/utils/preference-normalizers.js');
+
 describe('background.js message listener', () => {
     const DEFAULT_VISIBLE_QUICK_VIEW_KINDS = ['all', 'ungrouped', 'disabled', 'tag', 'recent', 'issues'];
     let listener;

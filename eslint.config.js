@@ -87,6 +87,8 @@ module.exports = [
                 module: 'readonly',
                 require: 'readonly',
                 exports: 'readonly',
+                importScripts: 'readonly',
+                NSM_PREFERENCE_NORMALIZERS: 'readonly',
                 structuredClone: 'readonly',
                 TextEncoder: 'readonly',
                 TextDecoder: 'readonly',

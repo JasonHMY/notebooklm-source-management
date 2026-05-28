@@ -1,3 +1,4 @@
+require('../../src/utils/preference-normalizers.js');
 const createContentDeveloperLogger = require('../../src/content/content-developer-logger.js');
 
 function createRuntimeMock(options = {}) {

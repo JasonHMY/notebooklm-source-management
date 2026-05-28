@@ -1,4 +1,5 @@
 function clearContentGlobals() {
+    delete globalThis.NSM_PREFERENCE_NORMALIZERS;
     delete globalThis.NSM_CONTENT_CONFIG;
     delete globalThis.NSM_SOURCE_DESCRIPTOR_HELPERS;
     delete globalThis.NSM_CONTENT_STYLE_TEXT;
@@ -49,6 +50,7 @@ function clearContentGlobals() {
 
 function loadContentModule() {
     clearContentGlobals();
+    require('../../src/utils/preference-normalizers.js');
     require('../../src/content/content-config.js');
     require('../../src/content/source-descriptor-helpers.js');
     require('../../src/content/content-style-text.js');
