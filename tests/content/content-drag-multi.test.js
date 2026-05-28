@@ -441,6 +441,37 @@ describe('content-drag-multi factory', () => {
             expect(state.ungrouped).toEqual(['A', 'B', 'C', 'D']);
         });
 
+        it('re-resolves the live target list after reassigning removeSourceFromParent (stale-ref regression)', () => {
+            // Production removeSourceFromTree does `state.ungrouped = state.ungrouped.filter(...)`
+            // — REASSIGNS the array reference. If applyMultiSourceDrop holds the original
+            // intent.targetList reference across the removes, the subsequent splice would
+            // mutate an orphan array and state.ungrouped would lose the dragged keys after
+            // render(). This test pins the post-remove live-list fetch so the regression
+            // (smoke test "moves three batch-selected sources into a folder via drag-and-drop"
+            // reaching the before-source path) cannot resurface.
+            const state = { ungrouped: ['A', 'B', 'C', 'D'], groups: [] };
+            const originalUngrouped = state.ungrouped;
+            const helpers = {
+                removeSourceFromParent: jest.fn((key) => {
+                    state.ungrouped = state.ungrouped.filter((k) => k !== key);
+                }),
+                sourceExists: jest.fn((key) => state.ungrouped.includes(key)),
+                getGroupById: jest.fn(() => null)
+            };
+            const helper = createContentDragMulti();
+            const result = helper.applyMultiSourceDrop({
+                keys: ['A', 'B', 'C'],
+                intent: { kind: 'before-source', targetList: state.ungrouped, insertIndex: 0, targetGroup: null },
+                state,
+                helpers
+            });
+            expect(result.moved).toBe(3);
+            expect(state.ungrouped).toEqual(['A', 'B', 'C', 'D']);
+            // Confirm the live state.ungrouped is the post-filter reassigned array (not the
+            // original one captured in intent.targetList), and that splices went into IT.
+            expect(state.ungrouped).not.toBe(originalUngrouped);
+        });
+
         it('returns moved=0 when the target list is entirely the dragged set', () => {
             const state = { ungrouped: ['A', 'B'], groups: [] };
             const helpers = makeHelpers(state);

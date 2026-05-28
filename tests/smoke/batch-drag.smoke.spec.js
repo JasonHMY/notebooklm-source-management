@@ -144,8 +144,11 @@ test.describe.serial('batch drag smoke', () => {
             } catch (err) { /* ignore data-transfer write failures */ }
 
             const rect = targetGroup.getBoundingClientRect();
-            const clientX = rect.left + rect.width / 2;
-            const clientY = rect.top + rect.height / 2;
+            // Use 75% width to land cursor clearly in the X-split right half ("inside") —
+            // Chrome integer-rounds clientX in synthesized DragEvent init dicts, so exact-midX
+            // coordinates can drift to the wrong side of the boundary by < 1px.
+            const clientX = Math.floor(rect.left + rect.width * 0.75);
+            const clientY = Math.floor(rect.top + rect.height / 2);
 
             // Production code keys the drop intent off the drag-feedback classes that dragover applies.
             // Force the drag-into intent to ensure a deterministic into-group drop.

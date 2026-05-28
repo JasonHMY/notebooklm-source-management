@@ -186,10 +186,23 @@
                     if (typeof helpers.removeSourceFromParent === 'function') helpers.removeSourceFromParent(key);
                 }
 
+                // Re-fetch the live target list reference: removeSourceFromParent reassigns
+                // state.ungrouped (and parent.children) via `= ...filter(...)`, so the original
+                // `list` captured from intent.targetList becomes a stale orphan when any of
+                // the removed sources shared this list. Splicing into the orphan would leave
+                // state un-mutated (sources disappear after render). Re-resolve from the
+                // current state / targetGroup before the splice.
+                let currentList = list;
+                if (intent.targetGroup && Array.isArray(intent.targetGroup.children)) {
+                    currentList = intent.targetGroup.children;
+                } else if (state && Array.isArray(state.ungrouped)) {
+                    currentList = state.ungrouped;
+                }
+
                 for (let i = 0; i < validKeys.length; i += 1) {
                     const key = validKeys[i];
                     const entry = hadObjectEntries ? { type: 'source', key } : key;
-                    list.splice(adjustedInsertIndex + i, 0, entry);
+                    currentList.splice(adjustedInsertIndex + i, 0, entry);
                 }
                 return { moved: validKeys.length, skipped };
             }
