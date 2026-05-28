@@ -2651,6 +2651,41 @@
                 overflow: hidden;
             }
 
+            /* Cancellation cue (dragend without successful drop): brief shake +
+               red glow so the user sees an explicit "rejected" beat instead of
+               the row silently snapping back. Plays in parallel with
+               unfoldDraggedItems' height grow-back. Transform shake does not
+               conflict with .sp-drag-unfolding (height/opacity only). The class
+               is removed after 240ms; the transition on box-shadow lets the
+               red ring fade out smoothly rather than snap to none. */
+            .sp-drag-cancelled {
+                animation: sp-drag-cancelled-shake 200ms var(--sp-ease-standard);
+                box-shadow: 0 0 0 1px rgba(255, 59, 48, 0.5), 0 0 8px var(--sp-danger-glow);
+                transition: box-shadow var(--sp-motion-medium) var(--sp-ease-standard);
+            }
+            @keyframes sp-drag-cancelled-shake {
+                0%, 100% { transform: translateX(0); }
+                20% { transform: translateX(-3px); }
+                50% { transform: translateX(3px); }
+                80% { transform: translateX(-2px); }
+            }
+
+            /* Hover-expand pending cue (drag pointer dwelling on a collapsed
+               group): 600ms outline build-up that pairs with the hover-expand
+               timer in armHoverExpandTimerForGroup. Inset box-shadow grows
+               from transparent to the same blue used by .drag-into so the
+               transition into the open state reads as continuous.
+               'forwards' fill-mode keeps the peak ring at the end of the
+               keyframe so there's no flash back to 0 if the JS class-remove
+               races the last paint. */
+            .group-container.sp-hover-expand-pending > .group-header {
+                animation: sp-hover-expand-pending-build 600ms var(--sp-ease-standard) forwards;
+            }
+            @keyframes sp-hover-expand-pending-build {
+                0%   { box-shadow: inset 0 0 0 0 transparent; }
+                100% { box-shadow: inset 0 0 0 2px var(--sp-drag-into-bg); }
+            }
+
             @media (prefers-reduced-motion: reduce) {
                 .sp-drop-landing {
                     animation: none !important;
@@ -2660,11 +2695,26 @@
                 .sp-drag-unfolding {
                     transition: none !important;
                 }
+                .group-container.drag-into > .group-header {
+                    transition: none !important;
+                }
+                /* Keep the static red ring so reduced-motion users still get a
+                   "rejected" cue, but skip the shake + the box-shadow fade. */
+                .sp-drag-cancelled {
+                    animation: none !important;
+                    transition: none !important;
+                }
+                /* Show the full outline immediately instead of building up. */
+                .group-container.sp-hover-expand-pending > .group-header {
+                    animation: none !important;
+                    box-shadow: inset 0 0 0 2px var(--sp-drag-into-bg);
+                }
             }
 
             .group-container.drag-into > .group-header {
                 background-color: var(--sp-drag-into-bg);
                 border-radius: 12px;
+                transition: background-color var(--sp-motion-fast) var(--sp-ease-standard), border-radius var(--sp-motion-fast) var(--sp-ease-standard);
             }
 
             .sp-toast {

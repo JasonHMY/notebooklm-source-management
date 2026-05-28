@@ -3434,6 +3434,62 @@ describe('handleDragOver hover-expand', () => {
         expect(ctx.groupsById.get('g1').collapsed).toBe(true);
     });
 
+    // Pending-expand visual cue (.sp-hover-expand-pending): added on the host
+    // group-container when the 600ms hover timer arms, removed when the timer
+    // fires (= the group actually opens) or cancels (pointer moved off, drag
+    // ended, etc.). CSS turns this into a 600ms outline build-up so the user
+    // sees "this group is about to open" during the wait.
+    it('adds .sp-hover-expand-pending on the group-container while the expand timer is armed', () => {
+        const ctx = setupTreeInteractionsTestContext({
+            state: { isBatchMode: false, ungrouped: [], groups: ['g1'] },
+            pendingBatchKeys: new Set(),
+            groups: { g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: true } },
+            items: [{ kind: 'group', id: 'g1', top: 100, headerHeight: 40, childrenStart: 140, childrenEnd: 140 }]
+        });
+        ctx.helpers.dragOverFor('g1');
+        const container = ctx.elementMap.get('group:g1');
+        expect(container.classList.contains('sp-hover-expand-pending')).toBe(true);
+    });
+
+    it('removes .sp-hover-expand-pending when the expand timer fires (group opens)', () => {
+        const ctx = setupTreeInteractionsTestContext({
+            state: { isBatchMode: false, ungrouped: [], groups: ['g1'] },
+            pendingBatchKeys: new Set(),
+            groups: { g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: true } },
+            items: [{ kind: 'group', id: 'g1', top: 100, headerHeight: 40, childrenStart: 140, childrenEnd: 140 }]
+        });
+        ctx.helpers.dragOverFor('g1');
+        const container = ctx.elementMap.get('group:g1');
+        expect(container.classList.contains('sp-hover-expand-pending')).toBe(true);
+        jest.advanceTimersByTime(600);
+        expect(container.classList.contains('sp-hover-expand-pending')).toBe(false);
+        expect(ctx.groupsById.get('g1').collapsed).toBe(false);
+    });
+
+    it('removes .sp-hover-expand-pending when the pointer moves to a different group before 600ms', () => {
+        const ctx = setupTreeInteractionsTestContext({
+            state: { isBatchMode: false, ungrouped: [], groups: ['g1', 'g2'] },
+            pendingBatchKeys: new Set(),
+            groups: {
+                g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: true },
+                g2: { id: 'g2', children: [{ type: 'source', key: 'Y' }], collapsed: true }
+            },
+            items: [
+                { kind: 'group', id: 'g1', top: 100, headerHeight: 40, childrenStart: 140, childrenEnd: 140 },
+                { kind: 'group', id: 'g2', top: 200, headerHeight: 40, childrenStart: 240, childrenEnd: 240 }
+            ]
+        });
+        ctx.helpers.dragOverFor('g1');
+        const c1 = ctx.elementMap.get('group:g1');
+        expect(c1.classList.contains('sp-hover-expand-pending')).toBe(true);
+        // Pointer moves to g2 before g1's 600ms elapsed → g1 timer cancels.
+        jest.advanceTimersByTime(300);
+        ctx.helpers.dragOverFor('g2');
+        expect(c1.classList.contains('sp-hover-expand-pending')).toBe(false);
+        const c2 = ctx.elementMap.get('group:g2');
+        expect(c2.classList.contains('sp-hover-expand-pending')).toBe(true);
+    });
+
     describe('state shape refactor (Set + Map)', () => {
         beforeEach(() => {
             jest.useFakeTimers();
@@ -4379,6 +4435,76 @@ describe('handleDragEnd reflow restore', () => {
 
         expect(dragReflow.clearReflow).not.toHaveBeenCalled();
         expect(dragReflow.unfoldDraggedItems).not.toHaveBeenCalled();
+    });
+
+    // Cancellation cue (.sp-drag-cancelled): added by cleanupReflowSession only
+    // when dragend runs with a non-null dragReflowSession (= drop did NOT
+    // succeed, since handleDrop nulls the session in its success path). Class
+    // self-clears via setTimeout(240ms) so the CSS shake + box-shadow fade
+    // finish naturally.
+    it('adds .sp-drag-cancelled to dragged rows when dragend cancels without a successful drop', () => {
+        jest.useFakeTimers();
+        try {
+            const draggedEl = { classList: createClassList([]) };
+            const sourcesListEl = {
+                id: 'sources-list',
+                querySelector: jest.fn((sel) => (sel.indexOf('"A"') >= 0 ? draggedEl : null))
+            };
+            const shadowRoot = {
+                querySelector: jest.fn(() => null),
+                querySelectorAll: jest.fn(() => []),
+                getElementById: jest.fn((id) => (id === 'sources-list' ? sourcesListEl : null))
+            };
+            const session = {
+                draggedKeys: new Set(['A']),
+                currentIntent: null,
+                shiftedItems: new Map()
+            };
+            const runtime = { dragReflowSession: session };
+            const dragReflow = makeDragReflowMock();
+            const interactions = createContentTreeInteractions({
+                runtime,
+                getState: () => ({ groups: [], ungrouped: ['A', 'B'] }),
+                getGroupsById: () => new Map(),
+                getPendingBatchKeys: () => new Set(),
+                getShadowRoot: () => shadowRoot,
+                dragMulti: createContentDragMulti({}),
+                dragReflow
+            });
+            interactions.handleDragEnd({ target: { closest: jest.fn(() => null) } });
+            expect(draggedEl.classList.add).toHaveBeenCalledWith('sp-drag-cancelled');
+            expect(draggedEl.classList.remove).not.toHaveBeenCalledWith('sp-drag-cancelled');
+            jest.advanceTimersByTime(240);
+            expect(draggedEl.classList.remove).toHaveBeenCalledWith('sp-drag-cancelled');
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    it('does NOT add .sp-drag-cancelled when handleDrop already nulled dragReflowSession (success path)', () => {
+        const draggedEl = { classList: createClassList([]) };
+        const sourcesListEl = {
+            id: 'sources-list',
+            querySelector: jest.fn(() => draggedEl)
+        };
+        const shadowRoot = {
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => []),
+            getElementById: jest.fn((id) => (id === 'sources-list' ? sourcesListEl : null))
+        };
+        const runtime = { dragReflowSession: null };
+        const dragReflow = makeDragReflowMock();
+        const interactions = createContentTreeInteractions({
+            runtime,
+            getState: () => ({ groups: [], ungrouped: ['A'] }),
+            getGroupsById: () => new Map(),
+            getPendingBatchKeys: () => new Set(),
+            getShadowRoot: () => shadowRoot,
+            dragMulti: createContentDragMulti({}),
+            dragReflow
+        });
+        interactions.handleDragEnd({ target: { closest: jest.fn(() => null) } });
+        expect(draggedEl.classList.add).not.toHaveBeenCalledWith('sp-drag-cancelled');
     });
 });
 

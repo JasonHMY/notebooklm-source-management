@@ -2217,6 +2217,14 @@
             if (typeof clearTimeout === 'function' && entry.timeoutId !== null && entry.timeoutId !== undefined) {
                 clearTimeout(entry.timeoutId);
             }
+            // If this was a pending expand, drop the visual cue too.
+            // Cancellation reasons: pointer moved off the group, drag ended,
+            // a sibling group's expand timer claimed the slot, etc.
+            if (entry.kind === 'expand' && entry.containerEl
+                && entry.containerEl.classList
+                && typeof entry.containerEl.classList.remove === 'function') {
+                entry.containerEl.classList.remove('sp-hover-expand-pending');
+            }
             runtime.hoverExpandTimers.delete(groupId);
         }
 
@@ -2229,6 +2237,15 @@
         }
 
         function executeHoverExpand(groupId) {
+            // Drop the pending-cue class on whatever container we tracked when
+            // the timer was armed — the actual expand is about to happen, so
+            // the "about to open" outline should give way to the open state.
+            const _expandEntry = runtime.hoverExpandTimers.get(groupId);
+            if (_expandEntry && _expandEntry.kind === 'expand' && _expandEntry.containerEl
+                && _expandEntry.containerEl.classList
+                && typeof _expandEntry.containerEl.classList.remove === 'function') {
+                _expandEntry.containerEl.classList.remove('sp-hover-expand-pending');
+            }
             runtime.hoverExpandTimers.delete(groupId);
             const groupsById = getGroupsById();
             const group = groupsById.get(groupId);
@@ -2263,8 +2280,24 @@
 
             const setTimeoutFn = getSetTimeout();
             if (typeof setTimeoutFn !== 'function') return;
+
+            // Visual cue: paint a 600ms outline build-up on the host
+            // group-container so the user sees "this group is about to open"
+            // during the wait. The class is removed either when the timer
+            // fires (executeHoverExpand) or when cancelHoverTimerForGroup
+            // runs (pointer moved elsewhere) — see both call sites.
+            let _armContainerEl = null;
+            const _armRoot = getShadowRoot();
+            if (_armRoot && typeof _armRoot.querySelector === 'function') {
+                _armContainerEl = _armRoot.querySelector(`.group-container[data-group-id="${cssEscape(groupId)}"]`);
+                if (_armContainerEl && _armContainerEl.classList
+                    && typeof _armContainerEl.classList.add === 'function') {
+                    _armContainerEl.classList.add('sp-hover-expand-pending');
+                }
+            }
+
             const timeoutId = setTimeoutFn(() => executeHoverExpand(groupId), 600);
-            runtime.hoverExpandTimers.set(groupId, { kind: 'expand', timeoutId });
+            runtime.hoverExpandTimers.set(groupId, { kind: 'expand', timeoutId, containerEl: _armContainerEl });
         }
 
         function armHoverCollapseTimerForGroup(groupId) {
@@ -2409,6 +2442,29 @@
                         rootElement: getSourceListContainer()
                     });
                 }
+                // Cancellation cue: cleanupReflowSession only runs when the drag
+                // ended WITHOUT a successful drop (handleDrop's success path nulls
+                // dragReflowSession before reaching dragend). Add .sp-drag-cancelled
+                // to the dragged rows so the CSS shake + red glow plays in parallel
+                // with the unfold grow-back, giving explicit "this didn't land"
+                // feedback. The class self-clears after 240ms (animation 200ms +
+                // shadow fade-out 240ms ≈ same lifetime as the unfold tail).
+                const _cancelRoot = getSourceListContainer();
+                const _cancelSetTimeout = getSetTimeout();
+                const _cancelledNodes = [];
+                if (_cancelRoot && runtime.dragReflowSession.draggedKeys
+                    && typeof _cancelRoot.querySelector === 'function') {
+                    for (const key of runtime.dragReflowSession.draggedKeys) {
+                        if (typeof key !== 'string' || !key) continue;
+                        const safe = key.replace(/"/g, '\\"');
+                        const el = _cancelRoot.querySelector(`[data-source-key="${safe}"]`)
+                            || _cancelRoot.querySelector(`[data-group-id="${safe}"]`);
+                        if (el && el.classList && typeof el.classList.add === 'function') {
+                            el.classList.add('sp-drag-cancelled');
+                            _cancelledNodes.push(el);
+                        }
+                    }
+                }
                 if (typeof dragReflow.unfoldDraggedItems === 'function') {
                     // animated:true → smooth 200ms grow-back. Pairs with clearReflow's
                     // sibling translateY transition so cancel (esc / drop outside) feels
@@ -2418,6 +2474,15 @@
                         rootElement: getSourceListContainer(),
                         animated: true
                     });
+                }
+                if (_cancelledNodes.length > 0 && typeof _cancelSetTimeout === 'function') {
+                    _cancelSetTimeout(() => {
+                        for (const node of _cancelledNodes) {
+                            if (node && node.classList && typeof node.classList.remove === 'function') {
+                                node.classList.remove('sp-drag-cancelled');
+                            }
+                        }
+                    }, 240);
                 }
                 runtime.dragReflowSession = null;
             }
