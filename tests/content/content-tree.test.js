@@ -1091,6 +1091,134 @@ describe('drop routes multi vs single source', () => {
         expect(developerLog).not.toHaveBeenCalled();
     });
 
+    it('single-source drop moves a source from group A to group B children, updating both groups consistently', () => {
+        const groupA = { id: 'gA', children: [{ type: 'source', key: 'A1' }, { type: 'source', key: 'A2' }] };
+        const groupB = { id: 'gB', children: [{ type: 'source', key: 'B1' }] };
+        const state = { isBatchMode: false, ungrouped: [], groups: ['gA', 'gB'] };
+        const groupsById = new Map([['gA', groupA], ['gB', groupB]]);
+        const sourcesByKey = new Map([
+            ['A1', { key: 'A1' }],
+            ['A2', { key: 'A2' }],
+            ['B1', { key: 'B1' }]
+        ]);
+        const parentMap = new Map([['A1', 'gA'], ['A2', 'gA'], ['B1', 'gB']]);
+        const buildParentMap = jest.fn();
+        const dropTarget = {
+            dataset: { sourceKey: 'B1' },
+            classList: createClassList(['source-item'])
+        };
+        const runtime = {
+            dragReflowSession: {
+                draggedKeys: new Set(['A1']),
+                currentIntent: {
+                    kind: 'after-source',
+                    targetGroup: groupB,
+                    targetList: groupB.children,
+                    insertIndex: 1,
+                    targetGroupId: 'gB',
+                    slotKey: 'B1'
+                },
+                shiftedItems: new Map()
+            }
+        };
+        const interactions = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getSourcesByKey: () => sourcesByKey,
+            getParentMap: () => parentMap,
+            getPendingBatchKeys: () => new Set(),
+            getShadowRoot: makeShadowRootWithList,
+            saveState: jest.fn(),
+            render: jest.fn(),
+            showToast: jest.fn(),
+            buildParentMap,
+            developerLog: jest.fn(),
+            dragMulti: createContentDragMulti({}),
+            getMessage: (key, args = []) => `${key}:${args.join(',')}`
+        });
+
+        interactions.handleDrop(createDropEvent({
+            dropTarget,
+            sourceKey: 'A1'
+        }));
+
+        // A1 removed from group A, appended after B1 in group B.
+        expect(groupA.children).toEqual([{ type: 'source', key: 'A2' }]);
+        expect(groupB.children).toEqual([
+            { type: 'source', key: 'B1' },
+            { type: 'source', key: 'A1' }
+        ]);
+        // parentMap rebuild is the contract for keeping subsequent drag lookups
+        // (findParentGroupOfSource) consistent with the new tree shape.
+        expect(buildParentMap).toHaveBeenCalled();
+    });
+
+    it('preserves batch selection when dragging an unselected source while batch mode is on', () => {
+        // Batch mode is on with A and B selected, but the user drags C (not in
+        // the selection). resolveDragSelection should fall back to origin-only,
+        // so the drop must NOT exit batch mode or clear pending selections —
+        // batch state is preserved for the user's next action.
+        const state = { isBatchMode: true, ungrouped: ['A', 'B', 'C', 'D'], groups: [] };
+        const groupsById = new Map();
+        const sourcesByKey = new Map([
+            ['A', { key: 'A' }],
+            ['B', { key: 'B' }],
+            ['C', { key: 'C' }],
+            ['D', { key: 'D' }]
+        ]);
+        const pendingBatchKeys = new Set(['A', 'B']);
+        const dropTarget = {
+            dataset: { sourceKey: 'D' },
+            classList: createClassList(['source-item'])
+        };
+        // Single-source drag intent (resolveDragSelection returned [C] only).
+        const runtime = {
+            dragReflowSession: {
+                draggedKeys: new Set(['C']),
+                currentIntent: {
+                    kind: 'after-source',
+                    targetGroup: null,
+                    targetList: state.ungrouped,
+                    insertIndex: 4,
+                    targetGroupId: null,
+                    slotKey: 'D'
+                },
+                shiftedItems: new Map()
+            }
+        };
+        const interactions = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getSourcesByKey: () => sourcesByKey,
+            getParentMap: () => new Map(),
+            getPendingBatchKeys: () => pendingBatchKeys,
+            getShadowRoot: makeShadowRootWithList,
+            saveState: jest.fn(),
+            render: jest.fn(),
+            showToast: jest.fn(),
+            buildParentMap: jest.fn(),
+            developerLog: jest.fn(),
+            dragMulti: createContentDragMulti({}),
+            getMessage: (key, args = []) => `${key}:${args.join(',')}`
+        });
+
+        // Note: sourceKeysJson is intentionally absent — the dragstart fell back
+        // to origin-only and only wrote application/source-key.
+        interactions.handleDrop(createDropEvent({
+            dropTarget,
+            sourceKey: 'C'
+        }));
+
+        // C reordered to after D in ungrouped.
+        expect(state.ungrouped).toEqual(['A', 'B', 'D', 'C']);
+        // Batch mode + selection survived the single-source drag/drop.
+        expect(state.isBatchMode).toBe(true);
+        expect(pendingBatchKeys.has('A')).toBe(true);
+        expect(pendingBatchKeys.has('B')).toBe(true);
+    });
+
     it('falls back to single-source path when application/source-keys is absent', () => {
         const group = { id: 'g1', children: [] };
         const state = { isBatchMode: false, ungrouped: ['A', 'B'], groups: ['g1'] };
