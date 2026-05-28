@@ -851,7 +851,19 @@
         setActiveSourceActionSubmenuAction,
         getSourceViewInfo: () => getSourceDisplayViewInfo(findSourcePanel()),
         getNativeLabelImportPreview: (...args) => getNativeLabelImportPreview(...args),
-        getLastNativeLabelImportSummary: () => lastNativeLabelImportSummary
+        getLastNativeLabelImportSummary: () => lastNativeLabelImportSummary,
+        // Post-render hook: re-apply active drag reflow shifts after render() rebuilds
+        // the DOM. Without this, when render() runs mid-drag (notebookLM SPA sync,
+        // hover-expand setState), patchNode may strip inline transforms from siblings
+        // — the session.shiftedItems Map still tracks correct deltas but the DOM
+        // doesn't reflect them, causing visible snap-back one frame. Lazy lookup of
+        // treeInteractionsModule because it's wired AFTER renderModule below; the
+        // hook only fires inside render() which can't run before both are wired.
+        onAfterRender: () => {
+            if (treeInteractionsModule && typeof treeInteractionsModule.applyReflowAfterRender === 'function') {
+                treeInteractionsModule.applyReflowAfterRender();
+            }
+        }
     });
     const {
         createBatchCountMessageChildren,

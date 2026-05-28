@@ -2852,6 +2852,30 @@
             }
         }
 
+        // Called by content-render's `render()` end-of-cycle hook. When a drag is
+        // active and the reflow session has tracked shifts, the DOM that
+        // patchChildren just produced may not carry the inline transforms anymore
+        // (patchNode can rewrite the style attribute or replace elements during
+        // reconciliation). Re-apply the tracked shifts so siblings stay at their
+        // visually-shifted positions across the render. Idempotent: if shifts
+        // already match (prev === delta) applyReflow skips per-element work.
+        function applyReflowAfterRender() {
+            if (!runtime.dragReflowSession || !dragReflow) return;
+            if (typeof dragReflow.applyReflow !== 'function') return;
+            const shifts = runtime.dragReflowSession.shiftedItems;
+            if (!(shifts instanceof Map) || shifts.size === 0) return;
+            // Snapshot the current shifts before applyReflow's diff loop mutates the
+            // session.shiftedItems Map (clears entries not in `next`). Without this
+            // snapshot, applyReflow would clear ALL tracked items because it
+            // compares against the incoming `shifts` argument — passing the live
+            // Map as `shifts` works because every entry trivially matches itself.
+            dragReflow.applyReflow({
+                session: runtime.dragReflowSession,
+                shifts,
+                rootElement: getSourceListContainer()
+            });
+        }
+
         return {
             handleAddNewGroup,
             syncSourceToPage,
@@ -2879,7 +2903,8 @@
             isNoopTreeMove,
             getGroupAncestorChain,
             resolveSiblingKeys,
-            computeDropIntent
+            computeDropIntent,
+            applyReflowAfterRender
         };
     }
 

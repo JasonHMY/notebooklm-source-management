@@ -1469,6 +1469,19 @@
             patchChildren(listContainer, fragment);
             animateBatchCountChanges(listContainer, previousBatchCountSnapshot);
             renderSourceActionMenuLayer();
+
+            // Post-render hook: when a drag is in progress, the reflow session's
+            // tracked sibling shifts (inline `transform: translateY(N)`) can be lost
+            // because patchNode may replace elements or rewrite their style attribute
+            // during reconciliation. The session.shiftedItems Map still tracks the
+            // correct shifts by key, but the DOM no longer reflects them — siblings
+            // visually snap back to their layout positions one frame. The hook lets
+            // tree-interactions re-apply current shifts to the freshly-patched DOM
+            // (idempotent: applyReflow skips entries whose prev === delta).
+            // Non-drag callers can leave deps.onAfterRender undefined → cheap no-op.
+            if (typeof deps.onAfterRender === 'function') {
+                try { deps.onAfterRender(); } catch (_) { /* ignore hook errors */ }
+            }
         }
 
         return {

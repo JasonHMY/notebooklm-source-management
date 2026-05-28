@@ -4205,3 +4205,106 @@ describe('handleDragEnd reflow restore', () => {
         expect(dragReflow.unfoldDraggedItems).not.toHaveBeenCalled();
     });
 });
+
+// applyReflowAfterRender is the bridge between content-render's `render()`
+// end-of-cycle hook and the active drag's tracked reflow shifts. Without this
+// hook, when render() rebuilds the DOM mid-drag (notebookLM SPA sync, hover-
+// expand setState), inline transforms on shifted siblings are dropped by
+// patchNode's style-attribute rewrite — siblings visually snap back to layout
+// for one frame until the next dragover frame re-applies. The hook lets
+// content-render trigger a re-apply at the end of every render() call,
+// keeping the shift visible across the rebuild.
+describe('applyReflowAfterRender hook', () => {
+    let createContentTreeInteractions;
+    let createContentDragMulti;
+
+    beforeEach(() => {
+        jest.resetModules();
+        setupGlobalMocks();
+        require('../../src/content/content-native-checkbox-sync.js');
+        createContentTreeInteractions = require('../../src/content/content-tree-interactions.js');
+        createContentDragMulti = require('../../src/content/content-drag-multi.js');
+    });
+
+    afterEach(teardownGlobalMocks);
+
+    function makeReflowMock() {
+        return {
+            applyReflow: jest.fn(),
+            clearReflow: jest.fn(),
+            prepareDragSession: jest.fn(),
+            foldDraggedItems: jest.fn(),
+            unfoldDraggedItems: jest.fn(),
+            computeReflow: jest.fn(() => new Map()),
+            extractInlineTranslateY: () => 0
+        };
+    }
+
+    function buildInteractions({ runtime, dragReflow }) {
+        const sourcesListEl = { id: 'sources-list' };
+        const shadowRoot = {
+            querySelector: () => null,
+            querySelectorAll: () => [],
+            getElementById: (id) => (id === 'sources-list' ? sourcesListEl : null)
+        };
+        return createContentTreeInteractions({
+            runtime,
+            getState: () => ({ ungrouped: [], groups: [] }),
+            getGroupsById: () => new Map(),
+            getParentMap: () => new Map(),
+            getShadowRoot: () => shadowRoot,
+            dragMulti: createContentDragMulti({}),
+            dragReflow
+        });
+    }
+
+    it('re-applies tracked shifts when called during an active drag with non-empty shiftedItems', () => {
+        const dragReflow = makeReflowMock();
+        const shifts = new Map([['B', 40], ['C', 40]]);
+        const runtime = {
+            dragReflowSession: {
+                draggedKeys: new Set(['A']),
+                itemHeights: new Map(),
+                totalDraggedHeight: 40,
+                currentIntent: null,
+                shiftedItems: shifts
+            }
+        };
+        const interactions = buildInteractions({ runtime, dragReflow });
+
+        interactions.applyReflowAfterRender();
+
+        expect(dragReflow.applyReflow).toHaveBeenCalledTimes(1);
+        const args = dragReflow.applyReflow.mock.calls[0][0];
+        expect(args.session).toBe(runtime.dragReflowSession);
+        expect(args.shifts).toBe(shifts);
+    });
+
+    it('is a cheap no-op when there is no active drag session', () => {
+        const dragReflow = makeReflowMock();
+        const runtime = { dragReflowSession: null };
+        const interactions = buildInteractions({ runtime, dragReflow });
+
+        interactions.applyReflowAfterRender();
+
+        expect(dragReflow.applyReflow).not.toHaveBeenCalled();
+    });
+
+    it('skips when drag session exists but no shifts are tracked (early dragover, empty shiftedItems)', () => {
+        const dragReflow = makeReflowMock();
+        const runtime = {
+            dragReflowSession: {
+                draggedKeys: new Set(['A']),
+                itemHeights: new Map(),
+                totalDraggedHeight: 0,
+                currentIntent: null,
+                shiftedItems: new Map() // empty
+            }
+        };
+        const interactions = buildInteractions({ runtime, dragReflow });
+
+        interactions.applyReflowAfterRender();
+
+        expect(dragReflow.applyReflow).not.toHaveBeenCalled();
+    });
+});
