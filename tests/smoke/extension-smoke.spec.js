@@ -1182,4 +1182,90 @@ test.describe.serial('extension smoke', () => {
         expect(storedAfterStaleSave.primary).toEqual(protectedState);
         expect(storedAfterStaleSave.backup).toEqual(protectedState);
     });
+
+    test('post-drop hover refresh: pseudo-hover lands on cursor row, not the dragstart row', async () => {
+        // Regression guard: Chrome's native :hover freezes during HTML5 drag and
+        // stays on the dragstart element after drop until a real mousemove fires.
+        // Because patchChildren re-uses DOM nodes in place, the dragstart node now
+        // displays a different source post-drop, so the user sees the "wrong" row
+        // highlighted. handleDragEnd compensates by adding .sp-drag-active on
+        // #sources-list (suppression CSS) + .sp-pseudo-hover on the cursor-under
+        // row, and tears down only on a trusted pointer event.
+        const notebookPage = await env.context.newPage();
+        await notebookPage.goto('https://notebooklm.google.com/notebook/hover-refresh');
+
+        await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
+        await notebookPage.evaluate(() => window.__waitForFixtureHydration('full'));
+
+        const dropOutcome = await notebookPage.evaluate(async () => {
+            const getRoot = () => document.querySelector('#sources-plus-root')?.shadowRoot || null;
+            const waitForValue = async (readValue, errorMessage, timeoutMs = 5_000) => {
+                const start = Date.now();
+                while ((Date.now() - start) < timeoutMs) {
+                    const value = readValue();
+                    if (value) return value;
+                    await new Promise((resolve) => window.setTimeout(resolve, 25));
+                }
+                throw new Error(errorMessage);
+            };
+            await waitForValue(getRoot, 'Manager root missing.');
+            const rows = await waitForValue(() => {
+                const list = Array.from(getRoot()?.querySelectorAll('.source-item') || []);
+                return list.length >= 2 ? list : null;
+            }, 'Need at least two source rows.');
+
+            const fromRow = rows[0];
+            const targetRow = rows[1];
+            const targetRect = targetRow.getBoundingClientRect();
+            const cursorX = Math.floor(targetRect.left + targetRect.width / 2);
+            const cursorY = Math.floor(targetRect.top + targetRect.height / 2);
+
+            const dataTransfer = new DataTransfer();
+            fromRow.dispatchEvent(new DragEvent('dragstart', {
+                bubbles: true, cancelable: true, dataTransfer
+            }));
+            targetRow.dispatchEvent(new DragEvent('dragover', {
+                bubbles: true, cancelable: true, dataTransfer,
+                clientX: cursorX, clientY: targetRect.bottom - 1
+            }));
+            targetRow.dispatchEvent(new DragEvent('drop', {
+                bubbles: true, cancelable: true, dataTransfer,
+                clientX: cursorX, clientY: cursorY
+            }));
+            // dragend MUST carry clientX/clientY — handleDragEnd's hover-refresh
+            // path is guarded on both being numbers.
+            fromRow.dispatchEvent(new DragEvent('dragend', {
+                bubbles: true, cancelable: true, dataTransfer,
+                clientX: cursorX, clientY: cursorY
+            }));
+
+            const root = getRoot();
+            const sourcesList = root?.getElementById('sources-list') || null;
+            const pseudoHoverRows = Array.from(root?.querySelectorAll('.sp-pseudo-hover') || []);
+            return {
+                hasDragActive: Boolean(sourcesList?.classList?.contains('sp-drag-active')),
+                pseudoHoverCount: pseudoHoverRows.length,
+                cursorX,
+                cursorY
+            };
+        });
+
+        // Immediately after dragend (no real mousemove yet): the suppression
+        // class and at least one pseudo-hover row must be present.
+        expect(dropOutcome.hasDragActive).toBe(true);
+        expect(dropOutcome.pseudoHoverCount).toBeGreaterThanOrEqual(1);
+
+        // A real (isTrusted=true) mousemove must tear both classes down so
+        // native :hover takes over again.
+        await notebookPage.mouse.move(dropOutcome.cursorX + 4, dropOutcome.cursorY + 4);
+        await expect.poll(async () => notebookPage.evaluate(() => {
+            const root = document.querySelector('#sources-plus-root')?.shadowRoot || null;
+            if (!root) return null;
+            const list = root.getElementById('sources-list');
+            return {
+                hasDragActive: Boolean(list?.classList?.contains('sp-drag-active')),
+                pseudoHoverCount: root.querySelectorAll('.sp-pseudo-hover').length
+            };
+        }), { timeout: 5_000 }).toEqual({ hasDragActive: false, pseudoHoverCount: 0 });
+    });
 });

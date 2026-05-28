@@ -2953,25 +2953,29 @@
                 }
             }
             cleanupReflowSession();
-            // Post-drop hover hint: Chrome's native :hover stays stuck on whichever DOM
-            // element was under the cursor at dragstart (regardless of layout changes that
-            // happened during drag), and pointer-events flicker alone doesn't reliably
-            // invalidate Chrome's hover-state cache. Two layered mechanisms now collaborate:
+            // Post-drop hover hint. Chrome's native :hover stays stuck on whichever DOM
+            // element was under the cursor at dragstart and does not refresh until the
+            // user moves the mouse for real (HTML5 drag freezes hover; the W3C security
+            // model also forbids untrusted MouseEvents from re-triggering native :hover
+            // hit-testing). Combined with this project's in-place patchChildren render,
+            // that means the "row that was under the cursor at dragstart" can now be
+            // displaying a totally different source after drop — and it stays visually
+            // hovered until a real mousemove arrives. Two layered mechanisms collaborate:
             //
-            //   (1) Synthetic `mousemove` dispatch (primary) — walks Chrome through the
-            //       hover-update path explicitly, so native :hover snaps to the cursor's
-            //       actual current element on the next paint.
-            //   (2) `.sp-pseudo-hover` JS class (redundancy) — applies hover styling to
-            //       whatever element is currently under the cursor; cleared on the first
-            //       genuine user pointer event. Acts as a safety net for browsers / cases
-            //       where (1) doesn't fully take effect (synthetic events have
-            //       isTrusted=false; some hover paths are gated on trusted events).
-            //
-            // The pseudo class is cleared the moment any of {mousemove, mouseover,
-            // mousedown} fires after dragend — the synthetic mousemove from (1)
-            // typically triggers (2)'s cleanup in the same frame, so the user rarely
-            // sees the pseudo class visually. If the synthetic dispatch fails, the
-            // pseudo class remains visible until the user moves the mouse for real.
+            //   (1) `.sp-pseudo-hover` JS class on the cursor-under element AND
+            //       `.sp-drag-active` on #sources-list. The pseudo class re-paints the
+            //       hover affordance on the element actually under the cursor; the
+            //       drag-active class lets the stylesheet suppress the stale native
+            //       :hover (the rule lives in content-style-text.js next to
+            //       `.sp-pseudo-hover`). Both classes are cleared the first time a
+            //       trusted pointer event fires, so native :hover takes over seamlessly.
+            //   (2) Synthetic `mousemove` dispatch (best-effort) — some Chrome versions
+            //       partially honor isTrusted=false events for hover hit-testing; if it
+            //       works, native :hover snaps back on the next paint and (1)'s capture
+            //       listener will tear down on the user's first real movement anyway.
+            //       The listener gates on `event.isTrusted` so our own synthetic
+            //       dispatch does NOT immediately tear down (1) and leave the user with
+            //       neither pseudo nor refreshed native :hover.
             const _endList = getSourceListContainer();
             if (_endList && typeof e.clientX === 'number' && typeof e.clientY === 'number') {
                 const _shadow = typeof getShadowRoot === 'function' ? getShadowRoot() : null;
@@ -2988,8 +2992,14 @@
                     : null;
                 if (_hoverable && _hoverable.classList && typeof _hoverable.classList.add === 'function') {
                     _hoverable.classList.add('sp-pseudo-hover');
+                    if (_endList.classList && typeof _endList.classList.add === 'function') {
+                        _endList.classList.add('sp-drag-active');
+                    }
                 }
                 const _clearPseudo = () => {
+                    if (_endList && _endList.classList && typeof _endList.classList.remove === 'function') {
+                        _endList.classList.remove('sp-drag-active');
+                    }
                     if (!_endList || typeof _endList.querySelectorAll !== 'function') return;
                     const _stale = _endList.querySelectorAll('.sp-pseudo-hover');
                     if (_stale && typeof _stale.forEach === 'function') {
@@ -3001,7 +3011,11 @@
                     }
                 };
                 if (_doc && typeof _doc.addEventListener === 'function') {
-                    const _onCleanup = () => {
+                    const _onCleanup = (evt) => {
+                        // Gate on isTrusted so the synthetic mousemove dispatched below
+                        // does not tear down the very state we just installed. Only real
+                        // user pointer activity should hand control back to native :hover.
+                        if (evt && evt.isTrusted === false) return;
                         try {
                             _doc.removeEventListener('mousemove', _onCleanup, true);
                             _doc.removeEventListener('mouseover', _onCleanup, true);
@@ -3013,13 +3027,12 @@
                     _doc.addEventListener('mouseover', _onCleanup, true);
                     _doc.addEventListener('mousedown', _onCleanup, true);
                 }
-                // Dispatch a synthetic mousemove at the cursor's actual position to force
-                // Chrome to recompute :hover. Target is the element from elementFromPoint
-                // (preferred — guarantees the event lands on what's actually under the
-                // cursor in the Shadow DOM); falls back to _hoverable if elementFromPoint
-                // returned a deeper child. The MouseEvent bubbles to document where the
-                // _onCleanup capture listener catches it and clears `.sp-pseudo-hover`,
-                // letting native :hover (now refreshed) take over seamlessly.
+                // Best-effort: dispatch a synthetic mousemove at the cursor position to
+                // poke Chrome's hover hit-test path. isTrusted is false so most browsers
+                // will not actually refresh native :hover, but the dispatch is cheap and
+                // harmless — `.sp-pseudo-hover` + `.sp-drag-active` are doing the real
+                // work. The capture _onCleanup ignores this event because of the
+                // isTrusted gate above.
                 const _dispatchTarget = _target || _hoverable;
                 if (_dispatchTarget && typeof _dispatchTarget.dispatchEvent === 'function') {
                     try {

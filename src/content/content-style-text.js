@@ -930,12 +930,17 @@
                 box-shadow: var(--sp-shadow-hover-item);
             }
             /* JS-managed pseudo-hover for the post-drop window: when drop finishes,
-               Chrome's native :hover stays stuck on whichever DOM element was under the
-               cursor at dragstart (regardless of layout changes), and we can't reliably
-               force it to refresh. Instead handleDragEnd keeps .sp-drag-active on
-               #sources-list (suppressing the stale native :hover via the rule below)
-               and adds .sp-pseudo-hover to whatever element the cursor is actually over
-               now. Both classes are cleared the first time the user moves the mouse. */
+               Chromes native :hover stays stuck on whichever DOM element was under the
+               cursor at dragstart (regardless of layout changes), and we cannot reliably
+               force it to refresh. handleDragEnd installs two classes:
+                 - .sp-drag-active on #sources-list — the suppression rule below
+                   neutralizes the stale :hover styling on the dragstart element so it
+                   does not compete with the cursors true location.
+                 - .sp-pseudo-hover on the element the cursor is actually over now —
+                   re-paints the hover affordance there.
+               Both are cleared on the first trusted pointer event (handleDragEnds
+               capture listener gates on event.isTrusted to ignore its own synthetic
+               mousemove). */
             .source-item.sp-pseudo-hover, .group-header.sp-pseudo-hover {
                 background-color: var(--sp-bg-hover);
                 z-index: 4;
@@ -947,6 +952,40 @@
                window, before the user's first real mousemove restores native :hover. */
             .source-item.sp-spotlight-surface.sp-pseudo-hover::before,
             .group-header.sp-spotlight-surface.sp-pseudo-hover::before {
+                opacity: 1;
+            }
+            /* Suppress the stale native :hover that Chrome keeps on the dragstart
+               element during the post-drop window. Without this, the row that was
+               under the cursor at dragstart stays visually hovered until the user
+               moves the mouse — and because this project re-uses DOM nodes in place
+               across renders, that row is now usually displaying a different source.
+               Scoped to #sources-list.sp-drag-active so it ONLY applies during the
+               brief refresh window; .sp-pseudo-hover on the actually-hovered row
+               (specificity 0,2,0, same as :hover) wins because it is listed after
+               this rule. The matching ::before spotlight is also pinned closed. */
+            #sources-list.sp-drag-active .source-item:hover,
+            #sources-list.sp-drag-active .group-header:hover {
+                background-color: transparent;
+                transform: none;
+                box-shadow: none;
+                z-index: auto;
+            }
+            #sources-list.sp-drag-active .source-item.sp-spotlight-surface:hover::before,
+            #sources-list.sp-drag-active .group-header.sp-spotlight-surface:hover::before {
+                opacity: 0;
+            }
+            /* But the cursor-under element (which also carries .sp-pseudo-hover)
+               must still show its hover affordance during the same window —
+               re-assert it with higher specificity than the suppression rule above. */
+            #sources-list.sp-drag-active .source-item.sp-pseudo-hover,
+            #sources-list.sp-drag-active .group-header.sp-pseudo-hover {
+                background-color: var(--sp-bg-hover);
+                z-index: 4;
+                transform: scale(1.01);
+                box-shadow: var(--sp-shadow-hover-item);
+            }
+            #sources-list.sp-drag-active .source-item.sp-spotlight-surface.sp-pseudo-hover::before,
+            #sources-list.sp-drag-active .group-header.sp-spotlight-surface.sp-pseudo-hover::before {
                 opacity: 1;
             }
             .source-item.sp-spotlight-surface:hover::before,

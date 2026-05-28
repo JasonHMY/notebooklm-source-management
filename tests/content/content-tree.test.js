@@ -4738,3 +4738,148 @@ describe('applyReflowAfterRender hook', () => {
         expect(dragReflow.applyReflow).not.toHaveBeenCalled();
     });
 });
+
+describe('handleDragEnd post-drop hover refresh', () => {
+    let createContentTreeInteractions;
+    let createContentDragMulti;
+
+    beforeEach(() => {
+        jest.resetModules();
+        setupGlobalMocks();
+        require('../../src/content/content-native-checkbox-sync.js');
+        createContentTreeInteractions = require('../../src/content/content-tree-interactions.js');
+        createContentDragMulti = require('../../src/content/content-drag-multi.js');
+    });
+
+    afterEach(teardownGlobalMocks);
+
+    function buildHoverRefreshFixture() {
+        const cursorClasses = new Set();
+        let cursorEl;
+        cursorEl = {
+            classList: {
+                add: jest.fn((c) => cursorClasses.add(c)),
+                remove: jest.fn((c) => cursorClasses.delete(c)),
+                contains: jest.fn((c) => cursorClasses.has(c))
+            },
+            closest: jest.fn((sel) => (sel === '.source-item, .group-header' ? cursorEl : null)),
+            dispatchEvent: jest.fn(() => true)
+        };
+
+        const listClasses = new Set();
+        const pseudoNodes = new Set();
+        const sourcesListEl = {
+            id: 'sources-list',
+            classList: {
+                add: jest.fn((c) => listClasses.add(c)),
+                remove: jest.fn((c) => listClasses.delete(c)),
+                contains: jest.fn((c) => listClasses.has(c))
+            },
+            querySelectorAll: jest.fn((sel) => {
+                if (sel === '.sp-pseudo-hover') {
+                    return Array.from(pseudoNodes).filter((n) => n.classList.contains('sp-pseudo-hover'));
+                }
+                return [];
+            })
+        };
+
+        const cursorAddOriginal = cursorEl.classList.add;
+        cursorEl.classList.add = jest.fn((c) => {
+            cursorAddOriginal(c);
+            if (c === 'sp-pseudo-hover') pseudoNodes.add(cursorEl);
+        });
+
+        const shadowRoot = {
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => []),
+            getElementById: jest.fn((id) => (id === 'sources-list' ? sourcesListEl : null)),
+            elementFromPoint: jest.fn(() => cursorEl)
+        };
+
+        const captureListeners = new Map();
+        const fakeDocument = {
+            addEventListener: jest.fn((type, handler, capture) => {
+                if (capture !== true) return;
+                const list = captureListeners.get(type) || [];
+                list.push(handler);
+                captureListeners.set(type, list);
+            }),
+            removeEventListener: jest.fn((type, handler, capture) => {
+                if (capture !== true) return;
+                const list = captureListeners.get(type) || [];
+                captureListeners.set(type, list.filter((h) => h !== handler));
+            }),
+            elementFromPoint: jest.fn(() => null)
+        };
+
+        const interactions = createContentTreeInteractions({
+            runtime: {},
+            getState: () => ({ groups: [], ungrouped: [] }),
+            getGroupsById: () => new Map(),
+            getParentMap: () => new Map(),
+            getPendingBatchKeys: () => new Set(),
+            getShadowRoot: () => shadowRoot,
+            getDocument: () => fakeDocument,
+            getSetTimeout: () => () => 0,
+            dragMulti: createContentDragMulti({}),
+            dragReflow: { clearReflow: jest.fn(), unfoldDraggedItems: jest.fn() }
+        });
+
+        function fireCapture(type, event) {
+            const handlers = captureListeners.get(type) || [];
+            handlers.forEach((h) => h(event));
+        }
+
+        return {
+            interactions,
+            cursorEl,
+            sourcesListEl,
+            cursorClasses,
+            listClasses,
+            captureListeners,
+            fireCapture
+        };
+    }
+
+    it('injects .sp-pseudo-hover on cursor-under element and .sp-drag-active on #sources-list', () => {
+        const { interactions, cursorClasses, listClasses } = buildHoverRefreshFixture();
+
+        interactions.handleDragEnd({ target: { closest: () => null }, clientX: 100, clientY: 200 });
+
+        // Cursor element gets pseudo-hover so it renders the hover affordance immediately.
+        expect(cursorClasses.has('sp-pseudo-hover')).toBe(true);
+        // Source list gets drag-active so CSS can suppress stale native :hover on the
+        // dragstart element (Chrome leaves :hover stuck there until the user moves
+        // the mouse for real).
+        expect(listClasses.has('sp-drag-active')).toBe(true);
+    });
+
+    it('ignores untrusted (synthetic) mousemove — our own dispatch must not self-clear the pseudo state', () => {
+        const { interactions, cursorClasses, listClasses, fireCapture, captureListeners } = buildHoverRefreshFixture();
+
+        interactions.handleDragEnd({ target: { closest: () => null }, clientX: 100, clientY: 200 });
+
+        // handleDragEnd dispatches a synthetic mousemove to try to nudge Chrome's
+        // native :hover; that dispatch bubbles to document where _onCleanup runs in
+        // capture phase. If _onCleanup did not gate on isTrusted, it would erase
+        // the pseudo state in the same frame, leaving stale native :hover unopposed.
+        expect((captureListeners.get('mousemove') || []).length).toBeGreaterThan(0);
+        fireCapture('mousemove', { isTrusted: false, type: 'mousemove' });
+
+        expect(cursorClasses.has('sp-pseudo-hover')).toBe(true);
+        expect(listClasses.has('sp-drag-active')).toBe(true);
+    });
+
+    it('clears .sp-pseudo-hover and .sp-drag-active on the first trusted user pointer event', () => {
+        const { interactions, cursorClasses, listClasses, fireCapture } = buildHoverRefreshFixture();
+
+        interactions.handleDragEnd({ target: { closest: () => null }, clientX: 100, clientY: 200 });
+        expect(cursorClasses.has('sp-pseudo-hover')).toBe(true);
+        expect(listClasses.has('sp-drag-active')).toBe(true);
+
+        fireCapture('mousemove', { isTrusted: true, type: 'mousemove' });
+
+        expect(cursorClasses.has('sp-pseudo-hover')).toBe(false);
+        expect(listClasses.has('sp-drag-active')).toBe(false);
+    });
+});
