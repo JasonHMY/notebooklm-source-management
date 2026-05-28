@@ -2741,16 +2741,20 @@
         }
 
         function handleDragEnd(e) {
-            cancelAllHoverTimers();
-            if (runtime.hoverExpandedGroupIds.size > 0) {
-                const openedIds = Array.from(runtime.hoverExpandedGroupIds);
-                for (const G of openedIds) {
-                    executeHoverCollapse(G);
-                }
-                runtime.hoverExpandedGroupIds.clear();
-            }
+            // clearDragFeedback is the single source of truth for cleanup that's
+            // common to ALL drag terminations (drop, cancel, esc, dragend race):
+            //   - cancelAllHoverTimers
+            //   - collapse hover-expanded groups (the auto-opened ones during drag)
+            //   - autoScrollController.stop
+            //   - runtime.activeDragContext = null
+            //   - remove .dragging / .drag-into / .drag-invalid classes from DOM
+            // Previously handleDragEnd duplicated steps 1, 2, 3, 4 inline before
+            // calling clearDragFeedback — harmless (idempotent) but obscured the
+            // ownership contract. Now we delegate cleanly and let handleDragEnd
+            // focus on dragend-only concerns: ghost destroy, reflow session
+            // teardown, pseudo-hover + synthetic mousemove for post-drop :hover
+            // refresh.
             clearDragFeedback();
-            if (autoScrollController) autoScrollController.stop();
             if (runtime.activeDragGhost && dragMulti && typeof dragMulti.destroyMultiDragGhost === 'function') {
                 const ghost = runtime.activeDragGhost;
                 runtime.activeDragGhost = null;
@@ -2761,7 +2765,6 @@
                     dragMulti.destroyMultiDragGhost(ghost);
                 }
             }
-            runtime.activeDragContext = null;
             cleanupReflowSession();
             // Post-drop hover hint: Chrome's native :hover stays stuck on whichever DOM
             // element was under the cursor at dragstart (regardless of layout changes that
