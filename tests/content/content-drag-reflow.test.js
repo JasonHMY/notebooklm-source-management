@@ -51,7 +51,7 @@ function makeRoot(items) {
 describe('content-drag-reflow factory', () => {
     test('exposes createDragSession factory', () => {
         const api = createContentDragReflow();
-        expect(api.TRANSITION_MS).toBe(200);
+        expect(api.TRANSITION_MS).toBe(180);
         expect(api.createDragSession).toBeInstanceOf(Function);
         const session = api.createDragSession();
         expect(session.draggedKeys).toBeInstanceOf(Set);

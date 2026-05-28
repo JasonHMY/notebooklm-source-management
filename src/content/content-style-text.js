@@ -2579,13 +2579,16 @@
                 transition: none;
             }
 
-            /* fold animates 200ms (same duration + easing as .sp-drag-unfolding and
-               .sp-drop-shift) so the origin row's space closes smoothly while sibling
-               reflow opens the new slot in sync. Earlier design used instant fold to
-               avoid sibling-position jitter from fold-height transition fighting
-               reflow-translateY transition, but slot-based geometric detection (which
-               does not depend on layout reflow) eliminates that feedback loop, so the
-               animated fold is now safe and provides a much more coherent UX. */
+            /* All drag-stage transitions share the base motion token
+               (var(--sp-motion-base) + var(--sp-ease-emphasized)) so the origin
+               row's space closes smoothly while sibling reflow opens the new
+               slot in sync, and the timing stays aligned with collapse/expand,
+               list-entry, toast, and modal motion across the rest of the panel.
+               Earlier design used instant fold to avoid sibling-position jitter
+               from fold-height transition fighting reflow-translateY transition,
+               but slot-based geometric detection (which does not depend on
+               layout reflow) eliminates that feedback loop, so the animated
+               fold is now safe and provides a much more coherent UX. */
             .sp-drag-folded {
                 overflow: hidden;
                 pointer-events: none;
@@ -2596,15 +2599,15 @@
                 border-top-width: 0 !important;
                 border-bottom-width: 0 !important;
                 transition:
-                    height 200ms cubic-bezier(0.2, 0, 0, 1),
-                    opacity 200ms cubic-bezier(0.2, 0, 0, 1),
-                    padding 200ms cubic-bezier(0.2, 0, 0, 1),
-                    margin 200ms cubic-bezier(0.2, 0, 0, 1),
-                    border-width 200ms cubic-bezier(0.2, 0, 0, 1);
+                    height var(--sp-motion-base) var(--sp-ease-emphasized),
+                    opacity var(--sp-motion-base) var(--sp-ease-emphasized),
+                    padding var(--sp-motion-base) var(--sp-ease-emphasized),
+                    margin var(--sp-motion-base) var(--sp-ease-emphasized),
+                    border-width var(--sp-motion-base) var(--sp-ease-emphasized);
             }
 
             .sp-drop-shift {
-                transition: transform 200ms cubic-bezier(0.2, 0, 0, 1);
+                transition: transform var(--sp-motion-base) var(--sp-ease-emphasized);
                 will-change: transform;
             }
 
@@ -2614,7 +2617,7 @@
                sibling reflow opened. Used when N>=2 — single-source uses the fly-in path
                (.sp-drop-flying) below for a more natural snap-to-slot feel. */
             .sp-drop-landing {
-                animation: sp-drop-landing-anim 200ms cubic-bezier(0.2, 0, 0, 1) both;
+                animation: sp-drop-landing-anim var(--sp-motion-base) var(--sp-ease-emphasized) both;
                 transform-origin: top;
             }
             @keyframes sp-drop-landing-anim {
@@ -2630,8 +2633,8 @@
                targets transform + opacity. */
             .sp-drop-flying {
                 transition:
-                    transform 200ms cubic-bezier(0.2, 0, 0, 1),
-                    opacity 200ms cubic-bezier(0.2, 0, 0, 1);
+                    transform var(--sp-motion-base) var(--sp-ease-emphasized),
+                    opacity var(--sp-motion-base) var(--sp-ease-emphasized);
                 will-change: transform, opacity;
             }
 
@@ -2643,11 +2646,11 @@
                dragged item growth and sibling slide-back stay visually synchronized. */
             .sp-drag-unfolding {
                 transition:
-                    height 200ms cubic-bezier(0.2, 0, 0, 1),
-                    opacity 200ms cubic-bezier(0.2, 0, 0, 1),
-                    padding 200ms cubic-bezier(0.2, 0, 0, 1),
-                    border-width 200ms cubic-bezier(0.2, 0, 0, 1),
-                    margin 200ms cubic-bezier(0.2, 0, 0, 1);
+                    height var(--sp-motion-base) var(--sp-ease-emphasized),
+                    opacity var(--sp-motion-base) var(--sp-ease-emphasized),
+                    padding var(--sp-motion-base) var(--sp-ease-emphasized),
+                    border-width var(--sp-motion-base) var(--sp-ease-emphasized),
+                    margin var(--sp-motion-base) var(--sp-ease-emphasized);
                 overflow: hidden;
             }
 
@@ -2659,7 +2662,7 @@
                is removed after 240ms; the transition on box-shadow lets the
                red ring fade out smoothly rather than snap to none. */
             .sp-drag-cancelled {
-                animation: sp-drag-cancelled-shake 200ms var(--sp-ease-standard);
+                animation: sp-drag-cancelled-shake var(--sp-motion-base) var(--sp-ease-standard);
                 box-shadow: 0 0 0 1px rgba(255, 59, 48, 0.5), 0 0 8px var(--sp-danger-glow);
                 transition: box-shadow var(--sp-motion-medium) var(--sp-ease-standard);
             }

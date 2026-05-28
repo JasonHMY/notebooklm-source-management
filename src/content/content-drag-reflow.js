@@ -1,7 +1,11 @@
 (function () {
     'use strict';
 
-    const DEFAULT_TRANSITION_MS = 200;
+    // Mirrors the CSS var(--sp-motion-base) used by .sp-drag-folded,
+    // .sp-drop-shift, .sp-drop-landing, .sp-drop-flying, .sp-drag-unfolding
+    // (all sourced from UI_GUIDELINES motion token). Kept here as a publicly
+    // queryable constant so callers can align timeouts / staggered work.
+    const DEFAULT_TRANSITION_MS = 180;
 
     function createContentDragReflow(deps = {}) {
         const _ctx = deps && typeof deps === 'object' ? deps : {};
