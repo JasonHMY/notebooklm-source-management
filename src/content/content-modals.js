@@ -133,6 +133,12 @@
         const setDeveloperModeEnabled = typeof deps.setDeveloperModeEnabled === 'function'
             ? deps.setDeveloperModeEnabled
             : () => Promise.resolve(false);
+        const getHoverSpotlightEnabled = typeof deps.getHoverSpotlightEnabled === 'function'
+            ? deps.getHoverSpotlightEnabled
+            : () => true;
+        const setHoverSpotlightEnabled = typeof deps.setHoverSpotlightEnabled === 'function'
+            ? deps.setHoverSpotlightEnabled
+            : () => Promise.resolve(true);
         const markWelcomeOnboardingSeen = typeof deps.markWelcomeOnboardingSeen === 'function'
             ? deps.markWelcomeOnboardingSeen
             : () => Promise.resolve(false);
@@ -529,6 +535,8 @@
                 setVisibleQuickViewKinds,
                 getDeveloperModeEnabled,
                 setDeveloperModeEnabled,
+                getHoverSpotlightEnabled,
+                setHoverSpotlightEnabled,
                 clearDeveloperLogs,
                 getStateHistoryEntries,
                 restoreStateHistoryEntry: (...args) => restoreStateHistoryEntry(...args),

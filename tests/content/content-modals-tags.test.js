@@ -236,7 +236,9 @@ const createModalMotionTestRuntime = ({
     getCommandShortcutComboFromEvent = jest.fn(() => ''),
     formatCommandShortcut = jest.fn((shortcut) => shortcut),
     getVisibleQuickViewKinds = jest.fn(() => ['all', 'ungrouped', 'disabled', 'tag', 'recent', 'issues']),
-    setVisibleQuickViewKinds = jest.fn(() => Promise.resolve(['all', 'ungrouped', 'disabled', 'tag', 'recent', 'issues']))
+    setVisibleQuickViewKinds = jest.fn(() => Promise.resolve(['all', 'ungrouped', 'disabled', 'tag', 'recent', 'issues'])),
+    getHoverSpotlightEnabled = jest.fn(() => true),
+    setHoverSpotlightEnabled = jest.fn(() => Promise.resolve(true))
 } = {}) => {
     const createContentModals = require('../../src/content/content-modals.js');
     const shadowRoot = createModalTestShadowRoot();
@@ -292,6 +294,8 @@ const createModalMotionTestRuntime = ({
         formatCommandShortcut,
         getVisibleQuickViewKinds,
         setVisibleQuickViewKinds,
+        getHoverSpotlightEnabled,
+        setHoverSpotlightEnabled,
         updateTag: jest.fn(() => null),
         deleteTag: jest.fn(),
         showToast,
@@ -1161,6 +1165,27 @@ describe('modal option motion', () => {
         testWelcomeButton.dispatchEvent({ type: 'click' });
         expect(shadowRoot.getElementById('sp-settings-modal')).toBeFalsy();
         expect(shadowRoot.getElementById('sp-welcome-modal')).toBeTruthy();
+    });
+
+    it('forwards hover spotlight setter through createContentModals to settings modal', async () => {
+        const setHoverSpotlightEnabled = jest.fn(() => Promise.resolve(false));
+        const showToast = jest.fn();
+        const { modals, shadowRoot } = createModalMotionTestRuntime({
+            getHoverSpotlightEnabled: () => true,
+            setHoverSpotlightEnabled,
+            showToast
+        });
+
+        expect(modals.renderSettingsModal()).toBe(true);
+
+        const toggle = shadowRoot.querySelector('.sp-settings-appearance-hover-spotlight-toggle');
+        expect(toggle).toBeTruthy();
+        expect(toggle.checked).toBe(true);
+
+        toggle.checked = false;
+        toggle.dispatchEvent({ type: 'change' });
+        await Promise.resolve();
+        expect(setHoverSpotlightEnabled).toHaveBeenCalledWith(false);
     });
 
     it('keeps developer controls unlocked when developer mode is already enabled', () => {
