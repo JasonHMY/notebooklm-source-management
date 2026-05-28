@@ -2688,12 +2688,85 @@ describe('computeDropIntent', () => {
         expect(intent.slotKey).toBeNull();
     });
 
+    // X-split corridor only fires on COLLAPSED folders. Cursor in a collapsed
+    // header's left half excludes the folder from chosenContainer → root-level
+    // slot detection takes over.
+    it('X-split corridor fires on a COLLAPSED folder — cursor in header left half excludes the folder', () => {
+        const state = { ungrouped: ['A'], groups: ['F'] };
+        const groupsById = new Map([
+            ['F', { id: 'F', collapsed: true, children: [{ type: 'source', key: 'X' }] }]
+        ]);
+        const tree = buildTree({ state, groupsById });
+        // Collapsed F: header only (childrenStart === childrenEnd, no children area).
+        const { sourcesListEl } = makeMockShadowList({
+            items: [
+                { kind: 'source', key: 'A', top: 50, height: 40 },
+                { kind: 'group', id: 'F', top: 100, headerHeight: 30, childrenStart: 130, childrenEnd: 130 }
+            ]
+        });
+
+        // Cursor at (50, 115): clientX=50 LEFT of header midX=100; clientY=115
+        // IN F header Y range (100..130). F is collapsed → X-split fires →
+        // F excluded → no chosenContainer → root-level slot detection.
+        // routeToNearestNeighborKind for source-single drag picks A (above).
+        const intent = tree.computeDropIntent({
+            clientX: 50,
+            clientY: 115,
+            rootElement: sourcesListEl,
+            state,
+            groupsById,
+            parentMap: new Map(),
+            activeDragContext: { kind: 'source-single', keys: ['external'] }
+        });
+        expect(intent).toBeTruthy();
+        expect(intent.targetGroup).toBeNull();
+        expect(intent.targetList).toBe(state.ungrouped);
+    });
+
+    // Inverse: X-split corridor does NOT fire on an EXPANDED folder. User has
+    // visual access to the children; the natural escape gesture is Y-axis gaps.
+    // Cursor on an expanded folder's header (even in left half) resolves to
+    // into-group as usual — header drop adds the source to the folder.
+    it('X-split corridor does NOT fire on an EXPANDED folder — cursor in header left half still resolves into-group', () => {
+        const state = { ungrouped: [], groups: ['F'] };
+        const groupsById = new Map([
+            // Expanded by default (no collapsed field).
+            ['F', { id: 'F', children: [{ type: 'source', key: 'X' }] }]
+        ]);
+        const tree = buildTree({ state, groupsById });
+        const { sourcesListEl } = makeMockShadowList({
+            items: [
+                {
+                    kind: 'group', id: 'F', top: 100, headerHeight: 30,
+                    childrenStart: 130, childrenEnd: 200,
+                    children: [{ kind: 'source', key: 'X', top: 130, height: 40 }]
+                }
+            ]
+        });
+
+        // Cursor at (50, 115): clientX=50 LEFT of header midX=100; clientY=115
+        // IN F header Y range (100..130). F is EXPANDED → X-split does NOT fire →
+        // F chosen → header rect check → into-group.
+        const intent = tree.computeDropIntent({
+            clientX: 50,
+            clientY: 115,
+            rootElement: sourcesListEl,
+            state,
+            groupsById,
+            parentMap: new Map(),
+            activeDragContext: { kind: 'source-single', keys: ['external'] }
+        });
+        expect(intent).toBeTruthy();
+        expect(intent.kind).toBe('into-group');
+        expect(intent.targetGroup).toBe(groupsById.get('F'));
+    });
+
     // X-split corridor is restricted to the header strip's Y range. Cursor over a
-    // child source INSIDE the folder must not get excluded by left-half X even when
-    // clientX falls in the header's left half — the user is clearly operating on
-    // children, not on the folder-as-a-unit. Without this rule the dragged source
-    // would inexplicably escape to root level just because cursor X happened to land
-    // in the folder's left half while hovering over an existing child.
+    // child source INSIDE an expanded folder must not get excluded — and since
+    // X-split doesn't fire on expanded folders anyway, this is doubly safe.
+    // Without this rule the dragged source would inexplicably escape to root
+    // level just because cursor X happened to land in the folder's left half
+    // while hovering over an existing child.
     it('X-split applies only to the header Y range — cursor over a child inside the folder uses inside-folder slot detection regardless of X', () => {
         const state = { ungrouped: [], groups: ['F'] };
         const groupsById = new Map([

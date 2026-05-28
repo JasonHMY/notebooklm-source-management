@@ -272,44 +272,53 @@
             // Pick deepest container that contains pointer.
             //
             // For TOP-LEVEL group containers, apply a left/right X-split rule
-            // RESTRICTED TO THE HEADER STRIP'S Y RANGE (not the full container):
-            // - cursor on header, LEFT HALF (X < header.left + header.width / 2) →
-            //   treated as OUTSIDE the container. User is signalling "this folder
-            //   should sibling-reorder, I'm not trying to enter it". chosenContainer
-            //   = null → root-level slot detection → source goes to ungrouped, group
-            //   is reordered.
-            // - cursor on header, RIGHT HALF (X >= midX) → INSIDE. User wants
-            //   into-group behavior. hover-expand timer arms normally.
-            // - cursor BELOW the header (in the children area or any gap inside the
-            //   container's Y range but outside the header's Y range) → X-split DOES
-            //   NOT APPLY. User is operating on the sources INSIDE the folder, so
-            //   slot detection within children (or into-group sentinel for empty
-            //   children) handles the cursor normally.
+            // RESTRICTED TO COLLAPSED FOLDERS' HEADER STRIPS:
+            // - folder is COLLAPSED + cursor on header, LEFT HALF (X < header.left
+            //   + header.width / 2) → treated as OUTSIDE the container. User is
+            //   signalling "this folder should sibling-reorder, I'm not trying to
+            //   enter it". chosenContainer = null → root-level slot detection →
+            //   source goes to ungrouped, group is reordered.
+            // - folder is COLLAPSED + cursor on header, RIGHT HALF (X >= midX) →
+            //   INSIDE. User wants into-group behavior. hover-expand timer arms.
+            // - folder is EXPANDED → X-split DOES NOT APPLY at all. Cursor over
+            //   the header resolves to into-group (header drop), cursor over the
+            //   children area resolves to slot detection or into-group sentinel
+            //   normally.
+            // - cursor BELOW the header (children area / gap) on ANY folder →
+            //   X-split DOES NOT APPLY (same as above — pass 1 only ever fires
+            //   when cursor Y is in header's Y range).
             //
-            // Why header-only: the X-split corridor is conceptually a gesture about
-            // the folder AS A UNIT — "I'm dragging near/around this folder, not into
-            // it". The header is the only part of the folder that visually represents
-            // it as a unit (it's the clickable expand/collapse strip with the folder
-            // name). When cursor descends into the children area, the user is clearly
-            // operating on individual sources inside, and applying the left-half
-            // "escape to root level" semantics there would let cursor X position
-            // override "I'm dragging over an existing child source" intent — the
-            // dragged source would inexplicably escape to root level just because
-            // cursor X happened to land in the folder's left half.
+            // Why collapsed-only: an expanded folder has its sources visible to
+            // the user, so the natural escape gesture is Y position (gap between
+            // folders / above-below). Forcing left-half exclusion on expanded
+            // headers fights user intuition that "the header is a valid drop
+            // target — clicking/dragging the header should add to the folder".
+            // Collapsed folders only show their header — the children aren't on
+            // screen, so the user has no Y corridor inside; X-split is the only
+            // generous escape route, and applying it there matches the visual
+            // signal that the folder is a single "chip" the user can drop near.
             //
-            // Rationale for header X-split itself: top-level group headers span the
-            // full panel width (~350-450px), so a left/right split gives the user a
-            // generous physical corridor on the left to express "between groups" /
-            // "at root level". The previous attempt (8px edge zones at top/bottom of
-            // each container) was too small — most of the group's Y-range was still
-            // "inside" and the user kept triggering hover-expand by accident.
+            // Why header-only (within collapsed): the X-split corridor is a
+            // gesture about the folder AS A UNIT — "I'm dragging near/around this
+            // folder, not into it". The header is the only part that visually
+            // represents the folder as a unit. Even when collapsed there's no
+            // children area, but keeping the header-only restriction means future
+            // hover-expand or other geometry changes don't accidentally extend
+            // the corridor beyond where the user can see the folder strip.
             //
-            // Nested groups INHERIT their top-level ancestor's X-split exclusion: when
-            // a user moves cursor into the left-half corridor of a top-level group A's
-            // header, any nested group B inside A is also excluded (so cursor over B
-            // does NOT sneakily route into B). Without inheritance the user trying to
-            // "exit out" of A to root level via header would accidentally land in
-            // nested B whenever cursor Y overlapped B's rect.
+            // Rationale for the X-split corridor itself: top-level group headers
+            // span the full panel width (~350-450px), so a left/right split gives
+            // the user a generous physical corridor on the left to express
+            // "between groups" / "at root level". The previous attempt (8px edge
+            // zones at top/bottom of each container) was too small — most of the
+            // group's Y-range was still "inside" and the user kept triggering
+            // hover-expand by accident.
+            //
+            // Nested groups INHERIT their top-level ancestor's X-split exclusion:
+            // when a user moves cursor into the left-half corridor of a collapsed
+            // top-level group A's header (rare but possible if A holds nested
+            // groups that get drag-folded out), any nested group B inside A is
+            // also excluded so cursor over B does NOT sneakily route into B.
             const _isTopLevelGroup = (gid) => {
                 if (!gid) return false;
                 if (!parentMap || typeof parentMap.get !== 'function') return true;
@@ -319,19 +328,25 @@
             const _hasClientX = typeof clientX === 'number';
 
             // Pass 1: identify top-level groups whose X-split rule excludes them
-            // at the current cursor position. X-split is evaluated against the
-            // HEADER's rect, not the full container's rect — cursor must be in the
-            // header's Y range for the corridor exclusion to fire. Cached so pass 2
-            // can apply inheritance to nested groups without re-querying ancestor
-            // rects.
+            // at the current cursor position. Only COLLAPSED top-level folders
+            // participate — expanded folders are skipped because the user has
+            // visual access to the children and uses Y-axis gaps for escape, not
+            // header X position. X-split is evaluated against the HEADER's rect
+            // so cursor must be in the header's Y range for the corridor to fire.
+            // Cached so pass 2 can apply inheritance to nested groups without
+            // re-querying ancestor rects.
             const _xSplitExcludedTopIds = new Set();
             if (_hasClientX) {
+                const _groupsByIdSafe = groupsById && typeof groupsById.get === 'function'
+                    ? groupsById : null;
                 for (const container of containerList) {
                     if (!container || !container.dataset) continue;
                     const _gid = container.dataset.groupId;
                     if (!_gid) continue;
                     if (!_isTopLevelGroup(_gid)) continue;
                     if (container.classList && container.classList.contains('sp-drag-folded')) continue;
+                    const _grp = _groupsByIdSafe ? _groupsByIdSafe.get(_gid) : null;
+                    if (!_grp || !_grp.collapsed) continue;
                     const _headerEl = typeof container.querySelector === 'function'
                         ? container.querySelector('.group-header')
                         : null;
