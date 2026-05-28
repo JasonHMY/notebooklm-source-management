@@ -1526,15 +1526,43 @@
             cancelAllHoverTimers();
             runtime.hoverExpandedGroupIds.clear();
 
-            // Preflight clean: a previous drop's landing/flash classes may linger if the user
-            // starts a new drag within the 800ms cleanup window. The lingering .sp-drop-flying
-            // transition rule (covers transform + opacity) would slow this drag's fold from
-            // instant to 200ms, which causes visible jitter. Strip them now so the new drag
-            // starts from a clean visual state. Don't touch inline transform/opacity here —
-            // they're owned by the previous transition or the new fold about to run.
+            // Preflight clean: defensively recover from any state the previous drag
+            // may have left behind. dragend is supposed to clean everything up, but
+            // browser-level drag interruption (window blur, Esc race, page nav,
+            // crash) can skip dragend entirely — leaving classes + inline styles +
+            // runtime state in a half-broken configuration. The next dragstart is
+            // our only chance to recover before the user notices something is off.
+            //
+            // Two tiers of leftovers to handle:
+            //
+            // (A) Transient animation classes from a recent drop's 800ms cleanup
+            //     window. .sp-drop-flying / .sp-drop-landing / .sp-drag-unfolding
+            //     each carry their own transition rule (e.g., 200ms transform);
+            //     if any survive into this new dragstart they'd slow the new
+            //     drag's fold from instant to 200ms, causing visible jitter.
+            //     .sp-pseudo-hover is post-drop hover-stuck rescue — stale copies
+            //     would visually stick to whatever row they were applied to.
+            //
+            // (B) Drag-active state classes that should ONLY exist mid-drag.
+            //     .sp-drag-folded keeps a row at height:0 + opacity:0 +
+            //     pointer-events:none — if it lingers, the row is invisible AND
+            //     un-draggable, which manifests to the user as "I can't drag this
+            //     source anymore". .sp-drop-shift carries an inline
+            //     transform: translateY(N) on siblings to "open the slot" —
+            //     lingering shift = visible visual offset until the page reloads.
+            //     .drag-into / .drag-invalid / .dragging are visual indicators
+            //     that handleDragOver / dragstart's setTimeout set; if dragend
+            //     didn't clean them, they linger as stale highlights.
+            //
+            // Strip every class in both tiers + reset the inline style backing
+            // them so the new drag starts from a known-clean visual state. Costs
+            // nothing on the common path (querySelectorAll returns 0 nodes when
+            // the previous drag cleaned up correctly).
             const _preflightList = getSourceListContainer();
             if (_preflightList && typeof _preflightList.querySelectorAll === 'function') {
-                const stale = _preflightList.querySelectorAll('.sp-drop-flying, .sp-drop-landing, .sp-drag-unfolding, .sp-pseudo-hover');
+                const stale = _preflightList.querySelectorAll(
+                    '.sp-drop-flying, .sp-drop-landing, .sp-drag-unfolding, .sp-pseudo-hover'
+                );
                 if (stale && typeof stale.forEach === 'function') {
                     stale.forEach((node) => {
                         if (!node || !node.classList || typeof node.classList.remove !== 'function') return;
@@ -1544,6 +1572,68 @@
                         node.classList.remove('sp-pseudo-hover');
                     });
                 }
+
+                // (B1) .sp-drag-folded: lingering = source stuck invisible + un-draggable.
+                // Clear class + restore inline height/opacity so the row reappears at
+                // its natural size. The new drag's RAF-deferred foldDraggedItems will
+                // re-apply on the right source(s) a frame later if needed.
+                const lingeringFolded = _preflightList.querySelectorAll('.sp-drag-folded');
+                if (lingeringFolded && typeof lingeringFolded.forEach === 'function') {
+                    lingeringFolded.forEach((node) => {
+                        if (!node || !node.classList || typeof node.classList.remove !== 'function') return;
+                        node.classList.remove('sp-drag-folded');
+                        if (node.style) {
+                            node.style.height = '';
+                            node.style.opacity = '';
+                        }
+                    });
+                }
+
+                // (B2) .sp-drop-shift: lingering = siblings visually offset by translateY.
+                // Clear class + reset inline transform. New drag's reflow re-applies
+                // shifts on the correct siblings.
+                const lingeringShift = _preflightList.querySelectorAll('.sp-drop-shift');
+                if (lingeringShift && typeof lingeringShift.forEach === 'function') {
+                    lingeringShift.forEach((node) => {
+                        if (!node || !node.classList || typeof node.classList.remove !== 'function') return;
+                        node.classList.remove('sp-drop-shift');
+                        if (node.style) {
+                            node.style.transform = '';
+                        }
+                    });
+                }
+
+                // (B3) .drag-into / .drag-invalid / .dragging: stale visual highlights.
+                const lingeringFeedback = _preflightList.querySelectorAll('.drag-into, .drag-invalid, .dragging');
+                if (lingeringFeedback && typeof lingeringFeedback.forEach === 'function') {
+                    lingeringFeedback.forEach((node) => {
+                        if (!node || !node.classList || typeof node.classList.remove !== 'function') return;
+                        node.classList.remove('drag-into');
+                        node.classList.remove('drag-invalid');
+                        node.classList.remove('dragging');
+                    });
+                }
+            }
+
+            // Reset runtime drag state defensively. A previous drag interrupted
+            // before dragend would leave these lingering, and the new drag's own
+            // assignments below would simply overwrite — but overwriting silently
+            // drops references to any DOM cleanup the old session was responsible
+            // for. We've already cleaned the DOM classes above; now drop the stale
+            // session/ghost/context refs cleanly. autoScrollController.stop is the
+            // matching teardown for any stuck scroll loop.
+            if (runtime.dragReflowSession) {
+                runtime.dragReflowSession = null;
+            }
+            if (runtime.activeDragGhost && dragMulti && typeof dragMulti.destroyMultiDragGhost === 'function') {
+                try { dragMulti.destroyMultiDragGhost(runtime.activeDragGhost); } catch (_) { /* ignore detach race */ }
+                runtime.activeDragGhost = null;
+            }
+            if (runtime.activeDragContext) {
+                runtime.activeDragContext = null;
+            }
+            if (autoScrollController && typeof autoScrollController.stop === 'function') {
+                autoScrollController.stop();
             }
 
             if (sourceTarget) {

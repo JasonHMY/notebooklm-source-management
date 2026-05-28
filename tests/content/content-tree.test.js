@@ -1902,6 +1902,81 @@ describe('handleDragStart reflow session + unified ghost', () => {
         }));
         expect(dataTransfer.setDragImage).toHaveBeenCalledWith(ghostNode, 12, 12);
     });
+
+    // Stability: dragend isn't always guaranteed (window blur, Esc race, page nav
+    // can interrupt before the cleanup handler fires). The next dragstart's
+    // preflight is the only chance to recover from leaked class state. The
+    // dangerous leak is .sp-drag-folded — it keeps a row at height:0 +
+    // opacity:0 + pointer-events:none, manifesting as "I can't drag this
+    // source anymore" to the user. Symmetric for .sp-drop-shift on siblings
+    // (lingering translateY offsets) and runtime.dragReflowSession (stale
+    // tracking).
+    it('preflight strips lingering .sp-drag-folded / .sp-drop-shift state and resets stale dragReflowSession', () => {
+        const runtime = {
+            // Pre-set stale session from a prior interrupted drag.
+            dragReflowSession: { draggedKeys: new Set(['old']), itemHeights: new Map(), totalDraggedHeight: 0, shiftedItems: new Map(), stale: true }
+        };
+        const state = { isBatchMode: false, ungrouped: ['A', 'B', 'C'], groups: [] };
+        const pendingBatchKeys = new Set();
+        const sourceRowA = createSourceRow('A');
+
+        // Stale source B: stuck folded (invisible, un-draggable).
+        const staleStyleB = { height: '0px', opacity: '0' };
+        const staleClassListB = { contains: jest.fn(() => false), add: jest.fn(), remove: jest.fn() };
+        const staleB = { dataset: { sourceKey: 'B' }, classList: staleClassListB, style: staleStyleB };
+
+        // Stale sibling C: lingering translateY offset.
+        const staleStyleC = { transform: 'translateY(40px)' };
+        const staleClassListC = { contains: jest.fn(() => false), add: jest.fn(), remove: jest.fn() };
+        const staleC = { dataset: { sourceKey: 'C' }, classList: staleClassListC, style: staleStyleC };
+
+        const sourcesListEl = {
+            id: 'sources-list',
+            querySelectorAll: jest.fn((selector) => {
+                if (selector === '.sp-drag-folded') return [staleB];
+                if (selector === '.sp-drop-shift') return [staleC];
+                return [];
+            })
+        };
+        const shadowRoot = {
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => []),
+            getElementById: jest.fn((id) => (id === 'sources-list' ? sourcesListEl : null))
+        };
+        const dragReflow = createDragReflowMock();
+
+        const interactions = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getPendingBatchKeys: () => pendingBatchKeys,
+            getShadowRoot: () => shadowRoot,
+            getDocument: () => null,
+            getSetTimeout: () => () => {},
+            dragMulti: createContentDragMulti({}),
+            dragReflow
+        });
+
+        const event = {
+            target: createSourceRowTargetStub(sourceRowA),
+            dataTransfer: createDataTransfer()
+        };
+        interactions.handleDragStart(event);
+
+        // B's stuck-folded state is cleared — class removed + inline height/opacity reset.
+        expect(staleClassListB.remove).toHaveBeenCalledWith('sp-drag-folded');
+        expect(staleStyleB.height).toBe('');
+        expect(staleStyleB.opacity).toBe('');
+
+        // C's lingering shift is cleared — class removed + inline transform reset.
+        expect(staleClassListC.remove).toHaveBeenCalledWith('sp-drop-shift');
+        expect(staleStyleC.transform).toBe('');
+
+        // Stale dragReflowSession reference replaced by the new drag's fresh session.
+        expect(runtime.dragReflowSession).not.toBe(undefined);
+        expect(runtime.dragReflowSession.stale).not.toBe(true);
+        expect(runtime.dragReflowSession.draggedKeys.has('A')).toBe(true);
+    });
 });
 
 describe('handleDragOver invalid-drop feedback', () => {
