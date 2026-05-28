@@ -3295,7 +3295,7 @@ describe('handleDrop reflow cleanup', () => {
         expect(runtime.dragReflowSession).toBeNull();
     });
 
-    it('does NOT animate the landed element on a single-source drop (fly-in animation removed)', () => {
+    it('fades the landed element in with opacity only (no fly-in / scaleY direction-baggage)', () => {
         const state = { groups: [], ungrouped: ['source-1', 'source-2'] };
         const saveState = jest.fn();
         const render = jest.fn();
@@ -3369,15 +3369,17 @@ describe('handleDrop reflow cleanup', () => {
         dropEvent.clientY = 220;
         interactions.handleDrop(dropEvent);
 
-        // Landed-element animation has been removed (per user UX feedback that the
-        // fly-in looked like the source "slid in from the right" when cursor was off
-        // to the side). The dropped row should NOT receive any of the animation
-        // classes, and the FLIP transform sequence should never run.
+        // Drop landing uses a direction-neutral opacity 0 → 1 fade-in. No fly-in /
+        // scaleY classes (which previously carried a visible "from the right" or
+        // "growing from top" feel the user rejected). Transform stays untouched so
+        // the post-drop pseudo-hover scale(1.01) can still apply via CSS.
         expect(landedEl.classList.add).not.toHaveBeenCalledWith('sp-drop-flying');
         expect(landedEl.classList.add).not.toHaveBeenCalledWith('sp-drop-landed');
         expect(landedEl.classList.add).not.toHaveBeenCalledWith('sp-drop-landing');
         expect(transformWrites).toEqual([]);
-        expect(opacityWrites).toEqual([]);
+        // Sequence: jump to 0 (instant, transition still 'none' from suppression),
+        // force layout flush, switch transition to opacity 180ms, target ''.
+        expect(opacityWrites).toEqual(['0', '']);
     });
 
     it('does NOT animate landed elements on a multi-source drop (scaleY landing removed)', () => {

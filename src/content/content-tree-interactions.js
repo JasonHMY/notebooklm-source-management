@@ -287,10 +287,12 @@
             // accident. X-split makes the active "outside zone" cover half the visual
             // area regardless of cursor Y position within the group.
             //
-            // Nested groups keep the full-rect rule (no X-split). They sit inside their
-            // parent's already-indented children-area where additional left-half carving
-            // would conflict with the parent's gutter. Cursor inside a nested rect is
-            // unambiguously "in the nested group" by design.
+            // Nested groups INHERIT their top-level ancestor's X-split exclusion: when
+            // a user moves cursor into the left-half corridor of a top-level group A,
+            // any nested group B inside A is also excluded (so cursor over B does NOT
+            // sneakily route into B). Without inheritance the user trying to "exit out"
+            // of A to root level would accidentally land in nested B whenever cursor Y
+            // overlapped B's rect — defeating the X-split corridor's intent.
             const _isTopLevelGroup = (gid) => {
                 if (!gid) return false;
                 if (!parentMap || typeof parentMap.get !== 'function') return true;
@@ -298,6 +300,28 @@
                 return !p;
             };
             const _hasClientX = typeof clientX === 'number';
+
+            // Pass 1: identify top-level groups whose X-split rule excludes them
+            // at the current cursor position. Cached so pass 2 can apply inheritance
+            // without re-querying ancestor rects.
+            const _xSplitExcludedTopIds = new Set();
+            if (_hasClientX) {
+                for (const container of containerList) {
+                    if (!container || !container.dataset) continue;
+                    const _gid = container.dataset.groupId;
+                    if (!_gid) continue;
+                    if (!_isTopLevelGroup(_gid)) continue;
+                    if (container.classList && container.classList.contains('sp-drag-folded')) continue;
+                    const _r = unshiftedRect(container);
+                    if (!_r || _r.width <= 0) continue;
+                    if (clientY < _r.top || clientY >= _r.bottom) continue;
+                    const _midX = _r.left + _r.width / 2;
+                    if (clientX < _midX) _xSplitExcludedTopIds.add(_gid);
+                }
+            }
+
+            // Pass 2: pick deepest container that contains pointer AND isn't excluded
+            // (directly or via top-level ancestor) by X-split.
             let chosenContainer = null;
             let chosenDepth = -1;
             for (const container of containerList) {
@@ -306,11 +330,21 @@
                 const r = unshiftedRect(container);
                 if (!r) continue;
                 if (clientY < r.top || clientY >= r.bottom) continue;
-                const _isTopLevel = _isTopLevelGroup(container.dataset.groupId);
-                if (_isTopLevel && _hasClientX && r.width > 0) {
-                    const _midX = r.left + r.width / 2;
-                    if (clientX < _midX) continue; // left half → user wants sibling-reorder
+
+                // Resolve this container's top-level ancestor (self if already top-level)
+                // and skip if that ancestor is in the X-split excluded set.
+                let _topAncestorId = container.dataset.groupId;
+                if (parentMap && typeof parentMap.get === 'function') {
+                    const _seen = new Set([_topAncestorId]);
+                    while (true) {
+                        const _pid = parentMap.get(_topAncestorId);
+                        if (!_pid || _seen.has(_pid)) break;
+                        _seen.add(_pid);
+                        _topAncestorId = _pid;
+                    }
                 }
+                if (_xSplitExcludedTopIds.has(_topAncestorId)) continue;
+
                 const d = getDepth(container.dataset.groupId);
                 if (d > chosenDepth) {
                     chosenContainer = container;
@@ -2386,16 +2420,14 @@
             }
         }
 
-        // Drop visual feedback: dropped rows no longer animate in. Previously single-source
-        // drops ran a FLIP `sp-drop-flying` from the cursor-release position into the
-        // slot — when the cursor was to the right of the row this looked like the row
-        // "slides in from the right", which the user disliked. Multi-source `sp-drop-landing`
-        // scaleY-from-zero was also removed for consistency. The dropped row now simply
-        // appears at its new layout position via the normal DOM update from render().
-        // Sibling FLIP below still smoothly slides the rest of the list so the overall
-        // drop remains coherent. cursorX / cursorY parameters retained for backward
-        // compatibility with callers but are now unused (intentional — no fly-in to
-        // compute deltas for).
+        // Drop visual feedback: dropped rows get a direction-neutral opacity 0→1 fade-in
+        // (180ms cubic-bezier), siblings get a FLIP transform animation from their pre-drop
+        // visual position to the new layout. Together the two animations give a coherent
+        // "everything settles into place" beat without the directional baggage of the
+        // earlier `.sp-drop-flying` (cursor-release → slot, read as "from the right") and
+        // `.sp-drop-landing` (scaleY 0 → 1, read as "growing from top") effects. cursorX /
+        // cursorY parameters retained for backward compatibility with callers — no longer
+        // used because opacity fade-in needs no positional input.
         function applyDropLandingAndFlash(landedKeys, _cursorX, _cursorY, preRects) {
             if (!Array.isArray(landedKeys) || landedKeys.length === 0) return;
             const rootElement = getSourceListContainer();
@@ -2490,23 +2522,47 @@
                     }
                 }
             }
-            // Landed-element drop animation has been removed (user UX feedback):
-            // the previous single-source `sp-drop-flying` FLIP animated the dropped row
-            // from its cursor-release position to the slot — when cursor was to the right
-            // of the row this looked like "from the right slides in", which the user
-            // disliked. The multi-source `sp-drop-landing` scaleY-from-zero was also a
-            // visible jump. Now the dropped row simply appears at its new layout position
-            // (rendered by the regular DOM update), no animation. Sibling FLIP above still
-            // smoothly slides the rest of the list so the overall drop remains coherent.
-            // Restore inline transition='' on each landed row so its future hover / focus
-            // transitions still work (this loop runs even with no animation work).
+            // Landed-element fade-in: gentle opacity 0→1 over 180ms.
+            //
+            // Direction-neutral by design — uses opacity only (no transform / scaleY /
+            // slide-from-X) to avoid the "from right" appearance that the previous
+            // `.sp-drop-flying` FLIP and `.sp-drop-landing` scaleY-from-zero produced.
+            // Both of those carried a visible direction (cursor-release → slot, top →
+            // expanded) that the user disliked. Opacity alone reads as "appearing into
+            // place" — directionless, but still gives the drop a coherent finishing beat
+            // that pairs with sibling FLIP's transform motion.
+            //
+            // Transform is intentionally left untouched here so the post-drop pseudo-hover
+            // CSS rule (`transform: scale(1.01)`) can still apply normally when
+            // handleDragEnd adds `.sp-pseudo-hover` to the cursor-under element.
+            //
+            // Element currently has inline `transition: none` from the _suppressedRows
+            // loop above. Sequence:
+            //   1. jump to opacity 0 instantly (transition still none → no animation)
+            //   2. force layout flush so the 0 commits before transition activates
+            //   3. switch to `transition: opacity 180ms` and target opacity ''
+            //      → browser animates from 0 to natural over 180ms
+            //   4. after 220ms setTimeout, clear inline transition so the base
+            //      `.source-item` transition rule (covers background/box-shadow/etc.)
+            //      regains effect for subsequent hover / focus changes.
             for (const key of landedKeys) {
                 if (typeof key !== 'string' || !key) continue;
                 const safe = key.replace(/"/g, '\\"');
                 const el = rootElement.querySelector(`[data-source-key="${safe}"]`)
                     || rootElement.querySelector(`[data-group-id="${safe}"]`);
                 if (!el || !el.style) continue;
-                el.style.transition = '';
+                el.style.opacity = '0';
+                void el.offsetHeight; // force layout flush so opacity 0 commits
+                el.style.transition = 'opacity 180ms cubic-bezier(0.2, 0, 0, 1)';
+                el.style.opacity = '';
+                if (typeof setTimeoutFn === 'function') {
+                    const _landedCleanup = ((target) => () => {
+                        if (target && target.style) {
+                            target.style.transition = '';
+                        }
+                    })(el);
+                    setTimeoutFn(_landedCleanup, 220);
+                }
             }
 
             // After sync code completes and the browser paints once, restore inline
@@ -2556,16 +2612,25 @@
             }
             runtime.activeDragContext = null;
             cleanupReflowSession();
-            // Post-drop hover hint: Chrome's native :hover may briefly stay on the
-            // originally-cursor'd element after drag completes. We mark the element
-            // currently under the cursor with `.sp-pseudo-hover` so the user sees the
-            // correct row highlighted right away — and any of {mousemove, mouseover,
-            // mousedown} clears it (whichever fires first), at which point Chrome's
-            // real :hover takes over. Three listeners + a 1.5s setTimeout backstop
-            // ensure the pseudo class never gets stuck. (The previous `.sp-drag-active`
-            // global hover-suppression mechanism was removed — it gated on mousemove
-            // only and would leave hover broken until the user actually moved the mouse,
-            // which they often didn't right after a drop.)
+            // Post-drop hover hint: Chrome's native :hover stays stuck on whichever DOM
+            // element was under the cursor at dragstart (regardless of layout changes that
+            // happened during drag), and pointer-events flicker alone doesn't reliably
+            // invalidate Chrome's hover-state cache. Two layered mechanisms now collaborate:
+            //
+            //   (1) Synthetic `mousemove` dispatch (primary) — walks Chrome through the
+            //       hover-update path explicitly, so native :hover snaps to the cursor's
+            //       actual current element on the next paint.
+            //   (2) `.sp-pseudo-hover` JS class (redundancy) — applies hover styling to
+            //       whatever element is currently under the cursor; cleared on the first
+            //       genuine user pointer event. Acts as a safety net for browsers / cases
+            //       where (1) doesn't fully take effect (synthetic events have
+            //       isTrusted=false; some hover paths are gated on trusted events).
+            //
+            // The pseudo class is cleared the moment any of {mousemove, mouseover,
+            // mousedown} fires after dragend — the synthetic mousemove from (1)
+            // typically triggers (2)'s cleanup in the same frame, so the user rarely
+            // sees the pseudo class visually. If the synthetic dispatch fails, the
+            // pseudo class remains visible until the user moves the mouse for real.
             const _endList = getSourceListContainer();
             if (_endList && typeof e.clientX === 'number' && typeof e.clientY === 'number') {
                 const _shadow = typeof getShadowRoot === 'function' ? getShadowRoot() : null;
@@ -2606,6 +2671,25 @@
                     _doc.addEventListener('mousemove', _onCleanup, true);
                     _doc.addEventListener('mouseover', _onCleanup, true);
                     _doc.addEventListener('mousedown', _onCleanup, true);
+                }
+                // Dispatch a synthetic mousemove at the cursor's actual position to force
+                // Chrome to recompute :hover. Target is the element from elementFromPoint
+                // (preferred — guarantees the event lands on what's actually under the
+                // cursor in the Shadow DOM); falls back to _hoverable if elementFromPoint
+                // returned a deeper child. The MouseEvent bubbles to document where the
+                // _onCleanup capture listener catches it and clears `.sp-pseudo-hover`,
+                // letting native :hover (now refreshed) take over seamlessly.
+                const _dispatchTarget = _target || _hoverable;
+                if (_dispatchTarget && typeof _dispatchTarget.dispatchEvent === 'function') {
+                    try {
+                        _dispatchTarget.dispatchEvent(new MouseEvent('mousemove', {
+                            clientX: e.clientX,
+                            clientY: e.clientY,
+                            bubbles: true,
+                            cancelable: true,
+                            view: typeof globalThis.window !== 'undefined' ? globalThis.window : null
+                        }));
+                    } catch (_) { /* ignore synthetic dispatch failure */ }
                 }
                 const _setTimeoutEnd = typeof getSetTimeout === 'function' ? getSetTimeout() : null;
                 if (typeof _setTimeoutEnd === 'function') {
