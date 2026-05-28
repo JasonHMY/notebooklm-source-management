@@ -1640,6 +1640,22 @@
                 autoScrollController.stop();
             }
 
+            // Edit-mode guard: when cursor is inside an editable control (rename input,
+            // textarea, contenteditable region), suppress the drag. Otherwise dragging
+            // a text selection across the row's draggable boundary triggers dragstart
+            // on the outer .source-item / .group-header — interrupting the edit AND
+            // starting an unwanted drag. The native rename input created by
+            // triggerRename() has no draggable="false", so this guard is the only
+            // protection. preventDefault tells the browser not to enter the drag
+            // lifecycle at all (cursor remains in text-select mode for the input).
+            if (e.target && typeof e.target.closest === 'function') {
+                const _editable = e.target.closest('input, textarea, [contenteditable=""], [contenteditable="true"]');
+                if (_editable) {
+                    if (typeof e.preventDefault === 'function') e.preventDefault();
+                    return;
+                }
+            }
+
             if (sourceTarget) {
                 const key = sourceTarget.dataset.sourceKey;
                 if (!key) return;

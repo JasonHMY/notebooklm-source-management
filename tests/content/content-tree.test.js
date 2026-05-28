@@ -863,6 +863,49 @@ describe('handleDragStart multi-source branch', () => {
         expect(sourceKeysCall).toBeUndefined();
         expect(dataTransfer.setDragImage).not.toHaveBeenCalled();
     });
+
+    // Edit-mode guard: when cursor is inside an editable control (rename input,
+    // textarea, contenteditable region), dragstart must not initiate a drag.
+    // Otherwise user dragging a text selection across the row's draggable
+    // boundary interrupts the edit and starts an unwanted drag.
+    it('aborts dragstart when e.target is inside an input (rename / text edit guard)', () => {
+        const state = { isBatchMode: false, ungrouped: ['A'], groups: [] };
+        const pendingBatchKeys = new Set();
+        const sourceRow = createSourceRow('A');
+        const dataTransfer = createDataTransfer();
+        const preventDefault = jest.fn();
+        const fakeInput = { tagName: 'INPUT' };
+
+        const interactions = createContentTreeInteractions({
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getPendingBatchKeys: () => pendingBatchKeys,
+            getShadowRoot: () => null,
+            getSetTimeout: () => () => {},
+            dragMulti: createContentDragMulti({})
+        });
+
+        // closest stub returns the fake input for the editable selector,
+        // and source row for .source-item (so without the guard, drag would proceed).
+        const closestStub = jest.fn((selector) => {
+            if (selector === 'input, textarea, [contenteditable=""], [contenteditable="true"]') return fakeInput;
+            if (selector === '.source-item') return sourceRow;
+            if (selector === '.group-header') return null;
+            return null;
+        });
+
+        const event = {
+            target: { closest: closestStub },
+            dataTransfer,
+            preventDefault
+        };
+        interactions.handleDragStart(event);
+
+        // Guard fires: preventDefault called once, dataTransfer.setData never called.
+        expect(preventDefault).toHaveBeenCalledTimes(1);
+        expect(dataTransfer.setData).not.toHaveBeenCalled();
+        expect(dataTransfer.setDragImage).not.toHaveBeenCalled();
+    });
 });
 
 describe('drop routes multi vs single source', () => {
