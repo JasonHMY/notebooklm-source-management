@@ -3532,6 +3532,43 @@ describe('handleDragOver hover-expand', () => {
         expect(ctx.groupsById.get('g1').collapsed).toBe(true);
     });
 
+    it('collapses in state when the container is unreachable mid-drag (no permanent open)', () => {
+        // H4: g1 is hover-opened, then its DOM node disappears (external state
+        // sync rebuilt the list mid-drag) before the collapse timer fires. The
+        // old code deleted g1 from hoverExpandedGroupIds and then bailed at the
+        // `if (!container) return` guard, leaving g1.collapsed === false forever
+        // with nothing tracking it. executeHoverCollapse must collapse g1 in
+        // state regardless, so the next render() reconciles the DOM.
+        const ctx = setupTreeInteractionsTestContext({
+            state: { isBatchMode: false, ungrouped: [], groups: ['g1', 'g2'] },
+            pendingBatchKeys: new Set(),
+            groups: {
+                g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: true },
+                g2: { id: 'g2', children: [{ type: 'source', key: 'Y' }], collapsed: true }
+            },
+            items: [
+                { kind: 'group', id: 'g1', top: 100, headerHeight: 40, childrenStart: 140, childrenEnd: 180 },
+                { kind: 'group', id: 'g2', top: 300, headerHeight: 40, childrenStart: 340, childrenEnd: 380 }
+            ]
+        });
+
+        // Hover g1 for 1000ms → hover-expand it.
+        ctx.helpers.dragOverFor('g1');
+        jest.advanceTimersByTime(1000);
+        expect(ctx.groupsById.get('g1').collapsed).toBe(false);
+        expect(ctx.runtime.hoverExpandedGroupIds.has('g1')).toBe(true);
+
+        // Move onto g2 → arms a collapse timer for g1 (g1 is not an ancestor of g2).
+        ctx.helpers.dragOverFor('g2');
+        // External sync removes g1's DOM node before the collapse timer fires.
+        ctx.elementMap.delete('group:g1');
+
+        jest.advanceTimersByTime(1000);
+
+        // g1 must end up collapsed in state even though its container was gone.
+        expect(ctx.groupsById.get('g1').collapsed).toBe(true);
+    });
+
     it('cancels the timer on dragend', () => {
         const ctx = setupTreeInteractionsTestContext({
             state: { isBatchMode: false, ungrouped: [], groups: ['g1'] },
@@ -4707,7 +4744,11 @@ describe('applyReflowAfterRender hook', () => {
         expect(dragReflow.applyReflow).toHaveBeenCalledTimes(1);
         const args = dragReflow.applyReflow.mock.calls[0][0];
         expect(args.session).toBe(runtime.dragReflowSession);
-        expect(args.shifts).toBe(shifts);
+        // shifts is now a decoupled snapshot (not the live Map) so applyReflow's
+        // diff loop sees prev === undefined and re-applies onto rebuilt nodes
+        // instead of short-circuiting on `prev === delta`.
+        expect(args.shifts).not.toBe(shifts);
+        expect(args.shifts).toEqual(new Map([['B', 40], ['C', 40]]));
     });
 
     it('is a cheap no-op when there is no active drag session', () => {
@@ -4736,6 +4777,130 @@ describe('applyReflowAfterRender hook', () => {
         interactions.applyReflowAfterRender();
 
         expect(dragReflow.applyReflow).not.toHaveBeenCalled();
+    });
+
+    // Regression guard for the no-op bug: applyReflowAfterRender used to pass
+    // session.shiftedItems as BOTH `session` and `shifts`, so applyReflow's
+    // `prev === delta` short-circuit matched every entry and never touched the
+    // DOM. The mock-based tests above could not catch it because they stub out
+    // applyReflow entirely. This test wires the REAL reflow engine and asserts
+    // the tracked translateY is actually written onto freshly-rendered rows
+    // (which carry no inline transform after render() rebuilds them).
+    it('writes tracked shifts onto rebuilt DOM nodes via the real reflow engine', () => {
+        const createContentDragReflow = require('../../src/content/content-drag-reflow.js');
+        const dragReflow = createContentDragReflow({});
+
+        const makeRow = (key) => ({
+            style: {},
+            classList: makeMockClassList(['source-item']),
+            dataset: { sourceKey: key }
+        });
+        const rows = { B: makeRow('B'), C: makeRow('C') };
+        const container = {
+            querySelector: (sel) => {
+                const m = sel.match(/\[data-source-key="(.+?)"\]/);
+                return m && rows[m[1]] ? rows[m[1]] : null;
+            }
+        };
+        const shadowRoot = {
+            querySelector: () => null,
+            querySelectorAll: () => [],
+            getElementById: (id) => (id === 'sources-list' ? container : null)
+        };
+        const runtime = {
+            dragReflowSession: {
+                draggedKeys: new Set(['A']),
+                itemHeights: new Map(),
+                totalDraggedHeight: 40,
+                currentIntent: null,
+                shiftedItems: new Map([['B', 40], ['C', 40]])
+            }
+        };
+        const interactions = createContentTreeInteractions({
+            runtime,
+            getState: () => ({ ungrouped: [], groups: [] }),
+            getGroupsById: () => new Map(),
+            getParentMap: () => new Map(),
+            getShadowRoot: () => shadowRoot,
+            dragMulti: createContentDragMulti({}),
+            dragReflow
+        });
+
+        interactions.applyReflowAfterRender();
+
+        expect(rows.B.style.transform).toBe('translateY(40px)');
+        expect(rows.C.style.transform).toBe('translateY(40px)');
+        expect(rows.B.classList.contains('sp-drop-shift')).toBe(true);
+        expect(rows.C.classList.contains('sp-drop-shift')).toBe(true);
+        // The live Map is restored to the same content after the re-apply.
+        expect(runtime.dragReflowSession.shiftedItems).toEqual(new Map([['B', 40], ['C', 40]]));
+    });
+});
+
+// H3: when the cursor leaves #sources-list, handleDragLeave must cancel any
+// dragover work already queued for the next animation frame. Otherwise the
+// queued frame still runs _processDragOver → armHoverExpandTimerForGroup,
+// re-arming a hover-expand timer after the pointer has already left the list.
+describe('handleDragLeave cancels pending dragover RAF', () => {
+    let createContentTreeInteractions;
+    let createContentDragMulti;
+    let originalRaf;
+    let originalCancelRaf;
+
+    beforeEach(() => {
+        jest.resetModules();
+        setupGlobalMocks();
+        require('../../src/content/content-native-checkbox-sync.js');
+        createContentTreeInteractions = require('../../src/content/content-tree-interactions.js');
+        createContentDragMulti = require('../../src/content/content-drag-multi.js');
+        originalRaf = globalThis.requestAnimationFrame;
+        originalCancelRaf = globalThis.cancelAnimationFrame;
+    });
+
+    afterEach(() => {
+        if (originalRaf === undefined) delete globalThis.requestAnimationFrame;
+        else globalThis.requestAnimationFrame = originalRaf;
+        if (originalCancelRaf === undefined) delete globalThis.cancelAnimationFrame;
+        else globalThis.cancelAnimationFrame = originalCancelRaf;
+        teardownGlobalMocks();
+    });
+
+    it('cancels the queued dragover frame when the cursor leaves #sources-list', () => {
+        // RAF returns an id but does NOT run the callback, so the dragover work
+        // stays queued (_pendingDragOverRafId != null) like it would mid-drag
+        // between two animation frames.
+        globalThis.requestAnimationFrame = jest.fn(() => 777);
+        globalThis.cancelAnimationFrame = jest.fn();
+
+        const runtime = { hoverExpandTimers: new Map(), hoverExpandedGroupIds: new Set() };
+        const shadowRoot = {
+            getElementById: () => null,
+            querySelector: () => null,
+            querySelectorAll: () => []
+        };
+        const tree = createContentTreeInteractions({
+            runtime,
+            getState: () => ({ ungrouped: [], groups: [] }),
+            getGroupsById: () => new Map(),
+            getPendingBatchKeys: () => new Set(),
+            getShadowRoot: () => shadowRoot,
+            getParentMap: () => new Map(),
+            getSetTimeout: () => globalThis.setTimeout,
+            dragMulti: createContentDragMulti({})
+        });
+
+        tree.handleDragOver({
+            target: { closest: () => null },
+            clientX: 0,
+            clientY: 0,
+            preventDefault: jest.fn(),
+            dataTransfer: { dropEffect: 'move' }
+        });
+        expect(globalThis.requestAnimationFrame).toHaveBeenCalledTimes(1);
+
+        tree.handleDragLeave({ target: { id: 'sources-list', closest: () => null } });
+
+        expect(globalThis.cancelAnimationFrame).toHaveBeenCalledWith(777);
     });
 });
 

@@ -2205,6 +2205,11 @@
             }
             if (e.target && e.target.id === 'sources-list') {
                 cancelAllHoverTimers();
+                // Drop any dragover work queued for the next frame: the pointer has
+                // left the list, so letting it run would re-arm a hover-expand timer
+                // (the RAF flush calls armHoverExpandTimerForGroup). clearDragFeedback
+                // is the only other cancel site and only fires on drop/dragend.
+                _cancelPendingDragOver();
             }
         }
 
@@ -2374,10 +2379,20 @@
             if (group.collapsed) return;
             if (!Array.isArray(group.children) || group.children.length === 0) return;
             const root = getShadowRoot();
-            if (!root || typeof root.querySelector !== 'function') return;
-            const container = root.querySelector(`.group-container[data-group-id="${cssEscape(groupId)}"]`);
-            if (!container) return;
-            toggleGroupCollapse(group, container);
+            const container = root && typeof root.querySelector === 'function'
+                ? root.querySelector(`.group-container[data-group-id="${cssEscape(groupId)}"]`)
+                : null;
+            if (container) {
+                toggleGroupCollapse(group, container);
+                return;
+            }
+            // DOM unreachable (external state sync rebuilt/removed the node mid-drag).
+            // We've already dropped groupId from hoverExpandedGroupIds, so without
+            // this the group would stay permanently expanded with nothing tracking
+            // it. Collapse in state — the next render() reconciles the DOM from
+            // group.collapsed. State is the source of truth; the DOM is its product.
+            group.collapsed = true;
+            saveState({ immediate: true });
         }
 
         function cancelExpandTimersForOtherGroups(keepGroupId) {
@@ -3064,16 +3079,21 @@
         function applyReflowAfterRender() {
             if (!runtime.dragReflowSession || !dragReflow) return;
             if (typeof dragReflow.applyReflow !== 'function') return;
-            const shifts = runtime.dragReflowSession.shiftedItems;
-            if (!(shifts instanceof Map) || shifts.size === 0) return;
-            // Snapshot the current shifts before applyReflow's diff loop mutates the
-            // session.shiftedItems Map (clears entries not in `next`). Without this
-            // snapshot, applyReflow would clear ALL tracked items because it
-            // compares against the incoming `shifts` argument — passing the live
-            // Map as `shifts` works because every entry trivially matches itself.
+            const live = runtime.dragReflowSession.shiftedItems;
+            if (!(live instanceof Map) || live.size === 0) return;
+            // render() rebuilt the rows, so the fresh nodes carry no inline
+            // transform — but session.shiftedItems still records the shift values.
+            // Snapshot those values, then CLEAR the live Map so applyReflow's
+            // `prev === delta` short-circuit sees prev === undefined for every key
+            // and actually re-writes translateY onto the new nodes (it repopulates
+            // session.shiftedItems as it applies). Passing the live Map directly as
+            // `shifts` no-ops: every entry trivially equals itself, so the diff loop
+            // skips every row and the shift is lost across the render.
+            const snapshot = new Map(live);
+            live.clear();
             dragReflow.applyReflow({
                 session: runtime.dragReflowSession,
-                shifts,
+                shifts: snapshot,
                 rootElement: getSourceListContainer()
             });
         }
