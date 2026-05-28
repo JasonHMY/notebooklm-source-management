@@ -1,6 +1,19 @@
 (function () {
     'use strict';
 
+    /**
+     * createContentSourcePartialSyncGuard(deps) — 防"半截扫描"误删 state 的判定层。
+     * NotebookLM 在加载新 source / 切换视图时常出现"DOM 暂时只渲染一部分 sources"的瞬态;
+     * 本模块判断:这种瞬态发生时,是否应跳过 sync(保留 previous state)、
+     * 并把仍然显示的 raw URL 标 isLoading 占位,避免下次 sync 又"重新发现"。
+     *
+     * @param {Object} deps Optional: URL (URL ctor, default globalThis.URL);
+     *   resolveStoredSourceKeyWithReason(storedKey, sourceLookup, sourceRecord) —
+     *   来自 content-source-resolve;默认返回 unresolved。
+     * @returns {{ hasPreviousRecordForCurrentSource, shouldPreserveExistingSourcesDuringPartialSync, isLikelyRawImportUrlTitle, markTransientRawUrlImportSources }}
+     *   `shouldPreserveExistingSourcesDuringPartialSync(currentSources, sourceLookup, previousSourceRecordsByKey, { recentNativeDeletedSourceKeys? })`
+     *   返回 true 时 caller 必须放弃这次 sync 写入。
+     */
     function createContentSourcePartialSyncGuard(deps = {}) {
         const URLCtor = deps.URL || globalThis.URL;
         const resolveStoredSourceKeyWithReason = typeof deps.resolveStoredSourceKeyWithReason === 'function'

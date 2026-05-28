@@ -1,6 +1,16 @@
 (function () {
     'use strict';
 
+    /**
+     * createContentNativeLabelImport(deps) — NotebookLM 原生标签 import preview 比对纯函数。
+     * 判断扫描出的 preview 是否包含期望 titles、定位 source-count 不齐的 summaries。
+     *
+     * @param {Object} deps Optional: getComparableNativeImportLabelTitle(value) — 来自
+     *   content-native-label-import-controller;默认 trim+lowercase。
+     * @returns {{ previewContainsTitles, getIncompleteSummaries }}
+     *   `previewContainsTitles` 返回 boolean;`getIncompleteSummaries` 返回带 reason
+     *   ('missing_label' / 'source_count_mismatch') 的 summary 列表。
+     */
     function createContentNativeLabelImport(deps = {}) {
         const getComparableNativeImportLabelTitle = typeof deps.getComparableNativeImportLabelTitle === 'function'
             ? deps.getComparableNativeImportLabelTitle

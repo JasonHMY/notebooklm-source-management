@@ -1,6 +1,18 @@
 (function () {
     'use strict';
 
+    /**
+     * createContentModalWhatsNew(deps) — 升级后 What's New 提示 modal。
+     * 复用 welcome modal 的 feature row 渲染;关闭即 markWhatsNewSeen 写入当前版本号
+     * 落 storage,下一次 minor/major bump 才再弹。Settings modal 入口可传 markSeenOnClose:false
+     * 实现"不污染 already-seen" 重看。
+     *
+     * @param {Object} deps Required: el, getMessage, getShadowRoot (缺一抛错).
+     *   Required for action: markWhatsNewSeen, createWelcomeFeatureRow.
+     *   Optional: prepareModalOpen, closeManagedModal, bindModalKeyboardNavigation, requestAnimationFrame.
+     * @returns {{ renderWhatsNewModal, closeWhatsNewModal }}
+     *   renderWhatsNewModal(options) — options.markSeenOnClose:false 走 read-only 模式。
+     */
     function createContentModalWhatsNew(deps = {}) {
         const {
             el,

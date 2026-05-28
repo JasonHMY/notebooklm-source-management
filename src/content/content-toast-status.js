@@ -1,6 +1,15 @@
 (function () {
     'use strict';
 
+    /**
+     * createContentToastStatus() — toast 选项归一化 + save-status 文案映射。
+     * 提供 toast variant/duration/actionLabel 校验默认值、save status state → i18n key
+     * 映射(saving / saved / failed / stale / recovery_available)、以及一个
+     * 跨实现的 `clearElementChildren` helper(兼容 replaceChildren 缺失环境)。
+     * 不持有运行状态,纯 stateless helpers。无外部 deps。
+     *
+     * @returns {{ TOAST_DEFAULT_DURATION_MS, TOAST_ACTION_DURATION_MS, normalizeToastOptions, getToastDuration, getSaveStatusMessageKey, clearElementChildren }}
+     */
     function createContentToastStatus() {
         const TOAST_DEFAULT_DURATION_MS = 3000;
         const TOAST_ACTION_DURATION_MS = 5000;

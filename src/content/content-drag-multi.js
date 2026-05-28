@@ -4,6 +4,20 @@
     const DEFAULT_AUTO_SCROLL_EDGE_PX = 60;
     const DEFAULT_AUTO_SCROLL_MAX_SPEED = 14;
 
+    /**
+     * createContentDragMulti(deps) — 多源拖拽 / 自定义 drag ghost / 边缘 auto-scroll 工具集。
+     * 解决 HTML5 DnD 单元素 ghost 限制:batch mode 拖多个源时拼出 stacked clone ghost,
+     * 拖拽落点附近持续滚动的容器边缘 auto-scroll 用 rAF 驱动。
+     *
+     * @param {Object} deps Optional: getDocument, requestAnimationFrame, cancelAnimationFrame, el (XSS-safe)。
+     *   未提供时回退到 globalThis 对应符号(test harness 可注入 mock)。
+     * @returns {{ EDGE_PX, MAX_SPEED, resolveDragSelection, computeAutoScrollVelocity,
+     *   createMultiDragGhost, destroyMultiDragGhost, applyMultiSourceDrop,
+     *   createAutoScrollController, inlineStylesRecursive, cloneSourceItem }}
+     *   resolveDragSelection 判定拖拽是否多选;applyMultiSourceDrop 把已解析 keys
+     *   按 targetList/insertIndex 批量插入(保持顺序);createAutoScrollController 在 dragover 边缘
+     *   触发 rAF loop 滚动容器,destroy 关闭。
+     */
     function createContentDragMulti(deps = {}) {
         const ctx = deps && typeof deps === 'object' ? deps : {};
 

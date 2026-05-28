@@ -1,6 +1,20 @@
 (function () {
     'use strict';
 
+    /**
+     * createContentTags(deps) — tag(标签)子系统的 CRUD + 颜色 + 排序 + source→tag 映射。
+     * 直接读写 runtime.tagsById / runtime.sourceTagsById / runtime.state.tagOrder /
+     * runtime.state.activeTagId — 是 state 的 thin wrapper,不持久化(saveState 在 caller)。
+     *
+     * @param {Object} deps Required: showToast, getMessage; runtime (持 tagsById / sourceTagsById / state)。
+     *   读取 globalThis.NSM_CONTENT_CONFIG.TAG_COLOR_PRESETS + TAG_COLOR_HEX_PATTERN。
+     * @returns {Object} 19 helpers,分三组:
+     *   - 标签值归一化 + 颜色: normalizeTagLabel / normalizeTagColor / normalizeTagColorInputValue /
+     *     getDefaultTagColor / getTagColorPresets / getTagColorRgb / getTagColorRgba /
+     *     getTagStyleVars / getTagColorPreviewStyle / getSerializedTag
+     *   - 查询: generateTagId / getSortedTagIds / getSourceTagIds / getTagUsageCounts / findExistingTagIdByLabel
+     *   - CUD: createTag / updateTag / setSourceTagIds / deleteTag(会清理 sourceTagsById + activeTagId)
+     */
     function createContentTags(deps = {}) {
         const {
             showToast,

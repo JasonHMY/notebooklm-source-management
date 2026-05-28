@@ -1,6 +1,48 @@
 (function () {
     'use strict';
 
+    /**
+     * createContentPersistence(context) — chrome.storage.local 持久层 + load/save 队列 + 历史 + recovery。
+     * 最大的 content module,集中了所有持久化决策:
+     *  - Build / 序列化:`buildPersistableState` 把 runtime(groups/groupsById/sourcesByKey/tagsById/...)
+     *    展平成 plain JSON snapshot,带 _saveRevision/_savedAt + schemaVersion。
+     *  - 写入路径:`enqueueStateSave` debounce 写;`saveState` 一次性写;
+     *    `sendStateToStorage` 经 chrome.runtime 走 SW 队列(SW 用 _saveRevision 拒绝过期);
+     *    `writeStateToLocalStorage` 是 local fallback。两条路径都同时把 backup snapshot 落盘。
+     *  - 读取路径:`loadState` 拉取 primary + backup + history,经
+     *    `pickPreferredStoredState` 选最佳,`normalizeLoadedState` 兼容老 schema,
+     *    最后 `applyLoadedStateToManager` 调下游 state-apply 灌回 runtime。
+     *  - 历史:`appendStateHistorySnapshot` per-notebook ring buffer(retention 来自
+     *    getHistoryRetentionLimit);`getStateHistoryEntries` 是 UI history panel 数据源。
+     *  - Recovery:`writeRecoverySnapshot` / `readRecoverySnapshot` /
+     *    `detectRecoverySnapshotAvailability` 处理崩溃恢复。
+     *  - Save status 流:saving/saved/failed/stale/recovery_available — 通过 onSaveStatusChange 回调。
+     *
+     * @param {Object} context 命名为 `context`(不是 deps)。完整 deps 见 line 4+ 的 const 块,主要分类:
+     *   - chrome / storageSchemaVersion / debounce
+     *   - state getters: getState (lazy), state initial,getHistoryRetentionLimit
+     *   - normalize / build helpers: normalizeSourceText, getSourceTagIds, getSerializedTag,
+     *     buildNormalizedTagState, appendGroupChildIfAcyclic, cloneSerializableData
+     *   - NotebookLM 侧:scanAndSyncSources, findSourcePanel, getSourcePanelState, hasRenderableSourceRows
+     *   - UI 回调:render, getMessage, showToast, developerLog, onSaveStatusChange
+     *   - 内部依赖:globalThis.NSM_CREATE_CONTENT_SNAPSHOT_SIGNATURE(必须先加载)
+     * @returns {Object} ~40+ 方法,分四类:
+     *   - 序列化 / 比较:buildPersistableState, preparePersistableSnapshot, prepareRuntimeSaveSnapshot,
+     *     hasRestorableStateSnapshot, hasPersistableManagerState, getBestPersistableSnapshot,
+     *     getSnapshotSaveRevision, normalizeLoadedState
+     *   - 存储 IO:writeStateToLocalStorage, sendStateToStorage, enqueueStateSave,
+     *     waitForPendingStateSave, flushPendingStateSave, cancelPendingStateSave, saveState
+     *   - History / Backup:getStateBackupKey, getStateHistoryKey, get/setStateHistoryEntries,
+     *     loadStateHistory, appendStateHistorySnapshot, pickPreferredStoredState
+     *   - Recovery:getRecoveryKey, write/read/clearRecoverySnapshot, detectRecoverySnapshotAvailability,
+     *     handlePageLifecyclePersistence
+     *   - Load / Apply 流:loadState, applyLoadedStateToManager, restoreInitialLoadedState,
+     *     flushPendingInitialLoadedState, restorePersistedSnapshotWithoutDom, shouldDeferInitialRestore,
+     *     capturePendingPanelReattachState, isLiveManagerLoadRequest, invalidateManagerInstance
+     *   - 状态查询:getSaveStatus, setSaveStatus, hasPreservableManagerSnapshot, canPersistManagerState,
+     *     hasPersistedSourceRefs, getPersistedSourceRefCount
+     *   完整 return 块见 line 1648。
+     */
     function createContentPersistence(context = {}) {
         const ctx = context && typeof context === 'object' ? context : {};
         const chromeApi = ctx.chrome ?? globalThis.chrome;

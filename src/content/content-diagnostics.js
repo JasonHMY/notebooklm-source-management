@@ -1,6 +1,14 @@
 (function () {
     'use strict';
 
+    /**
+     * createContentDiagnostics() — 内容脚本错误事件 + 诊断信息的标准化层。
+     * 把 `window.onerror` / `unhandledrejection` event 规范成 developerLog 可消费的
+     * `{ error, sourcePresent, line, column }` 形,并提供 plain-object / native-label-import
+     * summary 浅克隆 + diagnostics info pretty-print。无外部 deps。
+     *
+     * @returns {{ clonePlainObject, cloneNativeLabelImportSummary, getContentErrorLogDetails, getUnhandledRejectionLogDetails, stringifyDiagnostics }}
+     */
     function createContentDiagnostics() {
         function clonePlainObject(value) {
             return value && typeof value === 'object' ? Object.assign({}, value) : null;

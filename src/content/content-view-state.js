@@ -1,6 +1,45 @@
 (function () {
     'use strict';
 
+    /**
+     * createContentViewState(deps) — 渲染层的 filter / search / isolation / effective-enabled 计算。
+     * 不直接画 DOM,只为 createContentRender 提供 predicate 与 derived 状态:
+     *  - Effective enabled:`getEffectivelyEnabledSources` + `isSourceEffectivelyEnabled` —
+     *    一个 source 真正有效需要所有祖先 group 都 enabled(`areAllAncestorsEnabled`)。
+     *    `syncSourcesToEffectiveState` 把结果推回 NotebookLM DOM。
+     *  - Isolation 视图:`isGroupWithinActiveIsolation` / `isSourceWithinActiveIsolation` —
+     *    只渲染 activeIsolationGroupId 的后代。
+     *  - 搜索:`parseSearchQuery` 解析"标题词 + tag:xxx + group:xxx"语法,
+     *    `sourceMatchesSearchCriteria` / `groupMatchesSearchCriteria` 做 predicate。
+     *    搜索栏 UI:展开/折叠/外点关闭(handleSearchButtonClick / handleSearchOutsideClick /
+     *    handleDocumentOutsideClick)。
+     *  - Quick view:ungrouped / disabled / recent (7 天内) / issues / tag —
+     *    `sourceMatchesQuickView`、`isSourceIssue`、`isSourceRecentlyAdded`。
+     *  - 综合 predicate:`sourceMatchesCurrentFilters`, `hasActiveRenderFilters`,
+     *    `shouldRenderGroup`(含 groupHasRenderableDescendant 递归)。
+     *
+     * @param {Object} deps 全部可选(都有 runtime fallback),主要分两类:
+     *   - state getters:getState, getGroupsById, getSourcesByKey, getTagsById, getParentMap,
+     *     getShadowRoot, getActiveIsolationGroupId, getIsSearchExpanded, setIsSearchExpanded,
+     *     getExtensionHost, getNow, getSourceTagIds
+     *   - 行为回调:getMessage, render, closeSourceActionMenu, dismissSourceActionMenuAndRender,
+     *     getActiveSourceActionSourceKey, syncSourceToPage, isDescendant
+     *   完整 deps 取出见 line 5+。
+     * @returns {Object} 30+ helpers,大致分组:
+     *   - Enabled / isolation:getEffectivelyEnabledSources, areAllAncestorsEnabled,
+     *     isSourceEffectivelyEnabled, isGroupWithinActiveIsolation, isSourceWithinActiveIsolation
+     *   - Filter / search 解析:parseSearchQuery, sourceMatchesSearchCriteria,
+     *     groupMatchesSearchCriteria, normalizeQuickViewKind, sourceMatchesQuickView,
+     *     isSourceIssue, isSourceRecentlyAdded
+     *   - 综合 predicate:sourceMatchesCurrentFilters, hasActiveRenderFilters,
+     *     groupHasRenderableDescendant, shouldRenderGroup
+     *   - 搜索 UI:getSearchUiElements, getCurrentSearchValue, hasCurrentSearchValue,
+     *     isSearchUiCurrentlyExpanded, syncSearchUi, expandSearch, collapseSearchIfEmpty,
+     *     handleSearchButtonClick, handleSearchCloseButtonClick, handleSearchOutsideClick,
+     *     handleDocumentOutsideClick, handleSourceActionMenuViewportChange
+     *   - 状态推回:collectEffectiveSourceStates, syncSourcesToEffectiveState, isDescendant
+     *   完整 return 块见 line 663。
+     */
     function createContentViewState(deps = {}) {
         const ctx = deps && typeof deps === 'object' ? deps : {};
         const runtime = ctx.runtime && typeof ctx.runtime === 'object' ? ctx.runtime : ctx;

@@ -1,6 +1,17 @@
 (function () {
     'use strict';
 
+    /**
+     * createContentSourceActionMenu(deps) — 源行右键 action 菜单的 item 列表纯函数。
+     * 区分 normal source (查看详情/重命名/打标签/移动/删除) vs failed source (仅删除)。
+     * 不渲染 DOM,只生成 `{ action, kind, icon, label, disabled? }[]` 描述,
+     * 实际渲染 + 定位在 content-source-actions.js。
+     *
+     * @param {Object} deps Optional: getState, getSourcesByKey (Map), getMessage, canMoveSourceToUngrouped(sourceKey)
+     *   全部有 fallback。
+     * @returns {{ canOpenSourceActionMenu, createNativeActionResult, getSourceActionMenuItems, getSourceActionSubmenuItems }}
+     *   `canOpenSourceActionMenu`: batch mode / loading 不允许;failed 允许(可删)。
+     */
     function createContentSourceActionMenu(deps = {}) {
         const getState = typeof deps.getState === 'function' ? deps.getState : () => ({});
         const getSourcesByKey = typeof deps.getSourcesByKey === 'function' ? deps.getSourcesByKey : () => new Map();

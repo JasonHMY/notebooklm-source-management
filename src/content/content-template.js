@@ -1,6 +1,16 @@
 (function () {
     'use strict';
 
+    /**
+     * createManagerShell(el, chromeOrGetMessage) — Shadow DOM manager 的静态外壳 DOM 工厂。
+     * 注意:这是签名最特殊的 factory —— 不接 deps object,直接返回组装好的根节点(<div.sp-container>),
+     * 不返回 { method } map。内部 toolbar / search cluster / quick-view rail / view-state /
+     * sources-list / resizer 五个 anchor 是固定的;后续 content-render 通过 ID 查找填内容。
+     *
+     * @param {Function} el — XSS-safe element factory(src/utils/index.js)。
+     * @param {Function|Object} chromeOrGetMessage — 若是函数视作 getMessage(key);若是对象走 chrome.i18n.getMessage 回退。
+     * @returns {HTMLElement} <div.sp-container> 根节点(尚未插入 Shadow DOM)。
+     */
     function createManagerShell(el, chromeOrGetMessage) {
         const getMessage = typeof chromeOrGetMessage === 'function'
             ? chromeOrGetMessage

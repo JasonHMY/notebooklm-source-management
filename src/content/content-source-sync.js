@@ -1,6 +1,32 @@
 (function () {
     'use strict';
 
+    /**
+     * createContentSourceSync(deps) — 源扫描 + state 同步主控。
+     * 把 NotebookLM 原生 DOM (list view / label view / 折叠 label group / loading 行 / failed 行)
+     * 扫描成 source descriptor,再 reconcile 进 state.groups + state.ungrouped + sourcesByKey,
+     * 处理 SPA 切换 + 半截扫描 + native delete/rename 后的事后同步。MutationObserver 入口。
+     *
+     * @param {Object} deps 60+ 项依赖,大致四类(完整 destructuring 见 line 4+):
+     *   - 环境: runtime, getDocument / getWindow / getDEPS, findElement, findSourcePanel,
+     *     isSourcePanelRenderable
+     *   - 扫描/识别: createSourceDescriptor, extractSourceIdentitySnapshot,
+     *     isManageableSourceIdentity, hasPreservableManagerSnapshot,
+     *     isSourceEffectivelyEnabled
+     *   - state reconcile: reconcilePersistedTree, snapshotExistingSourceRecords,
+     *     remapExistingStateToCurrentSources, buildSourceLookup,
+     *     resolveStoredSourceKeyWithReason, buildResolvedSourceStateById,
+     *     buildNormalizedTagState, buildResolvedSourceTagsById, buildParentMap,
+     *     buildPersistableState, setSourceTagIds, syncSourceToPage, saveState
+     *   - 日志/i18n: developerLog
+     * @returns {Object} 30+ helpers。主要入口 `scanAndSyncSources` / `handleDomChanges` /
+     *   `debouncedScanAndSync`;此外暴露 fresh-row cache (findFreshCheckbox /
+     *   resolveFreshRowEntry / getFreshRowCache / setFreshRowCache / clearFreshRowCache),
+     *   source-view 检测 (detectSourceView / getSourceViewInfo),
+     *   折叠 label group 控制 (getCollapsedNativeLabel* / expandCollapsedNativeLabelGroups /
+     *   restoreNativeLabelExpansionControls),以及 panel 状态判定与 signature 比对。
+     *   完整 return 块见 line 2599。
+     */
     function createContentSourceSync(deps = {}) {
         const runtime = deps.runtime && typeof deps.runtime === 'object' ? deps.runtime : deps;
 

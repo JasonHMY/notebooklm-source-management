@@ -1,6 +1,23 @@
 (function () {
     'use strict';
 
+    /**
+     * createContentRender(deps) — Shadow DOM manager 渲染层。
+     * 负责列表行 / 分组容器 / 批量条 / 搜索栏 / 视图状态栏 / 快速视图栏 / 源 action 菜单层 / 拖拽 reflow 后的 DOM patch。
+     *
+     * @param {Object} deps 25+ 项依赖,主要分四类:
+     *   - state getters: getState, getGroupsById, getTagsById, getSourcesByKey, getParentMap,
+     *     getPendingBatchKeys, getActiveIsolationGroupId, getIsDeletingSources, getVisibleQuickViewKinds
+     *   - DOM 工厂: el (XSS-safe text-node-only element factory from src/utils/index.js)
+     *   - filter predicates: sourceMatchesCurrentFilters, areAllAncestorsEnabled,
+     *     isSourceWithinActiveIsolation, isGroupWithinActiveIsolation, isSourceEffectivelyEnabled,
+     *     shouldRenderGroup, hasActiveRenderFilters, getSourceTagIds, getTagStyleVars
+     *   - interaction callbacks: handleInteraction, canOpenSourceActionMenu, syncSearchUi, getMessage
+     *   完整 deps 列表见下方 line 6+ 的 destructuring 块。
+     * @returns {Object} 主入口 `render()`; 25+ helpers 涵盖 patch (patchNode/patchChildren)、
+     *   UI 子区域 (renderQuickViewRail/renderViewStateBar)、源 action 菜单层 (~10 fns)、
+     *   icon 工厂 (createSourceGlyphIcon/createSourceIconElement/...)。完整方法名见 line 1487 的 return 块。
+     */
     function createContentRender(deps = {}) {
         const QUICK_VIEW_BUTTON_KINDS = ['all', 'ungrouped', 'disabled', 'tag', 'recent', 'issues'];
         const getDocument = typeof deps.getDocument === 'function'

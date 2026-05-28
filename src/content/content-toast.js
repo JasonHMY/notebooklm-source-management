@@ -1,6 +1,18 @@
 (function () {
     'use strict';
 
+    /**
+     * createContentToast(deps) — Shadow DOM 内 toast 通知队列。
+     * 单元素复用模型(`.sp-toast` 永远只存在一个),后续 toast 进队列等当前 hide 完
+     * + 120ms 间隔后再显;showUndoableToast 自动给底层 undoStack 注入 "Undo" 按钮。
+     *
+     * @param {Object} deps Required: normalizeToastOptions, getToastDuration (缺一抛错).
+     *   Optional: document, setTimeout, clearTimeout, getMessage, getUndoStack, runUndo, runtime (含 shadowRoot)。
+     * @returns {{ ensureToastElement, clearToastTimeout, hideActiveToast, showNextToast,
+     *   showToast, showUndoableToast, resetToastState, getToastQueueLength, getActiveToastItem }}
+     *   showToast 是入口,showUndoableToast 在 undoStack 有项时附加 undo action;
+     *   resetToastState 给 teardown / 单测复位用。
+     */
     function createContentToast(deps = {}) {
         const {
             document: documentObj = globalThis.document,

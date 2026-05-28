@@ -1,6 +1,20 @@
 (function () {
     'use strict';
 
+    /**
+     * createContentStateRepair(deps) — 持久化 snapshot 的结构性修复候选搜索。
+     * 当 current state 比 backup / history 更"贫瘠"(分组里的 source 更少 + 同 groupId
+     * 缺失但 title 同名)时,从备份和历史里找一个 superset candidate,合并出一个
+     * `{ groups, groupsById, sourceStateById merged with current preference, recomputed ungrouped }`
+     * 修复后的 snapshot。优先级:groupedSourceKeys 数量大 + 最新 revision。
+     *
+     * @param {Object} deps Optional (全部有默认): cloneSerializableData (深克隆), hasRestorableStateSnapshot,
+     *   getMapLikeEntries, normalizeStateHistoryEntries, getSnapshotSaveRevision.
+     * @returns {{ collectSnapshotGroupedSourceKeys, getSnapshotGroupInfo, isCompatibleStructuralRepairCandidate, createStructurallyRepairedState, findStructuralRepairCandidate }}
+     *   `findStructuralRepairCandidate(current, backup, historyEntries)` 没找到时返回 null;
+     *   `createStructurallyRepairedState(current, candidate)` 保留 current 的 customHeight /
+     *   _saveRevision / _savedAt 不被覆盖。
+     */
     function createContentStateRepair(deps = {}) {
         const cloneSerializableData = typeof deps.cloneSerializableData === 'function'
             ? deps.cloneSerializableData

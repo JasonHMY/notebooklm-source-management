@@ -1,6 +1,24 @@
 (function () {
     'use strict';
 
+    /**
+     * createContentPanelDom(deps) — NotebookLM Source Panel DOM 定位 + 生命周期挂钩。
+     * 找面板、面板内容、header;判定面板是否可渲染 / 折叠;算面板表面色给 Shadow root 用;
+     * 监听 panel resize + header click → 触发 manager 同步。
+     * 在 SPA 切换 notebook 时,manager 不重建,而是靠本模块的 lifecycle hooks 持续追踪面板。
+     *
+     * @param {Object} deps Required: runtime (持 attachedPanelHeader / panelResizeObserver 等运行时句柄).
+     *   Optional 一组环境注入(default → globalThis): document, window, MutationObserver,
+     *   ResizeObserver, setTimeout, clearTimeout; DEPS (selector bundle), SCROLL_AREA_SELECTOR。
+     * @returns {Object} 17 helpers,主要分三组:
+     *   - DOM 查询: findElement, queryAllElements, waitForElement, findSourcePanel,
+     *     findSourcePanelContent, getSourcePanelHeader
+     *   - 渲染/可见性: getElementComputedStyle, isTransparentColor, resolveSourcePanelSurfaceColor,
+     *     applySourcePanelSurfaceColor, getElementBoundingRect, hasRenderableBox,
+     *     isElementRenderable, isSourcePanelCollapsed, isSourcePanelRenderable
+     *   - 生命周期: isManagerAttachedToPanel, schedulePanelLifecycleSync / clearScheduledPanelLifecycleSync,
+     *     handleSourcePanelHeaderInteraction, bindPanelLifecycleHooks
+     */
     function createContentPanelDom(deps = {}) {
         const {
             document: documentObj = globalThis.document,

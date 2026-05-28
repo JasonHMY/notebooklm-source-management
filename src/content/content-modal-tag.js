@@ -1,6 +1,27 @@
 (function () {
     'use strict';
 
+    /**
+     * createContentModalTag(deps) — Tag 管理 modal(增/改/删 tag + 颜色选择)+
+     * Batch tag 应用 modal(给批量选源加/移 tag)。包含 createTagColorControl 子组件
+     * (preset 色板 + 自由 hex 输入)和 createTagEditor(行内编辑器)两个 reusable factory。
+     *
+     * @param {Object} deps Required: el, getMessage, getShadowRoot (缺一抛错).
+     *   主要分三类(完整 deps 见 line 5 destructuring 块):
+     *   - state getter / mutator: getState, getTagsById, getSourcesByKey, getPendingBatchKeys,
+     *     getSourceTagIds, setSourceTagIds, getTagUsageCounts, createTag, updateTag, deleteTag,
+     *     saveState, render
+     *   - 颜色 / 预设 helper: normalizeTagColor, normalizeTagColorInputValue, getDefaultTagColor,
+     *     getTagColorPreviewStyle, tagColorPresets
+     *   - modal 共用: prepareModalOpen, closeManagedModal, bindModalKeyboardNavigation,
+     *     createModalItemStaggerStyle, showToast, showUndoableToast, closeSourceActionMenu
+     * @returns {{ renderTagModal, closeTagModal, renderBatchTagModal, closeBatchTagModal,
+     *   executeBatchTagUpdate, createTagEditor, createTagColorControl,
+     *   getEditTagInputId, getCssEscapedId }}
+     *   renderTagModal 是管理入口,renderBatchTagModal 是批量应用入口;
+     *   executeBatchTagUpdate 是落 state 的纯逻辑(含 showUndoableToast 反向操作)。
+     *   完整 return 块见 line 701。
+     */
     function createContentModalTag(deps = {}) {
         const {
             el,

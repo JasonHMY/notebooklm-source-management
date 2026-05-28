@@ -1,6 +1,17 @@
 (function () {
     'use strict';
 
+    /**
+     * createContentUndoHistory(deps) — single-step undo 栈(默认上限 20)。
+     * 每次 saveState 完成时调用 `recordUndoBaselineForSave(nextSnapshot)`:若新 snapshot
+     * 与已知 baseline 签名不同,baseline 推入栈;调用 `undoLastOperation()` 弹出栈顶 + 经
+     * `applyPersistableSnapshotToRuntime` 灌回 runtime,然后 `render` + 立刻 `runSaveAfterUndo`
+     * 把 undo 结果持久化(critical, recordUndo:false 避免再入栈)。
+     *
+     * @param {Object} deps Required: cloneSerializableData, buildPersistableState, applyPersistableSnapshotToRuntime.
+     *   Optional: showToast, getMessage, closeSourceActionMenu, render, runSaveAfterUndo, stackLimit (default 20).
+     * @returns {{ getUndoSnapshotSignature, getCurrentUndoSnapshot, setUndoBaselineSnapshot, resetUndoHistoryBaseline, recordUndoBaselineForSave, undoLastOperation, getUndoStack, getUndoStackLength, isApplyingUndo }}
+     */
     function createContentUndoHistory(deps = {}) {
         const {
             cloneSerializableData,

@@ -1,6 +1,16 @@
 (function () {
     'use strict';
 
+    /**
+     * createContentSnapshotSignature() — 持久化 snapshot 的稳定签名 + 修订号工具。
+     * 用 stable-key-sort + `_saveRevision`/`_savedAt` 剥离来生成 deterministic JSON 签名
+     * (`getPersistableSnapshotSignature`),用于 dedupe equivalent saves;同时提供
+     * `_saveRevision` 比较(`isStaleStateWrite`)用于 background SW 拒绝过期写入,以及
+     * storage quota 错误探测(`isStorageQuotaError`)+ storage metadata 抽取。
+     * 无外部 deps;由 createContentPersistence 内部直接 require/取出 factory 调用。
+     *
+     * @returns {{ isStorageQuotaError, getStorageMetadataFromResponse, getStorageMetadataFromResult, getSnapshotSaveRevision, isStaleStateWrite, getStableComparablePersistableValue, getPersistableSnapshotSignature, arePersistableSnapshotsEquivalent }}
+     */
     function createContentSnapshotSignature() {
         function isStorageQuotaError(error) {
             const message = String(error?.message || error || '').toLowerCase();

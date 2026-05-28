@@ -1,6 +1,16 @@
 (function () {
     'use strict';
 
+    /**
+     * createContentNativeCheckboxSync(deps) — NotebookLM 原生 checkbox 状态读取 + toggle 判定。
+     * 处理 aria-checked / indeterminate / mixed 与 .checked 三态优先级,避免重复触发 toggle。
+     *
+     * @param {Object} deps Optional: findFreshCheckbox(sourceKey), resolveFreshRowEntry(sourceKey)
+     *   — 来自 content-source-sync 的 fresh-row cache 桥接。
+     * @returns {{ getNativeControlAttribute, getNativeCheckboxState, shouldToggleNativeCheckbox, resolveDetachedRowEntry }}
+     *   `getNativeCheckboxState` 返回 true / false / null(indeterminate / mixed);
+     *   `shouldToggleNativeCheckbox` 用于判断"目标态 vs 当前态"是否需要 click。
+     */
     function createContentNativeCheckboxSync(deps = {}) {
         const findFreshCheckbox = typeof deps.findFreshCheckbox === 'function'
             ? deps.findFreshCheckbox

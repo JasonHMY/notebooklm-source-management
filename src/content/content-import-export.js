@@ -3,6 +3,22 @@
 
     const IMPORT_EXPORT_FORMAT = 'notebooklm-source-management-config';
 
+    /**
+     * createContentImportExport(deps) — JSON 导入/导出 + 预览 + 应用流。
+     * 导出:`getExportConfigText()` → wrap 成 `{ format, version, data: persistableState }`。
+     * 导入:`parseImportConfigText` 校验大小/上限 → `previewImportConfig` 做 source
+     * fingerprint 匹配预演,把缺失 source 列成 missing/conflicting 报表;
+     * `applyImportConfig` 实际写回 runtime + 历史快照 + saveState + 显示 undo toast。
+     * limits 来自 deps.limits(maxFileBytes/maxGroups/maxTags/maxSources/maxChildRefs/maxTreeDepth)。
+     *
+     * @param {Object} deps Required: runtime, cloneSerializableData, normalizeLoadedState,
+     *   hasPersistableManagerState, buildPersistableState, saveState.
+     *   Optional: limits, developerLog, showToast, getMessage, buildSourceLookup, resolveStoredSourceKey,
+     *   buildNormalizedTagState, normalizeSourceViewSwitchTarget, appendStateHistorySnapshot,
+     *   writeImportBackupSnapshot, restoreInitialLoadedState, restoreImportBackupSnapshotFromUi, render.
+     * @returns {{ IMPORT_EXPORT_FORMAT, getExportConfigText, parseImportConfigText, previewImportConfig, applyImportConfig, collectImportSourceRefs, unwrapImportConfigPayload }}
+     *   完整 return 块见 line 432。
+     */
     function createContentImportExport(deps = {}) {
         const {
             runtime,

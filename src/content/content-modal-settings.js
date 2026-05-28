@@ -10,6 +10,28 @@
         ['issues', 'ui_quick_view_issues']
     ];
 
+    /**
+     * createContentModalSettings(deps) — Settings modal + Quick-View 可见性子 modal +
+     * Developer settings 子面板。承载 30+ 偏好开关、导入导出 / 备份历史 / 源指纹修复 /
+     * 反馈链接 / 命令面板入口 / 欢迎 + What's New 入口 / 历史保留上限 / 语言覆盖 / 诊断网格。
+     *
+     * @param {Object} deps Required: el, getMessage, getShadowRoot (缺一抛错).
+     *   主要分四类(完整 deps 见 line 14 destructuring 块):
+     *   - state getter / setter 对: getVisibleQuickViewKinds/setVisibleQuickViewKinds,
+     *     getDeveloperModeEnabled/setDeveloperModeEnabled, getHoverSpotlightEnabled/setHoverSpotlightEnabled,
+     *     setLanguageOverride, setHistoryRetentionLimit
+     *   - history / 导入导出: getStateHistoryEntries, restoreStateHistoryEntry, getExportConfigText,
+     *     previewImportConfig, applyImportConfig, createManualRestorePoint, createHistoryNodes
+     *   - 源指纹修复: applySourceRepairRemaps, getSourceRepairReport, createSourceRepairNodes
+     *   - UI 子组件 + 跨 modal 联动: renderCommandPaletteModal, renderWelcomeModal,
+     *     renderWhatsNewModal, createDiagnosticsGrid, createLanguagePreferenceSection,
+     *     createHistoryPreferenceNodes, createImportPreviewDetailNodes, render, showToast
+     * @returns {{ closeSettingsModal, renderSettingsModal, renderQuickViewButtonsModal,
+     *   createDeveloperSettingsSection, bindDeveloperSettingsActions, unlockDeveloperSettings,
+     *   normalizeVisibleQuickViewKinds }}
+     *   renderSettingsModal 是主入口;Developer 子面板有独立 create/bind/unlock 三件套
+     *   供 password gate 后激活。完整 return 块见 line 718。
+     */
     function createContentModalSettings(deps = {}) {
         const {
             el,

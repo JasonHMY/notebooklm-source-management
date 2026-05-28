@@ -1,6 +1,16 @@
 (function () {
     'use strict';
 
+    /**
+     * createContentNativeLabelImportModal(deps) — Native-label import preview Modal 渲染层。
+     * 构造 `.sp-native-label-import-*` Shadow-DOM 节点树:summary + per-label item + source-list,
+     * 全部走 el() text-node 路径,untrusted title 不进 innerHTML。
+     *
+     * @param {Object} deps Optional: el (XSS-safe DOM 工厂,默认 globalThis.el);
+     *   getMessage(key, args) — i18n;createModalItemStaggerStyle(index) — 入场动画 stagger。
+     * @returns {{ getNativeLabelImportActionKey, createPreviewNodes }}
+     *   `createPreviewNodes(preview)` 返回 Element[],供 modal 容器直接 appendChild。
+     */
     function createContentNativeLabelImportModal(deps = {}) {
         const el = typeof deps.el === 'function' ? deps.el : globalThis.el;
         const getMessage = typeof deps.getMessage === 'function' ? deps.getMessage : (key) => key;

@@ -1,3 +1,25 @@
+/**
+ * src/background/index.js — Service Worker (MV3 background)。
+ *
+ * 职责:
+ *   1. chrome.storage.local 写入的队列化 + revision-guarded 协议(stateSaveQueueByKey)—
+ *      防止 content script 的 stale snapshot 覆盖 newer state。
+ *   2. tab focus / open 协议(popup → background → 跨 tab 聚焦或新开 NotebookLM)。
+ *   3. chrome.runtime.onMessage 路由 (SAVE_STATE / LOAD_STATE / SAVE_PREFERENCES /
+ *      LOAD_PREFERENCES / APPEND_DEVELOPER_LOG / SET_EXTENSION_ENABLED ...);
+ *      完整路由见 onMessage listener + docs/MESSAGE_CONTRACTS.md。
+ *   4. 偏好归一化 (normalizePreferences + 8 个 normalizeXxx 子函数 line ~263-410)。
+ *      ⚠ MIRROR: 这些 normalizer 在 src/content/content-developer-logger.js 中有
+ *      verbatim 复制,改动两处必须同步(Phase 3 会抽到 src/utils/preference-normalizers.js)。
+ *   5. 状态历史 / 命名快照 / quota 监控 / sender 校验。
+ *
+ * SECURITY: 不持有 DOM、不信任 message payload — 必须 sender 校验 + key prefix 校验
+ * + revision guard;Storage write 总是回传 usageInfo 给 content-side toast。
+ *
+ * 测试: tests/background.test.js
+ * 契约: docs/MESSAGE_CONTRACTS.md + docs/STORAGE_SCHEMA.md
+ */
+
 const NOTEBOOKLM_HOME_URL = 'https://notebooklm.google.com/';
 const NOTEBOOKLM_URL_PATTERN = 'https://notebooklm.google.com/*';
 const NOTEBOOKLM_NOTEBOOK_PREFIX = 'https://notebooklm.google.com/notebook/';

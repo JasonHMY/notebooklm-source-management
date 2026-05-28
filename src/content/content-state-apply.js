@@ -1,6 +1,18 @@
 (function () {
     'use strict';
 
+    /**
+     * createContentStateApply(deps) — 把持久化 snapshot 灌回 runtime 状态对象。
+     * 用 `applyPersistableSnapshotToRuntime(snapshot)` 把 normalized state 的
+     * groups / ungrouped / tagOrder / groupsById / tagsById / sourceTagsById / sourceStateById /
+     * customHeight 全量同步到 runtime + 调用 `syncSourceToPage` 把 enabled 推回 NotebookLM 原生 DOM。
+     * 是 undo / import / SW state push 三条恢复路径共用的最后一步。
+     *
+     * @param {Object} deps Required: runtime, cloneSerializableData, normalizeLoadedState, hasPersistableManagerState.
+     *   Optional: normalizeSourceText, buildParentMap, syncSourceToPage, isSourceEffectivelyEnabled.
+     * @returns {{ applyPersistableSnapshotToRuntime }} 返回 true 表示 snapshot 已应用,false 表示
+     *   snapshot 缺失或不是 persistable shape。
+     */
     function createContentStateApply(deps = {}) {
         const {
             cloneSerializableData,

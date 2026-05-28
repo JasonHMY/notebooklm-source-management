@@ -1,6 +1,16 @@
 (function () {
     'use strict';
 
+    /**
+     * createContentModalWelcome(deps) — 首次安装欢迎 modal(feature highlights + 反馈链接)。
+     * 关闭即调 markWelcomeOnboardingSeen 落 storage,避免下次再弹。
+     *
+     * @param {Object} deps Required: el, getMessage, getShadowRoot (缺一抛错).
+     *   Required for action: markWelcomeOnboardingSeen, openWebStoreFeedback.
+     *   Optional: prepareModalOpen, closeManagedModal, bindModalKeyboardNavigation, requestAnimationFrame.
+     * @returns {{ renderWelcomeModal, closeWelcomeModal, createWelcomeFeatureRow }}
+     *   createWelcomeFeatureRow 是私用渲染 helper(icon + 标题 + 副本)外露给 Settings modal "Welcome again" 入口复用。
+     */
     function createContentModalWelcome(deps = {}) {
         const {
             el,

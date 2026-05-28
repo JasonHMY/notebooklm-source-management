@@ -7,6 +7,19 @@
     // queryable constant so callers can align timeouts / staggered work.
     const DEFAULT_TRANSITION_MS = 180;
 
+    /**
+     * createContentDragReflow(deps) — 拖拽 reflow / fold / drop-shift 视觉过渡引擎。
+     * 拖拽期间把源行 fold 成 0 高度,对剩余可见行按 dropIntent 算 translateY shift,
+     * 给目标插入点留出预览空隙;dragend / drop 时 unfold 并清 shift。所有过渡时长统一用
+     * DEFAULT_TRANSITION_MS(同 UI_GUIDELINES `--sp-motion-base` token = 180ms)。
+     *
+     * @param {Object} deps Optional;当前实现是 pure DOM 操作,deps 仅 future-proof reserved。
+     * @returns {{ TRANSITION_MS, createDragSession, prepareDragSession,
+     *   foldDraggedItems, unfoldDraggedItems, computeReflow, applyReflow,
+     *   clearReflow, extractInlineTranslateY }}
+     *   session 维护 draggedKeys + itemHeights + shiftedItems;computeReflow 基于 dropIntent
+     *   返回 shift map,applyReflow/clearReflow 落实到 inline style.transform。
+     */
     function createContentDragReflow(deps = {}) {
         const _ctx = deps && typeof deps === 'object' ? deps : {};
 

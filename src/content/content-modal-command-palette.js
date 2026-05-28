@@ -1,6 +1,19 @@
 (function () {
     'use strict';
 
+    /**
+     * createContentModalCommandPalette(deps) — Ctrl/Cmd+K 命令面板 modal。
+     * 列出当前 surface 可执行命令(来自 deps.getCommandPaletteCommands),
+     * 支持搜索过滤、键盘上下选择、回车执行、就地编辑快捷键(record-combo 模式)。
+     *
+     * @param {Object} deps Required: el, getMessage, getShadowRoot (缺一抛错).
+     *   Optional: getDocument, prepareModalOpen, closeManagedModal, bindModalKeyboardNavigation,
+     *   showToast, getCommandPaletteCommands, executeCommandPaletteCommand,
+     *   getCommandShortcut, setCommandShortcut, getCommandShortcutComboFromEvent,
+     *   formatCommandShortcut, requestAnimationFrame.
+     * @returns {{ renderCommandPaletteModal, closeCommandPaletteModal }}
+     *   render 注入 backdrop + modal 到 Shadow DOM 并 focus input;close 走 closeManagedModal。
+     */
     function createContentModalCommandPalette(deps = {}) {
         const {
             el,

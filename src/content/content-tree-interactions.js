@@ -1,6 +1,36 @@
 (function () {
     'use strict';
 
+    /**
+     * createContentTreeInteractions(deps) — tree 视图所有交互的主控:
+     * 单击 / 勾选 / batch select 推进、checkbox propagation up/down、
+     * group 折叠展开、跨 group 拖拽 (HTML5 DnD)、reflow shift 动画补丁、
+     * batch move/delete/move-to-ungrouped 一阶段处理、native click queue 投递。
+     * 与 content-source-actions(右键菜单)互补,本模块管 row 主体与拖拽。
+     *
+     * @param {Object} deps 50+ 项依赖(完整 destructuring 见 line 4+),大致五类:
+     *   - state / 索引: runtime, getState / getGroupsById / getSourcesByKey /
+     *     getPendingBatchKeys / getParentMap / getClickQueue / getKeyByElement
+     *   - 环境: getShadowRoot / getDocument / getWindow / getSetTimeout / getDEPS /
+     *     getSourceCheckboxSelector
+     *   - i18n / 通知 / 渲染: getMessage, showToast, showUndoableToast, render, saveState
+     *   - 派发到其他子系统: buildParentMap, isSourceEffectivelyEnabled,
+     *     collectEffectiveSourceStates, syncSourcesToEffectiveState,
+     *     executeBatchDelete, renderMoveToFolderModal
+     *   - 拖拽配套: 一组 drag feedback / reflow helpers 在内部组装,
+     *     依赖 runtime.activeDragGhost 等运行时句柄
+     * @returns {Object} 28 helpers。group 操作 (handleAddNewGroup / removeGroupFromTree /
+     *   toggleGroupCollapse),source 操作 (syncSourceToPage / findParentGroupOfSource /
+     *   removeSourceFromTree / canMoveSourceToUngrouped / moveSourceToUngrouped),
+     *   batch 操作 (collectSourceKeysInTreeOrder / executeBatchMoveToUngrouped /
+     *   isBatchOperableSource),交互入口 (handleInteraction /
+     *   handleOriginalCheckboxChange / triggerRename / processClickQueue),
+     *   完整拖拽生命周期 (handleDragStart / handleDragOver / handleDragLeave /
+     *   handleDrop / handleDragEnd / clearDragFeedback / computeDropIntent /
+     *   applyReflowAfterRender),以及树形位置 (getSourceTreePosition /
+     *   getGroupTreePosition / isNoopTreeMove / getGroupAncestorChain /
+     *   resolveSiblingKeys)。完整 return 块见 line 3066。
+     */
     function createContentTreeInteractions(deps = {}) {
         const runtime = deps.runtime || deps;
         const NATIVE_SELECTION_SYNC_RETRY_LIMIT = 6;

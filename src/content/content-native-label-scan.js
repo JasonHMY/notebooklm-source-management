@@ -1,6 +1,12 @@
 (function () {
     'use strict';
 
+    /**
+     * createContentNativeLabelScan() — 解析 NotebookLM 原生标签视图里的 source-count 文本。
+     * 不接受 deps;只暴露 `parseNativeLabelSourceCount`,支持中英双语 "5 sources" / "5 项目"。
+     *
+     * @returns {{ parseNativeLabelSourceCount(value): number | null }}
+     */
     function createContentNativeLabelScan() {
         function parseNativeLabelSourceCount(value) {
             const text = String(value || '').replace(/\s+/g, ' ').trim();

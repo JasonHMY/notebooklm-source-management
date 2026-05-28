@@ -1,6 +1,38 @@
 (function () {
     'use strict';
 
+    /**
+     * createContentModals(deps) — modal 总编排 + 共享 helper 层。
+     * 把 6 个独立 modal sub-factory(Move / NativeLabelImport / CommandPalette /
+     * QuickViewButtons / Welcome / WhatsNew / Settings / Tag / BatchTag / TagFilter)
+     * 装配起来,统一 prepareModalOpen / closeManagedModal / focus-trap binding /
+     * stagger style / import preview 渲染 / file IO / clipboard 等横切关注点。
+     *
+     * @param {Object} deps 60+ 项依赖,主要分五类(完整 deps 见 line 5+ destructuring 块):
+     *   - state getter: getState, getGroupsById, getTagsById, getSourceTagsById,
+     *     getSourcesByKey, getPendingBatchKeys, getShadowRoot, getDocument, getWindow
+     *   - 行为 callback: render, saveState, buildParentMap, removeSourceFromTree,
+     *     closeSourceActionMenu, showToast, showUndoableToast
+     *   - tag CRUD: createTag, updateTag, deleteTag, getTagUsageCounts,
+     *     getSourceTagIds, setSourceTagIds
+     *   - import/export/history: getExportConfigText, previewImportConfig, applyImportConfig,
+     *     applyNativeLabelImport, getSourceRepairReport/Options, applySourceRepairRemaps,
+     *     getStateHistoryEntries, restoreStateHistoryEntry
+     *   - sub-factory 注入: createContentNativeLabelImportModal, createContentModalFocus
+     *     (各自有独立 globalThis.NSM_CREATE_* 回退)
+     * @returns {Object} 40+ 方法的扁平 surface。主入口分 10 组:
+     *   - Move/Native-label-import (4): render/closeMoveToFolderModal + 同名 native-label 对
+     *   - Command palette + QuickView (3): render/close + QuickViewButtons
+     *   - Tag filter + Welcome + WhatsNew + Settings (8): 各自 render/close 对
+     *   - Tag CRUD + Batch (7): renderTagModal / renderBatchTagModal / executeBatchTagUpdate +
+     *     createTagEditor / createTagColorControl
+     *   - 跨 modal helper (14+): getImportPreviewMessage, createImportPreviewDetailNodes,
+     *     copy/download/read IO 三组(SettingsText / DeveloperLogsText / SettingsImportFile),
+     *     focus-trap (getModalFocusableElements,
+     *     bindModalKeyboardNavigation, rememberModalFocusRestoreTarget, restoreModalFocus),
+     *     closeManagedModal, prepareModalOpen, createModalItemStaggerStyle, getTagColorPresets
+     *   完整 return 块见 line 1159。
+     */
     function createContentModals(deps = {}) {
         const getDocument = typeof deps.getDocument === 'function'
             ? deps.getDocument

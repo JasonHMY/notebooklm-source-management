@@ -1,6 +1,15 @@
 (function () {
     'use strict';
 
+    /**
+     * createContentSourceListScan() — 源列表扫描时读取原生 checkbox enabled 状态。
+     * 与 content-native-checkbox-sync 不同的是,本模块面向"列表全量重扫"场景,
+     * 没有 source.key 桥接,直接以 source 元素 + fallback 默认值收口。
+     *
+     * @returns {{ getNativeCheckboxState, getNativeSourceCheckboxState }}
+     *   `getNativeCheckboxState` 返回 true/false/null;
+     *   `getNativeSourceCheckboxState` 在 source 无原生 checkbox 时直接返回 true。
+     */
     function createContentSourceListScan() {
         function getAttributeValue(element, attr) {
             if (!element || typeof element.getAttribute !== 'function') return '';

@@ -1,6 +1,33 @@
 (function () {
     'use strict';
 
+    /**
+     * createContentStateReconcile(deps) — 持久化 snapshot ↔ live NotebookLM 源列表的对账层。
+     * NotebookLM 重启或重新加载后 source key 可能变动(legacy key 老化 / stableToken 变形 /
+     * 同标题多源),这一层负责把存盘的 sourceKey 映射回当前活的 sourceKey:
+     *  - `buildSourceLookup` 一次性建索引(byId, byLegacyKey, byElement WeakMap, 多 bucket maps),
+     *    再衍生 `uniqueByStableToken/Fingerprint/Title` 用于唯一匹配。
+     *  - `resolveStoredSourceKey` / `resolveStoredSourceKeyWithReason` 按优先级 stableToken →
+     *    legacy → fingerprint → title 匹配;reason 形如 'matched_by_stable_token' /
+     *    'unresolved' / 'duplicate_title' 便于诊断。
+     *  - `applySourceRemapsToSnapshot` 用 remap map 重写 snapshot 的 sourceStateById /
+     *    sourceTagsById / groups children / ungrouped。
+     *  - `reconcilePersistedTree` 是顶层入口:校验 groupsById 循环、给孤儿 source 派回
+     *    ungrouped、做 tag id 规范化(buildNormalizedTagState)。
+     *
+     * @param {Object} deps Required: normalizeSourceText, normalizeTagLabel, normalizeTagColor.
+     *   Optional: runtime(从 deps.runtime 或 deps 自身回退)。
+     * @returns {Object} 15 个 fn —
+     *   - 源 lookup / 匹配:buildSourceLookup, buildSourceMatchReport, resolveStoredSourceKey,
+     *     resolveStoredSourceKeyWithReason
+     *   - Snapshot remap:applySourceRemapsToSnapshot, collectPersistedSourceRefs,
+     *     snapshotExistingSourceRecords, buildSingleSourcePositionalRemap,
+     *     remapExistingStateToCurrentSources
+     *   - 解析后状态:buildResolvedSourceStateById, buildResolvedSourceTagsById,
+     *     buildNormalizedTagState
+     *   - 树校验:reconcilePersistedTree, appendGroupChildIfAcyclic
+     *   完整 return 块见 line 834。
+     */
     function createContentStateReconcile(deps = {}) {
         const {
             normalizeSourceText,

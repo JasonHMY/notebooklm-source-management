@@ -1,6 +1,35 @@
 (function () {
     'use strict';
 
+    /**
+     * createContentDeveloperLogger(context) — developer log 流 + 偏好设置存档。
+     * 双职责:
+     *  - 4-arg `developerLog(level, category, event, details)` — sanitize details
+     *    (敏感 key 自动 redacted、超长字段截断、stack 哈希化、循环检测),按 maxEntries +
+     *    maxBytes 滚动裁剪并 persist 到 `sourcesPlusDeveloperLogs_<projectId>`。
+     *  - 偏好状态 holder + getters/setters — developer mode flag、欢迎/whats-new seen versions、
+     *    历史 retention、语言 override、command shortcuts、quick-view 可见 kinds、appearance prefs。
+     *    `loadDeveloperPreferences` 从 chrome.storage 读取并 normalize 一次,offers safe defaults。
+     *
+     * @param {Object} context 命名为 `context`(不是 deps)。所有项可选(都有 fallback):
+     *   - chrome: chrome.* runtime(默认 globalThis.chrome)
+     *   - getProjectId(): 返回当前 notebook id(默认 '')
+     *   - getDiagnosticsInfo(): 拼到 export text 顶部的诊断信息
+     *   - now(): ISO 时间戳工厂
+     *   - maxEntries: 默认 500 条
+     *   - maxBytes: 默认 512KB
+     * @returns {Object} ~25 个 fn —
+     *   - 主入口: `developerLog(level, category, event, details)` 返回 true/false (写入是否成功)
+     *   - 模式 flag: get/setDeveloperModeEnabled, get/setWelcomeOnboardingSeenVersion,
+     *     get/setWhatsNewSeenVersion, setOnboardingModalSeenVersions
+     *   - 偏好: getPreferenceUsageState, get/setHistoryRetentionLimit, get/setLanguageOverride,
+     *     getCommandShortcuts, get/setCommandShortcut, get/setVisibleQuickViewKinds,
+     *     get/setHoverSpotlightEnabled
+     *   - 日志 IO: loadDeveloperPreferences, loadDeveloperLogs, getDeveloperLogs,
+     *     getLatestDeveloperLogAt, getDeveloperLogExportText, clearDeveloperLogs
+     *   - 测试 hook: _trimLogsForTest, _sanitizeDetailsForTest
+     *   完整 return 块见 line 623。
+     */
     function createContentDeveloperLogger(context = {}) {
         const ctx = context && typeof context === 'object' ? context : {};
         const chromeApi = ctx.chrome ?? globalThis.chrome;

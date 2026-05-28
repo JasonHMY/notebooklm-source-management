@@ -1,6 +1,16 @@
 (function () {
     'use strict';
 
+    /**
+     * createContentModalTagFilter(deps) — quick-view "Filter by tag" modal。
+     * 按 state.tagOrder 渲染 tag chip 列表,点击应用 applyTagQuickFilter(tagId)
+     * 切换源列表过滤(单选 toggle 模型,关闭即应用)。
+     *
+     * @param {Object} deps Required: el, getMessage, getShadowRoot (缺一抛错).
+     *   Required for action: getState, getTagsById, applyTagQuickFilter.
+     *   Optional: prepareModalOpen, closeManagedModal, bindModalKeyboardNavigation, requestAnimationFrame.
+     * @returns {{ renderTagFilterModal, closeTagFilterModal }}
+     */
     function createContentModalTagFilter(deps = {}) {
         const {
             el,

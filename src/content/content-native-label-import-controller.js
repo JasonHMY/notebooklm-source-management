@@ -1,6 +1,21 @@
 (function () {
     'use strict';
 
+    /**
+     * createContentNativeLabelImportController(deps) — 把扫描到的 NotebookLM 原生标签
+     * 视图(label → sources)落地为内部 group + source 记录的纯函数层。
+     * 不直接持有 state — 调用方传入 groupsById / sourcesByKey / sourceTagsById / keyByElement。
+     *
+     * @param {Object} deps Optional: normalizeSourceText(value) — 来自 source-descriptor-helpers。
+     * @returns {Object} 6 helpers:
+     *   - `getComparableNativeImportLabelTitle` — 标题归一化
+     *   - `findReusableNativeLabelImportGroup(title, groupsById)` — 命名相同 → 复用旧 group
+     *   - `resolveNativeLabelPreviewSourceKey(descriptor, sourcesByKey)` — key/legacyKey/stableToken/fingerprint/title 唯一匹配
+     *   - `createNativeLabelPreviewSourceRecord` — preview 记录构造
+     *   - `ensureNativeLabelPreviewSources(label, { sourcesByKey, sourceTagsById, keyByElement })` —
+     *     往 sourcesByKey 补缺,返回新增数
+     *   - `createImportedNativeLabelGroupId(title, usedIds)` — 生成 `native_label_<slug>` ID 并去重
+     */
     function createContentNativeLabelImportController(deps = {}) {
         const normalizeSourceText = typeof deps.normalizeSourceText === 'function'
             ? deps.normalizeSourceText

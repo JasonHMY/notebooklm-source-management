@@ -1,6 +1,21 @@
 (function () {
     'use strict';
 
+    /**
+     * createContentNativeLabelDetector(deps) — 识别 NotebookLM 原生标签视图 DOM 信号。
+     * 用一组正则 + 文本启发式判断:某个 DOM 节点是不是"label 入口控件"、
+     * "source-view 切换 (list/label)"、"clean accessible label 标题"等。
+     *
+     * @param {Object} deps Optional: getAttributeValue(el, attr) — 来自 panel-dom;
+     *   getElementTextSignal(el) — 聚合 aria-label / title / alt / textContent。
+     *   两者都有内置 fallback。
+     * @returns {Object} 9 个 pattern 常量 + 9 个 helper:
+     *   - `cleanAccessibleLabelTitle / collapseRepeatedNativeLabelTitle / cleanNativeLabelTitleCandidate`
+     *     一组标题清洗 (去 "expand/collapse" 前缀、symbols ligature、source-count 后缀)
+     *   - `getComparableLabelText / getComparableNativeLabelTitle` — 转 lowercase 用于等值比对
+     *   - `isLikelyNativeLabelTitle / isNativeLabelEntryPointControl / isNativeSourceViewSwitchControl`
+     *     三类布尔判定;入参既可以是字符串也可以是 element。
+     */
     function createContentNativeLabelDetector(deps = {}) {
         const getAttributeValue = typeof deps.getAttributeValue === 'function'
             ? deps.getAttributeValue

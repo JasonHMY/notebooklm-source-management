@@ -1,6 +1,21 @@
 (function () {
     'use strict';
 
+    /**
+     * createContentModalMove(deps) — 源 action 菜单 "Move to folder" modal。
+     * 展平 group 树为可选项列表(包含层级缩进),用户选目标后把当前选源 / 批量选中
+     * 从原位置移除并插入到目标 group.children。
+     *
+     * @param {Object} deps Required: el, getMessage, getShadowRoot (缺一抛错).
+     *   Required for execute: getState, getGroupsById, getPendingBatchKeys, getSourcesByKey,
+     *   saveState, render, removeSourceFromTree, buildParentMap.
+     *   Optional: prepareModalOpen, closeManagedModal, bindModalKeyboardNavigation,
+     *   createModalItemStaggerStyle, closeSourceActionMenu, requestAnimationFrame.
+     * @returns {{ renderMoveToFolderModal, closeMoveToFolderModal,
+     *   collectMoveFolderOptions, executeMoveToFolder }}
+     *   collectMoveFolderOptions 是 pure helper(给 modal item stagger 渲染用),
+     *   executeMoveToFolder 落 state 后 saveState + render。
+     */
     function createContentModalMove(deps = {}) {
         const {
             el,

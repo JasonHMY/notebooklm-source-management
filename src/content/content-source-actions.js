@@ -1,6 +1,31 @@
 (function () {
     'use strict';
 
+    /**
+     * createContentSourceActions(deps) — 源行右键 action 菜单的渲染 + 行为分发主控。
+     * 自菜单定位 (含视口边界 + 子菜单)、跨语言 NotebookLM 原生菜单/对话框匹配 (rename/delete/details)、
+     * 到 dispatch 合成激活事件触发原生流程,再到失败回退提示与 invoker 注册表,全部在这里。
+     * 通过内部 import content-source-action-menu 拿到 item 列表纯函数,自己负责 DOM + lifecycle。
+     *
+     * @param {Object} deps 30+ 项依赖,大致四类(完整 destructuring 见 line 4+):
+     *   - 环境/state: runtime, getDocument / getWindow / getState / getSourcesByKey /
+     *     getShadowRoot / getDEPS, findElement
+     *   - i18n / 日志 / 渲染: getMessage, showToast, developerLog, render
+     *   - 过滤 / 桥接: sourceMatchesCurrentFilters, resolveFreshRowEntry,
+     *     extractSourceIdentitySnapshot, getSourceElements
+     *   - native action 协调: renderTagModal, renderMoveToFolderModal,
+     *     canMoveSourceToUngrouped, moveSourceToUngrouped,
+     *     markSourceDetailViewRequested, onNativeSourceRenameStarted,
+     *     onNativeSourceDeleteAccepted, recordNativeActionFailure
+     *   - 子组件工厂: createContentSourceActionMenu (默认从 global 取)
+     * @returns {Object} 50+ helpers。主要入口 `handleSourceActionSelection`、
+     *   `toggleSourceActionMenu`、`closeSourceActionMenu`、`syncActiveSourceActionMenuState`;
+     *   一组原生菜单/对话框探测 (findNative*MenuItem / queryNativeMenuItems /
+     *   waitForNative*),原生流程触发 (triggerNativeSource*),
+     *   定位 helpers (getSourceActionMenuPosition / getSourceActionSubmenuPosition),
+     *   以及 active 状态访问器 (get/setActiveSourceActionSourceKey 等)。
+     *   完整 return 块见 line 1755。
+     */
     function createContentSourceActions(deps = {}) {
         const runtime = deps.runtime && typeof deps.runtime === 'object' ? deps.runtime : deps;
         const getDocument = typeof deps.getDocument === 'function'

@@ -1,6 +1,18 @@
 (function () {
     'use strict';
 
+    /**
+     * createContentModalFocus(deps) — modal focus-trap / 焦点恢复 工具集。
+     * 处理 modal 打开时初始 focus、Tab/Shift+Tab 循环、Esc 钩子、关闭后焦点回到触发元素;
+     * remember/restore 一对 API 兜底 stale restore 目标(disconnected / display:none / aria-hidden)。
+     *
+     * @param {Object} deps Optional: getDocument, getShadowRoot (用于在 Shadow DOM 内查找 activeElement)。
+     * @returns {{ MODAL_FOCUSABLE_SELECTOR, getModalFocusableElements, getModalActiveElement,
+     *   focusModalInitialElement, handleModalKeyboardEvent, bindModalKeyboardNavigation,
+     *   getCurrentFocusElement, resolveModalFocusRestoreTarget, rememberModalFocusRestoreTarget,
+     *   restoreModalFocus }}
+     *   bindModalKeyboardNavigation 是主入口(返回 { focusInitial, unbind });其余是底层 helper。
+     */
     function createContentModalFocus(deps = {}) {
         const getDocument = typeof deps.getDocument === 'function'
             ? deps.getDocument

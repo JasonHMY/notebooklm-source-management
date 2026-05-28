@@ -1,6 +1,18 @@
 (function () {
     'use strict';
 
+    /**
+     * createContentSourceViewSwitchController(deps) — NotebookLM "list view ↔ label view"
+     * 切换的状态机辅助层。把"检测到的原生 view 类型 (kind / confidence / unknown)"
+     * 与"用户期望显示的 view 类型 (displayKind)"两套坐标对齐,生成可记录的 status 字段
+     * 与 attempt 时间戳,供 content-source-sync 决策是否真的去切。
+     *
+     * @param {Object} deps Optional: SOURCE_VIEW_LIST ('list'), SOURCE_VIEW_LABEL ('label') 常量。
+     * @returns {Object} 7 helpers:normalizeSourceViewSwitchTarget / isConcreteSourceViewKind /
+     *   getFallbackSourceViewDisplayKind / buildSourceDisplayViewInfo /
+     *   buildSourceViewStatusFields / createLastViewSwitchAttempt / finishViewSwitchAttempt。
+     *   后两个支持注入 nowMs / now ISO 函数以便测试。
+     */
     function createContentSourceViewSwitchController(deps = {}) {
         const SOURCE_VIEW_LIST = deps.SOURCE_VIEW_LIST || 'list';
         const SOURCE_VIEW_LABEL = deps.SOURCE_VIEW_LABEL || 'label';
