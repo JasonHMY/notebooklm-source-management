@@ -3577,6 +3577,60 @@ describe('handleDragOver hover-expand', () => {
         expect(childrenEl.style.setProperty).toHaveBeenCalledWith('--sp-slot-comp', '48px');
     });
 
+    // Dead-zone regression: dragging a SOURCE up over a COLLAPSED folder's header LEFT
+    // half (or into the gap) routes to a root-level reorder. When state.ungrouped is
+    // empty (everything is filed into folders) that falls through routeToNearestNeighborKind's
+    // empty-list branch → { hostGroupContainerEl: null, slotKey: null }, which silently
+    // disables ALL feedback: no header cue, no blue guide, no hover-expand. The folder the
+    // cursor is physically over must still arm hover-expand (and show its pending cue)
+    // regardless of where the drop intent resolves — a dwell then opens it so the user can
+    // drop inside. We use the honest .sp-hover-expand-pending cue (NOT .drag-into, which
+    // would falsely imply the drop lands inside while the X-split escape routes to ungrouped).
+    it('source drag over a COLLAPSED folder header (left half, empty ungrouped) still shows the hover-expand pending cue on that folder', () => {
+        const ctx = setupTreeInteractionsTestContext({
+            state: { isBatchMode: false, ungrouped: [], groups: ['g1'] },
+            pendingBatchKeys: new Set(),
+            groups: { g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: true } },
+            items: [{ kind: 'group', id: 'g1', top: 100, headerHeight: 40, childrenStart: 140, childrenEnd: 140 }]
+        });
+        ctx.runtime.activeDragContext = { kind: 'source-single' };
+        ctx.runtime.dragReflowSession = {
+            draggedKeys: new Set(['Y']), itemHeights: new Map(),
+            totalDraggedHeight: 48, shiftedItems: new Map(), currentIntent: null
+        };
+        // clientX=10 → left half of the 0..200 header → X-split excludes g1 → root reorder.
+        // clientY=120 → inside g1's collapsed header band (100..140).
+        ctx.tree.handleDragOver({
+            target: { closest: () => null },
+            clientX: 10, clientY: 120,
+            preventDefault: jest.fn(),
+            dataTransfer: { dropEffect: 'move' }
+        });
+        expect(ctx.elementMap.get('group:g1').classList.contains('sp-hover-expand-pending')).toBe(true);
+    });
+
+    it('source drag dwelling on a COLLAPSED folder header (left half, empty ungrouped) arms hover-expand and opens it after 1000ms', () => {
+        const ctx = setupTreeInteractionsTestContext({
+            state: { isBatchMode: false, ungrouped: [], groups: ['g1'] },
+            pendingBatchKeys: new Set(),
+            groups: { g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: true } },
+            items: [{ kind: 'group', id: 'g1', top: 100, headerHeight: 40, childrenStart: 140, childrenEnd: 140 }]
+        });
+        ctx.runtime.activeDragContext = { kind: 'source-single' };
+        ctx.runtime.dragReflowSession = {
+            draggedKeys: new Set(['Y']), itemHeights: new Map(),
+            totalDraggedHeight: 48, shiftedItems: new Map(), currentIntent: null
+        };
+        ctx.tree.handleDragOver({
+            target: { closest: () => null },
+            clientX: 10, clientY: 120,
+            preventDefault: jest.fn(),
+            dataTransfer: { dropEffect: 'move' }
+        });
+        jest.advanceTimersByTime(1000);
+        expect(ctx.groupsById.get('g1').collapsed).toBe(false);
+    });
+
     it('expands a collapsed group after 1000ms of continuous hover', () => {
         const ctx = setupTreeInteractionsTestContext({
             state: { isBatchMode: false, ungrouped: [], groups: ['g1'] },

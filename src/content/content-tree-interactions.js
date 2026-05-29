@@ -2041,6 +2041,45 @@
                 _pendingDragOverRafId = raf(flush);
             }
         }
+        // During a drag, find the COLLAPSED folder whose header is visually under the
+        // pointer. Intentionally decoupled from computeDropIntent's drop resolution: the
+        // X-split left-half corridor (a deliberate escape that routes a source drag to a
+        // root-level reorder) and the empty-ungrouped root fallback both return
+        // hostGroupContainerEl=null, but the folder the cursor is physically over must
+        // still arm hover-expand so a dwell opens it (after which its children render and
+        // normal slot detection takes over). Uses the raw rect (on-screen position incl.
+        // any reflow transform) — we want what the user visually sees under the cursor.
+        // Returns null when the pointer isn't over a collapsed, non-empty folder header.
+        function resolvePointerOverCollapsedGroupId({ clientY, rootElement, groupsById }) {
+            if (typeof clientY !== 'number' || !rootElement || typeof rootElement.querySelectorAll !== 'function') {
+                return null;
+            }
+            const gById = groupsById && typeof groupsById.get === 'function' ? groupsById : null;
+            if (!gById) return null;
+            const containers = rootElement.querySelectorAll('.group-container');
+            const list = containers && typeof containers.forEach === 'function'
+                ? Array.from(containers)
+                : (Array.isArray(containers) ? containers : []);
+            for (const container of list) {
+                if (!container || !container.dataset) continue;
+                if (container.classList && typeof container.classList.contains === 'function'
+                    && container.classList.contains('sp-drag-folded')) continue;
+                const gid = container.dataset.groupId;
+                if (!gid) continue;
+                const grp = gById.get(gid);
+                if (!grp || !grp.collapsed) continue;
+                if (!Array.isArray(grp.children) || grp.children.length === 0) continue;
+                const headerEl = typeof container.querySelector === 'function'
+                    ? container.querySelector('.group-header')
+                    : null;
+                if (!headerEl || typeof headerEl.getBoundingClientRect !== 'function') continue;
+                const hr = headerEl.getBoundingClientRect();
+                if (!hr || typeof hr.top !== 'number' || typeof hr.bottom !== 'number') continue;
+                if (clientY < hr.top || clientY >= hr.bottom) continue;
+                return gid;
+            }
+            return null;
+        }
         function _processDragOver(args) {
             const sourceListEl = getSourceListContainer();
             const intent = computeDropIntent({
@@ -2237,10 +2276,26 @@
                     runtime.dragReflowSession.currentIntent = { ...intent };
                 }
 
-                // Hover-expand: derive pointerGroupId from the host group-container we already resolved.
-                const pointerGroupId = intent.hostGroupContainerEl && intent.hostGroupContainerEl.dataset
-                    ? intent.hostGroupContainerEl.dataset.groupId
+                // Hover-expand: derive pointerGroupId from the host group-container we already
+                // resolved. DECOUPLING: when a SOURCE drag's drop intent is a root-level reorder
+                // (X-split left-half escape, or the empty-ungrouped fallback → hostGroupContainerEl
+                // null), still arm hover-expand for the collapsed folder the cursor is physically
+                // over. A dwell then opens it (revealing its slots) so the user can drop inside;
+                // armHoverExpandTimerForGroup paints the honest .sp-hover-expand-pending cue
+                // meanwhile. Group drags keep their existing behavior (no pointer-over fallback).
+                const _isSourceDragCtx = runtime.activeDragContext
+                    && (runtime.activeDragContext.kind === 'source-single'
+                        || runtime.activeDragContext.kind === 'source-multi');
+                const pointerOverCollapsedId = _isSourceDragCtx
+                    ? resolvePointerOverCollapsedGroupId({
+                        clientY: args.clientY,
+                        rootElement: sourceListEl,
+                        groupsById: getGroupsById()
+                    })
                     : null;
+                const pointerGroupId = (intent.hostGroupContainerEl && intent.hostGroupContainerEl.dataset
+                    ? intent.hostGroupContainerEl.dataset.groupId
+                    : null) || pointerOverCollapsedId;
                 const ancestorChain = pointerGroupId ? getGroupAncestorChain(pointerGroupId) : [];
                 const ancestorSet = new Set(ancestorChain);
 
