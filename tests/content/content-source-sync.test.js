@@ -92,6 +92,53 @@ describe('scanAndSyncSources', () => {
         });
     });
 
+    it('memoizes source-view detection within one scan pass and refreshes across passes', () => {
+        const source = createMockSourceRow({ title: 'List Source', stableToken: 'list-doc', checked: true });
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        panel.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [source.row] : []
+        ));
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        const qsaCount = () => panel.querySelectorAll.mock.calls.length;
+
+        // Baseline: outside a pass, each detection re-scans the panel DOM.
+        panel.querySelectorAll.mockClear();
+        mod.getSourceViewInfo(panel);
+        const perDetectionQueries = qsaCount();
+        expect(perDetectionQueries).toBeGreaterThan(0);
+
+        panel.querySelectorAll.mockClear();
+        mod.getSourceViewInfo(panel);
+        mod.getSourceViewInfo(panel);
+        expect(qsaCount()).toBe(perDetectionQueries * 2);
+
+        // Within one pass, repeated detections for the same panel scan only once.
+        panel.querySelectorAll.mockClear();
+        mod.beginSourceViewPass();
+        mod.getSourceViewInfo(panel);
+        mod.getSourceViewInfo(panel);
+        mod.getSourceViewInfo(panel);
+        expect(qsaCount()).toBe(perDetectionQueries);
+        // Telemetry/value still correct from the cached detection.
+        expect(mod.getSourceViewInfo(panel)).toMatchObject({ kind: 'list', listRows: 1 });
+        mod.endSourceViewPass();
+
+        // A new pass must NOT reuse the previous pass's result (no cross-tick caching).
+        panel.querySelectorAll.mockClear();
+        mod.beginSourceViewPass();
+        mod.getSourceViewInfo(panel);
+        expect(qsaCount()).toBe(perDetectionQueries);
+        mod.endSourceViewPass();
+
+        // After the pass closes, detection re-scans again.
+        panel.querySelectorAll.mockClear();
+        mod.getSourceViewInfo(panel);
+        expect(qsaCount()).toBe(perDetectionQueries);
+    });
+
     it('reads ARIA checkbox state when scanning list source rows', () => {
         const source = configureAriaCheckbox(createMockSourceRow({
             title: 'ARIA List Source',

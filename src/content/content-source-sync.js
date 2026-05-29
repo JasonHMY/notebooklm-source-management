@@ -1565,7 +1565,44 @@
             return selectedKeys.size > 0;
         }
 
+        // Per-pass memoization for source-view detection. detectSourceView() runs a
+        // batch of panel-wide querySelectorAll scans; within a single synchronous
+        // scan/render pass it is invoked 5-6× (getSourcePanelState → scanAndSyncSources →
+        // render → renderViewStateBar → getNativeLabelImportPreview) with an identical
+        // result. The memo is ONLY active while a pass is open (beginSourceViewPass /
+        // endSourceViewPass, wrapped around debouncedScanAndSync); outside a pass every
+        // call recomputes, and each pass starts fresh — detection legitimately changes as
+        // NotebookLM rows stream in, so the cache must NOT survive across passes/ticks.
+        let sourceViewPassDepth = 0;
+        let sourceViewPassCache = null;
+
+        function beginSourceViewPass() {
+            sourceViewPassDepth += 1;
+        }
+
+        function endSourceViewPass() {
+            sourceViewPassDepth = Math.max(0, sourceViewPassDepth - 1);
+            if (sourceViewPassDepth === 0) {
+                sourceViewPassCache = null;
+            }
+        }
+
         function detectSourceView(panel = findSourcePanel()) {
+            if (sourceViewPassDepth <= 0) {
+                return computeSourceView(panel);
+            }
+            if (!sourceViewPassCache) {
+                sourceViewPassCache = new Map();
+            }
+            if (sourceViewPassCache.has(panel)) {
+                return sourceViewPassCache.get(panel);
+            }
+            const info = computeSourceView(panel);
+            sourceViewPassCache.set(panel, info);
+            return info;
+        }
+
+        function computeSourceView(panel = findSourcePanel()) {
             const sourcePanel = panel || findSourcePanel();
             if (!sourcePanel || !isSourcePanelRenderable(sourcePanel)) {
                 return createSourceViewInfo(SOURCE_VIEW_KIND_UNKNOWN, 0, {
@@ -2357,6 +2394,9 @@
             });
 
         const debouncedScanAndSync = createDebounced((syncOptions = {}) => {
+            // Memoize source-view detection for the whole pass (panel-state probe + scan +
+            // render + view-state bar + native-label preview all detect the same view).
+            beginSourceViewPass();
             try {
                 if (getIsAwaitingInitialStateLoad()) {
                     return;
@@ -2405,6 +2445,8 @@
                 }
             } catch (error) {
                 console.error('NotebookLM Source Management: Error syncing state during DOM change.', error);
+            } finally {
+                endSourceViewPass();
             }
         }, 500);
 
@@ -2602,6 +2644,8 @@
             findFreshCheckbox,
             getSourceViewInfo,
             detectSourceView,
+            beginSourceViewPass,
+            endSourceViewPass,
             getSourceEntries,
             getCollapsedNativeLabelViewControls,
             getCollapsedNativeLabelGroupSummaries,

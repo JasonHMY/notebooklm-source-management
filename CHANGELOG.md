@@ -14,6 +14,9 @@
 ### Security
 - **诊断 / 开发者日志导出脱敏原生 label 标题 (Redact Native Label Titles From Diagnostics and Developer-Log Exports)**: 原生 NotebookLM 标签导入后，未信任的文件夹 / 标签标题原样存入 `lastNativeLabelImportSummary.labels[].title`，并经 `cloneNativeLabelImportSummary` 浅克隆后嵌入诊断对象 —— 该对象同时进入剪贴板诊断（`getDiagnosticsText`）和开发者日志导出（`getDeveloperLogExportText` 的 `diagnostics:` 块），而 logger 的 `sanitizeDetails`（含 `title|label|name` 脱敏）只作用于 per-entry details、不覆盖 diagnostics 块，违反 SECURITY_THREAT_MODEL「诊断刻意省略标题」约定。把 `cloneNativeLabelImportSummary` 改为按白名单只发出 `{ sourceCount, action }`、丢弃 `title`（单一收口点同时堵住两个导出面；聚合计数等非敏感字段保留，内存里 `labels[].title` 不变供非诊断消费者）。现有诊断单测改为断言克隆不含 `title`、保留 `sourceCount`/`action` 且仍为脱离引用的对象图。
 
+### Changed
+- **来源视图检测按扫描 pass 记忆化 (Memoize Source-View Detection Per Scan Pass)**: `detectSourceView()` 会对来源面板跑一批 `querySelectorAll`（label 组选择器 + list/label 行扫描 + active label 控件），但在单个 `debouncedScanAndSync` 周期内被 `getSourcePanelState` → `scanAndSyncSources` → `render()` → `renderViewStateBar()` → `getNativeLabelImportPreview()` 以**完全相同的结果**触发 5-6 次，是 mutation 驱动高频路径上的主导开销（100-300 源时每 tick 数百次 `querySelectorAll`）。把 `detectSourceView` 的计算体抽成 `computeSourceView`，外层加一个**仅在扫描 pass 期间生效**的 memo（`beginSourceViewPass`/`endSourceViewPass` 包裹 `debouncedScanAndSync` 回调，`try/finally` 保证早 return / throw 也释放）：pass 内对同一 panel 只算一次、命中缓存复用；`getSourceViewInfo` 仍每次调 `updateRuntimeSourceViewInfo`，故首帧 view-transition 遥测不变。刻意**不跨 pass / 跨 tick 缓存** —— 检测结果随 NotebookLM 行流入合法变化，`endSourceViewPass` 在 depth 归零时清空缓存，每个新 pass 重新检测。pass 外（拖拽 / 视图切换等异步上下文）的 `getSourceViewInfo` 调用一律实时计算，无行为变化。新增 1 个单测锁定「同一 pass 内多次检测只扫一次、跨 pass 重新扫描、pass 外不缓存」。
+
 ## [2026-05-29] [26.5.29]
 
 ### Added
