@@ -2294,11 +2294,17 @@ describe('handleDragStart reflow session + unified ghost', () => {
 
         // .sp-drag-active lives on #sources-list itself (the host), not a descendant.
         const listClassList = { contains: jest.fn(() => true), add: jest.fn(), remove: jest.fn() };
+        // .sp-drag-guide is a descendant group-children left over from an interrupted drag.
+        const staleGuide = {
+            classList: { contains: jest.fn(() => true), add: jest.fn(), remove: jest.fn() },
+            style: { removeProperty: jest.fn() }
+        };
         const sourcesListEl = {
             id: 'sources-list',
             classList: listClassList,
             querySelectorAll: jest.fn((selector) => {
                 if (selector.includes('sp-hover-expand-pending')) return [stalePending, staleCancelled];
+                if (selector === '.sp-drag-guide') return [staleGuide];
                 return [];
             })
         };
@@ -2330,6 +2336,9 @@ describe('handleDragStart reflow session + unified ghost', () => {
         expect(staleCancelled.classList.remove).toHaveBeenCalledWith('sp-drag-cancelled');
         // Host-level .sp-drag-active cleared directly on #sources-list.
         expect(listClassList.remove).toHaveBeenCalledWith('sp-drag-active');
+        // Descendant .sp-drag-guide left-bar extension cleared + its CSS var removed.
+        expect(staleGuide.classList.remove).toHaveBeenCalledWith('sp-drag-guide');
+        expect(staleGuide.style.removeProperty).toHaveBeenCalledWith('--sp-fold-comp');
     });
 });
 

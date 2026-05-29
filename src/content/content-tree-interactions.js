@@ -1688,6 +1688,21 @@
                 if (_preflightList.classList && typeof _preflightList.classList.remove === 'function') {
                     _preflightList.classList.remove('sp-drag-active');
                 }
+
+                // (B5) .sp-drag-guide + --sp-fold-comp: the folder left-guide extension
+                // applied during fold (content-drag-reflow foldDraggedItems). Normally
+                // torn down by unfoldDraggedItems; clear here too in case dragend was
+                // skipped, so a folder isn't left with an over-long guide bar.
+                const lingeringGuide = _preflightList.querySelectorAll('.sp-drag-guide');
+                if (lingeringGuide && typeof lingeringGuide.forEach === 'function') {
+                    lingeringGuide.forEach((node) => {
+                        if (!node || !node.classList || typeof node.classList.remove !== 'function') return;
+                        node.classList.remove('sp-drag-guide');
+                        if (node.style && typeof node.style.removeProperty === 'function') {
+                            node.style.removeProperty('--sp-fold-comp');
+                        }
+                    });
+                }
             }
 
             // Reset runtime drag state defensively. A previous drag interrupted

@@ -1469,6 +1469,28 @@
                 position: relative;
                 /* By default, let height be auto. JS will set explicit heights during animation. */
             }
+            /* Drag guide extension: while a child is folded out of this folder during a
+               drag, border-left tracks the now-shortened layout height, but the
+               transform-shifted siblings still occupy that space visually — so the bar
+               stops short of the bottom. Draw the guide as an absolute ::before of
+               height calc(100% + folded-height) so it spans the full folder WITHOUT
+               entering layout (can't disturb reflow / cross-host shifts). JS
+               (foldDraggedItems) sets --sp-fold-comp + the .sp-drag-guide class; the
+               original border-left is handed off to transparent while active. */
+            .group-children.sp-drag-guide {
+                border-left-color: transparent;
+            }
+            .group-children.sp-drag-guide::before {
+                content: '';
+                position: absolute;
+                left: -2px;
+                top: 0;
+                width: 2px;
+                height: calc(100% + var(--sp-fold-comp, 0px));
+                background: var(--sp-border-light);
+                border-bottom-left-radius: 6px;
+                pointer-events: none;
+            }
             .group-children.collapsed {
                 height: 0;
                 opacity: 0;
@@ -3124,6 +3146,9 @@
             }
             .group-container:hover > .group-children {
                 border-left-color: var(--sp-accent);
+            }
+            .group-container:hover > .group-children.sp-drag-guide::before {
+                background: var(--sp-accent);
             }
             
             /* Enhanced Drag Feedback */
