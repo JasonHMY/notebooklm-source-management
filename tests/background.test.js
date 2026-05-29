@@ -77,6 +77,12 @@ describe('background.js message listener', () => {
         }
     };
 
+    // A sender tab whose notebook id matches a given storage key's project segment, so the
+    // per-notebook sender↔key binding allows the write.
+    const senderForNotebook = (projectId) => ({
+        tab: { url: `https://notebooklm.google.com/notebook/${projectId}` }
+    });
+
     it('should log a warning and return early for an unauthorized sender', () => {
         const invalidSender = {
             tab: {
@@ -95,6 +101,24 @@ describe('background.js message listener', () => {
             success: false,
             errorCode: 'unauthorized_sender'
         });
+    });
+
+    it('rejects a SAVE_STATE whose key targets a different notebook than the sender tab', () => {
+        // sender tab is notebook 123, but the key targets notebook 999 — a content script
+        // must not write another notebook's storage.
+        const request = {
+            type: 'SAVE_STATE',
+            key: 'sourcesPlusState_999',
+            data: { groups: [], groupsById: {}, ungrouped: [], sourceStateById: {} }
+        };
+
+        listener(request, validSender, mockSendResponse);
+
+        expect(global.chrome.storage.local.set).not.toHaveBeenCalled();
+        expect(mockSendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: false,
+            errorCode: 'unauthorized_sender'
+        }));
     });
 
     it('should handle SAVE_STATE message successfully', () => {
@@ -1003,7 +1027,7 @@ describe('background.js message listener', () => {
         // so the projected total ratio (~0.9 of the default 10MB) should trip the warning.
         global.chrome.storage.local.getBytesInUse = jest.fn((keys, cb) => cb(9 * 1024 * 1024));
 
-        listener(request, validSender, mockSendResponse);
+        listener(request, senderForNotebook('warn'), mockSendResponse);
 
         expect(global.chrome.storage.local.getBytesInUse).toHaveBeenCalled();
         expect(mockSendResponse).toHaveBeenCalledWith(expect.objectContaining({
@@ -1027,7 +1051,7 @@ describe('background.js message listener', () => {
         // from 0), so the projected total is critical and the growing write must be rejected.
         global.chrome.storage.local.getBytesInUse = jest.fn((keys, cb) => cb(Math.round(9.97 * 1024 * 1024)));
 
-        listener(request, validSender, mockSendResponse);
+        listener(request, senderForNotebook('crit'), mockSendResponse);
 
         expect(global.chrome.storage.local.set).not.toHaveBeenCalled();
         expect(mockSendResponse).toHaveBeenCalledWith(expect.objectContaining({
@@ -1126,7 +1150,7 @@ describe('background.js message listener', () => {
             }
         };
 
-        listener(request, validSender, mockSendResponse);
+        listener(request, senderForNotebook('shrink'), mockSendResponse);
 
         // The shrinking write must go through even while critical — otherwise a user
         // who filled their quota could never delete sources to recover (hard lock).

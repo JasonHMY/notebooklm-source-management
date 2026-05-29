@@ -1083,6 +1083,12 @@
             const persistedSourceTagsById = {};
 
             sourcesByKey.forEach((source, sourceKey) => {
+                // Source keys can be attacker-influenced after an import round-trip.
+                // Writing sourceStateById['__proto__'] = record reassigns the plain object's
+                // prototype instead of adding an own key, corrupting it; skip such keys.
+                if (sourceKey === '__proto__' || sourceKey === 'constructor' || sourceKey === 'prototype') {
+                    return;
+                }
                 const sourceRecord = {
                     enabled: Boolean(source.enabled),
                     title: source.title,
@@ -1183,6 +1189,15 @@
             return saveLifecycleSnapshotToLocalStorage(key, persistableState);
         }
 
+        // customHeight is later written straight into style.height; an imported/persisted
+        // non-numeric or non-positive value would leave a type-confused string in storage.
+        // Coerce to a finite positive number or null (the resize handle + CSS still enforce
+        // the view-specific min/max at interaction/render time).
+        function normalizeCustomHeight(value) {
+            const height = Number(value);
+            return Number.isFinite(height) && height > 0 ? height : null;
+        }
+
         function normalizeLoadedState(stateData) {
             if (!stateData || typeof stateData !== 'object') return null;
             rememberSnapshotSaveRevision(stateData);
@@ -1196,7 +1211,7 @@
                     groupsById: stateData.groupsById || {},
                     ungrouped: Array.isArray(stateData.ungrouped) ? stateData.ungrouped : [],
                     sourceStateById: stateData.sourceStateById || {},
-                    customHeight: stateData.customHeight ?? null,
+                    customHeight: normalizeCustomHeight(stateData.customHeight),
                     tagsById: stateData.tagsById || {},
                     tagOrder: Array.isArray(stateData.tagOrder) ? stateData.tagOrder : [],
                     sourceTagsById: stateData.sourceTagsById || {}
@@ -1215,7 +1230,7 @@
                     groupsById: stateData.groupsById || {},
                     ungrouped: Array.isArray(stateData.ungrouped) ? stateData.ungrouped : [],
                     sourceStateById: stateData.sourceStateById || {},
-                    customHeight: stateData.customHeight ?? null,
+                    customHeight: normalizeCustomHeight(stateData.customHeight),
                     tagsById: stateData.tagsById || {},
                     tagOrder: Array.isArray(stateData.tagOrder) ? stateData.tagOrder : [],
                     sourceTagsById: stateData.sourceTagsById || {}
@@ -1233,7 +1248,7 @@
                     groupsById: stateData.groupsById || {},
                     ungrouped: Array.isArray(stateData.ungrouped) ? stateData.ungrouped : [],
                     sourceStateById: stateData.sourceStateById || {},
-                    customHeight: stateData.customHeight ?? null,
+                    customHeight: normalizeCustomHeight(stateData.customHeight),
                     tagsById: {},
                     tagOrder: [],
                     sourceTagsById: {}

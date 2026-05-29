@@ -111,6 +111,30 @@ describe('saveState', () => {
         expect(global.chrome.runtime.sendMessage).not.toHaveBeenCalled();
     });
 
+    it('does not let a __proto__ source key corrupt the rebuilt sourceStateById', () => {
+        // After an import round-trip, source keys are attacker-influenced. Assigning
+        // sourceStateById['__proto__'] = record on a plain object reassigns its prototype
+        // instead of creating an own property, silently dropping that source and corrupting
+        // the object for any later property read.
+        mod.sourcesByKey.set('safe-key', { enabled: true, title: 'Safe', normalizedTitle: 'safe', stableToken: 't', fingerprint: 'f', identityType: 'stable-token' });
+        mod.sourcesByKey.set('__proto__', { enabled: true, title: 'Evil', normalizedTitle: 'evil', stableToken: 'e', fingerprint: 'ef', identityType: 'stable-token' });
+
+        const result = mod.buildPersistableState();
+
+        expect(Object.getPrototypeOf(result.sourceStateById)).toBe(Object.prototype);
+        expect(Object.prototype.hasOwnProperty.call(result.sourceStateById, 'safe-key')).toBe(true);
+        expect(result.sourceStateById['safe-key'].title).toBe('Safe');
+        expect(Object.prototype.hasOwnProperty.call(result.sourceStateById, '__proto__')).toBe(false);
+    });
+
+    it('coerces a non-numeric or non-positive persisted customHeight to null on load', () => {
+        expect(mod.normalizeLoadedState({ schemaVersion: 4, customHeight: '600px; background:red' }).customHeight).toBeNull();
+        expect(mod.normalizeLoadedState({ schemaVersion: 4, customHeight: -50 }).customHeight).toBeNull();
+        expect(mod.normalizeLoadedState({ schemaVersion: 4, customHeight: 0 }).customHeight).toBeNull();
+        expect(mod.normalizeLoadedState({ schemaVersion: 3, customHeight: { evil: true } }).customHeight).toBeNull();
+        expect(mod.normalizeLoadedState({ schemaVersion: 4, customHeight: 520 }).customHeight).toBe(520);
+    });
+
     it('debounces saves by default and persists the expected state', () => {
         const projectId = seedPersistedState();
         mod.saveState();

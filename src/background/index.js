@@ -190,6 +190,21 @@ function isAuthorizedNotebookSender(sender) {
     );
 }
 
+function getNotebookProjectIdFromSenderUrl(url) {
+    if (typeof url !== 'string' || !url.startsWith(NOTEBOOKLM_NOTEBOOK_PREFIX)) return '';
+    return url.slice(NOTEBOOKLM_NOTEBOOK_PREFIX.length).split(/[/?#]/)[0] || '';
+}
+
+// Bind a notebook-scoped storage key to the sender tab's own notebook so a content script
+// can only read/write its OWN notebook's state/history, not another's. If no project id is
+// resolvable from the sender URL (e.g. a bare /notebook/), don't newly reject — a real
+// notebook-scoped write can't happen without one anyway.
+function senderOwnsNotebookKey(sender, key) {
+    const projectId = getNotebookProjectIdFromSenderUrl(sender && sender.tab ? sender.tab.url : '');
+    if (!projectId) return true;
+    return typeof key === 'string' && key.endsWith(`_${projectId}`);
+}
+
 function pickPreferredNotebookTab(tabs) {
     if (!Array.isArray(tabs) || tabs.length === 0) return null;
     return tabs.find(tab => typeof tab.url === 'string' && tab.url.startsWith(NOTEBOOKLM_NOTEBOOK_PREFIX)) || tabs[0];
@@ -1225,6 +1240,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             sendResponse({ success: false, errorCode: ERROR_CODES.INVALID_STORAGE_KEY });
             return;
         }
+        if (!senderOwnsNotebookKey(sender, request.key)) {
+            console.warn('NotebookLM Source Management: SAVE_STATE key does not match sender notebook:', request.key);
+            sendResponse({ success: false, errorCode: ERROR_CODES.UNAUTHORIZED_SENDER });
+            return;
+        }
 
         enqueueStateWrite(request, sendResponse);
         return true;
@@ -1234,6 +1254,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         if (typeof request.key !== 'string' || !request.key.startsWith(STATE_HISTORY_KEY_PREFIX)) {
             console.warn(`NotebookLM Source Management: Received ${request.type} with invalid key:`, request.key);
             sendResponse({ success: false, errorCode: ERROR_CODES.INVALID_STORAGE_KEY });
+            return;
+        }
+        if (!senderOwnsNotebookKey(sender, request.key)) {
+            console.warn(`NotebookLM Source Management: ${request.type} key does not match sender notebook:`, request.key);
+            sendResponse({ success: false, errorCode: ERROR_CODES.UNAUTHORIZED_SENDER });
             return;
         }
 
@@ -1249,6 +1274,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (typeof request.key !== 'string' || !request.key.startsWith(STATE_KEY_PREFIX)) {
         console.warn('NotebookLM Source Management: Received LOAD_STATE with invalid key:', request.key);
         sendResponse({ success: false, errorCode: ERROR_CODES.INVALID_STORAGE_KEY });
+        return;
+    }
+    if (!senderOwnsNotebookKey(sender, request.key)) {
+        console.warn('NotebookLM Source Management: LOAD_STATE key does not match sender notebook:', request.key);
+        sendResponse({ success: false, errorCode: ERROR_CODES.UNAUTHORIZED_SENDER });
         return;
     }
 
