@@ -531,6 +531,22 @@ describe('manager shell structure', () => {
         expect(batchActionBar).toContain('transition:');
     });
 
+    it('scopes the newly-created folder pop so it can win the cascade over list-item-enter', () => {
+        jest.resetModules();
+        require('../../src/content/content-style-text.js');
+        const css = global.NSM_CONTENT_STYLE_TEXT;
+
+        // A new folder gets BOTH `sp-list-item-enter` and `sp-folder-enter` on a
+        // `.group-container`. The pop rule must match the same `.group-container.X`
+        // specificity (and come later) as `.group-container.sp-list-item-enter`, or the
+        // list-item-enter animation overrides it and `sp-folder-pop` never plays.
+        const block = extractCssBlock(css, '.group-container.sp-folder-enter {');
+        expect(block).toContain('animation: sp-folder-pop');
+        expect(css).toContain('@keyframes sp-folder-pop');
+        // The bare low-specificity selector that lost the cascade must be gone.
+        expect(css).not.toMatch(/\n\s*\.sp-folder-enter\s*\{/);
+    });
+
     it('defines modal option stagger motion and reduced-motion fallbacks', () => {
         jest.resetModules();
         require('../../src/content/content-style-text.js');
