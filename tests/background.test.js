@@ -396,6 +396,52 @@ describe('background.js message listener', () => {
         }));
     });
 
+    it('serializes APPEND_STATE_HISTORY behind a pending SAVE_STATE for the same notebook', async () => {
+        // SAVE_STATE writes sourcesPlusState_123 AND its history (sourcesPlusHistory_123) in one
+        // task; APPEND_STATE_HISTORY mutates the same history key. They must share one per-notebook
+        // queue or a read-modify-write on the history array can drop an entry (lost update).
+        const saveRequest = {
+            type: 'SAVE_STATE',
+            key: 'sourcesPlusState_123',
+            baseRevision: 0,
+            data: {
+                groups: [],
+                groupsById: {},
+                ungrouped: [],
+                sourceStateById: {},
+                tagsById: {},
+                tagOrder: [],
+                sourceTagsById: {}
+            }
+        };
+        const appendRequest = {
+            type: 'APPEND_STATE_HISTORY',
+            key: 'sourcesPlusHistory_123',
+            entry: { snapshot: { groups: [] }, label: 'manual', createdAt: '2026-05-29T00:00:00.000Z' }
+        };
+        const pendingGets = [];
+        const pendingSets = [];
+        global.chrome.storage.local.get.mockImplementation((keys, cb) => { pendingGets.push(cb); });
+        global.chrome.storage.local.set.mockImplementation((payload, cb) => { pendingSets.push({ payload, cb }); });
+
+        listener(saveRequest, validSender, jest.fn());
+        listener(appendRequest, validSender, jest.fn());
+
+        // SAVE_STATE's get is in flight; the APPEND for the same notebook is queued behind it,
+        // so it must NOT have issued its own get yet.
+        expect(pendingGets).toHaveLength(1);
+
+        // Drain SAVE_STATE (get → set) so the queued APPEND can run.
+        pendingGets[0]({});
+        expect(pendingSets).toHaveLength(1);
+        pendingSets[0].cb();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        // Now the APPEND runs and reads the history the SAVE_STATE just wrote.
+        expect(pendingGets).toHaveLength(2);
+    });
+
     it('should not overwrite the backup snapshot when SAVE_STATE receives an empty payload', () => {
         const request = {
             type: 'SAVE_STATE',

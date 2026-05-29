@@ -566,6 +566,14 @@ function getStateHistoryKey(primaryKey) {
     return `${STATE_HISTORY_KEY_PREFIX}${String(primaryKey || '').replace(/^sourcesPlusState_/, '')}`;
 }
 
+// SAVE_STATE writes a notebook's history under its STATE queue key, while
+// APPEND/LOAD_STATE_HISTORY arrive keyed by the HISTORY key. To keep every writer
+// of sourcesPlusHistory_<id> on ONE FIFO (no cross-queue lost update), history ops
+// serialize under the notebook's STATE queue key derived here.
+function getStateKeyFromHistoryKey(historyKey) {
+    return `${STATE_KEY_PREFIX}${String(historyKey || '').replace(/^sourcesPlusHistory_/, '')}`;
+}
+
 function hasRestorableStateSnapshot(snapshot) {
     if (!snapshot || typeof snapshot !== 'object') return false;
     if (Array.isArray(snapshot.groups) && snapshot.groups.length > 0) return true;
@@ -1052,7 +1060,10 @@ function enqueueStateWrite(request, sendResponse) {
 }
 
 function loadStateHistory(request, sendResponse) {
-    const pendingTask = stateSaveQueueByKey.get(request.key);
+    // Wait on the notebook's STATE queue (which serializes SAVE_STATE's history write)
+    // so a read never races a pending write of the same sourcesPlusHistory_<id> key.
+    const queueKey = getStateKeyFromHistoryKey(request.key);
+    const pendingTask = stateSaveQueueByKey.get(queueKey);
     if (!pendingTask) {
         loadStateHistoryNow(request, sendResponse);
         return;
@@ -1064,7 +1075,9 @@ function loadStateHistory(request, sendResponse) {
 }
 
 function appendStateHistory(request, sendResponse) {
-    enqueueStorageTask(request.key, () => new Promise((resolve) => {
+    // Serialize on the notebook's STATE queue key so APPEND shares one FIFO with
+    // SAVE_STATE's history write (prevents a lost-update read-modify-write race).
+    enqueueStorageTask(getStateKeyFromHistoryKey(request.key), () => new Promise((resolve) => {
         appendStateHistoryNow(request, (response) => {
             sendResponse(response);
             resolve(response);
