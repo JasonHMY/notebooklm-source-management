@@ -1486,11 +1486,20 @@
                 position: absolute;
                 left: -2px;
                 top: 0;
-                width: 2px;
+                /* Reproduce the resting guide's "tail": the grey bar is a border-left +
+                   border-radius 0 0 0 6px, whose bottom-left corner curves the border
+                   into a small hook. A background-filled 2px strip can't show that hook
+                   (radius > width degenerates), so draw the ::before the same way — a
+                   border-left with a bottom-left radius — and give it enough width to
+                   hold the 6px arc (still inside group-children's 8px padding-left, so
+                   it never overlaps content). height transition matches .group-children
+                   so the bar grows/shrinks together with the folder expand/collapse. */
+                width: 8px;
                 height: calc(100% + var(--sp-slot-comp, 0px));
-                background: var(--sp-accent);
+                border-left: 2px solid var(--sp-accent);
                 border-bottom-left-radius: 6px;
                 pointer-events: none;
+                transition: height var(--sp-motion-slow) var(--sp-ease-emphasized);
             }
             .group-children.collapsed {
                 height: 0;
