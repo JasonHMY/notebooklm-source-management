@@ -1899,7 +1899,10 @@
                 if (isDetailLikeSourceIdentity(identity)) {
                     detailLikeRows += 1;
                 }
-                if (hasSourceLoadingIndicator(row)) {
+                // hasSourceLoadingIndicator(row) === Boolean(extractSourceIdentitySnapshot(row).hasProcessingSignal),
+                // so reuse the identity already extracted above instead of re-scanning the row
+                // (mirrors the identity?.hasFailureSignal check below).
+                if (identity?.hasProcessingSignal) {
                     loadingRows += 1;
                 }
                 if (identity?.hasFailureSignal) {
