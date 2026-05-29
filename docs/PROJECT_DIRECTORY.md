@@ -656,7 +656,7 @@ content runtime memory
 │   └── 文件: tests/content/content-source-sync.test.js, tests/content/content-source-partial-sync-guard.test.js
 ├── 持久化 / history / import-export / background storage
 │   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-persistence.test.js tests/background.test.js
-│   └── 文件: tests/content/content-persistence.test.js, tests/background.test.js
+│   └── 文件: tests/content/content-persistence.test.js, tests/background.test.js, tests/content/content-import-export.test.js, tests/content/content-state-apply.test.js, tests/content/content-undo-history.test.js
 ├── 原生删除 / 重命名 / 详情
 │   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-source-actions.test.js tests/content/content-source-action-menu.test.js
 │   └── 文件: tests/content/content-source-actions.test.js, tests/content/content-source-action-menu.test.js
@@ -668,7 +668,7 @@ content runtime memory
 │   └── 文件: tests/content/content-render.test.js, tests/content/content-view-state.test.js
 ├── 欢迎 / 设置弹窗 / 标签 modal / 命令面板
 │   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-modals-tags.test.js tests/content/content-modal-focus.test.js
-│   └── 文件: tests/content/content-modals-tags.test.js, tests/content/content-modal-focus.test.js
+│   └── 文件: tests/content/content-modals-tags.test.js, tests/content/content-modal-focus.test.js, tests/content/content-modal-tag.test.js, tests/content/content-modal-tag-filter.test.js, tests/content/content-modal-move.test.js, tests/content/content-modal-command-palette.test.js, tests/content/content-modal-welcome.test.js, tests/content/content-modal-whats-new.test.js
 ├── 原生标签导入确认
 │   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-native-label-import-controller.test.js tests/content/content-native-label-import-modal.test.js
 │   └── 文件: tests/content/content-native-label-import-controller.test.js, tests/content/content-native-label-import-modal.test.js
