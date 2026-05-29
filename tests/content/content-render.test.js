@@ -395,6 +395,32 @@ describe('manager shell structure', () => {
         expect(searchCount.attrs['aria-atomic']).toBe('true');
     });
 
+    it('labels the quick-view rail as an accessible group', () => {
+        const createManagerShell = require('../../src/content/content-template.js');
+        const shell = createManagerShell(createTreeEl, {
+            i18n: { getMessage: (key) => key }
+        });
+
+        const rail = shell.children[1];
+        expect(rail.attrs.id).toBe('sp-quick-view-rail');
+        expect(rail.attrs.role).toBe('group');
+        expect(rail.attrs['aria-label']).toBe('ui_quick_view_rail_label');
+    });
+
+    it('makes the panel resizer a focusable, labeled separator', () => {
+        const createManagerShell = require('../../src/content/content-template.js');
+        const shell = createManagerShell(createTreeEl, {
+            i18n: { getMessage: (key) => key }
+        });
+
+        const resizer = shell.children[shell.children.length - 1];
+        expect(resizer.attrs.className).toBe('sp-resizer');
+        expect(resizer.attrs.role).toBe('separator');
+        expect(resizer.attrs['aria-orientation']).toBe('horizontal');
+        expect(resizer.attrs['aria-label']).toBe('ui_panel_resizer_label');
+        expect(resizer.attrs.tabIndex).toBe(0);
+    });
+
     it('keeps the toolbar controls defined as a single-row flex layout', () => {
         jest.resetModules();
         require('../../src/content/content-style-text.js');
@@ -875,6 +901,36 @@ describe('batch count and source menu motion rendering', () => {
 
         expect(pendingBatchKeys.has('live')).toBe(true);
         expect(pendingBatchKeys.has('ghost')).toBe(false);
+    });
+
+    it('exposes the batch action bar as a labeled toolbar region', () => {
+        const listContainer = createRenderTestElement('div', { id: 'sources-list' });
+        const renderModule = createContentRender({
+            el: createRenderTestElement,
+            getDocument: () => ({
+                createDocumentFragment: createRenderTestFragment,
+                createElement: (tag) => createRenderTestElement(tag)
+            }),
+            getShadowRoot: () => ({
+                appendChild: jest.fn(),
+                querySelector: (selector) => {
+                    if (selector === '#sources-list') return listContainer;
+                    if (selector === '.sp-container') return createRenderTestElement('div', { className: 'sp-container' });
+                    return null;
+                },
+                getElementById: (id) => (id === 'sources-list' ? listContainer : null)
+            }),
+            getState: () => ({ groups: [], ungrouped: [], isBatchMode: true, activeTagId: null }),
+            getPendingBatchKeys: () => new Set(),
+            getMessage: (key) => key
+        });
+
+        renderModule.render();
+
+        const bar = findRenderTestNodesByClass(listContainer, 'sp-batch-action-bar')[0];
+        expect(bar).toBeDefined();
+        expect(bar.attrs.role).toBe('toolbar');
+        expect(bar.attrs['aria-label']).toBe('ui_batch_actions_region');
     });
 
     it('renders only the configured quick view buttons and hides the rail when none are visible', () => {

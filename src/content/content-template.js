@@ -67,10 +67,16 @@
                     ])
                 ])
             ]),
-            el('div', { id: 'sp-quick-view-rail', className: 'sp-quick-view-rail' }),
+            el('div', { id: 'sp-quick-view-rail', className: 'sp-quick-view-rail', role: 'group', 'aria-label': getMessage('ui_quick_view_rail_label') }),
             el('div', { id: 'sp-view-state', className: 'sp-view-state', hidden: true }),
             el('div', { id: 'sources-list' }),
-            el('div', { className: 'sp-resizer' })
+            el('div', {
+                className: 'sp-resizer',
+                role: 'separator',
+                'aria-orientation': 'horizontal',
+                'aria-label': getMessage('ui_panel_resizer_label'),
+                tabIndex: 0
+            })
         ]);
     }
 

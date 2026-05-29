@@ -1046,6 +1046,15 @@
     "ui_batch_action": {
         "message": "Batch Action"
     },
+    "ui_batch_actions_region": {
+        "message": "Batch actions"
+    },
+    "ui_quick_view_rail_label": {
+        "message": "Quick views"
+    },
+    "ui_panel_resizer_label": {
+        "message": "Resize panel height"
+    },
     "ui_batch_add_to_folder": {
         "message": "Batch Add to Folder"
     },

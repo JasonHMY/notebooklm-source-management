@@ -1042,6 +1042,7 @@ Required rules:
 
 - Icon-only buttons must have `title` and `aria-label`.
 - Keyboard-focusable controls must show a clear focus treatment.
+- Related control clusters and dynamic regions carry landmark/grouping semantics: the quick-view rail is `role="group"` (`ui_quick_view_rail_label`), the batch action bar is `role="toolbar"` (`ui_batch_actions_region`), and the panel resizer is a focusable `role="separator"` (`aria-orientation="horizontal"`, `ui_panel_resizer_label`, `tabindex=0`) operable with ArrowUp/ArrowDown (steps height, clamped to the same per-view min as drag, persisted). The toggle buttons that flip state (batch mode, quick-view, isolate) expose `aria-pressed`.
 - New UI copy must go through i18n.
 - Disabled states must change both visuals and pointer behavior.
 - Loading states must block interaction when the action cannot succeed.

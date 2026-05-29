@@ -1046,6 +1046,15 @@
     "ui_batch_action": {
         "message": "Acción por lotes"
     },
+    "ui_batch_actions_region": {
+        "message": "Acciones por lotes"
+    },
+    "ui_quick_view_rail_label": {
+        "message": "Vistas rápidas"
+    },
+    "ui_panel_resizer_label": {
+        "message": "Ajustar altura del panel"
+    },
     "ui_batch_add_to_folder": {
         "message": "Agregar a carpeta por lotes"
     },

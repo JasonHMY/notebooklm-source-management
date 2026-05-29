@@ -4080,6 +4080,16 @@
         }
     }
 
+    // Keyboard step for the panel resizer separator. Mirrors doDrag's min-height clamp;
+    // returns null for non-arrow keys so the keydown handler can ignore them.
+    function resolveKeyboardResizeHeight(currentHeight, key, minHeight) {
+        const RESIZE_STEP_PX = 16;
+        const base = Number.isFinite(Number(currentHeight)) ? Number(currentHeight) : minHeight;
+        if (key === 'ArrowDown') return Math.max(minHeight, base + RESIZE_STEP_PX);
+        if (key === 'ArrowUp') return Math.max(minHeight, base - RESIZE_STEP_PX);
+        return null;
+    }
+
     function init(sourcePanel) {
         if (!isSourcePanelRenderable(sourcePanel)) {
             managerStatusReason = 'manager_not_ready';
@@ -4165,6 +4175,19 @@
             customHeight = parseInt(container.style.height, 10);
             saveState({ immediate: true, critical: true }); // Save the new height immediately
         }
+
+        // Keyboard resize: the resizer is a focusable role="separator"; ArrowUp/ArrowDown
+        // step the panel height (clamped to the same per-view minimum doDrag uses) and persist.
+        resizer.addEventListener('keydown', (e) => {
+            const minHeight = container.classList?.contains('is-native-label-view') ? 48 : 150;
+            const currentHeight = parseInt(document.defaultView.getComputedStyle(container).height, 10);
+            const nextHeight = resolveKeyboardResizeHeight(currentHeight, e.key, minHeight);
+            if (nextHeight == null) return;
+            e.preventDefault();
+            container.style.height = `${nextHeight}px`;
+            customHeight = nextHeight;
+            saveState({ immediate: true, critical: true });
+        });
 
         shadowRoot.getElementById('sp-settings-btn').addEventListener('click', () => {
             loadStateHistory().finally(() => renderSettingsModal());
@@ -4684,6 +4707,7 @@
                 }
             },
             _setCustomHeight: (val) => { customHeight = val; },
+            _resolveKeyboardResizeHeightForTest: (currentHeight, key, minHeight) => resolveKeyboardResizeHeight(currentHeight, key, minHeight),
             _setManagerStatusReason: (val) => { managerStatusReason = val; },
             _setProjectId: (val) => {
                 projectId = val;

@@ -1046,6 +1046,15 @@
     "ui_batch_action": {
         "message": "批量操作"
     },
+    "ui_batch_actions_region": {
+        "message": "批量操作"
+    },
+    "ui_quick_view_rail_label": {
+        "message": "快速视图"
+    },
+    "ui_panel_resizer_label": {
+        "message": "调整面板高度"
+    },
     "ui_batch_add_to_folder": {
         "message": "批量加入文件夹"
     },

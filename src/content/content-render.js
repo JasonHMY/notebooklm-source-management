@@ -1483,7 +1483,7 @@
             }
 
             if (state.isBatchMode) {
-                const actionBar = el('div', { className: 'sp-batch-action-bar' }, [
+                const actionBar = el('div', { className: 'sp-batch-action-bar', role: 'toolbar', 'aria-label': getMessage('ui_batch_actions_region') }, [
                     el('button', { className: 'sp-button sp-cancel-batch-btn' }, [getMessage('ui_cancel')]),
                     el('div', { className: 'sp-batch-actions' }, [
 	                        el('button', {

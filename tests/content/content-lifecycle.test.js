@@ -2146,6 +2146,15 @@ describe('manager launcher messaging', () => {
         expect(mod._getIsDeletingSources()).toBe(false);
     });
 
+    it('steps the panel height for keyboard resize, clamped to the view minimum', () => {
+        expect(mod._resolveKeyboardResizeHeightForTest(300, 'ArrowDown', 150)).toBe(316);
+        expect(mod._resolveKeyboardResizeHeightForTest(300, 'ArrowUp', 150)).toBe(284);
+        expect(mod._resolveKeyboardResizeHeightForTest(150, 'ArrowUp', 150)).toBe(150);
+        expect(mod._resolveKeyboardResizeHeightForTest(160, 'ArrowUp', 150)).toBe(150);
+        expect(mod._resolveKeyboardResizeHeightForTest(NaN, 'ArrowDown', 150)).toBe(166);
+        expect(mod._resolveKeyboardResizeHeightForTest(300, 'Enter', 150)).toBeNull();
+    });
+
     it('tears down the manager when DISABLE_MANAGER is received', () => {
         const mockHost = {
             isConnected: true,
