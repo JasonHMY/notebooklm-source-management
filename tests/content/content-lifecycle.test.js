@@ -2137,6 +2137,15 @@ describe('manager launcher messaging', () => {
         secondMod._destroyContentInstanceForTest();
     });
 
+    it('resets isDeletingSources when the content instance is torn down', () => {
+        mod._setIsDeletingSources(true);
+        expect(mod._getIsDeletingSources()).toBe(true);
+
+        mod._destroyContentInstanceForTest();
+
+        expect(mod._getIsDeletingSources()).toBe(false);
+    });
+
     it('tears down the manager when DISABLE_MANAGER is received', () => {
         const mockHost = {
             isConnected: true,

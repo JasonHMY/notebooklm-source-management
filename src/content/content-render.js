@@ -1451,6 +1451,16 @@
             }
             updateSearchResultCount(state.filterQuery, countedSearchResultKeys.size);
 
+            // The batch toggle lives in the static toolbar shell (persists across renders),
+            // so reflect its pressed/active state here like the other aria-pressed toggles
+            // (quick-view, isolate) that are rebuilt per render.
+            const batchToggleBtn = shadowRoot?.getElementById?.('sp-batch-action-btn');
+            if (batchToggleBtn) {
+                const batchActive = Boolean(state.isBatchMode);
+                batchToggleBtn.setAttribute('aria-pressed', batchActive ? 'true' : 'false');
+                batchToggleBtn.classList.toggle('is-active', batchActive);
+            }
+
             if (state.isBatchMode) {
                 const actionBar = el('div', { className: 'sp-batch-action-bar' }, [
                     el('button', { className: 'sp-button sp-cancel-batch-btn' }, [getMessage('ui_cancel')]),

@@ -1,15 +1,23 @@
 const createContentDiagnostics = require('../../src/content/content-diagnostics.js');
 
 describe('content diagnostics helper', () => {
-    it('clones native label import summaries without sharing label objects', () => {
+    it('sanitizes native label import summaries by dropping private titles from diagnostics', () => {
         const helper = createContentDiagnostics();
         const summary = {
             labelCount: 1,
-            labels: [{ title: 'Private Label', sourceCount: 2 }]
+            sourceCount: 2,
+            labels: [{ title: 'Private Label', sourceCount: 2, action: 'create' }]
         };
 
         const clone = helper.cloneNativeLabelImportSummary(summary);
-        expect(clone).toEqual(summary);
+
+        // Non-identifying aggregate fields stay so diagnostics remain useful.
+        expect(clone.labelCount).toBe(1);
+        expect(clone.sourceCount).toBe(2);
+        // Each label keeps only non-sensitive fields; the user's private title is dropped.
+        expect(clone.labels[0]).toEqual({ sourceCount: 2, action: 'create' });
+        expect(clone.labels[0]).not.toHaveProperty('title');
+        // Still a detached object graph (no shared references with the live summary).
         expect(clone).not.toBe(summary);
         expect(clone.labels[0]).not.toBe(summary.labels[0]);
     });

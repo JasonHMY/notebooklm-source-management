@@ -379,6 +379,22 @@ describe('manager shell structure', () => {
         expect(shell.children[1].attrs.className).toBe('sp-quick-view-rail');
     });
 
+    it('exposes the search-results count as a polite live region for screen readers', () => {
+        const createManagerShell = require('../../src/content/content-template.js');
+        const shell = createManagerShell(createTreeEl, {
+            i18n: {
+                getMessage: (key) => key
+            }
+        });
+
+        const searchSurface = shell.children[0].children[1].children[1];
+        const searchCount = searchSurface.children[1];
+
+        expect(searchCount.attrs.id).toBe('sp-search-count');
+        expect(searchCount.attrs['aria-live']).toBe('polite');
+        expect(searchCount.attrs['aria-atomic']).toBe('true');
+    });
+
     it('keeps the toolbar controls defined as a single-row flex layout', () => {
         jest.resetModules();
         require('../../src/content/content-style-text.js');
@@ -414,6 +430,15 @@ describe('manager shell structure', () => {
         expect(global.NSM_CONTENT_STYLE_TEXT).toContain('width: 0;');
         expect(global.NSM_CONTENT_STYLE_TEXT).toContain('opacity: 0;');
         expect(global.NSM_CONTENT_STYLE_TEXT).toContain('pointer-events: none;');
+    });
+
+    it('gives the batch toolbar toggle an accent-tinted active state like the other toggles', () => {
+        jest.resetModules();
+        require('../../src/content/content-style-text.js');
+
+        const block = extractCssBlock(global.NSM_CONTENT_STYLE_TEXT, '.sp-button.sp-toolbar-action.is-active');
+        expect(block).toContain('color: var(--sp-accent);');
+        expect(block).toContain('background: var(--sp-tag-active-bg);');
     });
 
     it('loads Google Symbols from the extension asset instead of the remote font host', () => {
@@ -474,6 +499,10 @@ describe('manager shell structure', () => {
         expect(global.NSM_CONTENT_STYLE_TEXT).toContain('--sp-ease-emphasized: cubic-bezier(0.2, 0.9, 0.25, 1);');
         expect(global.NSM_CONTENT_STYLE_TEXT).toContain('--sp-ease-press: cubic-bezier(0.25, 1, 0.5, 1);');
         expect(global.NSM_CONTENT_STYLE_TEXT).toContain('@media (prefers-reduced-motion: reduce)');
+        // Reduced-motion must also zero out staggered delays — clamping duration to 1ms
+        // alone still leaves toolbar/search/import-item items appearing on an index-based delay.
+        expect(global.NSM_CONTENT_STYLE_TEXT).toContain('animation-delay: 0ms !important;');
+        expect(global.NSM_CONTENT_STYLE_TEXT).toContain('transition-delay: 0ms !important;');
     });
 
     it('gives source menus and batch surfaces explicit motion', () => {
@@ -730,6 +759,56 @@ describe('batch count and source menu motion rendering', () => {
         ]);
         expect(buttons.find((button) => button.dataset.quickViewKind === 'recent').attrs['aria-pressed']).toBe('true');
         expect(buttons.find((button) => button.dataset.quickViewKind === 'all').attrs['aria-pressed']).toBe('false');
+    });
+
+    it('reflects batch mode on the persistent batch toggle button via aria-pressed and is-active', () => {
+        // The batch toggle persists in the static toolbar shell, so each render()
+        // must sync its pressed/active state. Render each state into its own fresh
+        // (empty) list container so patchChildren stays on the append path.
+        const renderOnceWithBatchMode = (isBatchMode) => {
+            const listContainer = createRenderTestElement('div', { id: 'sources-list' });
+            const batchClasses = new Set(['sp-button', 'sp-toolbar-action']);
+            const batchToggleBtn = {
+                attrs: {},
+                classList: {
+                    toggle: (cls, force) => { if (force) batchClasses.add(cls); else batchClasses.delete(cls); },
+                    contains: (cls) => batchClasses.has(cls)
+                },
+                setAttribute(name, value) { this.attrs[name] = value; }
+            };
+            const renderModule = createContentRender({
+                el: createRenderTestElement,
+                getDocument: () => ({
+                    createDocumentFragment: createRenderTestFragment,
+                    createElement: (tag) => createRenderTestElement(tag)
+                }),
+                getShadowRoot: () => ({
+                    appendChild: jest.fn(),
+                    querySelector: jest.fn((selector) => {
+                        if (selector === '#sources-list') return listContainer;
+                        if (selector === '.sp-container') return createRenderTestElement('div', { className: 'sp-container' });
+                        return null;
+                    }),
+                    getElementById: jest.fn((id) => {
+                        if (id === 'sources-list') return listContainer;
+                        if (id === 'sp-batch-action-btn') return batchToggleBtn;
+                        return null;
+                    })
+                }),
+                getState: () => ({ groups: [], ungrouped: [], isBatchMode, activeTagId: null }),
+                getMessage: (key) => key
+            });
+            renderModule.render();
+            return batchToggleBtn;
+        };
+
+        const active = renderOnceWithBatchMode(true);
+        expect(active.attrs['aria-pressed']).toBe('true');
+        expect(active.classList.contains('is-active')).toBe(true);
+
+        const inactive = renderOnceWithBatchMode(false);
+        expect(inactive.attrs['aria-pressed']).toBe('false');
+        expect(inactive.classList.contains('is-active')).toBe(false);
     });
 
     it('renders only the configured quick view buttons and hides the rail when none are visible', () => {

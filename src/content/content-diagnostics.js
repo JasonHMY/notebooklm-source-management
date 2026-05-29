@@ -17,8 +17,15 @@
         function cloneNativeLabelImportSummary(summary) {
             if (!summary || typeof summary !== 'object') return null;
             return Object.assign({}, summary, {
+                // Diagnostics + developer-log exports are copied/pasted into bug reports,
+                // so they must NOT carry user-private folder/label titles
+                // (see docs/SECURITY_THREAT_MODEL.md). Emit only non-identifying fields
+                // via an explicit allowlist; aggregate counts above stay useful.
                 labels: Array.isArray(summary.labels)
-                    ? summary.labels.map((label) => Object.assign({}, label))
+                    ? summary.labels.map((label) => ({
+                        sourceCount: label?.sourceCount,
+                        action: label?.action
+                    }))
                     : []
             });
         }

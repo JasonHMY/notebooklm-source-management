@@ -50,6 +50,8 @@
                         el('span', {
                             id: 'sp-search-count',
                             className: 'sp-search-count',
+                            'aria-live': 'polite',
+                            'aria-atomic': 'true',
                             hidden: true
                         })
                     ]),

@@ -3750,6 +3750,7 @@
         state.activeTagId = null;
         state.activeQuickViewKind = null;
         pendingBatchKeys.clear();
+        isDeletingSources = false;
         activeIsolationGroupId = null;
         isSearchExpanded = false;
         closeSourceActionMenu();

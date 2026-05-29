@@ -312,6 +312,11 @@
                     border-color var(--sp-motion-base) var(--sp-ease-standard),
                     box-shadow var(--sp-motion-base) var(--sp-ease-standard);
             }
+            .sp-button.sp-toolbar-action.is-active {
+                color: var(--sp-accent);
+                border-color: var(--sp-search-focus-border);
+                background: var(--sp-tag-active-bg);
+            }
             .sp-controls.is-search-expanded .sp-toolbar-actions {
                 flex-basis: 0;
                 max-width: 0;
@@ -3196,7 +3201,9 @@
                 *::after {
                     animation-duration: 1ms !important;
                     animation-iteration-count: 1 !important;
+                    animation-delay: 0ms !important;
                     transition-duration: 1ms !important;
+                    transition-delay: 0ms !important;
                     scroll-behavior: auto !important;
                 }
 
