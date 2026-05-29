@@ -48,4 +48,15 @@ describe('manifest <-> load-content-module sync', () => {
         const helperCount = loaderFiles.filter((file) => file !== 'index.js').length;
         expect(clearedGlobals.length).toBeGreaterThanOrEqual(helperCount);
     });
+
+    it('loader clearContentGlobals() and harness CONTENT_HELPER_GLOBALS enumerate the exact same NSM_* globals', () => {
+        // Bidirectional guard for the module-sync invariant: the loader teardown deletes and
+        // the harness array must stay in lockstep. A new content module added to one but not
+        // the other drifts silently — the omission direction the manifest<->loader ORDER
+        // check above cannot catch (that one only compares require()s to manifest entries).
+        const clearedGlobals = getLoaderClearGlobalsList();
+        const { CONTENT_HELPER_GLOBALS } = require('./helpers/content-test-harness');
+
+        expect([...clearedGlobals].sort()).toEqual([...CONTENT_HELPER_GLOBALS].sort());
+    });
 });
