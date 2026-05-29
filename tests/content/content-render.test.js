@@ -827,6 +827,56 @@ describe('batch count and source menu motion rendering', () => {
         expect(inactive.classList.contains('is-active')).toBe(false);
     });
 
+    it('skips spotlight layout work when the no-spotlight appearance preference is active', () => {
+        const surface = createRenderTestElement('div', { className: 'source-item sp-spotlight-surface' });
+        surface.closest = jest.fn(() => surface);
+        surface.getBoundingClientRect = jest.fn(() => ({ left: 0, top: 0, width: 100, height: 30 }));
+        const listContainer = createRenderTestElement('div', { id: 'sources-list' });
+        const host = { classList: { contains: (cls) => cls === 'sp-appearance-no-spotlight' } };
+        const renderModule = createContentRender({
+            el: createRenderTestElement,
+            getShadowRoot: () => ({ host, getElementById: () => null, querySelector: () => null }),
+            getState: () => ({}),
+            getMessage: (key) => key
+        });
+
+        const result = renderModule.handleSpotlightPointerMove({ target: surface, clientX: 10, clientY: 10 }, listContainer);
+
+        expect(result).toBeNull();
+        expect(surface.getBoundingClientRect).not.toHaveBeenCalled();
+    });
+
+    it('prunes pendingBatchKeys that no longer exist in sourcesByKey on a batch-mode render', () => {
+        const pendingBatchKeys = new Set(['live', 'ghost']);
+        const sourcesByKey = new Map([['live', { key: 'live', enabled: true, title: 'Live' }]]);
+        const listContainer = createRenderTestElement('div', { id: 'sources-list' });
+        const renderModule = createContentRender({
+            el: createRenderTestElement,
+            getDocument: () => ({
+                createDocumentFragment: createRenderTestFragment,
+                createElement: (tag) => createRenderTestElement(tag)
+            }),
+            getShadowRoot: () => ({
+                appendChild: jest.fn(),
+                querySelector: (selector) => {
+                    if (selector === '#sources-list') return listContainer;
+                    if (selector === '.sp-container') return createRenderTestElement('div', { className: 'sp-container' });
+                    return null;
+                },
+                getElementById: (id) => (id === 'sources-list' ? listContainer : null)
+            }),
+            getState: () => ({ groups: [], ungrouped: [], isBatchMode: true }),
+            getSourcesByKey: () => sourcesByKey,
+            getPendingBatchKeys: () => pendingBatchKeys,
+            getMessage: (key) => key
+        });
+
+        renderModule.render();
+
+        expect(pendingBatchKeys.has('live')).toBe(true);
+        expect(pendingBatchKeys.has('ghost')).toBe(false);
+    });
+
     it('renders only the configured quick view buttons and hides the rail when none are visible', () => {
         const quickRail = createRenderTestElement('div', { id: 'sp-quick-view-rail' });
         const listContainer = createRenderTestElement('div', { id: 'sources-list' });
@@ -1021,6 +1071,10 @@ describe('batch count and source menu motion rendering', () => {
                 activeTagId: null
             }),
             getPendingBatchKeys: () => pendingBatchKeys,
+            getSourcesByKey: () => new Map([
+                ['source-1', { key: 'source-1', enabled: true, title: 'Source 1' }],
+                ['source-2', { key: 'source-2', enabled: true, title: 'Source 2' }]
+            ]),
             getMessage: (key, substitutions = []) => {
                 if (key === 'ui_batch_add') return 'Add';
                 if (key === 'ui_batch_add_tags_title') return 'Add Tags';

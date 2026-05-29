@@ -570,8 +570,7 @@ Canonical style:
 Feedback:
 
 - Hover: accent border + `scale(1.05)`
-- Direct user selection can use the `.is-animating` organic checkmark draw.
-- Programmatic sync and batch selection should use the default state transition without replaying the pop animation.
+- The checked checkmark is drawn statically via `.sp-checkbox:checked::before` (width/height/opacity) — there is no animated draw-in, so programmatic sync and batch selection never flicker or replay a pop. (An older `.is-animating` organic draw + spring keyframes existed but were never wired up by any code path and have been removed; reintroduce only by adding the class on direct user toggle and clearing it on `animationend`.)
 
 Rules:
 

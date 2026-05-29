@@ -212,6 +212,13 @@
 
         function handleSpotlightPointerMove(event, listContainer) {
             if (!listContainer) return null;
+            // When the hover-spotlight appearance preference is off, the surface ::before is
+            // display:none, so skip the per-move getBoundingClientRect + custom-property writes
+            // entirely (zero visual effect for opted-out users).
+            const spotlightHost = getShadowRoot()?.host;
+            if (spotlightHost && spotlightHost.classList && spotlightHost.classList.contains('sp-appearance-no-spotlight')) {
+                return null;
+            }
             const surface = resolveSpotlightSurface(event?.target);
             const previousSurface = listContainer.__spActiveSpotlightSurface || null;
 
@@ -1190,6 +1197,20 @@
             const listContainer = shadowRoot.querySelector('#sources-list');
             if (!listContainer) return;
             const container = shadowRoot.querySelector('.sp-container');
+
+            // Reconcile batch selection against live sources: a selected source can vanish
+            // (NotebookLM native delete / SPA rescan) without an explicit user-delete, leaving
+            // a ghost key that inflates the delete-count badge and "Deleting N" toast. The set
+            // is tiny and only non-empty in batch mode, so this prune is cheap.
+            if (getState().isBatchMode) {
+                const pendingBatchKeys = getPendingBatchKeys();
+                const sourcesByKey = getSourcesByKey();
+                if (pendingBatchKeys && typeof pendingBatchKeys.delete === 'function' && sourcesByKey) {
+                    for (const batchKey of pendingBatchKeys) {
+                        if (!sourcesByKey.has(batchKey)) pendingBatchKeys.delete(batchKey);
+                    }
+                }
+            }
 
             bindSourceIconFallbackDelegation(listContainer);
             bindSpotlightPointerTracking(listContainer);

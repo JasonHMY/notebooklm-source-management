@@ -784,11 +784,6 @@
                 border-color: var(--sp-accent); 
                 /* Removed implicit animation */
             }
-            /* Explicit user-interaction animation */
-            .sp-checkbox.is-animating:checked {
-                animation: checkbox-spring var(--sp-motion-medium) var(--sp-ease-press);
-            }
-            
             /* The hidden checkmark shape inside the box */
             .sp-checkbox::before { 
                 content: ''; 
@@ -816,40 +811,6 @@
                 opacity: 1;
             }
 
-            /* Animate the checkmark drawing in using an organic, non-linear sequence ONLY on user interaction */
-            .sp-checkbox.is-animating:checked::before { 
-                /* ease-out decelerates at the very end of the stroke */
-                animation: check-draw-organic var(--sp-motion-medium) var(--sp-ease-press) forwards !important;
-                animation-delay: var(--sp-motion-fast) !important; /* Let the checkbox pop start and settle a bit first */
-            }
-
-            @keyframes check-draw-organic {
-                0% {
-                    width: 0;
-                    height: 0;
-                    opacity: 0;
-                }
-                10% {
-                    width: 0;
-                    height: 0;
-                    opacity: 1;
-                }
-                40%  { width: 4.5px; height: 0;    opacity: 1; } /* Stroke 1: Draw short stem left-to-right */
-                100% { width: 4.5px; height: 10px; opacity: 1; } /* Stroke 2: Whip up the long stem bottom-to-top */
-            }
-
-            @keyframes checkbox-spring {
-                0% {
-                    transform: scale(1);
-                }
-                30% {
-                    transform: scale(0.7);
-                }
-                60% { transform: scale(1.15); } /* Overshoot */
-                100% {
-                    transform: scale(1);
-                }
-            }
             @keyframes sp-list-item-enter {
                 0% {
                     opacity: 0;
@@ -3195,9 +3156,7 @@
                 .sp-batch-action-bar,
                 .source-item.selected-for-batch,
                 .sp-folder-modal.visible,
-                .sp-folder-modal.closing,
-                .sp-checkbox.is-animating:checked,
-                .sp-checkbox.is-animating:checked::before {
+                .sp-folder-modal.closing {
                     animation: none !important;
                 }
 
