@@ -91,14 +91,14 @@ describe('content modal whats-new', () => {
         expect(deps.prepareModalOpen).not.toHaveBeenCalled();
     });
 
-    it('renders the modal scaffolding with three feature rows from the fallback featureRow', () => {
+    it('renders the modal scaffolding with two feature rows from the fallback featureRow', () => {
         const deps = createDeps();
         const helper = createContentModalWhatsNew(deps);
 
         expect(helper.renderWhatsNewModal()).toBe(true);
         const shadow = deps.getShadowRoot();
         expect(shadow.querySelector('.sp-whats-new-modal')).toBeTruthy();
-        expect(shadow.querySelectorAll('.sp-welcome-feature-row')).toHaveLength(3);
+        expect(shadow.querySelectorAll('.sp-welcome-feature-row')).toHaveLength(2);
     });
 
     it('uses the injected createWelcomeFeatureRow when provided', () => {
@@ -108,8 +108,8 @@ describe('content modal whats-new', () => {
 
         helper.renderWhatsNewModal();
 
-        expect(customRow).toHaveBeenCalledTimes(3);
-        expect(customRow).toHaveBeenNthCalledWith(1, 'drag_indicator', 'ui_whats_new_batch_drag_title', 'ui_whats_new_batch_drag_body');
+        expect(customRow).toHaveBeenCalledTimes(2);
+        expect(customRow).toHaveBeenNthCalledWith(1, 'drag_pan', 'ui_whats_new_drag_title', 'ui_whats_new_drag_body');
     });
 
     it('clicking the close button marks whats-new seen and closes the modal', async () => {

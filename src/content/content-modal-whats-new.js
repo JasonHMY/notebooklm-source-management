@@ -96,9 +96,8 @@
             ]);
             const content = el('div', { className: 'sp-folder-modal-content sp-welcome-content' }, [
                 el('div', { className: 'sp-welcome-feature-list' }, [
-                    featureRow('drag_indicator', 'ui_whats_new_batch_drag_title', 'ui_whats_new_batch_drag_body'),
-                    featureRow('expand_more', 'ui_whats_new_hover_expand_title', 'ui_whats_new_hover_expand_body'),
-                    featureRow('auto_fix_high', 'ui_whats_new_smart_feedback_title', 'ui_whats_new_smart_feedback_body')
+                    featureRow('drag_pan', 'ui_whats_new_drag_title', 'ui_whats_new_drag_body'),
+                    featureRow('verified', 'ui_whats_new_stability_title', 'ui_whats_new_stability_body')
                 ])
             ]);
             const footer = el('div', { className: 'sp-folder-modal-footer sp-welcome-footer' }, [

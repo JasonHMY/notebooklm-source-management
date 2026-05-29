@@ -588,25 +588,19 @@
         "message": "Novedades"
     },
     "ui_whats_new_subtitle": {
-        "message": "Un vistazo rápido a las últimas mejoras de gestión de fuentes."
+        "message": "Un vistazo rápido a las novedades principales de esta versión."
     },
-    "ui_whats_new_batch_drag_title": {
-        "message": "Arrastre por lotes de varias fuentes"
+    "ui_whats_new_drag_title": {
+        "message": "Mejoras en arrastrar y soltar"
     },
-    "ui_whats_new_batch_drag_body": {
-        "message": "En modo lote, arrastra una fila seleccionada para mover todas."
+    "ui_whats_new_drag_body": {
+        "message": "Al arrastrar, la fuente se pliega y abre un hueco que sigue al cursor; al soltar en una carpeta aparece una barra guía azul con vista previa; más suave y fluido en general."
     },
-    "ui_whats_new_hover_expand_title": {
-        "message": "Pasa el cursor para expandir carpetas anidadas"
+    "ui_whats_new_stability_title": {
+        "message": "Correcciones de estabilidad"
     },
-    "ui_whats_new_hover_expand_body": {
-        "message": "Pasa 0,6 s sobre una carpeta plegada para expandirla; aléjate para plegar."
-    },
-    "ui_whats_new_smart_feedback_title": {
-        "message": "Retroalimentación de arrastre más inteligente"
-    },
-    "ui_whats_new_smart_feedback_body": {
-        "message": "Desplazamiento automático cerca de los bordes; rojo al soltar en posición inválida."
+    "ui_whats_new_stability_body": {
+        "message": "Arreglos de temblores y parpadeos ocasionales al arrastrar, un bloqueo por almacenamiento lleno que impedía borrar fuentes, y varios problemas de límites y sincronización."
     },
     "ui_whats_new_primary": {
         "message": "Entendido"

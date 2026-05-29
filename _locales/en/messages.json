@@ -588,25 +588,19 @@
         "message": "What's new"
     },
     "ui_whats_new_subtitle": {
-        "message": "A quick look at the latest source management improvements."
+        "message": "A quick look at this release's main updates."
     },
-    "ui_whats_new_batch_drag_title": {
-        "message": "Batch multi-source drag"
+    "ui_whats_new_drag_title": {
+        "message": "Drag-and-drop refinements"
     },
-    "ui_whats_new_batch_drag_body": {
-        "message": "In batch mode, drag any selected row to move them all."
+    "ui_whats_new_drag_body": {
+        "message": "Sources fold out and open an insertion slot that follows your cursor; dropping into a folder shows a blue guide bar with a live preview; smoother and more responsive overall."
     },
-    "ui_whats_new_hover_expand_title": {
-        "message": "Hover to expand nested folders"
+    "ui_whats_new_stability_title": {
+        "message": "Stability fixes"
     },
-    "ui_whats_new_hover_expand_body": {
-        "message": "Hover over a collapsed folder for 0.6s to expand; drag away to collapse."
-    },
-    "ui_whats_new_smart_feedback_title": {
-        "message": "Smarter drag feedback"
-    },
-    "ui_whats_new_smart_feedback_body": {
-        "message": "Auto-scroll near list edges; indicator turns red on invalid drops."
+    "ui_whats_new_stability_body": {
+        "message": "Fixes for occasional drag jitter and flicker, a storage-full deadlock that blocked deleting sources, and several edge-case and timing issues."
     },
     "ui_whats_new_primary": {
         "message": "Got it"
