@@ -58,3 +58,4 @@ Before starting work, read the relevant project instructions, repository guidanc
 - Do not use `innerHTML`, `eval`, or dynamic `Function` for user-controlled content.
 - Treat NotebookLM DOM, source titles, labels, icon URLs, imports, and extension storage contents as untrusted input.
 - Do not revert unrelated user changes in the working tree.
+- Match the existing formatting (recorded in `.editorconfig`): JS = 4-space indent, LF, final newline, no trailing whitespace; `manifest.json`/`package.json` = 2-space; `_locales/*` = 4-space. There is no auto-formatter (Prettier/@stylistic) wired up, so keep diffs surgical and do not mass-reformat untouched code.

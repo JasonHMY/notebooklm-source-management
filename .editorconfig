@@ -1,0 +1,31 @@
+# EditorConfig — go-forward formatting convention for this repo.
+# https://editorconfig.org  (respected natively or via plugin by all major editors)
+#
+# This records the EXISTING per-file-type conventions so new edits don't drift; it does NOT
+# reformat existing code. Indent sizes below match what each file type already uses today
+# (JS = 4 spaces; manifest/package = 2; _locales/* = 4). CI-level enforcement (Prettier /
+# @stylistic ESLint) would be a separate, larger step requiring a one-time normalization.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+
+[*.{js,cjs,mjs}]
+indent_size = 4
+
+[*.css]
+indent_size = 4
+
+[{manifest.json,package.json,package-lock.json}]
+indent_size = 2
+
+[_locales/**.json]
+indent_size = 4
+
+# Markdown uses trailing whitespace for hard line breaks.
+[*.md]
+trim_trailing_whitespace = false
