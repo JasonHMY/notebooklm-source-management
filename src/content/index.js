@@ -1,3 +1,34 @@
+/**
+ * src/content/index.js — content-script assembly hub & runtime owner.
+ *
+ * Loaded LAST in manifest.json content_scripts[0].js. Every `content-*` helper before it
+ * registers a factory on `globalThis.NSM_CREATE_CONTENT_*` (and `module.exports` for Jest);
+ * this file pulls those factories and wires the dependency graph by passing deps explicitly
+ * (there is no bundler — load order IS dependency order).
+ *
+ * Responsibilities concentrated here (it is intentionally large; the runtime state below is
+ * shared by closure across most of these, which is why it is not split into more modules):
+ *  - Runtime state ownership: groupsById / sourcesByKey / parentMap / pendingBatchKeys /
+ *    state{groups,ungrouped,isBatchMode,...} / customHeight / sourceView* / save status.
+ *    (Getter/setter binding helpers live in content-runtime-state.js.)
+ *  - Lifecycle: init / mount / teardown / cleanupManagerResources / route-change recovery /
+ *    panel reattach (NotebookLM is an SPA — switch ≠ reload; see content-panel-dom.js).
+ *  - Message routing from popup/background (content-message-router.js builds the table).
+ *  - Native source actions + batch handlers, modal orchestration callbacks, the resizer,
+ *    command-shortcut handling, and content-error/diagnostics wiring.
+ *  - The dependency-assembly graph: createContent*({ ...deps }) calls that build the module
+ *    instances and destructure their returned methods into this closure.
+ *  - A large test-only surface (`_*ForTest` / `_*`) on the returned object, consumed by the
+ *    Jest harness (tests/helpers/content-test-harness.js); these mirror internal closures and
+ *    are NOT part of any production contract.
+ *
+ * CSS lives in THREE places by scope (see CLAUDE.md "Shadow DOM vs global overlay boundary"):
+ *  - src/content/styles.css — manifest-injected, hides/overrides native NotebookLM DOM
+ *    (must be in the page, not the Shadow DOM).
+ *  - NSM_CONTENT_STYLE_TEXT — the Shadow-DOM manager UI (content-style-text.js).
+ *  - NSM_GLOBAL_OVERLAY_STYLE_TEXT — global overlays the Shadow DOM can't reach (drag ghost,
+ *    native Material menus), same file.
+ */
 (function () {
     'use strict';
 
