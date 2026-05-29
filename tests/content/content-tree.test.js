@@ -80,7 +80,7 @@ function makeMockShadowList({ items = [], listRect = { top: 0, bottom: 1000, hei
         };
         const childrenEl = {
             classList: makeMockClassList(['group-children']),
-            style: {},
+            style: { setProperty: jest.fn(), removeProperty: jest.fn() },
             rect: { top: childrenStart, bottom: childrenEnd, height: childrenEnd - childrenStart, left: 0, right: 200, width: 200 },
             getBoundingClientRect() { return this.rect; },
             querySelectorAll(selector) {
@@ -2338,7 +2338,7 @@ describe('handleDragStart reflow session + unified ghost', () => {
         expect(listClassList.remove).toHaveBeenCalledWith('sp-drag-active');
         // Descendant .sp-drag-guide left-bar extension cleared + its CSS var removed.
         expect(staleGuide.classList.remove).toHaveBeenCalledWith('sp-drag-guide');
-        expect(staleGuide.style.removeProperty).toHaveBeenCalledWith('--sp-fold-comp');
+        expect(staleGuide.style.removeProperty).toHaveBeenCalledWith('--sp-slot-comp');
         // ...then re-armed for THIS drag: Chrome freezes native :hover on the origin
         // folder, so the blue guide bar would stay stuck there. Marking the list
         // active lets CSS suppress that frozen :hover (the bar follows .drag-into).
@@ -3553,6 +3553,28 @@ describe('handleDragOver hover-expand', () => {
     afterEach(() => {
         jest.useRealTimers();
         teardownGlobalMocks();
+    });
+
+    it('marks the pointer-over folder children with sp-drag-guide + --sp-slot-comp during drag', () => {
+        const ctx = setupTreeInteractionsTestContext({
+            state: { isBatchMode: false, ungrouped: [], groups: ['g1'] },
+            pendingBatchKeys: new Set(),
+            groups: { g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: false } },
+            items: [{ kind: 'group', id: 'g1', top: 100, headerHeight: 40, childrenStart: 140, childrenEnd: 200 }]
+        });
+        // Active drag with a known slot height (the dragged row's height).
+        ctx.runtime.dragReflowSession = {
+            draggedKeys: new Set(['Y']), itemHeights: new Map(),
+            totalDraggedHeight: 48, shiftedItems: new Map(), currentIntent: null
+        };
+
+        ctx.helpers.dragOverFor('g1'); // pointer in g1's header → into-group g1
+
+        // The folder the pointer is over gets a blue guide that extends by one slot
+        // (preview of where the dragged source lands, incl. an empty slot at the end).
+        const childrenEl = ctx.elementMap.get('group:g1').querySelector('.group-children');
+        expect(childrenEl.classList.contains('sp-drag-guide')).toBe(true);
+        expect(childrenEl.style.setProperty).toHaveBeenCalledWith('--sp-slot-comp', '48px');
     });
 
     it('expands a collapsed group after 1000ms of continuous hover', () => {

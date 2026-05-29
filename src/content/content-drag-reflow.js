@@ -71,40 +71,15 @@
 
         function foldDraggedItems({ session, rootElement }) {
             if (!session || !rootElement) return;
-            const guideComp = new Map();
             for (const key of session.draggedKeys) {
                 const el = findItemElement(rootElement, key);
                 if (!el || !el.style) continue;
-                // Before collapsing, tally this item's height onto its parent
-                // group-children. fold removes the item's LAYOUT height, which would
-                // shorten the folder's border-left guide — but the reflow-shifted
-                // siblings still occupy that space VISUALLY (transform doesn't change
-                // layout). We extend the guide via a CSS ::before of height
-                // calc(100% + --sp-fold-comp) so the bar still spans the full folder.
-                const h = session.itemHeights && typeof session.itemHeights.get === 'function'
-                    ? (Number(session.itemHeights.get(key)) || 0) : 0;
-                const parent = el.parentElement;
-                if (h > 0 && parent && parent.classList && typeof parent.classList.contains === 'function'
-                    && parent.classList.contains('group-children')) {
-                    guideComp.set(parent, (guideComp.get(parent) || 0) + h);
-                }
                 el.style.height = '0px';
                 el.style.opacity = '0';
                 if (el.classList && typeof el.classList.add === 'function') {
                     el.classList.add('sp-drag-folded');
                 }
             }
-            const guided = [];
-            for (const [parent, total] of guideComp) {
-                if (parent.style && typeof parent.style.setProperty === 'function') {
-                    parent.style.setProperty('--sp-fold-comp', `${total}px`);
-                }
-                if (parent.classList && typeof parent.classList.add === 'function') {
-                    parent.classList.add('sp-drag-guide');
-                }
-                guided.push(parent);
-            }
-            session.guidedParents = guided;
         }
 
         // animated=true smoothly unfolds the dragged item from height 0 back to its cached
@@ -114,18 +89,6 @@
         // already rebuilt the DOM so transition would be a no-op anyway.
         function unfoldDraggedItems({ session, rootElement, animated }) {
             if (!session || !rootElement) return;
-            // Tear down the group-children guide extension applied during fold.
-            if (Array.isArray(session.guidedParents)) {
-                for (const parent of session.guidedParents) {
-                    if (parent && parent.style && typeof parent.style.removeProperty === 'function') {
-                        parent.style.removeProperty('--sp-fold-comp');
-                    }
-                    if (parent && parent.classList && typeof parent.classList.remove === 'function') {
-                        parent.classList.remove('sp-drag-guide');
-                    }
-                }
-                session.guidedParents = [];
-            }
             const win = (typeof globalThis !== 'undefined' && typeof globalThis.setTimeout === 'function')
                 ? globalThis
                 : null;

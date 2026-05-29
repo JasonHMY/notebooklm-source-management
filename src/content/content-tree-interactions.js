@@ -1689,17 +1689,17 @@
                     _preflightList.classList.remove('sp-drag-active');
                 }
 
-                // (B5) .sp-drag-guide + --sp-fold-comp: the folder left-guide extension
-                // applied during fold (content-drag-reflow foldDraggedItems). Normally
-                // torn down by unfoldDraggedItems; clear here too in case dragend was
-                // skipped, so a folder isn't left with an over-long guide bar.
+                // (B5) .sp-drag-guide + --sp-slot-comp: the per-frame folder guide marker
+                // set by _processDragOver on the pointer's current target folder. Normally
+                // cleared each frame + on dragend (clearDragFeedback); strip here too in
+                // case dragend was skipped, so a folder isn't left with a stale blue bar.
                 const lingeringGuide = _preflightList.querySelectorAll('.sp-drag-guide');
                 if (lingeringGuide && typeof lingeringGuide.forEach === 'function') {
                     lingeringGuide.forEach((node) => {
                         if (!node || !node.classList || typeof node.classList.remove !== 'function') return;
                         node.classList.remove('sp-drag-guide');
                         if (node.style && typeof node.style.removeProperty === 'function') {
-                            node.style.removeProperty('--sp-fold-comp');
+                            node.style.removeProperty('--sp-slot-comp');
                         }
                     });
                 }
@@ -2071,6 +2071,18 @@
                             }
                         });
                     }
+                    // Clear last frame's folder-guide marker; it is re-applied below for
+                    // whichever folder the pointer is currently inside.
+                    const staleGuide = sourceListEl.querySelectorAll('.sp-drag-guide');
+                    if (staleGuide && typeof staleGuide.forEach === 'function') {
+                        staleGuide.forEach((node) => {
+                            if (!node || !node.classList || typeof node.classList.remove !== 'function') return;
+                            node.classList.remove('sp-drag-guide');
+                            if (node.style && typeof node.style.removeProperty === 'function') {
+                                node.style.removeProperty('--sp-slot-comp');
+                            }
+                        });
+                    }
                 }
 
                 // Apply current frame's markers.
@@ -2096,6 +2108,24 @@
                         const slotEl = sourceListEl.querySelector(`[${slotAttr}="${cssEscape(intent.slotKey)}"]`);
                         if (slotEl && slotEl.classList && typeof slotEl.classList.add === 'function') {
                             slotEl.classList.add('drag-invalid');
+                        }
+                    }
+                }
+
+                // Folder guide: the folder the pointer is currently inside (into-group OR
+                // a slot within an expanded folder) gets a blue left bar extended by one
+                // slot — previews where the dragged source lands, including the empty slot
+                // when dropping at the very end. Per-frame so it follows the cursor (the
+                // sweep above already cleared the previous target's marker).
+                if (!isInvalid && intent.hostGroupContainerEl
+                    && typeof intent.hostGroupContainerEl.querySelector === 'function') {
+                    const guideChildren = intent.hostGroupContainerEl.querySelector('.group-children');
+                    const slotH = runtime.dragReflowSession ? runtime.dragReflowSession.totalDraggedHeight : 0;
+                    if (guideChildren && guideChildren.classList && typeof guideChildren.classList.add === 'function') {
+                        guideChildren.classList.add('sp-drag-guide');
+                        if (typeof slotH === 'number' && slotH > 0
+                            && guideChildren.style && typeof guideChildren.style.setProperty === 'function') {
+                            guideChildren.style.setProperty('--sp-slot-comp', `${slotH}px`);
                         }
                     }
                 }
@@ -2290,6 +2320,16 @@
                     }
                 });
                 count = nodes.length;
+                // Tear down the per-frame folder guide (blue bar + slot extension) so it
+                // doesn't linger after the drag ends.
+                Array.from(root.querySelectorAll('.sp-drag-guide')).forEach((node) => {
+                    if (node?.classList && typeof node.classList.remove === 'function') {
+                        node.classList.remove('sp-drag-guide');
+                    }
+                    if (node?.style && typeof node.style.removeProperty === 'function') {
+                        node.style.removeProperty('--sp-slot-comp');
+                    }
+                });
             }
             if (autoScrollController) autoScrollController.stop();
             // Drop any dragover work that was queued for the next frame — running

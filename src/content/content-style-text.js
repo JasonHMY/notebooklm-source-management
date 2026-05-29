@@ -1469,14 +1469,15 @@
                 position: relative;
                 /* By default, let height be auto. JS will set explicit heights during animation. */
             }
-            /* Drag guide extension: while a child is folded out of this folder during a
-               drag, border-left tracks the now-shortened layout height, but the
-               transform-shifted siblings still occupy that space visually — so the bar
-               stops short of the bottom. Draw the guide as an absolute ::before of
-               height calc(100% + folded-height) so it spans the full folder WITHOUT
-               entering layout (can't disturb reflow / cross-host shifts). JS
-               (foldDraggedItems) sets --sp-fold-comp + the .sp-drag-guide class; the
-               original border-left is handed off to transparent while active. */
+            /* Drag folder guide: while dragging, _processDragOver marks the folder the
+               pointer is currently inside with .sp-drag-guide + --sp-slot-comp (the
+               dragged row's height). Drawn as an absolute ::before of
+               height calc(100% + one slot) so it spans the folder's content AND the
+               insertion slot the drop will open — including the empty slot when dropping
+               at the very end. Absolute so it never enters layout (can't disturb reflow /
+               cross-host shifts). Blue because this is the live drop target; every other
+               folder keeps its plain grey border-left, which naturally ends at its last
+               item. border-left is handed to transparent so the ::before owns the bar. */
             .group-children.sp-drag-guide {
                 border-left-color: transparent;
             }
@@ -1486,8 +1487,8 @@
                 left: -2px;
                 top: 0;
                 width: 2px;
-                height: calc(100% + var(--sp-fold-comp, 0px));
-                background: var(--sp-border-light);
+                height: calc(100% + var(--sp-slot-comp, 0px));
+                background: var(--sp-accent);
                 border-bottom-left-radius: 6px;
                 pointer-events: none;
             }
@@ -3147,26 +3148,13 @@
             .group-container:hover > .group-children {
                 border-left-color: var(--sp-accent);
             }
-            .group-container:hover > .group-children.sp-drag-guide::before {
-                background: var(--sp-accent);
-            }
             /* During an active drag Chrome freezes native :hover on the ORIGIN folder
-               (the element under the cursor at dragstart), so the :hover blue above
-               would stay stuck on the source folder. While dragging, suppress that
-               frozen :hover and let .drag-into — which tracks the pointer's CURRENT
-               target folder — drive the blue guide instead. The .drag-into rules come
-               last so they win at equal specificity when dropping back onto the origin. */
+               (the element under the cursor at dragstart), so its border-left would
+               stay blue. While dragging, suppress that frozen :hover back to grey — the
+               blue bar is owned exclusively by .sp-drag-guide (the folder the pointer is
+               currently inside, set per-frame by _processDragOver). */
             #sources-list.sp-drag-active .group-container:hover > .group-children {
                 border-left-color: var(--sp-border-light);
-            }
-            #sources-list.sp-drag-active .group-container:hover > .group-children.sp-drag-guide::before {
-                background: var(--sp-border-light);
-            }
-            #sources-list.sp-drag-active .group-container.drag-into > .group-children {
-                border-left-color: var(--sp-accent);
-            }
-            #sources-list.sp-drag-active .group-container.drag-into > .group-children.sp-drag-guide::before {
-                background: var(--sp-accent);
             }
             
             /* Enhanced Drag Feedback */
