@@ -261,7 +261,7 @@
         //   NEVER splice a source key into state.groups — it corrupts the root tree.
         //   See CLAUDE.md "Non-obvious gotchas" and resolveSiblingKeys above for
         //   an example of polymorphic targetList consumption.
-        function computeDropIntent({ clientX, clientY, rootElement, state, groupsById, parentMap, activeDragContext }) {
+        function computeDropIntent({ clientX, clientY, rootElement, state, groupsById, parentMap, activeDragContext, prevIntent }) {
             if (typeof clientY !== 'number' || !rootElement || typeof rootElement.querySelectorAll !== 'function') {
                 return null;
             }
@@ -274,6 +274,14 @@
                     return null;
                 }
             }
+            // Hysteresis: once the pointer was judged INSIDE a group last frame
+            // (into-group), widen that SAME group's container + header Y band by this
+            // many px so jitter at the edge doesn't flip into-group ↔ reorder frame to
+            // frame. Entering still needs the precise band; only leaving gets the slack.
+            const HYSTERESIS_PX = 8;
+            const _stickyGroupId = prevIntent && prevIntent.kind === 'into-group'
+                ? prevIntent.targetGroupId
+                : null;
             const stateObj = state || {};
             const groups = stateObj.groups = Array.isArray(stateObj.groups) ? stateObj.groups : [];
             const ungrouped = stateObj.ungrouped = Array.isArray(stateObj.ungrouped) ? stateObj.ungrouped : [];
@@ -412,7 +420,12 @@
                 if (container.classList && container.classList.contains('sp-drag-folded')) continue;
                 const r = unshiftedRect(container);
                 if (!r) continue;
-                if (clientY < r.top || clientY >= r.bottom) continue;
+                // Sticky hysteresis: if this is the group we were inside last frame,
+                // extend its Y band so a few px of overshoot doesn't drop the pointer
+                // out of the container (which would flip into-group → reorder).
+                const _cBuf = (_stickyGroupId && container.dataset.groupId === _stickyGroupId)
+                    ? HYSTERESIS_PX : 0;
+                if (clientY < r.top - _cBuf || clientY >= r.bottom + _cBuf) continue;
 
                 // Resolve this container's top-level ancestor (self if already top-level)
                 // and skip if that ancestor is in the X-split excluded set.
@@ -456,7 +469,11 @@
                 // Pointer in group-header → into-group sentinel.
                 if (headerEl) {
                     const headerR = unshiftedRect(headerEl);
-                    if (headerR && clientY >= headerR.top && clientY < headerR.bottom) {
+                    // Same hysteresis as container selection: keep the header band
+                    // sticky for the group we were inside last frame so edge jitter
+                    // doesn't flip into-group ↔ reorder.
+                    const _hBuf = (_stickyGroupId && groupObj.id === _stickyGroupId) ? HYSTERESIS_PX : 0;
+                    if (headerR && clientY >= headerR.top - _hBuf && clientY < headerR.bottom + _hBuf) {
                         return {
                             kind: 'into-group',
                             targetGroup: groupObj,
@@ -2006,7 +2023,9 @@
                 state: getState(),
                 groupsById: getGroupsById(),
                 parentMap: getParentMap(),
-                activeDragContext: runtime.activeDragContext
+                activeDragContext: runtime.activeDragContext,
+                // Feed last frame's intent back in for into-group edge hysteresis.
+                prevIntent: runtime.dragReflowSession ? runtime.dragReflowSession.currentIntent : null
             });
 
             if (intent) {

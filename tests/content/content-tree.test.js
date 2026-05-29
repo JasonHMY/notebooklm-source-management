@@ -3069,6 +3069,35 @@ describe('computeDropIntent', () => {
         expect(intent.targetList).toBe(groupsById.get('g1').children);
     });
 
+    it('keeps into-group sticky within a hysteresis buffer just past a collapsed header (anti-jitter)', () => {
+        const state = { ungrouped: [], groups: ['g1'] };
+        const groupsById = new Map([
+            ['g1', { id: 'g1', collapsed: true, children: [{ type: 'source', key: 'X' }] }]
+        ]);
+        const tree = buildTree({ state, groupsById });
+        const { sourcesListEl } = makeMockShadowList({
+            // collapsed: header 100..130, no children band (childrenEnd === childrenStart),
+            // so the container rect is the header strip only.
+            items: [{ kind: 'group', id: 'g1', top: 100, headerHeight: 30, childrenStart: 130, childrenEnd: 130 }]
+        });
+
+        // Pointer at y=135 — 5px BELOW the header bottom (130). Without a prior
+        // into-group intent the precise band excludes it → NOT into-group.
+        const fresh = tree.computeDropIntent({
+            clientY: 135, rootElement: sourcesListEl, state, groupsById, parentMap: new Map()
+        });
+        expect(fresh.kind).not.toBe('into-group');
+
+        // With last frame already inside g1, hysteresis keeps it into-group despite the
+        // small overshoot, so tiny cursor jitter at the edge doesn't flip the intent.
+        const sticky = tree.computeDropIntent({
+            clientY: 135, rootElement: sourcesListEl, state, groupsById, parentMap: new Map(),
+            prevIntent: { kind: 'into-group', targetGroupId: 'g1' }
+        });
+        expect(sticky.kind).toBe('into-group');
+        expect(sticky.targetGroup).toBe(groupsById.get('g1'));
+    });
+
     it('routes to the deepest group when nested groups both contain the pointer', () => {
         const state = { ungrouped: [], groups: ['outer'] };
         const groupsById = new Map([
