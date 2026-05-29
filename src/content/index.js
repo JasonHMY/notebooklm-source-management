@@ -4474,9 +4474,12 @@
 
     contentInstance.destroy = destroyContentInstance;
 
-    // Expose internals for testing
+    // Expose internals for testing (module.exports only exists under Jest; the Chrome
+    // runtime never enters this block). Split into productionApi (mirrors of the module's
+    // real methods, used by integration tests) and testSurface (the _* accessors/setters
+    // that reach internal closures) so the real surface isn't drowned by the test surface.
     if (typeof module !== 'undefined' && module.exports) {
-        module.exports = {
+        const productionApi = {
             areAllAncestorsEnabled,
             buildPersistableState,
             createTag,
@@ -4644,6 +4647,9 @@
             triggerNativeSourceDetailsViaNativeMenuWithResult,
             triggerNativeSourceRenameWithResult,
             getNativeActionFailureMessage,
+        };
+
+        const testSurface = {
             _createBatchCountMessageChildrenForTest: createBatchCountMessageChildren,
             _collectBatchCountSnapshotForTest: collectBatchCountSnapshot,
             _animateBatchCountElementForTest: animateBatchCountElement,
@@ -4875,6 +4881,8 @@
                 }
             }
         };
+
+        module.exports = Object.assign({}, productionApi, testSurface);
     }
 
 })();
