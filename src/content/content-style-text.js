@@ -3150,6 +3150,24 @@
             .group-container:hover > .group-children.sp-drag-guide::before {
                 background: var(--sp-accent);
             }
+            /* During an active drag Chrome freezes native :hover on the ORIGIN folder
+               (the element under the cursor at dragstart), so the :hover blue above
+               would stay stuck on the source folder. While dragging, suppress that
+               frozen :hover and let .drag-into — which tracks the pointer's CURRENT
+               target folder — drive the blue guide instead. The .drag-into rules come
+               last so they win at equal specificity when dropping back onto the origin. */
+            #sources-list.sp-drag-active .group-container:hover > .group-children {
+                border-left-color: var(--sp-border-light);
+            }
+            #sources-list.sp-drag-active .group-container:hover > .group-children.sp-drag-guide::before {
+                background: var(--sp-border-light);
+            }
+            #sources-list.sp-drag-active .group-container.drag-into > .group-children {
+                border-left-color: var(--sp-accent);
+            }
+            #sources-list.sp-drag-active .group-container.drag-into > .group-children.sp-drag-guide::before {
+                background: var(--sp-accent);
+            }
             
             /* Enhanced Drag Feedback */
             .drag-invalid {

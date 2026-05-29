@@ -2339,6 +2339,10 @@ describe('handleDragStart reflow session + unified ghost', () => {
         // Descendant .sp-drag-guide left-bar extension cleared + its CSS var removed.
         expect(staleGuide.classList.remove).toHaveBeenCalledWith('sp-drag-guide');
         expect(staleGuide.style.removeProperty).toHaveBeenCalledWith('--sp-fold-comp');
+        // ...then re-armed for THIS drag: Chrome freezes native :hover on the origin
+        // folder, so the blue guide bar would stay stuck there. Marking the list
+        // active lets CSS suppress that frozen :hover (the bar follows .drag-into).
+        expect(listClassList.add).toHaveBeenCalledWith('sp-drag-active');
     });
 });
 

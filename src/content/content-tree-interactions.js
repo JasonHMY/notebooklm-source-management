@@ -1848,6 +1848,13 @@
                         dragReflow.foldDraggedItems({ session, rootElement });
                     }
                 }
+                // Mark the list actively dragging so CSS suppresses Chrome's frozen
+                // native :hover on the origin folder's guide bar — the blue bar should
+                // follow .drag-into (the target folder), not stay stuck on the source.
+                const _activeListSrc = getSourceListContainer();
+                if (_activeListSrc && _activeListSrc.classList && typeof _activeListSrc.classList.add === 'function') {
+                    _activeListSrc.classList.add('sp-drag-active');
+                }
                 if (typeof setTimeoutFn === 'function') {
                     setTimeoutFn(() => {
                         if (selection.isMulti) {
@@ -1876,6 +1883,11 @@
                     e.dataTransfer.setData('application/group-id', key);
                     runtime.activeDragContext = { kind: 'group', draggedGroupId: key };
                     e.dataTransfer.effectAllowed = 'move';
+                    // See source branch: mark active so the guide bar follows .drag-into.
+                    const _activeListGrp = getSourceListContainer();
+                    if (_activeListGrp && _activeListGrp.classList && typeof _activeListGrp.classList.add === 'function') {
+                        _activeListGrp.classList.add('sp-drag-active');
+                    }
                     if (typeof setTimeoutFn === 'function') {
                         setTimeoutFn(() => groupTarget.classList.add('dragging'), 0);
                     }
