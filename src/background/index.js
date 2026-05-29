@@ -91,8 +91,57 @@ function getSerializedByteLength(value) {
     return serialized.length;
 }
 
-function createStorageUsageInfo(payload, quotaBytes = getStorageQuotaBytes()) {
-    const storageUsageBytes = getSerializedByteLength(payload);
+// Best-effort "everything else" usage for projecting a real total. getBytesInUse(null)
+// returns the whole chrome.storage.local footprint; we subtract the bytes of the keys THIS
+// write owns (they get replaced by the new payload, so counting both double-counts) to get
+// the usage of all OTHER notebooks/keys. The caller adds this to the new payload size for a
+// projected-total quota ratio. Falls back to 0 — i.e. the historical per-payload behavior —
+// whenever getBytesInUse is unavailable or errors, so nothing regresses.
+function resolveExtraStorageBytes(existingData, ownedKeys, callback) {
+    const local = globalThis.chrome?.storage?.local;
+    const getBytesInUse = local && typeof local.getBytesInUse === 'function'
+        ? local.getBytesInUse.bind(local)
+        : null;
+    if (!getBytesInUse) {
+        callback(0);
+        return;
+    }
+
+    let ownedBytes = 0;
+    if (existingData && typeof existingData === 'object') {
+        for (const ownedKey of ownedKeys) {
+            if (Object.prototype.hasOwnProperty.call(existingData, ownedKey)) {
+                ownedBytes += getSerializedByteLength({ [ownedKey]: existingData[ownedKey] });
+            }
+        }
+    }
+
+    let settled = false;
+    const finish = (value) => {
+        if (settled) return;
+        settled = true;
+        callback(value);
+    };
+    try {
+        getBytesInUse(null, (totalBytes) => {
+            if ((globalThis.chrome?.runtime?.lastError) || !Number.isFinite(Number(totalBytes))) {
+                finish(0);
+                return;
+            }
+            finish(Math.max(0, Number(totalBytes) - ownedBytes));
+        });
+    } catch (error) {
+        finish(0);
+    }
+}
+
+// extraBytes = real chrome.storage.local usage OUTSIDE the keys in `payload` (i.e. all
+// OTHER notebooks/keys, from getBytesInUse). Defaults to 0 so callers that can't measure
+// the real total (no getBytesInUse) keep the historical per-payload behavior exactly —
+// the projected total then equals just this write's payload size.
+function createStorageUsageInfo(payload, quotaBytes = getStorageQuotaBytes(), extraBytes = 0) {
+    const safeExtraBytes = Number.isFinite(Number(extraBytes)) && extraBytes > 0 ? Number(extraBytes) : 0;
+    const storageUsageBytes = getSerializedByteLength(payload) + safeExtraBytes;
     const storageQuotaBytes = Number.isFinite(quotaBytes) && quotaBytes > 0
         ? quotaBytes
         : DEFAULT_STORAGE_QUOTA_BYTES;
@@ -765,7 +814,8 @@ function createStateStoragePayload({
     savedState,
     existingHistory,
     reason = 'save',
-    historyLimit = STATE_HISTORY_LIMIT
+    historyLimit = STATE_HISTORY_LIMIT,
+    extraBytes = 0
 }) {
     const storagePayload = { [key]: savedState };
     let history = [];
@@ -782,11 +832,11 @@ function createStateStoragePayload({
     return {
         payload: storagePayload,
         history,
-        usageInfo: createStorageUsageInfo(storagePayload)
+        usageInfo: createStorageUsageInfo(storagePayload, getStorageQuotaBytes(), extraBytes)
     };
 }
 
-function trimStateStorageHistory(payloadInfo, historyKey) {
+function trimStateStorageHistory(payloadInfo, historyKey, extraBytes = 0) {
     if (!payloadInfo || !Array.isArray(payloadInfo.history) || payloadInfo.history.length <= 1) {
         return payloadInfo;
     }
@@ -798,17 +848,17 @@ function trimStateStorageHistory(payloadInfo, historyKey) {
     return {
         payload,
         history: trimmedHistory,
-        usageInfo: createStorageUsageInfo(payload),
+        usageInfo: createStorageUsageInfo(payload, getStorageQuotaBytes(), extraBytes),
         historyTrimmed: true
     };
 }
 
-function prepareStateStoragePayloadForQuota(payloadInfo, historyKey) {
+function prepareStateStoragePayloadForQuota(payloadInfo, historyKey, extraBytes = 0) {
     if (!isStorageCritical(payloadInfo?.usageInfo)) {
         return payloadInfo;
     }
 
-    const trimmedPayloadInfo = trimStateStorageHistory(payloadInfo, historyKey);
+    const trimmedPayloadInfo = trimStateStorageHistory(payloadInfo, historyKey, extraBytes);
     return trimmedPayloadInfo || payloadInfo;
 }
 
@@ -885,68 +935,73 @@ function writeStateWithRevisionGuard(request, sendResponse) {
         const savedState = createSavedStateSnapshot(data, currentRevision, baseRevision);
         const existingHistory = existingData && typeof existingData === 'object' ? existingData[historyKey] : [];
         const historyLimit = normalizePreferences(existingData?.[PREFERENCES_KEY]).historyRetentionLimit;
-        const initialPayloadInfo = createStateStoragePayload({
-            key,
-            backupKey,
-            historyKey,
-            savedState,
-            existingHistory,
-            reason: request.critical ? 'critical_save' : 'save',
-            historyLimit
-        });
-        const payloadInfo = prepareStateStoragePayloadForQuota(initialPayloadInfo, historyKey);
-        if (isStorageCritical(payloadInfo.usageInfo)) {
-            // Over the critical threshold — but reject ONLY writes that GROW the stored
-            // snapshot. A write that shrinks (or keeps) the state must go through, e.g.
-            // the user deleting a source to free space; otherwise quota exhaustion is a
-            // hard lock with no escape (history trimming above can't always recover it).
-            const incomingBytes = getSerializedByteLength(savedState);
-            const currentBytes = currentState ? getSerializedByteLength(currentState) : 0;
-            if (incomingBytes > currentBytes) {
-                sendResponse(Object.assign({
-                    success: false,
-                    errorCode: ERROR_CODES.STORAGE_QUOTA_EXCEEDED
-                }, createStorageResponseFields(payloadInfo.usageInfo, {
-                    historyEntryCount: payloadInfo.history.length,
-                    historyTrimmed: Boolean(payloadInfo.historyTrimmed)
-                })));
-                return;
-            }
-            // Shrinking/equal write: fall through to writePayload to let the user recover.
-        }
-
-        const writePayload = (nextPayloadInfo, didRetry = false) => chrome.storage.local.set(nextPayloadInfo.payload, () => {
-            if (chrome.runtime.lastError) {
-                console.error('NotebookLM Source Management background save error:', chrome.runtime.lastError);
-                if (!didRetry && isStorageQuotaError(chrome.runtime.lastError)) {
-                    const trimmedPayloadInfo = trimStateStorageHistory(nextPayloadInfo, historyKey);
-                    if (trimmedPayloadInfo !== nextPayloadInfo && !isStorageCritical(trimmedPayloadInfo.usageInfo)) {
-                        writePayload(trimmedPayloadInfo, true);
-                        return;
-                    }
+        // Resolve real "other keys" usage (best-effort) so the quota ratio reflects the
+        // whole chrome.storage.local footprint, not just this one notebook's write.
+        resolveExtraStorageBytes(existingData, [key, backupKey, historyKey], (extraBytes) => {
+            const initialPayloadInfo = createStateStoragePayload({
+                key,
+                backupKey,
+                historyKey,
+                savedState,
+                existingHistory,
+                reason: request.critical ? 'critical_save' : 'save',
+                historyLimit,
+                extraBytes
+            });
+            const payloadInfo = prepareStateStoragePayloadForQuota(initialPayloadInfo, historyKey, extraBytes);
+            if (isStorageCritical(payloadInfo.usageInfo)) {
+                // Over the critical threshold — but reject ONLY writes that GROW the stored
+                // snapshot. A write that shrinks (or keeps) the state must go through, e.g.
+                // the user deleting a source to free space; otherwise quota exhaustion is a
+                // hard lock with no escape (history trimming above can't always recover it).
+                const incomingBytes = getSerializedByteLength(savedState);
+                const currentBytes = currentState ? getSerializedByteLength(currentState) : 0;
+                if (incomingBytes > currentBytes) {
+                    sendResponse(Object.assign({
+                        success: false,
+                        errorCode: ERROR_CODES.STORAGE_QUOTA_EXCEEDED
+                    }, createStorageResponseFields(payloadInfo.usageInfo, {
+                        historyEntryCount: payloadInfo.history.length,
+                        historyTrimmed: Boolean(payloadInfo.historyTrimmed)
+                    })));
+                    return;
                 }
-
-                const isQuotaError = isStorageQuotaError(chrome.runtime.lastError);
-                sendResponse(Object.assign({
-                    success: false,
-                    errorCode: isQuotaError ? ERROR_CODES.STORAGE_QUOTA_EXCEEDED : ERROR_CODES.RUNTIME_FAILURE
-                }, createStorageResponseFields(nextPayloadInfo.usageInfo, {
-                    historyEntryCount: nextPayloadInfo.history.length,
-                    historyTrimmed: Boolean(nextPayloadInfo.historyTrimmed)
-                })));
-            } else {
-                sendResponse(Object.assign({
-                    success: true,
-                    saveRevision: savedState._saveRevision,
-                    savedAt: savedState._savedAt
-                }, createStorageResponseFields(nextPayloadInfo.usageInfo, {
-                    historyEntryCount: nextPayloadInfo.history.length,
-                    historyTrimmed: Boolean(nextPayloadInfo.historyTrimmed)
-                })));
+                // Shrinking/equal write: fall through to writePayload to let the user recover.
             }
-        });
 
-        writePayload(payloadInfo);
+            const writePayload = (nextPayloadInfo, didRetry = false) => chrome.storage.local.set(nextPayloadInfo.payload, () => {
+                if (chrome.runtime.lastError) {
+                    console.error('NotebookLM Source Management background save error:', chrome.runtime.lastError);
+                    if (!didRetry && isStorageQuotaError(chrome.runtime.lastError)) {
+                        const trimmedPayloadInfo = trimStateStorageHistory(nextPayloadInfo, historyKey, extraBytes);
+                        if (trimmedPayloadInfo !== nextPayloadInfo && !isStorageCritical(trimmedPayloadInfo.usageInfo)) {
+                            writePayload(trimmedPayloadInfo, true);
+                            return;
+                        }
+                    }
+
+                    const isQuotaError = isStorageQuotaError(chrome.runtime.lastError);
+                    sendResponse(Object.assign({
+                        success: false,
+                        errorCode: isQuotaError ? ERROR_CODES.STORAGE_QUOTA_EXCEEDED : ERROR_CODES.RUNTIME_FAILURE
+                    }, createStorageResponseFields(nextPayloadInfo.usageInfo, {
+                        historyEntryCount: nextPayloadInfo.history.length,
+                        historyTrimmed: Boolean(nextPayloadInfo.historyTrimmed)
+                    })));
+                } else {
+                    sendResponse(Object.assign({
+                        success: true,
+                        saveRevision: savedState._saveRevision,
+                        savedAt: savedState._savedAt
+                    }, createStorageResponseFields(nextPayloadInfo.usageInfo, {
+                        historyEntryCount: nextPayloadInfo.history.length,
+                        historyTrimmed: Boolean(nextPayloadInfo.historyTrimmed)
+                    })));
+                }
+            });
+
+            writePayload(payloadInfo);
+        });
     });
 }
 
@@ -980,48 +1035,50 @@ function appendStateHistoryNow(request, sendResponse) {
             request.entry,
             historyLimit
         );
-        const initialPayload = { [key]: history };
-        let nextHistory = history;
-        let payload = initialPayload;
-        let usageInfo = createStorageUsageInfo(payload);
-        let historyTrimmed = false;
-        if (isStorageCritical(usageInfo) && history.length > 1) {
-            nextHistory = history.slice(0, 1);
-            payload = { [key]: nextHistory };
-            usageInfo = createStorageUsageInfo(payload);
-            historyTrimmed = true;
-        }
-        if (isStorageCritical(usageInfo)) {
-            sendResponse(Object.assign({
-                success: false,
-                errorCode: ERROR_CODES.STORAGE_QUOTA_EXCEEDED
-            }, createStorageResponseFields(usageInfo, {
-                historyEntryCount: nextHistory.length,
-                historyTrimmed
-            })));
-            return;
-        }
-
-        chrome.storage.local.set(payload, () => {
-            if (chrome.runtime.lastError) {
+        resolveExtraStorageBytes(data, [key], (extraBytes) => {
+            const initialPayload = { [key]: history };
+            let nextHistory = history;
+            let payload = initialPayload;
+            let usageInfo = createStorageUsageInfo(payload, getStorageQuotaBytes(), extraBytes);
+            let historyTrimmed = false;
+            if (isStorageCritical(usageInfo) && history.length > 1) {
+                nextHistory = history.slice(0, 1);
+                payload = { [key]: nextHistory };
+                usageInfo = createStorageUsageInfo(payload, getStorageQuotaBytes(), extraBytes);
+                historyTrimmed = true;
+            }
+            if (isStorageCritical(usageInfo)) {
                 sendResponse(Object.assign({
                     success: false,
-                    errorCode: isStorageQuotaError(chrome.runtime.lastError)
-                        ? ERROR_CODES.STORAGE_QUOTA_EXCEEDED
-                        : ERROR_CODES.RUNTIME_FAILURE
+                    errorCode: ERROR_CODES.STORAGE_QUOTA_EXCEEDED
                 }, createStorageResponseFields(usageInfo, {
                     historyEntryCount: nextHistory.length,
                     historyTrimmed
                 })));
                 return;
             }
-            sendResponse(Object.assign({
-                success: true,
-                history: nextHistory
-            }, createStorageResponseFields(usageInfo, {
-                historyEntryCount: nextHistory.length,
-                historyTrimmed
-            })));
+
+            chrome.storage.local.set(payload, () => {
+                if (chrome.runtime.lastError) {
+                    sendResponse(Object.assign({
+                        success: false,
+                        errorCode: isStorageQuotaError(chrome.runtime.lastError)
+                            ? ERROR_CODES.STORAGE_QUOTA_EXCEEDED
+                            : ERROR_CODES.RUNTIME_FAILURE
+                    }, createStorageResponseFields(usageInfo, {
+                        historyEntryCount: nextHistory.length,
+                        historyTrimmed
+                    })));
+                    return;
+                }
+                sendResponse(Object.assign({
+                    success: true,
+                    history: nextHistory
+                }, createStorageResponseFields(usageInfo, {
+                    historyEntryCount: nextHistory.length,
+                    historyTrimmed
+                })));
+            });
         });
     });
 }

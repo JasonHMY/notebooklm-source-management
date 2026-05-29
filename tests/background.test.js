@@ -989,6 +989,53 @@ describe('background.js message listener', () => {
         }));
     });
 
+    it('drives the quota warning from real total usage via getBytesInUse, not just this write', () => {
+        const request = {
+            type: 'SAVE_STATE',
+            key: 'sourcesPlusState_warn',
+            data: {
+                groups: ['g'],
+                groupsById: { g: { id: 'g', children: [] } },
+                sourceStateById: {}
+            }
+        };
+        // This notebook's payload is tiny, but ~9MB is already used across OTHER notebooks,
+        // so the projected total ratio (~0.9 of the default 10MB) should trip the warning.
+        global.chrome.storage.local.getBytesInUse = jest.fn((keys, cb) => cb(9 * 1024 * 1024));
+
+        listener(request, validSender, mockSendResponse);
+
+        expect(global.chrome.storage.local.getBytesInUse).toHaveBeenCalled();
+        expect(mockSendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: true,
+            storageWarning: true
+        }));
+    });
+
+    it('rejects a growing write when getBytesInUse shows projected total usage is critical', () => {
+        const request = {
+            type: 'SAVE_STATE',
+            key: 'sourcesPlusState_crit',
+            baseRevision: 0,
+            data: {
+                groups: ['g'],
+                groupsById: { g: { id: 'g', children: [] } },
+                sourceStateById: {}
+            }
+        };
+        // Other notebooks already sit just under the 10MB quota; this notebook is new (grows
+        // from 0), so the projected total is critical and the growing write must be rejected.
+        global.chrome.storage.local.getBytesInUse = jest.fn((keys, cb) => cb(Math.round(9.97 * 1024 * 1024)));
+
+        listener(request, validSender, mockSendResponse);
+
+        expect(global.chrome.storage.local.set).not.toHaveBeenCalled();
+        expect(mockSendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: false,
+            errorCode: 'storage_quota_exceeded'
+        }));
+    });
+
     it('trims state history once when projected save payload is over the critical quota threshold', () => {
         const existingHistory = [1, 2, 3, 4, 5].map((index) => ({
             id: `history-${index}`,
