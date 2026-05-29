@@ -13,7 +13,8 @@
  *    (Getter/setter binding helpers live in content-runtime-state.js.)
  *  - Lifecycle: init / mount / teardown / cleanupManagerResources / route-change recovery /
  *    panel reattach (NotebookLM is an SPA — switch ≠ reload; see content-panel-dom.js).
- *  - Message routing from popup/background (content-message-router.js builds the table).
+ *  - Message routing from popup/background: the handler table is built HERE and passed to
+ *    content-message-router.js, which only dispatches against it.
  *  - Native source actions + batch handlers, modal orchestration callbacks, the resizer,
  *    command-shortcut handling, and content-error/diagnostics wiring.
  *  - The dependency-assembly graph: createContent*({ ...deps }) calls that build the module
