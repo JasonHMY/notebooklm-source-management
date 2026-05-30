@@ -9,6 +9,7 @@
 - 每个发布段只保留实际需要的分类，分类名必须精确使用 `### Added`、`### Changed`、`### Fixed`、`### Security`、`### Removed`。不要在分类标题后追加中文括号，也不要创建空分类。
 - 分类顺序固定为 `Added`、`Changed`、`Fixed`、`Security`、`Removed`；某个分类没有内容时直接省略。
 - 条目格式统一为 `- **中文标题 (English Title)**: 具体说明。` 标题应短而明确，正文说明用户可感知的影响、修复范围或必要的技术原因。
+- 实现细节较多或较长的条目，正文开头用 `**影响**: ` 加一句用户视角的影响摘要（用户能直接感知什么）；纯内部改动（重构、测试、文档、无可感知的性能优化）统一写「对扩展使用无可感知变化」。标题已自解释的短条目可省略此摘要。
 - 只记录可验证的功能、修复、安全加固、打包和兼容性变化。避免夸张营销语、泛泛的“优化体验/提升稳定性”，除非同时写清楚具体修复点。
 - 同一类相关改动应合并成一条高信号记录；不同风险面或不同用户影响的改动应拆开写，便于回溯。
 - Agent 写入流程：先读本规范和 `AGENTS.md`；非发布改动写入 `Unreleased`；如果同步改了项目结构、功能域、存储 key、测试入口、发布流程或维护规则，同时更新 `docs/PROJECT_DIRECTORY.md`；发布前再把 `Unreleased` 内容移动到正式版本段。
@@ -20,7 +21,8 @@
 ## [Unreleased] (未发布)
 
 ### Changed
-- **中文标题 (English Title)**: 写清楚具体影响、范围或原因。
+- **中文标题 (English Title)**: **影响**: 一句用户视角摘要（纯内部改动写「对扩展使用无可感知变化」）。 写清楚具体影响、范围或必要的技术原因。
+- **短条目标题 (Short Entry)**: 标题已自解释的短条目，正文写清即可，可省略「影响」摘要。
 ```
 
 ## [Unreleased] (未发布)
@@ -29,6 +31,7 @@
 - **`.editorconfig` 格式护栏 (Formatting Guardrail via .editorconfig)**: **影响**: 对扩展使用无可感知变化;统一仓库各文件类型的缩进/换行约定、防新编辑漂移。 此前 JS 缩进虽统一为 4 空格,但 `content-render.js` 有零星 tab 缩进、JSON 缩进 manifest/package(2)与 `_locales/*`(4)不一致,且无任何 formatter 约束(ESLint 无 `indent` 规则)。新增 `.editorconfig`,按 glob **记录各类型的现有约定**(JS=4、`manifest/package`=2、`_locales/*`=4、CSS 按文件:`popup/styles.css`=4 / `content/styles.css`=2、md 保留尾空格;统一 LF + 末尾换行 + 去行尾空格),让新编辑不再漂移、且不在文件内制造新旧混缩。**刻意不大规模 reformat 存量**(保持 diff 外科式)。AGENTS.md「Project Constraints」补一条格式约定。`.editorconfig` 不进发布包(package.js allowlist 已确认 0 条)。CI 级强制(Prettier/@stylistic + 一次性规范化)作为可选后续,未在本次引入(避免新 dev 依赖 + 存量 churn)。
 
 ### Changed
+- **写作规范纳入「影响」摘要约定 (Codify the Impact-Summary Convention)**: **影响**: 对扩展使用无可感知变化;纯规范/文档更新。 在 CHANGELOG 顶部写作规范与 `AGENTS.md` Changelog Rules 同步新增一条约定:实现细节较多/较长的条目正文开头用 `**影响**: ` 加一句用户视角摘要,纯内部改动写「对扩展使用无可感知变化」,标题已自解释的短条目可省略;并更新规范模板示例(展示带「影响」与短条目两种)。
 - **CHANGELOG 超长条目补「影响」摘要 (Add User-Impact Summary to Long CHANGELOG Entries)**: **影响**: 对扩展使用无可感知变化;纯 CHANGELOG 可读性增强。 给全文件 104 条超长(>180 字)条目正文开头补一句加粗的「影响」摘要(用户视角),原正文逐字保留(机械验证:每条新正文以原正文为后缀、标题不变);内部重构/测试/文档类统一标注「对扩展使用无可感知变化」,功能/修复/安全/无障碍类写明用户可感知差异。
 - **CHANGELOG 结构修复:写作规范段移回顶部 + 合并重复分类 (Fix CHANGELOG Structure: Guidelines Back to Top + Merge Duplicate Categories)**: **影响**: 对扩展使用无可感知变化;纯 CHANGELOG 文档结构整理。 `Changelog Writing Guidelines` 段此前埋在 26.5.29 与 26.5.26 两个发布段之间,与 `AGENTS.md` / `CLAUDE.md`「位于 CHANGELOG 顶部」的契约矛盾,现移回文件顶部(标题/描述之后、首个版本段之前)。顶部 `## [Unreleased]` 补 `(未发布)` 后缀并按 `Added → Changed → Fixed → Security → Removed` 固定顺序重排;26.5.29 段内重复出现的 3 个 `### Changed`、2 个 `### Fixed` 各合并为一条并按固定顺序重排,删掉段内孤立空行。纯结构重组:全部条目正文逐字未改(以「条目行排序后与改前 diff 为空」机械验证),历史发布段(26.5.26 及更早)与规范段文字一字未动。
 - **index.js 测试导出拆为 productionApi + testSurface (Split index.js's Jest Export Into productionApi + testSurface)**: **影响**: 对扩展使用无可感知变化;纯测试导出的组织性重构。 `module.exports` 块(仅 Jest 执行,Chrome 下 `module` 为 undefined、整块跳过)此前把 ~50 个生产方法镜像与 **126 个 `_*` 测试访问器**混在一个对象字面量里,真实面被测试面淹没。拆成两个命名对象:`productionApi`(模块真实方法的镜像,集成测试用)+ `testSurface`(够到内部闭包的 `_*` 访问器/setter),末尾 `module.exports = Object.assign({}, productionApi, testSurface)`。纯组织性重构、零运行时影响(该块 Chrome 不执行),导出键集合与签名完全不变,由全量单测(几十处用这些 `_` 访问器)守护。

@@ -47,6 +47,7 @@ Before starting work, read the relevant project instructions, repository guidanc
 - Normal in-progress work goes under the single top `## [Unreleased] (未发布)` section. Do not create a dated release section unless the same change updates the version and produces a release package.
 - Use only exact category headings: `### Added`, `### Changed`, `### Fixed`, `### Security`, `### Removed`.
 - Use the required item format: `- **中文标题 (English Title)**: 具体说明。`
+- For long or implementation-heavy entries, prefix the body with `**影响**: ` and a one-line user-facing impact summary (what the user can perceive); for purely internal changes (refactors, tests, docs, non-perceivable perf) write `对扩展使用无可感知变化`. Short, self-explanatory entries may omit it.
 - Keep entries factual and verifiable. Avoid vague claims such as "优化体验" unless the concrete behavior, fix, or scope is stated in the same entry.
 - When releasing, move the relevant `Unreleased` entries into `## [YYYY-MM-DD] [x.y.z]` and verify `manifest.json`, `package.json`, README version badge, release zip name, and `CHANGELOG.md` all match.
 
