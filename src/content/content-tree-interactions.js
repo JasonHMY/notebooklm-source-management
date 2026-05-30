@@ -2324,10 +2324,11 @@
             }
 
             if (autoScrollController && dragMulti && typeof dragMulti.computeAutoScrollVelocity === 'function') {
-                const root = getShadowRoot();
-                const list = root && typeof root.getElementById === 'function' ? root.getElementById('sources-list') : null;
-                if (list && typeof list.getBoundingClientRect === 'function') {
-                    const listRect = list.getBoundingClientRect();
+                // Reuse the sources-list element already resolved at the top of this frame
+                // (getSourceListContainer() === getShadowRoot().getElementById('sources-list')),
+                // rather than re-resolving the shadow root + element on every dragover frame.
+                if (sourceListEl && typeof sourceListEl.getBoundingClientRect === 'function') {
+                    const listRect = sourceListEl.getBoundingClientRect();
                     const velocity = dragMulti.computeAutoScrollVelocity({
                         pointerY: args.clientY,
                         containerTop: listRect.top,
