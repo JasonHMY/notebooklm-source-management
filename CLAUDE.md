@@ -2,15 +2,24 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Authoritative Rules
+## Documentation Map (Authoritative Rules)
 
-Read these BEFORE making any change. They override anything below.
+Read the relevant doc BEFORE making a change. Each doc is the source of truth for its area and overrides anything below. **This table is the single index of project docs**; for task-by-task routing ("I'm doing X → read Y") see the `nsm-discipline` skill.
 
-- **[AGENTS.md](AGENTS.md)** — required maintenance + workflow rules (CHANGELOG and PROJECT_DIRECTORY sync, helper file sync for new content modules, verification matrix per change type, NotebookLM native DOM safety, no `innerHTML`/`eval`, auto-commit OK but no auto-push).
-- **[docs/PROJECT_DIRECTORY.md](docs/PROJECT_DIRECTORY.md)** — the project map. Section 3 (功能域树) is the fastest way to locate code for any feature area; Section 2 is the canonical content-script load order.
-- **`Changelog Writing Guidelines`** at the top of [CHANGELOG.md](CHANGELOG.md) — bilingual title format `**中文标题 (English Title)**: 说明`, fixed category headings, no marketing language.
-- **[UI_GUIDELINES.md](UI_GUIDELINES.md)** — required reading before any UI / token / style-text / motion / popup change. Reuse `.sp-*` component patterns.
-- **[docs/DEVELOPER_LOGGING.md](docs/DEVELOPER_LOGGING.md)** — sanitization rules for dev logs.
+| Doc | Source of truth for | Read when |
+|---|---|---|
+| **[AGENTS.md](AGENTS.md)** | maintenance + workflow rules, verification matrix, project constraints, native-DOM safety, auto-commit/no-push | before any change (always) |
+| **[docs/PROJECT_DIRECTORY.md](docs/PROJECT_DIRECTORY.md)** | project map — directory tree, content-script load order (§2), feature-area tree (§3, fastest locator), test tree | locating code, changing structure/files |
+| **[UI_GUIDELINES.md](UI_GUIDELINES.md)** | UI / tokens / `.sp-*` components / motion / popup | before any UI or style change |
+| **`Changelog Writing Guidelines`** (top of [CHANGELOG.md](CHANGELOG.md)) | changelog entry format, fixed categories, `**影响**` summary rule, no marketing language | before writing CHANGELOG |
+| **[docs/STORAGE_SCHEMA.md](docs/STORAGE_SCHEMA.md)** | chrome.storage / sessionStorage keys + persisted schema + migrations | changing a storage key, field, or migration |
+| **[docs/MESSAGE_CONTRACTS.md](docs/MESSAGE_CONTRACTS.md)** | popup↔content↔background message types, payloads, sender validation | changing a message type or response shape |
+| **[docs/DEVELOPER_LOGGING.md](docs/DEVELOPER_LOGGING.md)** | `developerLog` levels/categories/events + sanitization | writing a `developerLog` call |
+| **[docs/SECURITY_THREAT_MODEL.md](docs/SECURITY_THREAT_MODEL.md)** | trust boundaries, attack surface, mitigations, severity calibration | security-relevant changes, hardening, untrusted input |
+| **[docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md)** | release gate + version-sync points | publishing a build |
+| **[PRIVACY.md](PRIVACY.md)** | outward privacy statement (permissions, data flow, no remote resources) | changing permissions, data flow, or remote resources |
+
+(This file, **CLAUDE.md**, is the project overview — auto-loaded each session, so it is not listed as a separate "read when".)
 
 ## Commands
 
