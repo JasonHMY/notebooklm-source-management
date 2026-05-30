@@ -151,7 +151,7 @@ Future additions should preserve these traits.
 
 ## 5. Core Design Tokens
 
-## 5.1 Color tokens
+### 5.1 Color tokens
 
 Content panel tokens live on `:host` in `src/content/content-style-text.js`.
 
@@ -197,7 +197,7 @@ Rules:
 - If a new color is needed, add a token before using a literal value.
 - Avoid one-off colors in component rules.
 
-## 5.2 Border tokens
+### 5.2 Border tokens
 
 Current shared borders:
 
@@ -211,7 +211,7 @@ Rules:
 - Hover-strength border or stronger separation: `--sp-border-medium`
 - Custom checkbox outline: `--sp-border-checkbox`
 
-## 5.3 Shadow tokens
+### 5.3 Shadow tokens
 
 Current shadow tokens:
 
@@ -234,7 +234,7 @@ Rules:
 - Do not invent a new shadow just because one component feels special.
 - If a new elevation level is necessary, define it as a token and document the intended layer.
 
-## 5.4 Radius scale
+### 5.4 Radius scale
 
 The current UI consistently uses a small set of radius values.
 
@@ -256,7 +256,7 @@ Rules:
 - Do not use arbitrary radii like `7px`, `9px`, `13px`, `15px`.
 - Choose the nearest existing radius bucket.
 
-## 5.5 Typography scale
+### 5.5 Typography scale
 
 Content panel typography:
 
@@ -278,7 +278,7 @@ Rules:
 - Small metadata should stay in the `11px` to `12px` band.
 - Only use `16px+` for true hierarchy shifts such as modal titles or popup headings.
 
-## 5.6 Icon scale
+### 5.6 Icon scale
 
 Current icon sizes:
 
@@ -292,7 +292,7 @@ Rules:
 - `18px` is for toolbar-level icon buttons.
 - `20px` is reserved for navigational or modal list items.
 
-## 5.7 Motion system
+### 5.7 Motion system
 
 The current content panel and popup use a shared three-curve motion system.
 
@@ -336,7 +336,7 @@ Rules:
 - Avoid raw `ease-in-out` or ad hoc cubic curves.
 - `linear` is allowed for true continuous indicators such as spinners and progress loops.
 
-## 5.8 Z-index layers
+### 5.8 Z-index layers
 
 Current practical layer system:
 
@@ -449,7 +449,7 @@ The source list keeps a small bottom safe area so the final row can scroll above
 
 ## 8. Buttons
 
-## 8.1 Primary panel button: `.sp-button`
+### 8.1 Primary panel button: `.sp-button`
 
 Canonical style:
 
@@ -480,7 +480,7 @@ Rules:
 - If a button needs a stronger semantic state, restyle color tokens on top of `.sp-button`.
 - Do not build new button styles from scratch unless the role is fundamentally different.
 
-## 8.2 Icon button: `.sp-icon-button`
+### 8.2 Icon button: `.sp-icon-button`
 
 Canonical style:
 
@@ -501,7 +501,7 @@ Rules:
 - Icon-only controls must have `title` and `aria-label`.
 - Do not use `.sp-icon-button` for destructive actions without an explicit semantic override.
 
-## 8.3 Row action button family
+### 8.3 Row action button family
 
 Classes:
 
@@ -537,7 +537,7 @@ Rules:
 - Row actions should not always be fully visible unless the action is critical.
 - Reveal-on-hover is the default for row-scope secondary actions.
 
-## 8.4 Popup button
+### 8.4 Popup button
 
 Popup uses a separate CTA style:
 
@@ -557,7 +557,7 @@ Rules:
 
 ## 9. Selection Controls
 
-## 9.1 Source checkbox: `.sp-checkbox`
+### 9.1 Source checkbox: `.sp-checkbox`
 
 Canonical style:
 
@@ -577,7 +577,7 @@ Rules:
 - New checkbox-like controls should reuse `.sp-checkbox` unless there is a very strong reason not to.
 - Avoid native browser checkbox visuals for in-panel controls.
 
-## 9.2 Group switch
+### 9.2 Group switch
 
 Classes:
 
@@ -599,7 +599,7 @@ Rules:
 
 ## 10. Source Row and Group Row Specification
 
-## 10.1 Source row
+### 10.1 Source row
 
 Class: `.source-item`
 
@@ -640,7 +640,7 @@ Rules:
 - Do not add permanent heavy borders around normal rows.
 - The title area should remain the primary click target.
 
-## 10.2 Group row
+### 10.2 Group row
 
 Classes:
 
@@ -674,7 +674,7 @@ Rules:
 - Group UI must feel structurally related to source rows, not like a separate product.
 - Future nested controls must not break indentation rhythm or tree-line clarity.
 
-## 10.3 Drag and drop feedback
+### 10.3 Drag and drop feedback
 
 Existing cues:
 
@@ -694,7 +694,7 @@ Rules:
 
 ## 11. Titles, Tags, Badges, and Metadata
 
-## 11.1 Title blocks
+### 11.1 Title blocks
 
 Classes:
 
@@ -716,7 +716,7 @@ Rules:
 - Do not reintroduce layouts that force long source titles into one-character columns.
 - If a future design clamps titles again, it must preserve a reliable way to inspect the full title.
 
-## 11.2 Tag pills
+### 11.2 Tag pills
 
 Class: `.sp-tag-pill`
 
@@ -737,7 +737,7 @@ Rules:
 - Tags should remain visually lightweight.
 - Avoid using full-solid accent fills for idle tags.
 
-## 11.3 Badges
+### 11.3 Badges
 
 Class: `.badge`
 
@@ -751,7 +751,7 @@ Rules:
 - Keep badges compact and quiet.
 - Badges are metadata, not actions.
 
-## 11.4 Tag color editor
+### 11.4 Tag color editor
 
 Classes:
 
@@ -783,7 +783,7 @@ Rules:
 
 ## 12. Menus, Overlays, and Modals
 
-## 12.1 Source action menu
+### 12.1 Source action menu
 
 Classes:
 
@@ -809,7 +809,7 @@ Rules:
 - Small contextual menus should follow this glass popover pattern.
 - Do not create solid opaque dropdowns for content-panel context menus.
 
-## 12.2 Modal system
+### 12.2 Modal system
 
 Classes:
 
@@ -868,7 +868,7 @@ Command palette:
 - Commands should bridge to existing manager actions instead of duplicating business logic.
 - Batch commands must remain disabled until batch mode has selected sources.
 
-## 12.3 Option lists inside modals
+### 12.3 Option lists inside modals
 
 Classes:
 
@@ -889,7 +889,7 @@ Rules:
 
 ## 13. Temporary and Informational Surfaces
 
-## 13.1 View state banners
+### 13.1 View state banners
 
 Class: `.sp-view-banner`
 
@@ -909,7 +909,7 @@ Rules:
 - View-state banners are for temporary mode context only.
 - Do not use them for permanent settings.
 
-## 13.2 Toast
+### 13.2 Toast
 
 Class: `.sp-toast`
 
@@ -924,7 +924,7 @@ Rules:
 - Use toast for short confirmation only.
 - Do not use toast for workflows that require decision-making.
 
-## 13.3 Empty states
+### 13.3 Empty states
 
 Class: `.sp-empty-state`
 
@@ -940,7 +940,7 @@ Rules:
 - Empty states should be quiet and actionable.
 - Prefer one clear message over illustration-heavy placeholders.
 
-## 13.4 Drag interaction (physical reflow)
+### 13.4 Drag interaction (physical reflow)
 
 Classes: `.dragging` (state marker), `.sp-drag-folded`, `.sp-drag-unfolding`, `.sp-drop-shift`, `.sp-drag-ghost`, `.sp-drag-ghost-single`, `.sp-drag-ghost-stack`, `.sp-drag-ghost-layer`, `.sp-drag-ghost-badge`, `.drag-into`, `.drag-invalid`, `.sp-pseudo-hover` (post-drop), `.sp-drag-active` (during-drag + post-drop, on `#sources-list`), `.sp-drag-guide` (folder left-guide extension while a child is folded)
 
