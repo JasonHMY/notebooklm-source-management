@@ -676,21 +676,12 @@ Rules:
 
 ### 10.3 Drag and drop feedback
 
-Existing cues:
+Source and group rows participate in the physical-reflow drag system. Row-level summary:
 
-- Dragged item folds out of the list (height/opacity → 0) so the layout reads "the item has left its slot"; siblings at and after the pointer translate down to open a slot that follows the cursor
-- A custom source-row clone ghost (`.sp-drag-ghost`) follows the pointer; single drag uses one clone, multi drag stacks up to three clones with a count badge
-- Drop target group gets an accent-tinted header (`.drag-into`)
-- Invalid drop targets surface a red outline on the slot top item (or red group header). Because the dragged row itself is folded out (height/opacity 0), the warning lives on a sibling slot and is never obscured by the dragged item.
-- On successful drop, the landed row(s) fade in (opacity 0→1, direction-neutral) while sibling rows FLIP from their pre-drop position to the new layout (`.sp-drop-shift`), so the list settles in place without a directional fly-in. (The earlier `.sp-drop-flying` cursor→slot fly-in, `.sp-drop-landing` scaleY, and `.sp-drop-landed` accent flash were removed — see 13.4.)
-- On dragend cancel (esc / drop outside), the dragged row smoothly grows back from height 0 to natural over 200ms, paired with sibling translateY clearing — no instant snap.
-- Empty drop zones enlarge slightly and tint on valid target hover
+- The dragged row folds out of the list (`.sp-drag-folded`, height/opacity → 0) and the rows after the pointer open a slot that follows the cursor — the moving gap *is* the insertion indicator.
+- A row-clone ghost (`.sp-drag-ghost`) follows the pointer; the drop-target group shows an accent header (`.drag-into`); an invalid drop shows a red outline on the slot's top item or the group header, never on the folded row.
 
-Rules:
-
-- All drag affordances should use accent blue (valid) or danger red (invalid) and subtle scaling.
-- Do not introduce unrelated colors or large shake animations.
-- See 13.4 for the canonical physical-reflow timing, classes, and rules.
+**§13.4 is the single source of truth** for the full drag interaction — every class, ghost stacking, drop-landing motion, cancel/unfold timing, reduced-motion behavior, and the do-not-reintroduce rules. Keep drag details there, not duplicated here.
 
 ## 11. Titles, Tags, Badges, and Metadata
 
