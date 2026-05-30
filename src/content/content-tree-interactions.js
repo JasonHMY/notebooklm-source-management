@@ -2685,7 +2685,7 @@
                     }
                 }
                 if (typeof dragReflow.unfoldDraggedItems === 'function') {
-                    // animated:true → smooth 200ms grow-back. Pairs with clearReflow's
+                    // animated:true → smooth grow-back on --sp-motion-base (180ms). Pairs with clearReflow's
                     // sibling translateY transition so cancel (esc / drop outside) feels
                     // like the row "settles" back into the list instead of snapping.
                     dragReflow.unfoldDraggedItems({

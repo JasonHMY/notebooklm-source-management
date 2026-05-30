@@ -83,7 +83,7 @@
         }
 
         // animated=true smoothly unfolds the dragged item from height 0 back to its cached
-        // natural height (200ms cubic-bezier, paired with .sp-drag-unfolding CSS rule).
+        // natural height (var(--sp-motion-base) = 180ms, paired with .sp-drag-unfolding CSS rule).
         // Used by dragend / esc cancel so the dragged row doesn't "snap" back into the list.
         // animated=false (default) does an instant restore — used by drop where render()
         // already rebuilt the DOM so transition would be a no-op anyway.
