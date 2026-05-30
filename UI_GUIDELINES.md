@@ -464,7 +464,7 @@ Canonical style:
 Feedback:
 
 - Hover: brighter surface + stronger border
-- Active: `scale(0.95)`
+- Active: `scale(0.98)`
 - Hover feedback should not use decorative sweep or glare pseudo-elements; keep the state change to surface, border, and subtle scale.
 
 Use for:
@@ -488,8 +488,8 @@ Canonical style:
 - Radius: `8px`
 - No border
 - Default secondary text color
-- Hover: hover-surface background + `scale(1.08)`
-- Active: `scale(0.85)`
+- Hover: hover-surface background + `scale(1.06)`
+- Active: `scale(0.95)`
 
 Use for:
 
@@ -522,8 +522,8 @@ Shared traits:
 Feedback:
 
 - Hover: hover-surface background
-- Hover scale: `1.1`
-- Active scale: `0.85`
+- Hover scale: `1.06`
+- Active scale: `0.95`
 
 Special behavior:
 
@@ -682,7 +682,7 @@ Existing cues:
 - A custom source-row clone ghost (`.sp-drag-ghost`) follows the pointer; single drag uses one clone, multi drag stacks up to three clones with a count badge
 - Drop target group gets an accent-tinted header (`.drag-into`)
 - Invalid drop targets surface a red outline on the slot top item (or red group header). Because the dragged row itself is folded out (height/opacity 0), the warning lives on a sibling slot and is never obscured by the dragged item.
-- On successful drop, the landed row gets a 200ms in-place animation + 600ms accent outline flash so the user's eye catches the new location. Single-source uses FLIP fly-in (from cursor to slot); multi-source uses scaleY (per element).
+- On successful drop, the landed row(s) fade in (opacity 0→1, direction-neutral) while sibling rows FLIP from their pre-drop position to the new layout (`.sp-drop-shift`), so the list settles in place without a directional fly-in. (The earlier `.sp-drop-flying` cursor→slot fly-in, `.sp-drop-landing` scaleY, and `.sp-drop-landed` accent flash were removed — see 13.4.)
 - On dragend cancel (esc / drop outside), the dragged row smoothly grows back from height 0 to natural over 200ms, paired with sibling translateY clearing — no instant snap.
 - Empty drop zones enlarge slightly and tint on valid target hover
 
@@ -801,7 +801,7 @@ Canonical style:
 
 Feedback:
 
-- Hover: menu row tint + `translateX(2px)`
+- Hover: menu row tint + slight `scale(1.02)` lift (keyboard focus, not hover, shifts the row `translateX(2px)`)
 - Icons brighten with hover
 
 Rules:
@@ -881,7 +881,7 @@ Canonical style:
 - Radius `10px`
 - Dense rows
 - Clear icon/title separation
-- Hover scale slightly down to feel pressable, not floating
+- Hover scale slightly up (`scale(1.01`–`1.02)`) for a gentle lift
 
 Rules:
 
@@ -960,7 +960,7 @@ Canonical behavior:
 
 Motion:
 
-- **Fold is instant** (no transition on `.sp-drag-folded`): the dragged item leaves layout in one frame so its height collapse doesn't run in parallel with the sibling reflow translateY transition and produce jitter.
+- **Fold is animated**: `.sp-drag-folded` transitions height/opacity/padding/margin/border-width on the shared `var(--sp-motion-base) var(--sp-ease-emphasized)` beat, so the origin row collapses in sync with the sibling reflow. Safe because slot-based geometric drop detection no longer reads layout reflow, so fold-height and reflow-translateY animate in parallel without feedback jitter (see the comment above `.sp-drag-folded` in content-style-text.js).
 - **Unfold (`.sp-drag-unfolding` on cancel)** and **reflow shift (`.sp-drop-shift`)** both transition on `var(--sp-motion-base) var(--sp-ease-emphasized)` (the shared base-motion beat), so the dragged item's grow-back and the siblings' slide-back stay coordinated. The post-drop landed-row fade-in is opacity-only on the same base beat.
 - `transform` uses GPU compositing (`will-change: transform` on `.sp-drop-shift`).
 - `@media (prefers-reduced-motion: reduce)` disables drag transitions (`.sp-drop-shift`, `.sp-drag-unfolding`, `.group-container.drag-into > .group-header`).
@@ -979,7 +979,7 @@ Rules:
 - Do not introduce a new ghost variant for other drag flows without a clear UX reason; reuse `.sp-drag-ghost`.
 - Do not animate the ghost element itself (it lives ~200ms; transitions would conflict with the browser's drag-image capture).
 - Do not add interactive elements to the ghost (it is `pointer-events: none` and `aria-hidden`).
-- Keep unfold and reflow shift on the same `var(--sp-motion-base) var(--sp-ease-emphasized)` beat so the dragged item's grow-back and the siblings' slide-back stay coordinated. Fold stays instant on purpose — adding a transition there re-introduces dragged-item collapse + sibling reflow parallel-animation jitter.
+- Keep fold, unfold, and reflow shift on the same `var(--sp-motion-base) var(--sp-ease-emphasized)` beat so the origin row's collapse / grow-back and the siblings' slide stay coordinated. (Fold was historically instant to avoid jitter; slot-based geometric detection removed that constraint, so the animated fold is now safe.)
 - Keep the post-drop landing motion direction-neutral (opacity fade + sibling FLIP). Do not reintroduce a directional `.sp-drop-flying` cursor→slot fly-in, `.sp-drop-landing` scaleY-from-top, or `.sp-drop-landed` accent flash — they were removed because their built-in direction read as a confusing scatter.
 
 ## 14. Batch Mode
@@ -1198,14 +1198,15 @@ This section is not mandatory for feature work, but it is worth doing over time.
 1. Split content-panel tokens, components, overlays, and state styles into clearer sections or modules.
 2. Consolidate duplicate selectors in `src/content/content-style-text.js`.
 3. Introduce explicit token names for typography and spacing if the system grows.
-4. Consider replacing the inline folder emoji in group titles with a formal icon element for stricter consistency.
+4. ~~Consider replacing the inline folder emoji in group titles with a formal icon element for stricter consistency.~~ **Done** — group titles render a formal `sp-group-title-icon` (`google-symbols` "folder"), no emoji.
 5. Keep popup and content-panel motion tokens aligned if either surface changes.
 
 ## 23. Canonical File Map
 
-Use this map when updating UI.
+Use this map when updating UI. It lists UI / style / render / modal / toast modules only — pure state, persistence, message-routing, and logic modules live in `docs/PROJECT_DIRECTORY.md`.
 
-- `src/content/content-style-text.js`: content-panel tokens, components, motion, overlays
+- `src/content/content-style-text.js`: content-panel tokens, components, motion, overlays (Shadow-DOM `NSM_CONTENT_STYLE_TEXT` + global-overlay `NSM_GLOBAL_OVERLAY_STYLE_TEXT`)
+- `src/content/styles.css`: native NotebookLM DOM overrides — injected via manifest `content_scripts[0].css`, scoped under `.sources-plus-manager-active`, uses `!important` to hide native source-list containers and restyle native Material menus (the third CSS mechanism; lives in the page, not the Shadow DOM)
 - `src/content/content-template.js`: shell structure
 - `src/content/content-panel-dom.js`: source panel lookup, renderability, lifecycle scheduling helpers
 - `src/content/content-source-actions.js`: source action menu state, menu models, native menu bridge
@@ -1213,7 +1214,15 @@ Use this map when updating UI.
 - `src/content/content-tags.js`: tag normalization, serialization, CRUD helpers
 - `src/content/content-state-reconcile.js`: persisted source and tag reconciliation
 - `src/content/content-persistence.js`: state load/save, schema normalization, lifecycle persistence
-- `src/content/content-modals.js`: move-to-folder, tag management, command palette, settings, welcome, and import preview modals
+- `src/content/content-modals.js`: modal orchestration + shared modal helpers (prepareModalOpen / closeManagedModal, focus-trap glue, item stagger style, import-preview rendering, file/clipboard IO); delegates each modal's node-building to the `content-modal-*` sub-factories
+- `src/content/content-modal-move.js`: move-to-folder modal — flattened group-tree picker, executes move of current/batch sources
+- `src/content/content-modal-tag.js`: tag-management + batch-tag modals; reusable tag editor + tag color control (preset swatches + hex input)
+- `src/content/content-modal-tag-filter.js`: quick-view "filter by tag" modal (single-select tag chips)
+- `src/content/content-modal-command-palette.js`: command-palette modal (search, keyboard nav, in-place shortcut rebinding)
+- `src/content/content-modal-settings.js`: settings modal + quick-view visibility sub-modal + developer settings panel
+- `src/content/content-modal-welcome.js`: first-run welcome modal; exports the feature-row builder reused by What's New + Settings
+- `src/content/content-modal-whats-new.js`: post-upgrade What's New modal (reuses welcome feature rows, marks version seen)
+- `src/content/content-toast.js`: Shadow-DOM toast queue/renderer (showToast / showUndoableToast); distinct from `content-toast-status.js` below (text normalization only)
 - `src/content/content-modal-focus.js`: modal focus trap, Escape handling, and focus restoration helpers
 - `src/content/content-native-label-import-modal.js`: native label import preview modal node generation
 - `src/content/content-render.js`: fragment patching, icons, menu layer, main render path
