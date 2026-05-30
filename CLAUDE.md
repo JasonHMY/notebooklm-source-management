@@ -30,7 +30,7 @@ Read these BEFORE making any change. They override anything below.
 
 ### Three independent runtime surfaces
 
-- **Content script** (`src/content/index.js` + ~44 helper modules) — injected into `https://notebooklm.google.com/*`. Mounts a Shadow-DOM manager (`#sources-plus-root`) into NotebookLM's source panel. 90% of the code lives here.
+- **Content script** (`src/content/index.js` + ~45 helper modules) — injected into `https://notebooklm.google.com/*`. Mounts a Shadow-DOM manager (`#sources-plus-root`) into NotebookLM's source panel. 90% of the code lives here.
 - **Background service worker** (`src/background/index.js`) — owns `chrome.storage.local` writes via a queued + revision-guarded protocol; resolves tab focus/open requests from the popup.
 - **Toolbar popup** (`src/popup/index.js`) — launcher only. Enables/disables the manager and switches NotebookLM source view; the real UI lives in the content panel.
 
@@ -104,7 +104,7 @@ A 2-arg call silently coerces level/category to fallback strings and discards yo
 - **Source-list scroll container** is `#sources-list` (`overflow-y: auto` in content-style-text.js). Access via `shadowRoot.getElementById('sources-list')`.
 - **NotebookLM is a single-page app.** Switching notebooks does NOT trigger a full reload. The content script tears down and rebuilds in place; a full reload is only the last-resort fallback after repeated retries fail.
 - **Do not hardcode NotebookLM-generated CSS class names.** They are obfuscated and rotate. Use aria attributes, roles, `data-*`, text signals (`label_auto`, "Return to list view"), and relative structure.
-- **`getDropIntent` returns** `{ targetList, insertIndex, targetGroup }`. `targetList` is one of: `state.ungrouped` (string[]), some `group.children` (object[]), or `state.groups` (string[] of group IDs at root level). The entry shape differs — code that splices into `targetList` must handle both string and object entries, and must NOT splice source keys into `state.groups`.
+- **`computeDropIntent` returns** `{ targetList, insertIndex, targetGroup }`. `targetList` is one of: `state.ungrouped` (string[]), some `group.children` (object[]), or `state.groups` (string[] of group IDs at root level). The entry shape differs — code that splices into `targetList` must handle both string and object entries, and must NOT splice source keys into `state.groups`.
 - **`runtime.activeDragGhost`** is set on multi-source dragstart and torn down on dragend (RAF-deferred so the browser finishes capturing the drag image). Cleanup paths: `handleDragEnd` + `clearDragFeedback` as backstop.
 - **Manifest version, package.json version, README badge, release zip name, and CHANGELOG version section must all match** on release. AGENTS.md enumerates this gate.
 

@@ -21,7 +21,7 @@ Popup/content -> background
 └── CLEAR_DEVELOPER_LOGS
 ```
 
-Notebook-scoped storage messages require a sender tab whose URL starts with `https://notebooklm.google.com/notebook/`.
+Notebook-scoped storage messages require a sender tab whose URL starts with `https://notebooklm.google.com/notebook/`. Beyond the URL prefix, `SAVE_STATE` / `LOAD_STATE` / `APPEND_STATE_HISTORY` / `LOAD_STATE_HISTORY` also require the `projectId` embedded in `request.key` (the trailing `_<id>` segment) to match the sender tab's own `/notebook/<id>`; otherwise the worker returns `unauthorized_sender`. When no projectId can be derived from the sender URL (a bare `/notebook/`), no extra rejection is added.
 
 Global messages that are not notebook-state writes, such as extension enable/disable, preferences, tab focus/open, and web store feedback, are not tied to one notebook state key.
 

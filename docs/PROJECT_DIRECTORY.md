@@ -121,8 +121,10 @@ NotebookLM Source Management
 │   │   │   └── 来源视图切换目标归一、状态字段和 attempt 记录 helper
 │   │   ├── content-style-text.js
 │   │   │   └── manager 和 overlay 的 CSS 文本
-│   │   └── content-template.js
-│   │       └── manager shell 模板
+│   │   ├── content-template.js
+│   │   │   └── manager shell 模板
+│   │   └── styles.css
+│   │       └── 原生 NotebookLM DOM 覆写（manifest content_scripts[0].css 注入，scoped 在 .sources-plus-manager-active；三套 CSS 之一）
 │   ├── background/
 │   │   └── index.js
 │   │       └── service worker；storage 队列、revision guard、history、tab focus/open、偏好和日志消息
@@ -135,7 +137,7 @@ NotebookLM Source Management
 │   │   ├── index.js
 │   │   │   └── el/debounce/isDescendant/getMessage；`el()` 是 XSS 防护核心
 │   │   └── preference-normalizers.js
-│   │       └── 偏好归一化 (8 个 normalizeXxx)；content + background SW 共享，挂 `globalThis.NSM_PREFERENCE_NORMALIZERS`
+│   │       └── 偏好归一化 (10 个 normalizeXxx)；content + background SW 共享，挂 `globalThis.NSM_PREFERENCE_NORMALIZERS`
 │   └── assets/
 │       ├── icons/
 │       └── fonts/
@@ -737,6 +739,7 @@ CI: .github/workflows/ci.yml
 ├── checkout
 ├── setup Node 20
 ├── npm ci
+├── npm run lint
 ├── npx playwright install --with-deps chromium
 ├── npm run test:unit
 ├── npm run test:smoke

@@ -25,7 +25,7 @@ Every developer log entry must be structured JSON with these fields:
 - `timestamp`: ISO timestamp.
 - `level`: one of `debug`, `info`, `warn`, or `error`.
 - `category`: one of `settings`, `persistence`, `source_sync`, `source_action`, `native_action`, `import_export`, `view_switch`, `lifecycle`, `ui`, or `background`.
-- `event`: stable snake_case event name. Do not include dynamic data in the event name.
+- `event`: stable snake_case event name. Do not include dynamic data in the event name. (The logger enforces this — it strips disallowed chars to `[A-Za-z0-9_.:-]`, truncates to 120 chars, and falls back to `unknown_event` when empty — so dynamic content is silently rewritten rather than rejected.)
 - `notebookId`: current NotebookLM notebook id, or an empty string when unavailable.
 - `details`: small sanitized object with counts, ids, reasons, revisions, booleans, and result metadata.
 
@@ -41,7 +41,7 @@ Developer logs are sanitized by default. Do not intentionally log:
 - raw URLs or hrefs that may contain private query parameters
 - clipboard content
 
-When a log needs to refer to a source, use `sourceKey`, `stableTokenHash`, `fingerprintHash`, counts, or reason codes. Do not add title fallbacks for convenience.
+When a log needs to refer to a source, use `sourceKey`, counts, or reason codes — or pass the raw values under the keys `stableToken` / `fingerprint`, which the logger hashes and renames to the output fields `stableTokenHash` / `fingerprintHash` automatically. (Passing a key literally named `stableTokenHash` is NOT auto-hashed — use the unsuffixed key.) Do not add title fallbacks for convenience.
 
 Captured errors may include:
 

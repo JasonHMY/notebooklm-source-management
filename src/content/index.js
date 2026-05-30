@@ -136,7 +136,7 @@
     // INVARIANT: state.groups is string[] of root-level group IDs — NEVER group
     // objects. Resolve a group via groupsById.get(id). Splicing a source key
     // into state.groups corrupts the root tree. state.ungrouped is string[] of
-    // bare source keys at root level. See CLAUDE.md "State shape" + getDropIntent.
+    // bare source keys at root level. See CLAUDE.md "State shape" + computeDropIntent.
     let state = {
         groups: [], // Top-level group IDs (string[]), not group objects.
         ungrouped: [],

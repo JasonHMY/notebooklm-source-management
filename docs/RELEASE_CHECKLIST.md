@@ -1,11 +1,11 @@
 # Release Checklist
 
-Use this checklist before publishing a new Chrome Web Store build.
+Use this checklist before publishing a new Chrome Web Store build. (This is the executable checklist; AGENTS.md release rules and `docs/PROJECT_DIRECTORY.md` §6 "版本同步点" describe the same version-sync gate at a higher level — keep the three reconciled.)
 
 1. Update the version in `manifest.json` and `package.json`; if `package-lock.json` exists, keep its package version in sync.
 2. Update the README version badge to the same version.
 3. Move the relevant `CHANGELOG.md` `Unreleased` entries into `## [YYYY-MM-DD] [x.y.z]` using the actual local release date.
-4. Run `npm run test:unit`.
+4. Run `npm run lint` (baseline is 0 errors, 0 warnings — do not regress), then `npm run test:unit`. (Or `npm run verify:full` to chain lint → unit → smoke, matching the CI gate.)
 5. Run `npm run test:smoke` (headless by default; use `PLAYWRIGHT_HEADLESS=false npm run test:smoke` only for interactive debugging).
 6. Run `git diff --check`.
 7. Run `npm run package`.

@@ -23,11 +23,12 @@ Before starting work, read the relevant project instructions, repository guidanc
   - update `manifest.json`
   - update `tests/helpers/load-content-module.js`
   - update `tests/helpers/content-test-harness.js`
+  - update `docs/PROJECT_DIRECTORY.md` (sections 1 目录树, 2 Runtime 加载树, 3 功能域树 "先看" list)
   - keep the existing helper pattern: expose `globalThis.NSM_CREATE_*` for Chrome runtime loading and `module.exports` for Jest.
 - Use this minimum verification matrix:
   - docs-only changes: run `git diff --check` and verify new links or paths exist.
-  - content helper changes: run the relevant focused Jest test plus `npm run test:unit`.
-  - runtime, manifest, storage, message, or automation changes: run `npm run test:unit`, `npm run test:smoke`, `npm run package`, and `git diff --check`.
+  - content helper changes: run `npm run lint` plus the relevant focused Jest test and `npm run test:unit`.
+  - runtime, manifest, storage, message, or automation changes: run `npm run lint`, `npm run test:unit`, `npm run test:smoke`, `npm run package`, and `git diff --check` (or `npm run verify:full`, which chains lint → unit → smoke and matches CI).
   - release/version changes: verify `manifest.json`, `package.json`, `package-lock.json`, README version badge, release zip filename, and `CHANGELOG.md` all match.
 - Treat NotebookLM native DOM automation as high-risk:
   - before native delete or rename, re-resolve a fresh row and verify it still matches the intended source.
@@ -55,7 +56,6 @@ Before starting work, read the relevant project instructions, repository guidanc
 
 - Keep changes small and focused unless a larger change is clearly required.
 - Do not add dependencies, permissions, or manifest host surface unless explicitly needed.
-- Do not hardcode NotebookLM generated CSS classes; prefer aria, role, data attributes, stable text signals, and relative structure.
 - Do not use `innerHTML`, `eval`, or dynamic `Function` for user-controlled content.
 - Treat NotebookLM DOM, source titles, labels, icon URLs, imports, and extension storage contents as untrusted input.
 - Do not revert unrelated user changes in the working tree.

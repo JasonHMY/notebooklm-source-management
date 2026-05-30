@@ -22,6 +22,10 @@ chrome.storage.local
 
 `<projectId>` is derived from the NotebookLM notebook URL. Notebook-scoped writes normally go through the background service worker, which validates the sender and key prefix before touching storage.
 
+### Recovery snapshot (sessionStorage)
+
+Separately from `chrome.storage.local`, page-lifecycle recovery writes a per-tab fallback snapshot to `sessionStorage` under `sourcesPlusRecovery_<projectId>`, holding `{ snapshot, baseRevision, createdAt, reason, clientSaveId, failed }`. It is a last-resort fallback (e.g. a critical save under quota pressure) so a tab can recover unsaved organization after a lifecycle interruption — normal primary writes still go through background `SAVE_STATE`.
+
 ## Global preferences schema
 
 `sourcesPlusPreferences` is not included in notebook import/export JSON.
@@ -30,7 +34,7 @@ chrome.storage.local
 {
   "developerModeEnabled": false,
   "welcomeOnboardingSeenVersion": 1,
-  "whatsNewSeenVersion": "2.7.4",
+  "whatsNewSeenVersion": "26.5.29",
   "historyRetentionLimit": 20,
   "languageOverride": "auto",
   "commandShortcuts": {
@@ -110,6 +114,7 @@ Field notes:
 - `nativeLabelTitle` marks sources or groups that came from NotebookLM native label import. Ordinary user folders with the same visible name must not be treated as native labels unless this field is present.
 - `sourceViewDisplayKind` stores the last list/label view used in this notebook. Missing or invalid values are ignored so legacy state does not force a view switch.
 - `tagsById`, `tagOrder`, and `sourceTagsById` are optional in legacy data and must be normalized on load.
+- `_saveRevision` (number) and `_savedAt` (ISO string) are internal metadata injected into every persisted snapshot on save (omitted from the example above). They drive the background revision guard, the primary/backup preference choice, and the history dedup signature.
 
 ## Migrations
 
