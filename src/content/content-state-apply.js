@@ -100,32 +100,46 @@
                 source.addedAt = sourceState.addedAt || source.addedAt || '';
             });
 
-            const knownSourceKeys = new Set(state.ungrouped);
+            // Defense-in-depth: enforce the v5 invariant that each source key lives in
+            // exactly one of group.children / state.root / state.ungrouped, even if the
+            // snapshot is malformed (e.g. a key duplicated across root and the bin). Folder
+            // membership wins, then positioned root sources, then the bin; orphans sweep in.
+            const seenSourceRefs = new Set();
             const visitGroupSources = (groupId) => {
                 const group = groupsById?.get?.(groupId);
                 if (!group || !Array.isArray(group.children)) return;
                 group.children.forEach((child) => {
                     if (child?.type === 'source' && child.key) {
-                        knownSourceKeys.add(child.key);
+                        seenSourceRefs.add(child.key);
                     } else if (child?.type === 'group' && child.id) {
                         visitGroupSources(child.id);
                     }
                 });
             };
-            // v5: walk the heterogeneous root — recurse into root groups and treat
-            // positioned root sources as known so the orphan sweep below leaves them put.
-            state.root.forEach((entry) => {
-                if (!entry) return;
-                if (entry.type === 'group' && entry.id) {
-                    visitGroupSources(entry.id);
-                } else if (entry.type === 'source' && entry.key) {
-                    knownSourceKeys.add(entry.key);
-                }
+            // Pass 1: collect every grouped source key reachable from the root folders.
+            (Array.isArray(state.root) ? state.root : []).forEach((entry) => {
+                if (entry?.type === 'group' && entry.id) visitGroupSources(entry.id);
             });
+            // Pass 2: keep root folder entries + first-seen positioned root sources only.
+            state.root = (Array.isArray(state.root) ? state.root : []).filter((entry) => {
+                if (entry?.type === 'group' && entry.id) return true;
+                if (entry?.type === 'source' && entry.key && !seenSourceRefs.has(entry.key)) {
+                    seenSourceRefs.add(entry.key);
+                    return true;
+                }
+                return false;
+            });
+            // De-dup the bin against anything already placed in a folder or at root.
+            state.ungrouped = (Array.isArray(state.ungrouped) ? state.ungrouped : []).filter((sourceKey) => {
+                if (!sourceKey || seenSourceRefs.has(sourceKey)) return false;
+                seenSourceRefs.add(sourceKey);
+                return true;
+            });
+            // Orphan sweep: any live source not placed anywhere lands in the bin.
             sourcesByKey?.forEach?.((source, sourceKey) => {
-                if (!knownSourceKeys.has(sourceKey)) {
+                if (!seenSourceRefs.has(sourceKey)) {
                     state.ungrouped.push(sourceKey);
-                    knownSourceKeys.add(sourceKey);
+                    seenSourceRefs.add(sourceKey);
                 }
             });
 

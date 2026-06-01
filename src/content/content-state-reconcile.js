@@ -400,6 +400,18 @@
                 group.children = nextChildren;
             });
 
+            // v5: rewrite positioned root sources (state.root {type:'source'} entries) too,
+            // sharing seenTreeSourceRefs so a remapped key is de-duped against group children
+            // and (below) the bin. Group entries pass through untouched; order is preserved.
+            clonedSnapshot.root = (Array.isArray(clonedSnapshot.root) ? clonedSnapshot.root : [])
+                .map((entry) => (entry?.type === 'source' ? { ...entry, key: mapSourceKey(entry.key) } : entry))
+                .filter((entry) => {
+                    if (entry?.type !== 'source') return Boolean(entry);
+                    if (!entry.key || seenTreeSourceRefs.has(entry.key)) return false;
+                    seenTreeSourceRefs.add(entry.key);
+                    return true;
+                });
+
             clonedSnapshot.ungrouped = (Array.isArray(clonedSnapshot.ungrouped) ? clonedSnapshot.ungrouped : [])
                 .map(mapSourceKey)
                 .filter((sourceKey) => {

@@ -2,7 +2,7 @@ const createContentStateApply = require('../../src/content/content-state-apply.j
 
 function createRuntime(overrides = {}) {
     return {
-        state: { groups: [], ungrouped: [], tagOrder: [], activeTagId: null, isBatchMode: true },
+        state: { root: [], ungrouped: [], tagOrder: [], activeTagId: null, isBatchMode: true },
         pendingBatchKeys: new Set(['stale']),
         groupsById: new Map(),
         tagsById: new Map(),
@@ -44,7 +44,39 @@ describe('content state apply helper', () => {
         expect(result).toBe(false);
         expect(deps.buildParentMap).not.toHaveBeenCalled();
         expect(deps.syncSourceToPage).not.toHaveBeenCalled();
-        expect(runtime.state.groups).toEqual([]);
+        expect(runtime.state.root).toEqual([]);
+    });
+
+    it('keeps a positioned root source out of the bin (orphan sweep leaves it put) and de-dups a key present in both root and ungrouped', () => {
+        const runtime = createRuntime({
+            sourcesByKey: new Map([
+                ['positioned', { key: 'positioned' }],
+                ['dup', { key: 'dup' }],
+                ['orphan', { key: 'orphan' }]
+            ])
+        });
+        const deps = createDeps();
+        const { applyPersistableSnapshotToRuntime } = createContentStateApply({ runtime, ...deps });
+
+        // 'dup' appears in BOTH state.root (positioned) and the bin — a malformed snapshot.
+        const result = applyPersistableSnapshotToRuntime({
+            root: [
+                { type: 'source', key: 'positioned' },
+                { type: 'source', key: 'dup' }
+            ],
+            ungrouped: ['dup'],
+            groupsById: {},
+            sourceStateById: {}
+        });
+
+        expect(result).toBe(true);
+        // Positioned sources stay in state.root, order preserved.
+        expect(runtime.state.root).toEqual([
+            { type: 'source', key: 'positioned' },
+            { type: 'source', key: 'dup' }
+        ]);
+        // 'dup' is removed from the bin (root placement wins); only the genuine orphan is swept in.
+        expect(runtime.state.ungrouped).toEqual(['orphan']);
     });
 
     it('clears prior collections and writes snapshot groups, ungrouped and tag order', () => {

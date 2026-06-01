@@ -1637,6 +1637,58 @@ describe('drop routes multi vs single source', () => {
         expect(developerLog).not.toHaveBeenCalled();
     });
 
+    it('does not show the "Moved to Ungrouped" hint when a source lands in an EMPTY root corridor (positioned, not binned)', () => {
+        // Empty root + a binned source: dropping it into the empty root corridor yields the
+        // empty-root intent (isRootList, slotKey null). It becomes a POSITIONED root source,
+        // so the discoverability hint about the ungrouped bin must NOT fire.
+        const state = { isBatchMode: false, ungrouped: ['A'], root: [] };
+        const groupsById = new Map();
+        const sourcesByKey = new Map([['A', { key: 'A' }]]);
+        const saveState = jest.fn();
+        const render = jest.fn();
+        const showToast = jest.fn();
+        const buildParentMap = jest.fn();
+        const developerLog = jest.fn();
+        const runtime = {
+            dragReflowSession: {
+                draggedKeys: new Set(['A']),
+                currentIntent: {
+                    kind: 'after-source',
+                    targetGroup: null,
+                    targetList: state.root,
+                    isRootList: true,
+                    insertIndex: 0,
+                    slotKey: null
+                },
+                shiftedItems: new Map()
+            }
+        };
+        const interactions = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getSourcesByKey: () => sourcesByKey,
+            getParentMap: () => new Map(),
+            getPendingBatchKeys: () => new Set(),
+            getShadowRoot: makeShadowRootWithList,
+            saveState,
+            render,
+            showToast,
+            buildParentMap,
+            developerLog,
+            dragMulti: createContentDragMulti({}),
+            getMessage: (key, args = []) => `${key}:${args.join(',')}`
+        });
+
+        interactions.handleDrop(createDropEvent({ dropTarget: null, sourceKey: 'A' }));
+
+        // Landed as a positioned root source; bin emptied.
+        expect(state.root).toEqual([{ type: 'source', key: 'A' }]);
+        expect(state.ungrouped).toEqual([]);
+        // The "Moved to Ungrouped" discoverability hint must NOT fire for a positioned drop.
+        expect(showToast).not.toHaveBeenCalledWith(expect.stringContaining('ui_keyboard_moved_ungrouped_toast'));
+    });
+
     it('logs batch_drag_move with count and intent.kind on successful multi-drop', () => {
         const group = { id: 'g1', children: [] };
         const state = { isBatchMode: true, ungrouped: ['A', 'B', 'C', 'D'], groups: ['g1'] };
@@ -2735,6 +2787,37 @@ describe('handleDragOver invalid-drop feedback', () => {
         const g2El = ctx.elementMap.get('group:g2');
         expect(g2El.classList.has('drag-invalid')).toBe(true);
         expect(dataTransfer.dropEffect).toBe('none');
+    });
+
+    it('does NOT mark a positioned root source slot invalid when dragging a group over it (valid state.root insert)', () => {
+        const ctx = setupCtx({
+            state: { isBatchMode: false, ungrouped: [], root: [{ type: 'group', id: 'g1' }, { type: 'source', key: 'A' }, { type: 'group', id: 'g2' }] },
+            pendingBatchKeys: new Set(),
+            groups: {
+                g1: { id: 'g1', children: [] },
+                g2: { id: 'g2', children: [] }
+            },
+            items: [
+                { kind: 'group', id: 'g1', top: 100, headerHeight: 30, childrenStart: 130, childrenEnd: 130 },
+                { kind: 'source', key: 'A', top: 140, height: 40 },
+                { kind: 'group', id: 'g2', top: 200, headerHeight: 30, childrenStart: 230, childrenEnd: 230 }
+            ]
+        });
+        // Drag the root folder g2 over the positioned root source A's row.
+        ctx.runtime.activeDragContext = { kind: 'group', draggedGroupId: 'g2' };
+        const dataTransfer = { dropEffect: 'move' };
+        ctx.tree.handleDragOver({
+            target: { closest: () => null },
+            // upper half of A (140..180, mid 160) → before-source A against state.root (isRootList).
+            clientY: 145,
+            preventDefault: jest.fn(),
+            dataTransfer
+        });
+        const slotEl = ctx.elementMap.get('source:A');
+        // v5: a folder positioned adjacent to a root source is a valid {type:'group'} insert
+        // into state.root — no red outline, drop allowed.
+        expect(slotEl.classList.has('drag-invalid')).toBe(false);
+        expect(dataTransfer.dropEffect).toBe('move');
     });
 
     it('marks slot invalid when multi-source drag hovers a slot anchored to a member of the dragged set', () => {

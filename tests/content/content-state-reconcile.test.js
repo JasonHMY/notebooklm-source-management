@@ -61,4 +61,68 @@ describe('content state reconciliation guards', () => {
         ]);
         expect(remapped.sourceTagsById.get('new-source')).toEqual(['tag-1']);
     });
+
+    it('remaps a POSITIONED root source across a re-scan, preserving interleaved root order', () => {
+        const runtime = {
+            groupsById: new Map([
+                ['g1', { id: 'g1', title: 'Folder', children: [] }]
+            ]),
+            state: { root: [{ type: 'group', id: 'g1' }, { type: 'source', key: 'old-pos' }], ungrouped: [] }
+        };
+        const reconcile = createReconcileModule(runtime);
+        const sourceLookup = reconcile.buildSourceLookup([
+            { key: 'new-pos', title: 'Positioned Paper', normalizedTitle: 'positioned paper', stableToken: '', fingerprint: '' }
+        ]);
+        const previousState = {
+            sourceRecordsByKey: new Map([
+                ['old-pos', {
+                    title: 'Positioned Paper',
+                    normalizedTitle: 'positioned paper',
+                    enabled: true,
+                    stableToken: '',
+                    fingerprint: ''
+                }]
+            ]),
+            sourceTagsById: new Map()
+        };
+
+        const remapped = reconcile.remapExistingStateToCurrentSources(sourceLookup, previousState);
+
+        // The positioned root source survives the re-scan with its key re-resolved, and the
+        // folder/source interleave order in state.root is preserved.
+        expect(remapped.root).toEqual([
+            { type: 'group', id: 'g1' },
+            { type: 'source', key: 'new-pos' }
+        ]);
+        expect(remapped.ungrouped).toEqual([]);
+    });
+
+    it('reconcilePersistedTree preserves a positioned root source from loadedState.root', () => {
+        const reconcile = createReconcileModule({ groupsById: new Map(), state: {} });
+        const sourceLookup = reconcile.buildSourceLookup([
+            { key: 'cur-pos', title: 'Positioned Paper', normalizedTitle: 'positioned paper', stableToken: '', fingerprint: '' }
+        ]);
+        const loadedState = {
+            schemaVersion: 5,
+            root: [
+                { type: 'group', id: 'g1' },
+                { type: 'source', key: 'stored-pos' }
+            ],
+            groupsById: { g1: { id: 'g1', title: 'Folder', children: [] } },
+            ungrouped: [],
+            sourceStateById: {
+                'stored-pos': { title: 'Positioned Paper', normalizedTitle: 'positioned paper', enabled: true }
+            }
+        };
+
+        const reconciled = reconcile.reconcilePersistedTree(loadedState, sourceLookup);
+
+        // On first load (reload), the positioned root source is re-resolved to the current
+        // row key and kept in root order — it does NOT fall into the ungrouped bin.
+        expect(reconciled.root).toEqual([
+            { type: 'group', id: 'g1' },
+            { type: 'source', key: 'cur-pos' }
+        ]);
+        expect(reconciled.ungrouped).toEqual([]);
+    });
 });

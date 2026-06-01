@@ -1966,9 +1966,11 @@
                 if (!draggedGroupId) return false;
                 const targetGroup = intent.targetGroup;
                 if (!targetGroup) {
-                    // Root host. Source-typed slots would splice the group id into
-                    // state.ungrouped (string[]) using an index computed against ungrouped —
-                    // schema mismatch. Reject so the user sees the invalid outline.
+                    // v5: a root-host before/after-source slot targets state.root (isRootList) —
+                    // a folder dropped adjacent to a positioned root source is a valid
+                    // { type:'group' } insert into state.root (handleDrop supports it), so allow it.
+                    // Only the bottom ungrouped bin rejects a group (folders never enter the bin).
+                    if (intent.isRootList) return false;
                     if (intent.kind === 'before-source' || intent.kind === 'after-source') return true;
                     return false;
                 }
@@ -2966,15 +2968,14 @@
                     e.clientX, e.clientY,
                     _preDropRects
                 );
-                // Discoverability hint: when a source drop falls back to the ungrouped
-                // section via the root-corridor route (intent.slotKey === null is the
-                // routeToNearestNeighborKind fallback marker), the source lands in the
-                // ungrouped region — which render() places at the BOTTOM of the list,
-                // below all groups. User just dropped between two groups in the root
-                // corridor and now the source visually appears far below where their
-                // cursor was — confusing without a hint. Surface a toast + scroll the
-                // ungrouped header into view so user can find their source.
-                if (sourceKey && intent && intent.targetGroup == null && intent.slotKey == null) {
+                // Discoverability hint: when a source drop lands in the bottom ungrouped
+                // bin via the trailing drop zone (targetGroup null, slotKey null, and NOT a
+                // positioned root drop), render() places it at the BOTTOM of the list, below
+                // all root content — far from the cursor. Surface a toast + scroll the
+                // ungrouped header into view so the user can find their source. An empty-root
+                // positioned drop also has slotKey null but carries isRootList, so it is
+                // excluded here (the source stays at root, not the bin).
+                if (sourceKey && intent && !intent.isRootList && intent.targetGroup == null && intent.slotKey == null) {
                     try { showToast(getMessage('ui_keyboard_moved_ungrouped_toast')); } catch (_) {}
                     const _listAfter = getSourceListContainer();
                     if (_listAfter && typeof _listAfter.querySelector === 'function') {

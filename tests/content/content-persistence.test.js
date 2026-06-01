@@ -1612,6 +1612,33 @@ describe('settings import/export configuration', () => {
         });
     });
 
+    it('remaps positioned root sources in snapshot.root and de-dups them out of the bin', () => {
+        const remapped = mod.applySourceRemapsToSnapshot({
+            schemaVersion: 5,
+            root: [
+                { type: 'group', id: 'g1' },
+                { type: 'source', key: 'old-root-source' }
+            ],
+            groupsById: { g1: { id: 'g1', title: 'G1', children: [] } },
+            ungrouped: ['old-root-source'],
+            sourceStateById: {
+                'old-root-source': { enabled: true, title: 'Root Source' }
+            }
+        }, { 'old-root-source': 'new-root-source' });
+
+        // The positioned root entry is remapped to the new key, order preserved.
+        expect(remapped.root).toEqual([
+            { type: 'group', id: 'g1' },
+            { type: 'source', key: 'new-root-source' }
+        ]);
+        // The same (remapped) key in the bin is de-duped away — root placement wins.
+        expect(remapped.ungrouped).toEqual([]);
+        expect(remapped.sourceStateById).toMatchObject({
+            'new-root-source': { enabled: true, title: 'Root Source' }
+        });
+        expect(remapped.sourceStateById['old-root-source']).toBeUndefined();
+    });
+
     it('rejects empty or invalid import text', () => {
         expect(mod.previewImportConfig('')).toMatchObject({ ok: false, reason: 'empty' });
         expect(mod.previewImportConfig('{bad json')).toMatchObject({ ok: false, reason: 'invalid' });
