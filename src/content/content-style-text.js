@@ -2597,6 +2597,11 @@
                 transform: scale(0.98);
             }
 
+            .ungrouped-section {
+                display: flex;
+                flex-direction: column;
+            }
+
             .ungrouped-header {
                 margin: 16px 0 6px 8px;
                 color: var(--sp-text-secondary);

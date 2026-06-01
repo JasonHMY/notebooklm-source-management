@@ -430,6 +430,15 @@ describe('manager shell structure', () => {
         expect(global.NSM_CONTENT_STYLE_TEXT).toContain('flex-wrap: nowrap;');
     });
 
+    it('declares an .ungrouped-section base block in the shadow DOM style', () => {
+        require('../../src/content/content-style-text.js');
+        const css = global.NSM_CONTENT_STYLE_TEXT;
+        expect(css).toContain('.ungrouped-section {');
+        const block = extractCssBlock(css, '.ungrouped-section {');
+        expect(block).toContain('display: flex');
+        expect(block).toContain('flex-direction: column');
+    });
+
     it('collapses the leading toolbar buttons when the search rail expands', () => {
         jest.resetModules();
         require('../../src/content/content-style-text.js');
