@@ -1207,7 +1207,7 @@
                 ctx.pendingStorageUpgrade = Boolean(ctx.pendingStructuralStateRepair);
                 const normalizedState = {
                     schemaVersion: storageSchemaVersion,
-                    groups: Array.isArray(stateData.groups) ? stateData.groups : [],
+                    root: Array.isArray(stateData.root) ? stateData.root : [],
                     groupsById: stateData.groupsById || {},
                     ungrouped: Array.isArray(stateData.ungrouped) ? stateData.ungrouped : [],
                     sourceStateById: stateData.sourceStateById || {},
@@ -1223,6 +1223,25 @@
             }
 
             ctx.pendingStorageUpgrade = true;
+            if (stateData.schemaVersion === 4) {
+                const normalizedState = {
+                    schemaVersion: storageSchemaVersion,
+                    root: (Array.isArray(stateData.groups) ? stateData.groups : [])
+                        .map((id) => ({ type: 'group', id })),
+                    groupsById: stateData.groupsById || {},
+                    ungrouped: Array.isArray(stateData.ungrouped) ? stateData.ungrouped : [],
+                    sourceStateById: stateData.sourceStateById || {},
+                    customHeight: normalizeCustomHeight(stateData.customHeight),
+                    tagsById: stateData.tagsById || {},
+                    tagOrder: Array.isArray(stateData.tagOrder) ? stateData.tagOrder : [],
+                    sourceTagsById: stateData.sourceTagsById || {}
+                };
+                if (sourceViewDisplayKind) {
+                    normalizedState.sourceViewDisplayKind = sourceViewDisplayKind;
+                }
+                return normalizedState;
+            }
+
             if (stateData.schemaVersion === 3) {
                 const normalizedState = {
                     schemaVersion: 3,

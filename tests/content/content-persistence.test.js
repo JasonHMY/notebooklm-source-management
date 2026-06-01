@@ -163,6 +163,61 @@ describe('saveState', () => {
         expect(snapshot.ungrouped).toEqual(['source4']);
     });
 
+    it('migrates a v4 snapshot (groups+ungrouped) to v5 (root+ungrouped) preserving order', () => {
+        const normalized = mod.normalizeLoadedState({
+            schemaVersion: 4,
+            groups: ['g1', 'g2'],
+            groupsById: { g1: { id: 'g1', children: [] }, g2: { id: 'g2', children: [] } },
+            ungrouped: ['srcA'],
+            sourceStateById: {},
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {}
+        });
+        expect(normalized.schemaVersion).toBe(5);
+        expect(normalized.root).toEqual([
+            { type: 'group', id: 'g1' },
+            { type: 'group', id: 'g2' }
+        ]);
+        expect(normalized.ungrouped).toEqual(['srcA']);
+        expect(Object.prototype.hasOwnProperty.call(normalized, 'groups')).toBe(false);
+        expect(mod._getPendingStorageUpgrade()).toBe(true);
+    });
+
+    it('migrates a v4 snapshot with no groups to an empty root array', () => {
+        const normalized = mod.normalizeLoadedState({
+            schemaVersion: 4,
+            groups: [],
+            groupsById: {},
+            ungrouped: ['only'],
+            sourceStateById: {},
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {}
+        });
+        expect(normalized.schemaVersion).toBe(5);
+        expect(normalized.root).toEqual([]);
+        expect(normalized.ungrouped).toEqual(['only']);
+    });
+
+    it('reads a v5 snapshot through unchanged (idempotent) and never re-wraps root', () => {
+        const v5 = {
+            schemaVersion: 5,
+            root: [{ type: 'group', id: 'g1' }, { type: 'source', key: 'sX' }],
+            groupsById: { g1: { id: 'g1', children: [] } },
+            ungrouped: ['sBin'],
+            sourceStateById: {},
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {}
+        };
+        const normalized = mod.normalizeLoadedState(v5);
+        expect(normalized.schemaVersion).toBe(5);
+        expect(normalized.root).toEqual([{ type: 'group', id: 'g1' }, { type: 'source', key: 'sX' }]);
+        expect(normalized.ungrouped).toEqual(['sBin']);
+        expect(Object.prototype.hasOwnProperty.call(normalized, 'groups')).toBe(false);
+    });
+
     it('debounces saves by default and persists the expected state', () => {
         const projectId = seedPersistedState();
         mod.saveState();
