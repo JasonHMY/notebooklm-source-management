@@ -93,3 +93,62 @@ describe('content quick view filters', () => {
         expect(module.sourceMatchesCurrentFilters(sourcesByKey.get('recent-source'))).toBe(false);
     });
 });
+
+describe('content effective-enabled with state.root', () => {
+    const make = ({ state, sourcesByKey, groupsById = new Map() }) => createContentViewState({
+        getState: () => state,
+        getSourcesByKey: () => sourcesByKey,
+        getGroupsById: () => groupsById,
+        getParentMap: () => new Map(),
+        getTagsById: () => new Map(),
+        getSourceTagIds: () => []
+    });
+
+    it('enables root groups and positioned root sources from state.root, plus the bin', () => {
+        const state = {
+            root: [
+                { type: 'group', id: 'g1' },
+                { type: 'source', key: 'positioned' }
+            ],
+            ungrouped: ['bin']
+        };
+        const groupsById = new Map([
+            ['g1', { id: 'g1', enabled: true, children: [{ type: 'source', key: 'inGroup' }] }]
+        ]);
+        const sourcesByKey = new Map([
+            ['inGroup', { key: 'inGroup', enabled: true }],
+            ['positioned', { key: 'positioned', enabled: true }],
+            ['bin', { key: 'bin', enabled: true }]
+        ]);
+        const mod = make({ state, sourcesByKey, groupsById });
+        const result = mod.getEffectivelyEnabledSources();
+        expect(result.get('inGroup')).toBe(true);
+        expect(result.get('positioned')).toBe(true);
+        expect(result.get('bin')).toBe(true);
+    });
+
+    it('does not enable a positioned root source whose record is disabled', () => {
+        const state = { root: [{ type: 'source', key: 'off' }], ungrouped: [] };
+        const sourcesByKey = new Map([['off', { key: 'off', enabled: false }]]);
+        const mod = make({ state, sourcesByKey });
+        expect(mod.getEffectivelyEnabledSources().has('off')).toBe(false);
+    });
+
+    it('keeps the ungrouped quick-view filter scoped to the bin (not state.root)', () => {
+        const state = {
+            filterQuery: '',
+            root: [{ type: 'source', key: 'positioned' }],
+            ungrouped: ['bin'],
+            activeQuickViewKind: 'ungrouped',
+            activeTagId: null
+        };
+        const sourcesByKey = new Map([
+            ['positioned', { key: 'positioned', title: 'Pos', enabled: true }],
+            ['bin', { key: 'bin', title: 'Bin', enabled: true }]
+        ]);
+        const mod = make({ state, sourcesByKey });
+        // 'ungrouped' filter = bin membership ONLY; positioned root source must NOT match.
+        expect(mod.sourceMatchesCurrentFilters(sourcesByKey.get('bin'))).toBe(true);
+        expect(mod.sourceMatchesCurrentFilters(sourcesByKey.get('positioned'))).toBe(false);
+    });
+});

@@ -151,9 +151,19 @@
                 }
             };
 
-            for (const groupId of state.groups || []) {
-                const group = groupsById.get(groupId);
-                if (group) visit(group, true);
+            const rootEntries = Array.isArray(state.root)
+                ? state.root
+                : (Array.isArray(state.groups) ? state.groups.map((id) => ({ type: 'group', id })) : []);
+            for (const entry of rootEntries) {
+                if (entry && entry.type === 'group') {
+                    const group = groupsById.get(entry.id);
+                    if (group) visit(group, true);
+                } else if (entry && entry.type === 'source') {
+                    const source = sourcesByKey.get(entry.key);
+                    if (source && source.enabled) {
+                        effectivelyEnabled.set(entry.key, true);
+                    }
+                }
             }
 
             for (const sourceKey of state.ungrouped || []) {
