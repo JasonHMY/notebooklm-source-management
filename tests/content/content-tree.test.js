@@ -691,6 +691,99 @@ describe('drag and drop ordering guards', () => {
         expect(saveState).toHaveBeenCalledWith({ immediate: true, critical: true });
     });
 
+    it('does not save or render when a positioned root source is dropped back into its own slot', () => {
+        const state = {
+            root: [
+                { type: 'source', key: 'src-1' },
+                { type: 'group', id: 'g1' },
+                { type: 'source', key: 'src-2' }
+            ],
+            ungrouped: []
+        };
+        const saveState = jest.fn();
+        const render = jest.fn();
+        const dropTarget = { dataset: { sourceKey: 'src-1' }, classList: createClassList(['source-item']) };
+        const runtime = {
+            dragReflowSession: {
+                draggedKeys: new Set(['src-1']),
+                currentIntent: {
+                    kind: 'before-source',
+                    targetGroup: null,
+                    targetList: state.root,
+                    insertIndex: 0, // src-1 is already at root index 0
+                    targetGroupId: null,
+                    slotKey: 'src-1'
+                },
+                shiftedItems: new Map()
+            }
+        };
+        const interactions = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => new Map([['g1', { id: 'g1', children: [] }]]),
+            getParentMap: () => new Map(),
+            getShadowRoot: () => ({ querySelectorAll: jest.fn(() => []) }),
+            saveState,
+            render
+        });
+
+        interactions.handleDrop(createDropEvent({ dropTarget, sourceKey: 'src-1' }));
+
+        expect(state.root).toEqual([
+            { type: 'source', key: 'src-1' },
+            { type: 'group', id: 'g1' },
+            { type: 'source', key: 'src-2' }
+        ]);
+        expect(render).not.toHaveBeenCalled();
+        expect(saveState).not.toHaveBeenCalled();
+    });
+
+    it('does not save or render when a positioned root GROUP is dropped back into its own slot', () => {
+        const state = {
+            root: [
+                { type: 'group', id: 'g1' },
+                { type: 'group', id: 'g2' }
+            ],
+            ungrouped: []
+        };
+        const saveState = jest.fn();
+        const render = jest.fn();
+        const dropTarget = { dataset: { groupId: 'g2' }, classList: createClassList(['group-container']) };
+        const runtime = {
+            dragReflowSession: {
+                draggedKeys: new Set(['g2']),
+                currentIntent: {
+                    kind: 'after-group',
+                    targetGroup: null,
+                    targetList: state.root,
+                    insertIndex: 2, // g2 already last; normalized back to its own index
+                    targetGroupId: null,
+                    slotKey: 'g2'
+                },
+                shiftedItems: new Map()
+            }
+        };
+        const interactions = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => new Map([['g1', { id: 'g1', children: [] }], ['g2', { id: 'g2', children: [] }]]),
+            getParentMap: () => new Map(),
+            getShadowRoot: () => ({ querySelectorAll: jest.fn(() => []) }),
+            isDescendant: global.isDescendant,
+            saveState,
+            render
+        });
+
+        interactions.handleDrop(createDropEvent({ dropTarget, groupId: 'g2' }));
+
+        expect(state.root).toEqual([
+            { type: 'group', id: 'g1' },
+            { type: 'group', id: 'g2' }
+        ]);
+        expect(render).not.toHaveBeenCalled();
+        expect(saveState).not.toHaveBeenCalled();
+    });
+
     it('prevents moving a group into itself or its own subtree', () => {
         const state = { root: [{ type: 'group', id: 'root' }], ungrouped: [] };
         const groupsById = new Map([

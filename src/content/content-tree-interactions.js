@@ -2497,6 +2497,16 @@
                 };
             }
 
+            // Root-level source: positioned in state.root (object entry) wins over the
+            // ungrouped bin (bare key) — they are mutually exclusive, but check root first
+            // so a positioned source reports the state.root array as its home (required for
+            // isNoopTreeMove to detect a drop back into the same root slot).
+            state.root = Array.isArray(state.root) ? state.root : [];
+            const rootIndex = state.root.findIndex((entry) => entry && entry.type === 'source' && entry.key === sourceKey);
+            if (rootIndex >= 0) {
+                return { list: state.root, index: rootIndex, parentGroup: null };
+            }
+
             state.ungrouped = Array.isArray(state.ungrouped) ? state.ungrouped : [];
             return {
                 list: state.ungrouped,
@@ -2518,10 +2528,10 @@
                 };
             }
 
-            state.groups = Array.isArray(state.groups) ? state.groups : [];
+            state.root = Array.isArray(state.root) ? state.root : [];
             return {
-                list: state.groups,
-                index: state.groups.indexOf(groupId),
+                list: state.root,
+                index: state.root.findIndex((entry) => entry && entry.type === 'group' && entry.id === groupId),
                 parentGroup: null
             };
         }
