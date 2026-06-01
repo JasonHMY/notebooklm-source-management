@@ -39,7 +39,7 @@ function makeMockClassList(initial = []) {
         has: (c) => classes.has(c)
     };
 }
-function makeMockShadowList({ items = [], listRect = { top: 0, bottom: 1000, height: 1000 } } = {}) {
+function makeMockShadowList({ items = [], ungroupedSection = null, listRect = { top: 0, bottom: 1000, height: 1000 } } = {}) {
     const elementMap = new Map();
     const rootChildren = [];
     const allContainers = [];
@@ -149,6 +149,38 @@ function makeMockShadowList({ items = [], listRect = { top: 0, bottom: 1000, hei
     }
     recurseContainers(rootChildren);
 
+    // Optional non-empty "Ungrouped" bin region. Rendered by render() as a sibling
+    // <div class="ungrouped-section"> (header + the bin's .source-item rows), so the
+    // bin items are NOT direct children of #sources-list. `bounds` is the section's
+    // own rect; `items` are { key, top, height? } in state.ungrouped order.
+    let ungroupedSectionEl = null;
+    if (ungroupedSection) {
+        const binItemEls = (Array.isArray(ungroupedSection.items) ? ungroupedSection.items : []).map((it) => {
+            const height = typeof it.height === 'number' ? it.height : 40;
+            const top = it.top;
+            const el = {
+                classList: makeMockClassList(['source-item']),
+                dataset: { sourceKey: it.key },
+                style: {},
+                rect: { top, bottom: top + height, height, left: 0, right: 200, width: 200 },
+                getBoundingClientRect() { return this.rect; }
+            };
+            elementMap.set('source:' + it.key, el);
+            return el;
+        });
+        const b = ungroupedSection.bounds || { top: 0, bottom: 0, height: 0 };
+        ungroupedSectionEl = {
+            classList: makeMockClassList(['ungrouped-section']),
+            style: {},
+            rect: { top: b.top, bottom: b.bottom, height: typeof b.height === 'number' ? b.height : (b.bottom - b.top), left: 0, right: 200, width: 200 },
+            getBoundingClientRect() { return this.rect; },
+            querySelectorAll(selector) {
+                if (selector === ':scope > .source-item') return binItemEls.slice();
+                return [];
+            }
+        };
+    }
+
     const sourcesListEl = {
         id: 'sources-list',
         getBoundingClientRect: () => ({
@@ -160,6 +192,7 @@ function makeMockShadowList({ items = [], listRect = { top: 0, bottom: 1000, hei
             width: 200
         }),
         querySelector(selector) {
+            if (selector === '.ungrouped-section') return ungroupedSectionEl;
             let m = selector.match(/\[data-source-key="([^"]+)"\]/);
             if (m) return elementMap.get('source:' + m[1]) || null;
             m = selector.match(/\[data-group-id="([^"]+)"\]/);
@@ -3382,6 +3415,77 @@ describe('computeDropIntent', () => {
         expect(intent.kind).toBe('before-source');
         expect(intent.insertIndex).toBe(2);
         expect(intent.slotKey).toBe('B');
+    });
+
+    it('routes a drop inside a non-empty .ungrouped-section to state.ungrouped (between bin items)', () => {
+        const state = { root: [{ type: 'group', id: 'g1' }], ungrouped: ['u1', 'u2'] };
+        const groupsById = new Map([['g1', { id: 'g1', children: [] }]]);
+        const tree = buildTree({ state, groupsById });
+        const { sourcesListEl } = makeMockShadowList({
+            items: [
+                { kind: 'group', id: 'g1', top: 100, headerHeight: 30, childrenStart: 130, childrenEnd: 130 }
+            ],
+            ungroupedSection: {
+                bounds: { top: 300, bottom: 400 },
+                items: [
+                    { key: 'u1', top: 300, height: 40 },
+                    { key: 'u2', top: 340, height: 40 }
+                ]
+            }
+        });
+
+        // Pointer at y=345 — inside the section, upper half of u2 (midY=360) → insert before u2.
+        const intent = tree.computeDropIntent({
+            clientY: 345,
+            rootElement: sourcesListEl,
+            state,
+            groupsById,
+            parentMap: new Map(),
+            activeDragContext: { kind: 'source-single' }
+        });
+        expect(intent).toBeTruthy();
+        expect(intent.kind).toBe('before-source');
+        expect(intent.targetList).toBe(state.ungrouped);
+        expect(intent.isUngroupedBin).toBe(true);
+        expect(intent.insertIndex).toBe(1); // index of u2 in state.ungrouped
+        expect(intent.slotKey).toBe('u2');
+        expect(intent.targetGroup).toBeNull();
+    });
+
+    it('appends to state.ungrouped when the pointer is below all bin items in the .ungrouped-section', () => {
+        const state = { root: [{ type: 'group', id: 'g1' }], ungrouped: ['u1', 'u2'] };
+        const groupsById = new Map([['g1', { id: 'g1', children: [] }]]);
+        const tree = buildTree({ state, groupsById });
+        const { sourcesListEl } = makeMockShadowList({
+            items: [
+                { kind: 'group', id: 'g1', top: 100, headerHeight: 30, childrenStart: 130, childrenEnd: 130 }
+            ],
+            ungroupedSection: {
+                bounds: { top: 300, bottom: 400 },
+                items: [
+                    { key: 'u1', top: 300, height: 40 },
+                    { key: 'u2', top: 340, height: 40 }
+                ]
+            }
+        });
+
+        // Pointer at y=395 — below both bin items' mids (u1=320, u2=360) but still
+        // inside the section (300..400) → after-source append at end of state.ungrouped.
+        const intent = tree.computeDropIntent({
+            clientY: 395,
+            rootElement: sourcesListEl,
+            state,
+            groupsById,
+            parentMap: new Map(),
+            activeDragContext: { kind: 'source-single' }
+        });
+        expect(intent).toBeTruthy();
+        expect(intent.kind).toBe('after-source');
+        expect(intent.targetList).toBe(state.ungrouped);
+        expect(intent.isUngroupedBin).toBe(true);
+        expect(intent.insertIndex).toBe(2); // append (ungrouped.length)
+        expect(intent.slotKey).toBe('u2');
+        expect(intent.targetGroup).toBeNull();
     });
 
     it('returns into-group with insertIndex=0 (top of folder) when the pointer is on a group-header band', () => {

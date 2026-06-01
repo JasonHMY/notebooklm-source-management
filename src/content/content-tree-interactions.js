@@ -286,7 +286,86 @@
             const root = stateObj.root = Array.isArray(stateObj.root) ? stateObj.root : [];
             // Normalize ungrouped to an array for downstream consumers; the root host branch
             // itself never targets state.ungrouped (see the root-host return block below).
-            stateObj.ungrouped = Array.isArray(stateObj.ungrouped) ? stateObj.ungrouped : [];
+            const ungrouped = stateObj.ungrouped = Array.isArray(stateObj.ungrouped) ? stateObj.ungrouped : [];
+
+            // Non-empty "Ungrouped" bin region. When state.ungrouped is non-empty,
+            // render() puts the bin items inside a sibling <div class="ungrouped-section">
+            // (NOT direct children of #sources-list), so the root scan below cannot see
+            // them and the root after-all path would mis-route a bin drop to the end of
+            // state.root. Handle the bin as its own drop target here: if the cursor is
+            // within the section's Y band, slot-detect among the bin's .source-item rows
+            // and return a state.ungrouped intent. Empty bin (ungrouped.length === 0) is
+            // NOT rendered as a section — that case is handled by the empty-bin trailing
+            // branch. `isUngroupedBin` is informational (parallels isRootList /
+            // isEmptyBinTrailing), letting drag feedback flag the bin.
+            if (ungrouped.length > 0 && typeof rootElement.querySelector === 'function') {
+                const binSection = rootElement.querySelector('.ungrouped-section');
+                if (binSection && typeof binSection.getBoundingClientRect === 'function') {
+                    const binRect = binSection.getBoundingClientRect();
+                    if (binRect && typeof binRect.top === 'number' && typeof binRect.bottom === 'number'
+                        && clientY >= binRect.top && clientY < binRect.bottom) {
+                        const binNodes = typeof binSection.querySelectorAll === 'function'
+                            ? binSection.querySelectorAll(':scope > .source-item')
+                            : [];
+                        const binItems = binNodes && typeof binNodes.forEach === 'function'
+                            ? Array.from(binNodes)
+                            : (Array.isArray(binNodes) ? binNodes : []);
+                        const binCandidates = [];
+                        for (const el of binItems) {
+                            if (!el || typeof el.getBoundingClientRect !== 'function') continue;
+                            if (el.classList && el.classList.contains('sp-drag-folded')) continue;
+                            const key = el.dataset ? el.dataset.sourceKey : null;
+                            if (!key) continue;
+                            binCandidates.push({ el, key });
+                        }
+                        let binBeforeIndex = -1;
+                        for (let i = 0; i < binCandidates.length; i += 1) {
+                            const rect = binCandidates[i].el.getBoundingClientRect();
+                            if (!rect || typeof rect.top !== 'number' || typeof rect.height !== 'number') continue;
+                            const midY = rect.top + rect.height / 2;
+                            if (midY > clientY) { binBeforeIndex = i; break; }
+                        }
+                        if (binCandidates.length === 0) {
+                            return {
+                                kind: 'after-source',
+                                targetGroup: null,
+                                targetList: ungrouped,
+                                insertIndex: ungrouped.length,
+                                targetGroupId: null,
+                                hostGroupContainerEl: null,
+                                slotKey: null,
+                                isUngroupedBin: true
+                            };
+                        }
+                        if (binBeforeIndex >= 0) {
+                            const slot = binCandidates[binBeforeIndex];
+                            const ungroupedIndex = ungrouped.indexOf(slot.key);
+                            return {
+                                kind: 'before-source',
+                                targetGroup: null,
+                                targetList: ungrouped,
+                                insertIndex: ungroupedIndex >= 0 ? ungroupedIndex : 0,
+                                targetGroupId: null,
+                                hostGroupContainerEl: null,
+                                slotKey: slot.key,
+                                isUngroupedBin: true
+                            };
+                        }
+                        const lastBin = binCandidates[binCandidates.length - 1];
+                        const lastIndex = ungrouped.indexOf(lastBin.key);
+                        return {
+                            kind: 'after-source',
+                            targetGroup: null,
+                            targetList: ungrouped,
+                            insertIndex: lastIndex >= 0 ? lastIndex + 1 : ungrouped.length,
+                            targetGroupId: null,
+                            hostGroupContainerEl: null,
+                            slotKey: lastBin.key,
+                            isUngroupedBin: true
+                        };
+                    }
+                }
+            }
 
             // Find the deepest group-container whose children-area encloses clientY.
             const containers = rootElement.querySelectorAll('.group-container');
