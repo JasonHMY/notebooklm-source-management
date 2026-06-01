@@ -44,9 +44,19 @@ function makeMockShadowList({ items = [], listRect = { top: 0, bottom: 1000, hei
     const rootChildren = [];
     const allContainers = [];
 
-    function buildSource(item) {
+    // translateY(Npx) parser — mirrors content-drag-reflow.js extractInlineTranslateY.
+    function parseTranslateY(t) {
+        if (typeof t !== 'string') return 0;
+        const m = t.match(/translateY\((-?\d+(?:\.\d+)?)px\)/);
+        return m ? parseFloat(m[1]) : 0;
+    }
+
+    function buildSource(item, ancestorShift = 0) {
         const height = typeof item.height === 'number' ? item.height : 40;
-        const top = item.top;
+        // Authored coords are LAYOUT; getBoundingClientRect reflects the element's OWN
+        // transform PLUS every ancestor container's transform (as a real browser does).
+        const shift = ancestorShift + parseTranslateY(item.transform);
+        const top = item.top + shift;
         const bottom = top + height;
         const el = {
             classList: makeMockClassList(['source-item']),
@@ -59,16 +69,25 @@ function makeMockShadowList({ items = [], listRect = { top: 0, bottom: 1000, hei
         return el;
     }
 
-    function buildGroup(item) {
+    function buildGroup(item, ancestorShift = 0) {
         const headerHeight = typeof item.headerHeight === 'number' ? item.headerHeight : 32;
-        const top = item.top;
-        const childrenStart = typeof item.childrenStart === 'number' ? item.childrenStart : (top + headerHeight);
-        const childrenEnd = typeof item.childrenEnd === 'number' ? item.childrenEnd : childrenStart;
+        // Total shift carried by this container = ancestors' transforms + this container's
+        // OWN transform. Its descendants (header / children / nested items) inherit this
+        // whole sum in getBoundingClientRect but carry NO own inline transform — exactly
+        // the condition that exposes the ancestor-transform read bug (the header/children
+        // bands must subtract the container's own shift to recover layout coords).
+        const shift = ancestorShift + parseTranslateY(item.transform);
+        const layoutTop = item.top;
+        const layoutChildrenStart = typeof item.childrenStart === 'number' ? item.childrenStart : (layoutTop + headerHeight);
+        const layoutChildrenEnd = typeof item.childrenEnd === 'number' ? item.childrenEnd : layoutChildrenStart;
+        const top = layoutTop + shift;
+        const childrenStart = layoutChildrenStart + shift;
+        const childrenEnd = layoutChildrenEnd + shift;
         const bottom = childrenEnd;
 
         const childElements = [];
         (Array.isArray(item.children) ? item.children : []).forEach((child) => {
-            const childEl = build(child);
+            const childEl = build(child, shift);
             if (childEl) childElements.push(childEl);
         });
 
@@ -109,15 +128,15 @@ function makeMockShadowList({ items = [], listRect = { top: 0, bottom: 1000, hei
         return container;
     }
 
-    function build(item) {
+    function build(item, ancestorShift = 0) {
         if (!item) return null;
-        if (item.kind === 'source') return buildSource(item);
-        if (item.kind === 'group') return buildGroup(item);
+        if (item.kind === 'source') return buildSource(item, ancestorShift);
+        if (item.kind === 'group') return buildGroup(item, ancestorShift);
         return null;
     }
 
     items.forEach((item) => {
-        const el = build(item);
+        const el = build(item, 0);
         if (el) rootChildren.push(el);
     });
 
@@ -3153,6 +3172,97 @@ describe('computeDropIntent', () => {
         expect(intent.slotKey).toBe('X');
     });
 
+    // Regression: dragging a SOURCE into a nested subfolder must not "twitch" between
+    // into-group and slot. The driver is that a nested subfolder S's .group-container
+    // carries a reflow translateY whenever a slot lands at/before S in its PARENT's
+    // children. The header/children band reads must subtract that ANCESTOR shift to
+    // recover S's true layout band, otherwise a cursor that is genuinely PAST S's header
+    // (in S's children) is mis-read as into-group for the frame S still rides the shift.
+    // Scene (LAYOUT coords): P > [A, S(+40 stale shift), B]; S > [s1, s2].
+    //   S layout: container 170..280, header 170..200, children 200..280 (s1 200..240, s2 240..280)
+    //   S rendered (+40): container 210..320, header 210..240, children 240..320 (s1 240..280, s2 280..320)
+    function nestedSubfolderScene(sShift) {
+        const state = { ungrouped: [], groups: ['P'] };
+        const groupsById = new Map([
+            ['P', { id: 'P', children: [
+                { type: 'source', key: 'A' },
+                { type: 'group', id: 'S' },
+                { type: 'source', key: 'B' }
+            ] }],
+            ['S', { id: 'S', children: [
+                { type: 'source', key: 's1' },
+                { type: 'source', key: 's2' }
+            ] }]
+        ]);
+        const parentMap = new Map([['S', 'P']]);
+        const tree = buildTree({ state, groupsById, parentMap });
+        const { sourcesListEl } = makeMockShadowList({
+            items: [{
+                kind: 'group', id: 'P', top: 100, headerHeight: 30, childrenStart: 130, childrenEnd: 320,
+                children: [
+                    { kind: 'source', key: 'A', top: 130, height: 40 },
+                    {
+                        kind: 'group', id: 'S', top: 170, headerHeight: 30, childrenStart: 200, childrenEnd: 280,
+                        transform: sShift ? 'translateY(40px)' : undefined,
+                        children: [
+                            { kind: 'source', key: 's1', top: 200, height: 40 },
+                            { kind: 'source', key: 's2', top: 240, height: 40 }
+                        ]
+                    },
+                    { kind: 'source', key: 'B', top: 280, height: 40 }
+                ]
+            }]
+        });
+        return { tree, state, groupsById, parentMap, sourcesListEl };
+    }
+
+    it('does NOT misfire into-group when a nested subfolder rides a stale reflow shift (ancestor-transform aware)', () => {
+        const { tree, state, groupsById, parentMap, sourcesListEl } = nestedSubfolderScene(true);
+        // cursorY=215 is PAST S's true header (170..200) and inside S's true children band
+        // (200..280) → the correct answer is a slot inside S (before s1). The stale +40 drags
+        // S's header band down to 210..240, catching 215 → pre-fix returns into-group (the twitch).
+        const intent = tree.computeDropIntent({
+            clientY: 215,
+            rootElement: sourcesListEl,
+            state, groupsById, parentMap,
+            activeDragContext: { kind: 'source-single' }
+        });
+        expect(intent).toBeTruthy();
+        expect(intent.kind).toBe('before-source');
+        expect(intent.slotKey).toBe('s1');
+        expect(intent.targetGroup).toBe(groupsById.get('S'));
+    });
+
+    it('resolves the SAME slot inside a nested subfolder whether or not it rides a reflow shift (transform-invariant)', () => {
+        // Identical geometry, S NOT shifted — proves the scene resolves to before-source s1
+        // at the true layout band, so the shifted case above must match (no twitch).
+        const { tree, state, groupsById, parentMap, sourcesListEl } = nestedSubfolderScene(false);
+        const intent = tree.computeDropIntent({
+            clientY: 215,
+            rootElement: sourcesListEl,
+            state, groupsById, parentMap,
+            activeDragContext: { kind: 'source-single' }
+        });
+        expect(intent).toBeTruthy();
+        expect(intent.kind).toBe('before-source');
+        expect(intent.slotKey).toBe('s1');
+    });
+
+    it('still nests into a shifted nested subfolder when the cursor is on its TRUE header band', () => {
+        // Guard against over-correction: a cursor genuinely on S's layout header (170..200)
+        // must still resolve into-group even while S rides a +40 shift.
+        const { tree, state, groupsById, parentMap, sourcesListEl } = nestedSubfolderScene(true);
+        const intent = tree.computeDropIntent({
+            clientY: 185,
+            rootElement: sourcesListEl,
+            state, groupsById, parentMap,
+            activeDragContext: { kind: 'source-single' }
+        });
+        expect(intent).toBeTruthy();
+        expect(intent.kind).toBe('into-group');
+        expect(intent.targetGroup).toBe(groupsById.get('S'));
+    });
+
     it('returns into-group when pointer is in an empty group children-area', () => {
         const state = { ungrouped: [], groups: ['g1'] };
         const groupsById = new Map([['g1', { id: 'g1', children: [] }]]);
@@ -3191,9 +3301,11 @@ describe('computeDropIntent', () => {
         // user to push the cursor much further upward — past 160 — before re-triggering
         // the shift. That asymmetry between up- and down-avoidance is now fixed.)
         const { sourcesListEl } = makeMockShadowList({
+            // Author B in LAYOUT coords (140..180) + its own translateY(40px); the mock now
+            // renders it at 180..220 (visual) exactly as the comment describes.
             items: [
                 { kind: 'source', key: 'A', top: 100, height: 40 },
-                { kind: 'source', key: 'B', top: 180, height: 40, transform: 'translateY(40px)' }
+                { kind: 'source', key: 'B', top: 140, height: 40, transform: 'translateY(40px)' }
             ]
         });
         const intent = tree.computeDropIntent({

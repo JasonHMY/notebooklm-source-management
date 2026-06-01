@@ -459,6 +459,18 @@
                     : null;
                 if (!groupObj) return null;
 
+                // chosenContainer may ride a reflow translateY: a nested subfolder's
+                // .group-container is shifted +slotHeight whenever a slot lands at/before it
+                // in its PARENT's children. Its .group-header / .group-children carry NO
+                // inline transform of their own, yet getBoundingClientRect inherits the
+                // container's shift — and unshiftedRect only strips an element's OWN
+                // transform. So the header/children band reads below must additionally
+                // subtract this container shift to live in the SAME unshifted frame Pass-2's
+                // container band (line ~421) already trusts. Without it, a cursor genuinely
+                // PAST the header is mis-read as into-group for the frame the shift survives,
+                // producing the nested-subfolder drag "twitch".
+                const _containerShift = extractInlineTranslateY(chosenContainer);
+
                 const headerEl = typeof chosenContainer.querySelector === 'function'
                     ? chosenContainer.querySelector('.group-header')
                     : null;
@@ -468,7 +480,12 @@
 
                 // Pointer in group-header → into-group sentinel.
                 if (headerEl) {
-                    const headerR = unshiftedRect(headerEl);
+                    const _headerRaw = unshiftedRect(headerEl);
+                    // Subtract the inherited container shift (see _containerShift above) so the
+                    // band is measured at the header's true layout position.
+                    const headerR = _headerRaw
+                        ? { top: _headerRaw.top - _containerShift, bottom: _headerRaw.bottom - _containerShift, height: _headerRaw.height }
+                        : null;
                     // Same hysteresis as container selection: keep the header band
                     // sticky for the group we were inside last frame so edge jitter
                     // doesn't flip into-group ↔ reorder.
@@ -513,7 +530,12 @@
                     // else: chosenContainer is top-level → host stays null → slot detection
                     // below uses root list (state.ungrouped + state.groups view via DOM).
                 } else if (childrenEl) {
-                    const childrenR = unshiftedRect(childrenEl);
+                    const _childrenRaw = unshiftedRect(childrenEl);
+                    // Subtract the inherited container shift (see _containerShift above) so the
+                    // children band is measured at its true layout position.
+                    const childrenR = _childrenRaw
+                        ? { top: _childrenRaw.top - _containerShift, bottom: _childrenRaw.bottom - _containerShift, height: _childrenRaw.height }
+                        : null;
                     if (childrenR && clientY >= childrenR.top && clientY < childrenR.bottom) {
                         const groupChildren = Array.isArray(groupObj.children) ? groupObj.children : (groupObj.children = []);
                         // Empty children area → user clearly wants 'into-group'.
