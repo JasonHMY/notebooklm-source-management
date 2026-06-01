@@ -24,7 +24,7 @@ describe('saveState', () => {
         const projectId = 'test_project_id';
         if (mod._setProjectId) mod._setProjectId(projectId); else mod.projectId = projectId;
 
-        mod.state.groups = ['group1', 'group2'];
+        mod.state.root = [{ type: 'group', id: 'group1' }, { type: 'group', id: 'group2' }];
         mod.state.ungrouped = ['source3'];
 
         mod.groupsById.set('group1', { id: 'group1', title: 'Group 1', children: [{ type: 'source', key: 'source1' }] });
@@ -37,8 +37,8 @@ describe('saveState', () => {
         mod._setCustomHeight(500);
 
         expectedPersistableState = {
-            schemaVersion: 4,
-            groups: ['group1', 'group2'],
+            schemaVersion: 5,
+            root: [{ type: 'group', id: 'group1' }, { type: 'group', id: 'group2' }],
             groupsById: {
                 group1: { id: 'group1', title: 'Group 1', children: [{ type: 'source', key: 'source1' }] },
                 group2: { id: 'group2', title: 'Group 2', children: [{ type: 'source', key: 'source2' }] }
@@ -375,6 +375,35 @@ describe('saveState', () => {
         expect(mod.buildPersistableState().sourceStateById.source1.addedAt).toBe('2026-05-17T00:00:00.000Z');
     });
 
+    it('rebuilds runtime state.root from a migrated v5 snapshot with positioned sources', () => {
+        const restored = mod.restorePersistedSnapshotWithoutDom({
+            schemaVersion: 5,
+            root: [
+                { type: 'group', id: 'g1' },
+                { type: 'source', key: 'positioned' },
+                { type: 'group', id: 'missing-group' }
+            ],
+            groupsById: { g1: { id: 'g1', title: 'G1', children: [] } },
+            ungrouped: ['binSource'],
+            sourceStateById: {
+                positioned: { enabled: true, title: 'Positioned', normalizedTitle: 'positioned', stableToken: '', fingerprint: 'positioned||article', identityType: 'fingerprint' },
+                binSource: { enabled: true, title: 'Bin', normalizedTitle: 'bin', stableToken: '', fingerprint: 'bin||article', identityType: 'fingerprint' }
+            },
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {}
+        });
+
+        expect(restored).toBe(true);
+        // Dangling group ref (missing-group not in groupsById) is dropped; order preserved.
+        expect(mod.state.root).toEqual([
+            { type: 'group', id: 'g1' },
+            { type: 'source', key: 'positioned' }
+        ]);
+        // Positioned source is NOT also in the bin (mutual exclusion).
+        expect(mod.state.ungrouped).toEqual(['binSource']);
+    });
+
     it('reports manual restore point creation failure when history append fails', async () => {
         seedPersistedState();
         global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
@@ -441,9 +470,9 @@ describe('saveState', () => {
 
         mod.saveState({ immediate: true, critical: true });
         mod.groupsById.get('group1').title = 'Changed after save started';
-        mod.state.groups.push('late-group');
+        mod.state.root.push({ type: 'group', id: 'late-group' });
 
-        expect(capturedData.groups).toEqual(['group1', 'group2']);
+        expect(capturedData.root).toEqual([{ type: 'group', id: 'group1' }, { type: 'group', id: 'group2' }]);
         expect(capturedData.groupsById.group1.title).toBe('Group 1');
     });
 
@@ -561,7 +590,7 @@ describe('saveState', () => {
         expect(global.chrome.storage.local.set).toHaveBeenCalledWith(
             expect.objectContaining({
                 sourcesPlusState_test_project_id: expect.objectContaining({
-                    groups: ['group1', 'group2']
+                    root: [{ type: 'group', id: 'group1' }, { type: 'group', id: 'group2' }]
                 })
             }),
             expect.any(Function)
@@ -1909,8 +1938,8 @@ describe('loadState', () => {
     it('reads state directly from local storage before falling back to runtime messaging', () => {
         const callback = jest.fn();
         const storedState = {
-            schemaVersion: 3,
-            groups: ['group1'],
+            schemaVersion: 5,
+            root: [{ type: 'group', id: 'group1' }],
             groupsById: {
                 group1: { id: 'group1', title: 'Pinned', children: [] }
             },
@@ -2004,7 +2033,7 @@ describe('loadState', () => {
         mod.loadState(callback);
 
         expect(callback).toHaveBeenCalledWith(expect.objectContaining({
-            groups: ['group-00', 'group-02'],
+            root: [{ type: 'group', id: 'group-00' }, { type: 'group', id: 'group-02' }],
             groupsById: {
                 'group-00': { id: 'group-00', title: '00', children: [{ type: 'source', key: 'source-a' }] },
                 'group-02': { id: 'group-02', title: '02', children: [{ type: 'group', id: 'group-a' }] },
@@ -2052,8 +2081,8 @@ describe('loadState', () => {
         mod.loadState(callback);
 
         expect(callback).toHaveBeenCalledWith({
-            schemaVersion: 2,
-            groups: ['group1'],
+            schemaVersion: 5,
+            root: [{ type: 'group', id: 'group1' }],
             groupsById: {
                 group1: { id: 'group1', title: 'Group', children: [] }
             },
@@ -2100,8 +2129,8 @@ describe('loadState', () => {
         mod.loadState(callback);
 
         expect(callback).toHaveBeenCalledWith({
-            schemaVersion: 1,
-            groups: ['group1'],
+            schemaVersion: 5,
+            root: [{ type: 'group', id: 'group1' }],
             groupsById: {
                 group1: { id: 'group1', title: 'Group', children: [{ type: 'source', key: 'source_legacy' }] }
             },

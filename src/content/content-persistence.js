@@ -1469,8 +1469,19 @@
                 });
             });
 
-            state.groups = (Array.isArray(loadedState.groups) ? loadedState.groups : [])
-                .filter((groupId) => groupsById.has(groupId));
+            state.root = [];
+            (Array.isArray(loadedState.root) ? loadedState.root : []).forEach((entry) => {
+                if (entry?.type === 'group' && groupsById.has(entry.id)) {
+                    state.root.push({ type: 'group', id: entry.id });
+                } else if (
+                    entry?.type === 'source' &&
+                    sourceKeys.has(entry.key) &&
+                    !seenSourceRefs.has(entry.key)
+                ) {
+                    state.root.push({ type: 'source', key: entry.key });
+                    seenSourceRefs.add(entry.key);
+                }
+            });
             state.ungrouped = [];
             (Array.isArray(loadedState.ungrouped) ? loadedState.ungrouped : []).forEach((sourceKey) => {
                 if (!sourceKeys.has(sourceKey) || seenSourceRefs.has(sourceKey)) return;
