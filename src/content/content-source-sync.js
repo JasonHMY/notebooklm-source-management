@@ -193,7 +193,7 @@
             }
 
             const next = {
-                groups: [],
+                root: [],
                 ungrouped: [],
                 filterQuery: '',
                 isBatchMode: false,

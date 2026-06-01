@@ -3776,7 +3776,7 @@
         sourceTagsById.clear();
         parentMap.clear();
         keyByElement = new WeakMap();
-        state.groups = [];
+        state.root = [];
         state.ungrouped = [];
         state.filterQuery = '';
         state.isBatchMode = false;
@@ -4798,7 +4798,7 @@
                 clearScheduledPanelLifecycleSync();
                 invalidateManagerInstance();
                 nextLoadStateRequestId = 1;
-                state.groups = [];
+                state.root = [];
                 state.ungrouped = [];
                 state.filterQuery = '';
                 state.isBatchMode = false;
