@@ -60,12 +60,15 @@ Separately from `chrome.storage.local`, page-lifecycle recovery writes a per-tab
 
 ## Current state schema
 
-Current `sourcesPlusState_<projectId>` payloads use `schemaVersion: 4`.
+Current `sourcesPlusState_<projectId>` payloads use `schemaVersion: 5`.
 
 ```json
 {
-  "schemaVersion": 4,
-  "groups": ["group-id"],
+  "schemaVersion": 5,
+  "root": [
+    { "type": "group", "id": "group-id" },
+    { "type": "source", "key": "source-key" }
+  ],
   "groupsById": {
     "group-id": {
       "id": "group-id",
@@ -106,9 +109,9 @@ Current `sourcesPlusState_<projectId>` payloads use `schemaVersion: 4`.
 
 Field notes:
 
-- `groups` is the top-level group order.
+- `root` is the ordered root layer: an array of `{ type: 'group', id }` and `{ type: 'source', key }` entries (same shape as `groupsById[id].children`). Root-level folders and positioned sources interleave in display order.
 - `groupsById` is the full group map. Group `children` must be treated defensively as an array; legacy or imported data can omit it.
-- `ungrouped` is the source order outside plugin folders.
+- `ungrouped` is the bottom "unsorted" bin (`string[]` of source keys). A root-level source appears in EITHER `root` (positioned) XOR `ungrouped` (bin), never both. New imports default to the bin.
 - `sourceStateById` stores metadata needed to remap sources after NotebookLM DOM changes.
 - `sourceStateById[sourceKey].addedAt` stores when the extension first recognized a source. It is optional for legacy sources and powers the built-in Recent quick view; missing values must not be backfilled as recent during migration.
 - `nativeLabelTitle` marks sources or groups that came from NotebookLM native label import. Ordinary user folders with the same visible name must not be treated as native labels unless this field is present.
@@ -130,6 +133,15 @@ schemaVersion 3
 
 schemaVersion 4
 └── Adds optional sourceStateById[sourceKey].addedAt for Recent quick view filtering.
+
+schemaVersion 5
+└── Replaces the flat `groups: string[]` with `root: ({ type:'group', id } | { type:'source', key })[]`,
+    enabling root-level sources to be positioned between folders. Migration 4→5:
+    `root = (groups || []).map(id => ({ type: 'group', id }))`, then drop `groups`;
+    `ungrouped` is unchanged. Applied to the primary snapshot, `__backup`, and every
+    `sourcesPlusHistory_<projectId>` entry on load (history entries may still be v4 or older).
+    Older extension builds reading v5 data will not recognize `root` (root-level folders
+    appear to vanish) — accepted one-way risk of a schema bump.
 ```
 
 Load paths normalize older schemas to the current runtime shape and mark `pendingStorageUpgrade` so a later safe save rewrites current schema data.
