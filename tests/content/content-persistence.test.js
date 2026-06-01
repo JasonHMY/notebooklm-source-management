@@ -851,7 +851,7 @@ describe('saveState', () => {
         const projectId = seedPersistedState();
         const recoveredSnapshot = {
             ...expectedPersistableState,
-            groups: ['recovered'],
+            root: [{ type: 'group', id: 'recovered' }],
             groupsById: {
                 recovered: { id: 'recovered', title: 'Recovered', children: [] }
             },
@@ -873,7 +873,7 @@ describe('saveState', () => {
 
         expect(mod.restoreRecoverySnapshotFromUi()).toBe(true);
 
-        expect(mod.state.groups).toEqual(['recovered']);
+        expect(mod.state.root).toEqual([{ type: 'group', id: 'recovered' }]);
         expect(mod.groupsById.get('recovered')).toMatchObject({
             id: 'recovered',
             title: 'Recovered'
@@ -883,7 +883,7 @@ describe('saveState', () => {
                 type: 'SAVE_STATE',
                 critical: true,
                 data: expect.objectContaining({
-                    groups: ['recovered']
+                    root: [{ type: 'group', id: 'recovered' }]
                 })
             }),
             expect.any(Function)
@@ -1665,7 +1665,7 @@ describe('settings import/export configuration', () => {
             querySelector: jest.fn(() => null),
             appendChild: jest.fn()
         });
-        mod.state.groups = ['before'];
+        mod.state.root = [{ type: 'group', id: 'before' }];
         mod.groupsById.set('before', { id: 'before', title: 'Before', children: [] });
 
         const result = await mod.applyImportConfig(JSON.stringify({
@@ -1690,7 +1690,7 @@ describe('settings import/export configuration', () => {
             groupCount: 1,
             tagCount: 0,
             snapshot: {
-                groups: ['before']
+                root: [{ type: 'group', id: 'before' }]
             }
         });
         expect(mod._getActiveToastItemForTest()).toMatchObject({
@@ -1702,7 +1702,7 @@ describe('settings import/export configuration', () => {
 
     it('waits for the before_import history snapshot before applying and saving imported state', async () => {
         mod._setProjectId('project-import-order');
-        mod.state.groups = ['before'];
+        mod.state.root = [{ type: 'group', id: 'before' }];
         mod.groupsById.set('before', { id: 'before', title: 'Before', children: [] });
 
         const events = [];
@@ -1744,7 +1744,7 @@ describe('settings import/export configuration', () => {
 
         await Promise.resolve();
         expect(events).toEqual(['history_append_started']);
-        expect(mod.state.groups).toEqual(['before']);
+        expect(mod.state.root).toEqual([{ type: 'group', id: 'before' }]);
 
         resolveHistoryAppend();
         const result = await importPromise;
@@ -1755,7 +1755,7 @@ describe('settings import/export configuration', () => {
             'history_append_resolved',
             'critical_save'
         ]);
-        expect(mod.state.groups).toEqual(['after']);
+        expect(mod.state.root).toEqual([{ type: 'group', id: 'after' }]);
     });
 
     it('restores the import backup, saves it critically, and clears the backup', async () => {
@@ -1765,25 +1765,25 @@ describe('settings import/export configuration', () => {
             querySelector: jest.fn(() => null),
             appendChild: jest.fn()
         });
-        mod.state.groups = ['before'];
+        mod.state.root = [{ type: 'group', id: 'before' }];
         mod.groupsById.set('before', { id: 'before', title: 'Before', children: [] });
         const backup = mod.writeImportBackupSnapshot();
         expect(backup).toBeTruthy();
 
-        mod.state.groups = ['after'];
+        mod.state.root = [{ type: 'group', id: 'after' }];
         mod.groupsById.clear();
         mod.groupsById.set('after', { id: 'after', title: 'After', children: [] });
 
         await expect(mod.restoreImportBackupSnapshotFromUi()).resolves.toBe(true);
 
-        expect(mod.state.groups).toEqual(['before']);
+        expect(mod.state.root).toEqual([{ type: 'group', id: 'before' }]);
         expect(mod.groupsById.get('before')).toMatchObject({ title: 'Before' });
         expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(
             expect.objectContaining({
                 type: 'SAVE_STATE',
                 critical: true,
                 data: expect.objectContaining({
-                    groups: ['before']
+                    root: [{ type: 'group', id: 'before' }]
                 })
             }),
             expect.any(Function)
