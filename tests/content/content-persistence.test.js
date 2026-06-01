@@ -135,6 +135,34 @@ describe('saveState', () => {
         expect(mod.normalizeLoadedState({ schemaVersion: 4, customHeight: 520 }).customHeight).toBe(520);
     });
 
+    it('builds a snapshot at schemaVersion 5 with a root array and no legacy groups field', () => {
+        const snapshot = mod.buildPersistableState();
+        expect(snapshot.schemaVersion).toBe(5);
+        expect(Array.isArray(snapshot.root)).toBe(true);
+        expect(Object.prototype.hasOwnProperty.call(snapshot, 'groups')).toBe(false);
+    });
+
+    it('emits root entries for root-level folders and positioned sources in order', () => {
+        mod.state.root = [
+            { type: 'group', id: 'group1' },
+            { type: 'source', key: 'source3' },
+            { type: 'group', id: 'group2' }
+        ];
+        mod.state.ungrouped = ['source4'];
+        mod.groupsById.set('group1', { id: 'group1', title: 'G1', children: [] });
+        mod.groupsById.set('group2', { id: 'group2', title: 'G2', children: [] });
+        mod.sourcesByKey.set('source3', { enabled: true, title: 'S3', normalizedTitle: 's3', stableToken: '', fingerprint: 's3||article', identityType: 'fingerprint' });
+        mod.sourcesByKey.set('source4', { enabled: true, title: 'S4', normalizedTitle: 's4', stableToken: '', fingerprint: 's4||article', identityType: 'fingerprint' });
+
+        const snapshot = mod.buildPersistableState();
+        expect(snapshot.root).toEqual([
+            { type: 'group', id: 'group1' },
+            { type: 'source', key: 'source3' },
+            { type: 'group', id: 'group2' }
+        ]);
+        expect(snapshot.ungrouped).toEqual(['source4']);
+    });
+
     it('debounces saves by default and persists the expected state', () => {
         const projectId = seedPersistedState();
         mod.saveState();

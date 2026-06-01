@@ -111,7 +111,7 @@
         const getState = () => {
             if (!ctx.state || typeof ctx.state !== 'object') {
                 ctx.state = {
-                    groups: [],
+                    root: [],
                     ungrouped: [],
                     tagOrder: [],
                     activeTagId: null
@@ -1113,7 +1113,7 @@
 
             const persistableState = {
                 schemaVersion: storageSchemaVersion,
-                groups: Array.isArray(state.groups) ? state.groups : [],
+                root: Array.isArray(state.root) ? state.root : [],
                 groupsById: Object.fromEntries(groupsById),
                 ungrouped: Array.isArray(state.ungrouped) ? state.ungrouped : [],
                 sourceStateById,
