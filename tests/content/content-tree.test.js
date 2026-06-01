@@ -3406,6 +3406,41 @@ describe('computeDropIntent', () => {
         expect(intent.targetGroup).toBeNull();
     });
 
+    it('returns a before-source intent into an expanded folder when cursor is between its two children', () => {
+        const state = { root: [{ type: 'group', id: 'g1' }], ungrouped: [] };
+        const groupsById = new Map([
+            ['g1', { id: 'g1', collapsed: false, children: [{ type: 'source', key: 'c1' }, { type: 'source', key: 'c2' }] }]
+        ]);
+        const tree = buildTree({ state, groupsById });
+        const { sourcesListEl } = makeMockShadowList({
+            items: [
+                {
+                    kind: 'group', id: 'g1', top: 100, headerHeight: 40,
+                    childrenStart: 140, childrenEnd: 220,
+                    children: [
+                        { kind: 'source', key: 'c1', top: 140, height: 40 },
+                        { kind: 'source', key: 'c2', top: 180, height: 40 }
+                    ]
+                }
+            ]
+        });
+        const intent = tree.computeDropIntent({
+            clientX: 100,
+            clientY: 185,
+            rootElement: sourcesListEl,
+            state,
+            groupsById,
+            parentMap: new Map(),
+            activeDragContext: { kind: 'source-single', keys: ['X'] }
+        });
+        expect(intent).toBeTruthy();
+        expect(intent.targetGroup).toBe(groupsById.get('g1'));
+        expect(intent.targetList).toBe(groupsById.get('g1').children);
+        expect(intent.kind).toBe('before-source');
+        expect(intent.slotKey).toBe('c2');
+        expect(intent.insertIndex).toBe(1);
+    });
+
     it('returns a before-group intent when the pointer is above a root group-container slot', () => {
         const state = { root: [{ type: 'group', id: 'g1' }, { type: 'group', id: 'g2' }], ungrouped: [] };
         const groupsById = new Map([
@@ -4357,6 +4392,30 @@ describe('handleDragOver hover-expand', () => {
         ctx.helpers.dragOverFor('g1');
         const container = ctx.elementMap.get('group:g1');
         expect(container.classList.contains('sp-hover-expand-pending')).toBe(true);
+    });
+
+    it('settles the opened folder children to drag-ready (height:auto, overflow:visible) so reflow is not clipped mid-drag', () => {
+        const ctx = setupTreeInteractionsTestContext({
+            state: { isBatchMode: false, ungrouped: [], groups: ['g1'] },
+            pendingBatchKeys: new Set(),
+            groups: { g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: true } },
+            items: [{ kind: 'group', id: 'g1', top: 100, headerHeight: 40, childrenStart: 140, childrenEnd: 140 }]
+        });
+        const container = ctx.elementMap.get('group:g1');
+        const childrenEl = container.querySelector('.group-children');
+        // Simulate the animated-open window left by toggleGroupCollapse: the children
+        // container is clamped to a fixed pixel height with overflow:hidden until an
+        // async transitionend would restore it. A drag-reflow translateY would be clipped.
+        childrenEl.style.overflow = 'hidden';
+        childrenEl.style.height = '80px';
+
+        ctx.helpers.dragOverFor('g1');
+        jest.advanceTimersByTime(1000);
+
+        expect(ctx.groupsById.get('g1').collapsed).toBe(false);
+        // Hover-expand must leave the folder immediately drag-ready, NOT wait for transitionend.
+        expect(childrenEl.style.overflow).toBe('visible');
+        expect(childrenEl.style.height).toBe('auto');
     });
 
     it('removes .sp-hover-expand-pending when the expand timer fires (group opens)', () => {

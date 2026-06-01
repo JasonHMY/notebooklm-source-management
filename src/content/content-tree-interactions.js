@@ -2507,6 +2507,21 @@
             toggleGroupCollapse(group, container);
             if (!group.collapsed) {
                 runtime.hoverExpandedGroupIds.add(groupId);
+                // Hover-expand happens MID-DRAG. toggleGroupCollapse runs the click-style
+                // animated open, which leaves .group-children at inline overflow:hidden +
+                // a fixed pixel height until an async transitionend (~one motion-slow later)
+                // restores height:auto / overflow:visible. During that window the drag
+                // reflow's translateY slot-opening is CLIPPED and the fixed-height container
+                // can't grow, so dragging into the just-opened folder shows no avoidance and
+                // the drop slot (mid-list or trailing) never opens. Settle the container to
+                // its drag-ready state immediately so reflow works the instant it opens.
+                const childrenEl = typeof container.querySelector === 'function'
+                    ? container.querySelector('.group-children')
+                    : null;
+                if (childrenEl && childrenEl.style) {
+                    childrenEl.style.height = 'auto';
+                    childrenEl.style.overflow = 'visible';
+                }
             }
         }
 
