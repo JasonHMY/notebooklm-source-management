@@ -275,10 +275,10 @@ describe('removeGroupFromTree', () => {
 
     afterEach(teardownGlobalMocks);
 
-    it('removes a top-level group from state.groups', () => {
-        mod.state.groups = ['group1', 'group2', 'group3'];
+    it('removes a top-level group from state.root', () => {
+        mod.state.root = [{ type: 'group', id: 'group1' }, { type: 'group', id: 'group2' }, { type: 'group', id: 'group3' }];
         mod.removeGroupFromTree('group2');
-        expect(mod.state.groups).toEqual(['group1', 'group3']);
+        expect(mod.state.root).toEqual([{ type: 'group', id: 'group1' }, { type: 'group', id: 'group3' }]);
     });
 
     it('removes a nested group from its parent children array', () => {
@@ -290,36 +290,36 @@ describe('removeGroupFromTree', () => {
         expect(parentGroup.children).toEqual([{ id: 'child2' }]);
     });
 
-    it('removes a group from both state.groups and parent children if present in both', () => {
-        mod.state.groups = ['group1', 'orphanChild'];
+    it('removes a group from both state.root and parent children if present in both', () => {
+        mod.state.root = [{ type: 'group', id: 'group1' }, { type: 'group', id: 'orphanChild' }];
         const parentGroup = { id: 'parent1', children: [{ id: 'orphanChild' }, { id: 'other' }] };
         mod.groupsById.set('parent1', parentGroup);
 
         mod.removeGroupFromTree('orphanChild');
 
-        expect(mod.state.groups).toEqual(['group1']);
+        expect(mod.state.root).toEqual([{ type: 'group', id: 'group1' }]);
         expect(parentGroup.children).toEqual([{ id: 'other' }]);
     });
 
     it('does nothing if group id is not found', () => {
-        mod.state.groups = ['group1'];
+        mod.state.root = [{ type: 'group', id: 'group1' }];
         const parentGroup = { id: 'parent1', children: [{ id: 'child1' }] };
         mod.groupsById.set('parent1', parentGroup);
 
         mod.removeGroupFromTree('nonExistent');
 
-        expect(mod.state.groups).toEqual(['group1']);
+        expect(mod.state.root).toEqual([{ type: 'group', id: 'group1' }]);
         expect(parentGroup.children).toEqual([{ id: 'child1' }]);
     });
 
     it('tolerates persisted groups that are missing children arrays', () => {
-        mod.state.groups = ['group1'];
+        mod.state.root = [{ type: 'group', id: 'group1' }];
         const parentGroup = { id: 'parent1' };
         mod.groupsById.set('parent1', parentGroup);
 
         expect(() => mod.removeGroupFromTree('group1')).not.toThrow();
 
-        expect(mod.state.groups).toEqual([]);
+        expect(mod.state.root).toEqual([]);
         expect(parentGroup.children).toEqual([]);
     });
 });
@@ -469,6 +469,43 @@ describe('drag and drop ordering guards', () => {
         expect(groupsById.get('group-1').children).toEqual([]);
     });
 
+    it('removeSourceFromTree drops a positioned root source out of state.root', () => {
+        const state = {
+            root: [
+                { type: 'group', id: 'g1' },
+                { type: 'source', key: 'src-pos' },
+                { type: 'source', key: 'src-keep' }
+            ],
+            ungrouped: ['bin-1']
+        };
+        const interactions = createContentTreeInteractions({
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getParentMap: () => new Map()
+        });
+
+        interactions.removeSourceFromTree('src-pos');
+
+        expect(state.root).toEqual([
+            { type: 'group', id: 'g1' },
+            { type: 'source', key: 'src-keep' }
+        ]);
+        // bin untouched
+        expect(state.ungrouped).toEqual(['bin-1']);
+    });
+
+    it('removeSourceFromTree still drops a bin source out of state.ungrouped', () => {
+        const state = { root: [{ type: 'source', key: 'src-keep' }], ungrouped: ['bin-1', 'bin-2'] };
+        const interactions = createContentTreeInteractions({
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getParentMap: () => new Map()
+        });
+        interactions.removeSourceFromTree('bin-1');
+        expect(state.ungrouped).toEqual(['bin-2']);
+        expect(state.root).toEqual([{ type: 'source', key: 'src-keep' }]);
+    });
+
     it('does not save or render when a source is dropped back into the same position', () => {
         const state = { groups: [], ungrouped: ['source-1', 'source-2'] };
         const saveState = jest.fn();
@@ -547,8 +584,115 @@ describe('drag and drop ordering guards', () => {
         expect(saveState).toHaveBeenCalledWith({ immediate: true, critical: true });
     });
 
+    it('handleDrop splices a dragged source into state.root as a {type:source} entry', () => {
+        const state = {
+            root: [
+                { type: 'group', id: 'g1' },
+                { type: 'group', id: 'g2' }
+            ],
+            ungrouped: ['mover']
+        };
+        const saveState = jest.fn();
+        const render = jest.fn();
+        const buildParentMap = jest.fn();
+        const dropTarget = {
+            dataset: { groupId: 'g2' },
+            classList: createClassList(['group-container'])
+        };
+        const runtime = {
+            dragReflowSession: {
+                draggedKeys: new Set(['mover']),
+                currentIntent: {
+                    kind: 'before-group',
+                    targetGroup: null,
+                    targetList: state.root,
+                    insertIndex: 1, // before g2 in state.root
+                    targetGroupId: null,
+                    slotKey: 'g2'
+                },
+                shiftedItems: new Map()
+            }
+        };
+        const interactions = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => new Map([['g1', { id: 'g1', children: [] }], ['g2', { id: 'g2', children: [] }]]),
+            getParentMap: () => new Map(),
+            getShadowRoot: () => ({ querySelectorAll: jest.fn(() => []) }),
+            saveState,
+            render,
+            buildParentMap
+        });
+
+        interactions.handleDrop(createDropEvent({ dropTarget, sourceKey: 'mover' }));
+
+        expect(state.root).toEqual([
+            { type: 'group', id: 'g1' },
+            { type: 'source', key: 'mover' },
+            { type: 'group', id: 'g2' }
+        ]);
+        // 'mover' was pulled out of the bin
+        expect(state.ungrouped).toEqual([]);
+        expect(saveState).toHaveBeenCalledWith({ immediate: true, critical: true });
+        expect(render).toHaveBeenCalledTimes(1);
+    });
+
+    it('handleDrop splices a dragged group into state.root as a {type:group} entry', () => {
+        const state = {
+            root: [
+                { type: 'source', key: 'A' },
+                { type: 'group', id: 'g1' }
+            ],
+            ungrouped: []
+        };
+        const groupsById = new Map([
+            ['g1', { id: 'g1', children: [] }],
+            ['mover', { id: 'mover', children: [] }]
+        ]);
+        const saveState = jest.fn();
+        const render = jest.fn();
+        const buildParentMap = jest.fn();
+        const dropTarget = { dataset: { sourceKey: 'A' }, classList: createClassList(['source-item']) };
+        const runtime = {
+            dragReflowSession: {
+                draggedKeys: new Set(['mover']),
+                currentIntent: {
+                    kind: 'before-source',
+                    targetGroup: null,
+                    targetList: state.root,
+                    insertIndex: 0, // before A in state.root
+                    targetGroupId: null,
+                    slotKey: 'A'
+                },
+                shiftedItems: new Map()
+            }
+        };
+        // 'mover' starts as a root group at index 1; moving it before A.
+        state.root.push({ type: 'group', id: 'mover' });
+        const interactions = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getParentMap: () => new Map(),
+            getShadowRoot: () => ({ querySelectorAll: jest.fn(() => []) }),
+            isDescendant: global.isDescendant,
+            saveState,
+            render,
+            buildParentMap
+        });
+
+        interactions.handleDrop(createDropEvent({ dropTarget, groupId: 'mover' }));
+
+        expect(state.root).toEqual([
+            { type: 'group', id: 'mover' },
+            { type: 'source', key: 'A' },
+            { type: 'group', id: 'g1' }
+        ]);
+        expect(saveState).toHaveBeenCalledWith({ immediate: true, critical: true });
+    });
+
     it('prevents moving a group into itself or its own subtree', () => {
-        const state = { groups: ['root'], ungrouped: [] };
+        const state = { root: [{ type: 'group', id: 'root' }], ungrouped: [] };
         const groupsById = new Map([
             ['root', {
                 id: 'root',
@@ -578,7 +722,7 @@ describe('drag and drop ordering guards', () => {
 
         interactions.handleDrop(createDropEvent({ dropTarget, groupId: 'root' }));
 
-        expect(state.groups).toEqual(['root']);
+        expect(state.root).toEqual([{ type: 'group', id: 'root' }]);
         expect(groupsById.get('root').children).toEqual([{ type: 'group', id: 'child' }]);
         expect(render).not.toHaveBeenCalled();
         expect(saveState).not.toHaveBeenCalled();
@@ -630,7 +774,7 @@ describe('drag and drop ordering guards', () => {
     });
 
     it('moves selected grouped sources to ungrouped in visible tree order', () => {
-        const state = { groups: ['root'], ungrouped: ['source-3'], isBatchMode: true };
+        const state = { root: [{ type: 'group', id: 'root' }], ungrouped: ['source-3'], isBatchMode: true };
         const root = {
             id: 'root',
             children: [

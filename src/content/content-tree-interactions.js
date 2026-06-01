@@ -963,9 +963,14 @@
             if (parentGroup) {
                 parentGroup.children = (Array.isArray(parentGroup.children) ? parentGroup.children : [])
                     .filter((c) => c.type === 'group' || c.key !== key);
-            } else {
-                state.ungrouped = (Array.isArray(state.ungrouped) ? state.ungrouped : []).filter((k) => k !== key);
+                return;
             }
+            // Root-level source: either positioned in state.root (object entry) or in the
+            // bottom ungrouped bin (bare key). The two are mutually exclusive but scrub
+            // both defensively so a stale duplicate never survives a move.
+            state.root = (Array.isArray(state.root) ? state.root : [])
+                .filter((entry) => !(entry && entry.type === 'source' && entry.key === key));
+            state.ungrouped = (Array.isArray(state.ungrouped) ? state.ungrouped : []).filter((k) => k !== key);
         }
 
         function isBatchOperableSource(source) {
@@ -1067,7 +1072,8 @@
         function removeGroupFromTree(id) {
             const state = getState();
             const groupsById = getGroupsById();
-            state.groups = (Array.isArray(state.groups) ? state.groups : []).filter((gid) => gid !== id);
+            state.root = (Array.isArray(state.root) ? state.root : [])
+                .filter((entry) => !(entry && entry.type === 'group' && entry.id === id));
             groupsById.forEach((group) => {
                 group.children = (Array.isArray(group.children) ? group.children : []).filter((c) => c.id !== id);
             });
@@ -2734,12 +2740,21 @@
                         return;
                     }
                     const insertionIndex = getNormalizedInsertionIndex(intent.targetList, intent.insertIndex, originalPosition);
+                    // Capture the bin-vs-root discriminator BEFORE removeSourceFromTree
+                    // runs — it reassigns state.ungrouped to a new filtered array, which
+                    // would break the targetList === state.ungrouped identity check.
+                    const droppedIntoBin = intent.targetList === state.ungrouped;
                     clearReflowBeforeMutation();
                     removeSourceFromTree(sourceKey);
                     if (intent.targetGroup) {
                         intent.targetGroup.children.splice(insertionIndex, 0, { type: 'source', key: sourceKey });
-                    } else {
+                    } else if (droppedIntoBin) {
+                        // Dropped into the bottom ungrouped bin → store a bare key.
                         state.ungrouped.splice(insertionIndex, 0, sourceKey);
+                    } else {
+                        // Positioned at root → store an object entry in state.root.
+                        state.root = Array.isArray(state.root) ? state.root : [];
+                        state.root.splice(insertionIndex, 0, { type: 'source', key: sourceKey });
                     }
                     didMove = true;
                 } else if (draggedGroupId) {
@@ -2763,7 +2778,9 @@
                     if (intent.targetGroup) {
                         intent.targetGroup.children.splice(insertionIndex, 0, { type: 'group', id: draggedGroupId });
                     } else {
-                        state.groups.splice(insertionIndex, 0, draggedGroupId);
+                        // Root group → object entry in state.root (groups never go to the bin).
+                        state.root = Array.isArray(state.root) ? state.root : [];
+                        state.root.splice(insertionIndex, 0, { type: 'group', id: draggedGroupId });
                     }
                     didMove = true;
                 }
