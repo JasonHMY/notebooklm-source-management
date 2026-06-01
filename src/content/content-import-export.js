@@ -157,6 +157,9 @@
             (Array.isArray(importState.ungrouped) ? importState.ungrouped : []).forEach((sourceKey) => {
                 if (sourceKey) sourceRefs.add(sourceKey);
             });
+            (Array.isArray(importState.root) ? importState.root : []).forEach((entry) => {
+                if (entry?.type === 'source' && entry.key) sourceRefs.add(entry.key);
+            });
             if (sourceRefs.size > getImportConfigLimit(maxSources, 5000)) return 'too_large';
 
             return getImportGroupTreeValidationError(groupsByIdMap);
@@ -186,6 +189,9 @@
             });
             (Array.isArray(importState.ungrouped) ? importState.ungrouped : []).forEach((sourceKey) => {
                 if (sourceKey) refs.add(sourceKey);
+            });
+            (Array.isArray(importState.root) ? importState.root : []).forEach((entry) => {
+                if (entry?.type === 'source' && entry.key) refs.add(entry.key);
             });
             Object.keys(importState.sourceStateById || {}).forEach((sourceKey) => refs.add(sourceKey));
             return refs;

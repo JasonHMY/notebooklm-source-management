@@ -122,6 +122,19 @@ describe('content import/export helper', () => {
                 .toEqual({ ok: false, reason: 'invalid' });
         });
 
+        it('counts positioned state.root sources toward the maxSources cap', () => {
+            const deps = createDeps();
+            const { parseImportConfigText } = createContentImportExport({ ...deps, limits: { maxSources: 2 } });
+            // 2 bin sources + 1 positioned root source = 3 > cap 2.
+            const payload = JSON.stringify({
+                groupsById: {},
+                root: [{ type: 'source', key: 'r1' }],
+                ungrouped: ['a', 'b'],
+                sourceStateById: {}
+            });
+            expect(parseImportConfigText(payload)).toEqual({ ok: false, reason: 'invalid' });
+        });
+
         it('rejects payloads with a cycle in the group tree', () => {
             const groupsById = {
                 a: { children: [{ type: 'group', id: 'b' }] },
@@ -164,6 +177,34 @@ describe('content import/export helper', () => {
 
             expect(result.ok).toBe(true);
             expect(result.state).toEqual(bare);
+        });
+    });
+
+    describe('collectImportSourceRefs', () => {
+        it('includes positioned state.root {type:"source"} entries alongside ungrouped + grouped + sourceStateById', () => {
+            const { collectImportSourceRefs } = createContentImportExport(createDeps());
+            const importState = {
+                groupsById: { g1: { children: [{ type: 'source', key: 'grouped' }] } },
+                root: [{ type: 'group', id: 'g1' }, { type: 'source', key: 'positioned' }],
+                ungrouped: ['bin'],
+                sourceStateById: { recordOnly: {} }
+            };
+            const refs = collectImportSourceRefs(importState);
+            expect(refs.has('grouped')).toBe(true);
+            expect(refs.has('positioned')).toBe(true);
+            expect(refs.has('bin')).toBe(true);
+            expect(refs.has('recordOnly')).toBe(true);
+        });
+
+        it('ignores root group entries (only source entries become refs)', () => {
+            const { collectImportSourceRefs } = createContentImportExport(createDeps());
+            const refs = collectImportSourceRefs({
+                groupsById: {},
+                root: [{ type: 'group', id: 'g1' }],
+                ungrouped: [],
+                sourceStateById: {}
+            });
+            expect(refs.size).toBe(0);
         });
     });
 
