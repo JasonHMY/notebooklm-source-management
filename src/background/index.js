@@ -641,6 +641,7 @@ function getStateKeyFromHistoryKey(historyKey) {
 function hasRestorableStateSnapshot(snapshot) {
     if (!snapshot || typeof snapshot !== 'object') return false;
     if (Array.isArray(snapshot.groups) && snapshot.groups.length > 0) return true;
+    if (Array.isArray(snapshot.root) && snapshot.root.length > 0) return true;
     if (snapshot.groupsById && Object.keys(snapshot.groupsById).length > 0) return true;
     if (Array.isArray(snapshot.ungrouped) && snapshot.ungrouped.length > 0) return true;
     if (snapshot.sourceStateById && Object.keys(snapshot.sourceStateById).length > 0) return true;

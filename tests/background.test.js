@@ -1894,6 +1894,47 @@ describe('background.js message listener', () => {
     });
 });
 
+describe('hasRestorableStateSnapshot recognizes state.root (v5)', () => {
+    let hasRestorableStateSnapshot;
+    beforeEach(() => {
+        jest.resetModules();
+        global.chrome = {
+            runtime: {
+                id: 'abcdefghijklmnopabcdefghijklmnop',
+                onMessage: { addListener: jest.fn() },
+                getManifest: jest.fn(() => ({})),
+                lastError: undefined
+            },
+            tabs: {
+                query: jest.fn(),
+                update: jest.fn(),
+                sendMessage: jest.fn(),
+                create: jest.fn()
+            },
+            windows: { update: jest.fn() },
+            storage: { local: { set: jest.fn(), get: jest.fn() } }
+        };
+        ({ hasRestorableStateSnapshot } = require('../src/background/index.js'));
+    });
+
+    afterEach(() => {
+        delete global.chrome;
+    });
+
+    it('treats a v5 snapshot with a non-empty state.root as restorable', () => {
+        expect(hasRestorableStateSnapshot({ root: [{ type: 'source', key: 'a' }] })).toBe(true);
+        expect(hasRestorableStateSnapshot({ root: [{ type: 'group', id: 'g1' }] })).toBe(true);
+    });
+
+    it('treats an empty state.root with no other content as not restorable', () => {
+        expect(hasRestorableStateSnapshot({ root: [], ungrouped: [], groupsById: {}, sourceStateById: {} })).toBe(false);
+    });
+
+    it('still recognizes legacy v4 snapshots via state.groups', () => {
+        expect(hasRestorableStateSnapshot({ groups: ['g1'] })).toBe(true);
+    });
+});
+
 describe('appearance preference normalization', () => {
     let normalizePreferences;
 
