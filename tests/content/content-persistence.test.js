@@ -1233,6 +1233,56 @@ describe('saveState', () => {
         expect(typeof payload[`sourcesPlusState_${projectId}`]._savedAt).toBe('string');
         expect(payload[`sourcesPlusState_${projectId}__backup`]).toEqual(payload[`sourcesPlusState_${projectId}`]);
     });
+
+    it('lifts a v3 snapshot to v5 root entries and drops the legacy groups field', () => {
+        const normalized = mod.normalizeLoadedState({
+            schemaVersion: 3,
+            groups: ['g3a', 'g3b'],
+            groupsById: { g3a: { id: 'g3a', children: [] }, g3b: { id: 'g3b', children: [] } },
+            ungrouped: ['s3'],
+            sourceStateById: {},
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {}
+        });
+        expect(normalized.schemaVersion).toBe(5);
+        expect(normalized.root).toEqual([
+            { type: 'group', id: 'g3a' },
+            { type: 'group', id: 'g3b' }
+        ]);
+        expect(Object.prototype.hasOwnProperty.call(normalized, 'groups')).toBe(false);
+        expect(mod._getPendingStorageUpgrade()).toBe(true);
+    });
+
+    it('lifts a v2 snapshot to v5 root entries', () => {
+        const normalized = mod.normalizeLoadedState({
+            schemaVersion: 2,
+            groups: ['g2a'],
+            groupsById: { g2a: { id: 'g2a', children: [] } },
+            ungrouped: ['s2'],
+            sourceStateById: {},
+            customHeight: 420
+        });
+        expect(normalized.schemaVersion).toBe(5);
+        expect(normalized.root).toEqual([{ type: 'group', id: 'g2a' }]);
+        expect(normalized.ungrouped).toEqual(['s2']);
+        expect(normalized.customHeight).toBe(420);
+        expect(Object.prototype.hasOwnProperty.call(normalized, 'groups')).toBe(false);
+    });
+
+    it('lifts a v1/legacy snapshot (enabledMap) to v5 root entries', () => {
+        const normalized = mod.normalizeLoadedState({
+            groups: ['g1a'],
+            groupsById: { g1a: { id: 'g1a', children: [{ type: 'source', key: 'legacySrc' }] } },
+            ungrouped: ['legacyUngrouped'],
+            enabledMap: { legacySrc: false }
+        });
+        expect(normalized.schemaVersion).toBe(5);
+        expect(normalized.root).toEqual([{ type: 'group', id: 'g1a' }]);
+        expect(normalized.ungrouped).toEqual(['legacyUngrouped']);
+        expect(normalized.legacyEnabledMap).toEqual({ legacySrc: false });
+        expect(Object.prototype.hasOwnProperty.call(normalized, 'groups')).toBe(false);
+    });
 });
 
 describe('settings import/export configuration', () => {

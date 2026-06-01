@@ -1244,8 +1244,9 @@
 
             if (stateData.schemaVersion === 3) {
                 const normalizedState = {
-                    schemaVersion: 3,
-                    groups: Array.isArray(stateData.groups) ? stateData.groups : [],
+                    schemaVersion: storageSchemaVersion,
+                    root: (Array.isArray(stateData.groups) ? stateData.groups : [])
+                        .map((id) => ({ type: 'group', id })),
                     groupsById: stateData.groupsById || {},
                     ungrouped: Array.isArray(stateData.ungrouped) ? stateData.ungrouped : [],
                     sourceStateById: stateData.sourceStateById || {},
@@ -1262,8 +1263,9 @@
 
             if (stateData.schemaVersion === 2) {
                 return {
-                    schemaVersion: 2,
-                    groups: Array.isArray(stateData.groups) ? stateData.groups : [],
+                    schemaVersion: storageSchemaVersion,
+                    root: (Array.isArray(stateData.groups) ? stateData.groups : [])
+                        .map((id) => ({ type: 'group', id })),
                     groupsById: stateData.groupsById || {},
                     ungrouped: Array.isArray(stateData.ungrouped) ? stateData.ungrouped : [],
                     sourceStateById: stateData.sourceStateById || {},
@@ -1275,8 +1277,9 @@
             }
 
             return {
-                schemaVersion: 1,
-                groups: Array.isArray(stateData.groups) ? stateData.groups : [],
+                schemaVersion: storageSchemaVersion,
+                root: (Array.isArray(stateData.groups) ? stateData.groups : [])
+                    .map((id) => ({ type: 'group', id })),
                 groupsById: stateData.groupsById || {},
                 ungrouped: Array.isArray(stateData.ungrouped) ? stateData.ungrouped : [],
                 legacyEnabledMap: stateData.enabledMap || {},
