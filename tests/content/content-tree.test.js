@@ -3015,7 +3015,7 @@ describe('computeDropIntent', () => {
     }
 
     it('returns a before-source intent when the pointer is in the upper half of a root source-item', () => {
-        const state = { ungrouped: ['A', 'B'], groups: [] };
+        const state = { root: [{ type: 'source', key: 'A' }, { type: 'source', key: 'B' }], ungrouped: [] };
         const tree = buildTree({ state });
         const { sourcesListEl } = makeMockShadowList({
             items: [
@@ -3034,14 +3034,14 @@ describe('computeDropIntent', () => {
         });
         expect(intent).toBeTruthy();
         expect(intent.kind).toBe('before-source');
-        expect(intent.targetList).toBe(state.ungrouped);
+        expect(intent.targetList).toBe(state.root);
         expect(intent.insertIndex).toBe(1);
         expect(intent.slotKey).toBe('B');
         expect(intent.targetGroup).toBeNull();
     });
 
     it('returns a before-group intent when the pointer is above a root group-container slot', () => {
-        const state = { ungrouped: [], groups: ['g1', 'g2'] };
+        const state = { root: [{ type: 'group', id: 'g1' }, { type: 'group', id: 'g2' }], ungrouped: [] };
         const groupsById = new Map([
             ['g1', { id: 'g1', children: [] }],
             ['g2', { id: 'g2', children: [] }]
@@ -3067,10 +3067,84 @@ describe('computeDropIntent', () => {
         expect(intent).toBeTruthy();
         // Slot midY scan: g1 mid=115 < 150 (skip), g2 mid=215 > 150 → before-group g2.
         expect(intent.kind).toBe('before-group');
-        expect(intent.targetList).toBe(state.groups);
-        expect(intent.insertIndex).toBe(1); // index of g2 in state.groups
+        expect(intent.targetList).toBe(state.root);
+        expect(intent.insertIndex).toBe(1); // index of g2 in state.root
         expect(intent.slotKey).toBe('g2');
         expect(intent.targetGroup).toBeNull();
+    });
+
+    it('root host returns targetList === state.root and slot index into state.root (source between two folders)', () => {
+        // state.root is the unified heterogeneous root array.
+        const state = {
+            root: [
+                { type: 'group', id: 'g1' },
+                { type: 'group', id: 'g2' }
+            ],
+            ungrouped: []
+        };
+        const groupsById = new Map([
+            ['g1', { id: 'g1', children: [] }],
+            ['g2', { id: 'g2', children: [] }]
+        ]);
+        const tree = buildTree({ state, groupsById });
+        const { sourcesListEl } = makeMockShadowList({
+            items: [
+                { kind: 'group', id: 'g1', top: 100, headerHeight: 30, childrenStart: 130, childrenEnd: 130 },
+                { kind: 'group', id: 'g2', top: 200, headerHeight: 30, childrenStart: 230, childrenEnd: 230 }
+            ]
+        });
+        // Pointer at y=170 — gap between g1 (header 100..130) and g2 (200..230): neither
+        // container encloses it. Slot scan: g1 mid=115 < 170 (skip), g2 mid=215 > 170 →
+        // before g2. With the unified root model the source drops BETWEEN the folders.
+        const intent = tree.computeDropIntent({
+            clientY: 170,
+            rootElement: sourcesListEl,
+            state,
+            groupsById,
+            parentMap: new Map(),
+            activeDragContext: { kind: 'source-single', keys: ['external'] }
+        });
+        expect(intent).toBeTruthy();
+        expect(intent.targetGroup).toBeNull();
+        expect(intent.targetList).toBe(state.root);
+        expect(intent.kind).toBe('before-group');
+        // index of g2 in state.root
+        expect(intent.insertIndex).toBe(1);
+        expect(intent.slotKey).toBe('g2');
+    });
+
+    it('root host: pointer in upper half of a positioned root source returns before-source index into state.root', () => {
+        const state = {
+            root: [
+                { type: 'source', key: 'A' },
+                { type: 'group', id: 'g1' },
+                { type: 'source', key: 'B' }
+            ],
+            ungrouped: []
+        };
+        const groupsById = new Map([['g1', { id: 'g1', children: [] }]]);
+        const tree = buildTree({ state, groupsById });
+        const { sourcesListEl } = makeMockShadowList({
+            items: [
+                { kind: 'source', key: 'A', top: 100, height: 40 },
+                { kind: 'group', id: 'g1', top: 140, headerHeight: 30, childrenStart: 170, childrenEnd: 170 },
+                { kind: 'source', key: 'B', top: 200, height: 40 }
+            ]
+        });
+        // y=205 — upper half of B (mid 220) → before-source B. B is at index 2 in state.root.
+        const intent = tree.computeDropIntent({
+            clientY: 205,
+            rootElement: sourcesListEl,
+            state,
+            groupsById,
+            parentMap: new Map(),
+            activeDragContext: { kind: 'source-single', keys: ['external'] }
+        });
+        expect(intent).toBeTruthy();
+        expect(intent.targetList).toBe(state.root);
+        expect(intent.kind).toBe('before-source');
+        expect(intent.insertIndex).toBe(2);
+        expect(intent.slotKey).toBe('B');
     });
 
     it('returns into-group with insertIndex=0 (top of folder) when the pointer is on a group-header band', () => {
@@ -3287,7 +3361,7 @@ describe('computeDropIntent', () => {
     });
 
     it('uses visual mid-Y so a shifted sibling avoids upward when cursor enters its visual zone', () => {
-        const state = { ungrouped: ['A', 'B'], groups: [] };
+        const state = { root: [{ type: 'source', key: 'A' }, { type: 'source', key: 'B' }], ungrouped: [] };
         const tree = buildTree({ state });
         // B has been translateY'd +40 to "open" a slot above it. Its visual band is now
         // 180..220 (visual mid 200); its un-shifted layout band is 140..180 (layout mid 160).
@@ -3343,113 +3417,6 @@ describe('computeDropIntent', () => {
             state, groupsById: new Map(), parentMap: new Map()
         });
         expect(belowIntent).toBeNull();
-    });
-
-    // P3(B): source drag landing in a root group-typed slot auto-routes to the nearest ungrouped neighbor.
-    it('auto-routes a source drag away from a root group slot to the nearest ungrouped neighbor', () => {
-        const state = { ungrouped: ['SrcA', 'SrcB'], groups: ['g1'] };
-        const groupsById = new Map([['g1', { id: 'g1', children: [] }]]);
-        const tree = buildTree({ state, groupsById });
-        // DOM order: SrcA (top 100..140), SrcB (140..180), g1 group-container header (200..230, no children band)
-        const { sourcesListEl } = makeMockShadowList({
-            items: [
-                { kind: 'source', key: 'SrcA', top: 100, height: 40 },
-                { kind: 'source', key: 'SrcB', top: 140, height: 40 },
-                { kind: 'group', id: 'g1', top: 200, headerHeight: 30, childrenStart: 230, childrenEnd: 230 }
-            ]
-        });
-        // Pointer at y=190 — between SrcB (mid 160) and g1 container (top 200). No group contains pointer,
-        // so root host. Slot detection: SrcA midY=120 < 190, SrcB midY=160 < 190, g1 midY varies but
-        // first midY > 190 hits g1. beforeIndex points at the group → would normally return before-group.
-        // With activeDragContext source-single → auto-route to nearest ungrouped neighbor (SrcB above).
-        const intent = tree.computeDropIntent({
-            clientY: 190,
-            rootElement: sourcesListEl,
-            state, groupsById, parentMap: new Map(),
-            activeDragContext: { kind: 'source-single', keys: ['external'] }
-        });
-        expect(intent).toBeTruthy();
-        expect(intent.targetList).toBe(state.ungrouped);
-        // SrcB is the closer ungrouped neighbor (above) → after-source SrcB at insertIndex 2 (end of ungrouped).
-        expect(intent.kind).toBe('after-source');
-        expect(intent.slotKey).toBe('SrcB');
-        expect(intent.insertIndex).toBe(2);
-
-        // Same pointer with group drag should NOT auto-route — group reorder is valid in state.groups.
-        const groupIntent = tree.computeDropIntent({
-            clientY: 190,
-            rootElement: sourcesListEl,
-            state, groupsById, parentMap: new Map(),
-            activeDragContext: { kind: 'group', draggedGroupId: 'external' }
-        });
-        expect(groupIntent).toBeTruthy();
-        expect(groupIntent.kind).toBe('before-group');
-        expect(groupIntent.targetList).toBe(state.groups);
-    });
-
-    // Group drag landing on a root source slot auto-routes to the nearest group neighbor.
-    it('auto-routes a group drag away from a root source slot to the nearest group neighbor', () => {
-        const state = { ungrouped: ['SrcA'], groups: ['g1', 'g2'] };
-        const groupsById = new Map([
-            ['g1', { id: 'g1', children: [] }],
-            ['g2', { id: 'g2', children: [] }]
-        ]);
-        const tree = buildTree({ state, groupsById });
-        // DOM order at root: g1 (100..130), g2 (200..230), then SrcA (300..340).
-        // (Groups render before ungrouped, matching content-render.js.)
-        const { sourcesListEl } = makeMockShadowList({
-            items: [
-                { kind: 'group', id: 'g1', top: 100, headerHeight: 30, childrenStart: 130, childrenEnd: 130 },
-                { kind: 'group', id: 'g2', top: 200, headerHeight: 30, childrenStart: 230, childrenEnd: 230 },
-                { kind: 'source', key: 'SrcA', top: 300, height: 40 }
-            ]
-        });
-        const intent = tree.computeDropIntent({
-            clientY: 315, // mid-Y of SrcA (320), upper half → before-source SrcA
-            rootElement: sourcesListEl,
-            state, groupsById, parentMap: new Map(),
-            activeDragContext: { kind: 'group', draggedGroupId: 'external' }
-        });
-        expect(intent).toBeTruthy();
-        // Group drag should auto-route away from SrcA to nearest group (g2 above).
-        expect(intent.targetList).toBe(state.groups);
-        expect(intent.kind).toBe('after-group');
-        expect(intent.slotKey).toBe('g2');
-        expect(intent.insertIndex).toBe(2); // after g2
-    });
-
-    // P3(B): when no ungrouped neighbors exist at root (groups-only), source drag falls through to
-    // before/after-group (which computeIsInvalidDrop will then flag as invalid + apply red outline).
-    it('falls back to ungrouped-tail when source dragged between groups with empty ungrouped list', () => {
-        const state = { ungrouped: [], groups: ['g1', 'g2'] };
-        const groupsById = new Map([
-            ['g1', { id: 'g1', children: [] }],
-            ['g2', { id: 'g2', children: [] }]
-        ]);
-        const tree = buildTree({ state, groupsById });
-        const { sourcesListEl } = makeMockShadowList({
-            items: [
-                { kind: 'group', id: 'g1', top: 100, headerHeight: 30, childrenStart: 130, childrenEnd: 130 },
-                { kind: 'group', id: 'g2', top: 200, headerHeight: 30, childrenStart: 230, childrenEnd: 230 }
-            ]
-        });
-        const intent = tree.computeDropIntent({
-            clientY: 170, // between g1 (100..130 header only) and g2 (200..230) — neither group contains pointer.
-            rootElement: sourcesListEl,
-            state, groupsById, parentMap: new Map(),
-            activeDragContext: { kind: 'source-single', keys: ['external'] }
-        });
-        // Previously this returned `before-group` (which `computeIsInvalidDrop` would
-        // flag — silently rejecting the drop). Now `routeToNearestNeighborKind` falls
-        // back to an "after-source" intent targeting the empty `state.ungrouped` array
-        // so handleDrop can splice the source into the ungrouped list. The drop will
-        // visually land wherever the ungrouped region renders rather than between the
-        // two groups, but at least the drop succeeds.
-        expect(intent).toBeTruthy();
-        expect(intent.kind).toBe('after-source');
-        expect(intent.targetList).toBe(state.ungrouped);
-        expect(intent.insertIndex).toBe(0);
-        expect(intent.slotKey).toBeNull();
     });
 
     // X-split corridor only fires on COLLAPSED folders. Cursor in a collapsed

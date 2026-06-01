@@ -283,8 +283,10 @@
                 ? prevIntent.targetGroupId
                 : null;
             const stateObj = state || {};
-            const groups = stateObj.groups = Array.isArray(stateObj.groups) ? stateObj.groups : [];
-            const ungrouped = stateObj.ungrouped = Array.isArray(stateObj.ungrouped) ? stateObj.ungrouped : [];
+            const root = stateObj.root = Array.isArray(stateObj.root) ? stateObj.root : [];
+            // Normalize ungrouped to an array for downstream consumers; the root host branch
+            // itself never targets state.ungrouped (see the root-host return block below).
+            stateObj.ungrouped = Array.isArray(stateObj.ungrouped) ? stateObj.ungrouped : [];
 
             // Find the deepest group-container whose children-area encloses clientY.
             const containers = rootElement.querySelectorAll('.group-container');
@@ -600,7 +602,7 @@
                         : (Array.isArray(allDesc) ? allDesc : []);
                 }
             } else {
-                // Root host. The state model has groups and ungrouped as two separate lists.
+                // Root host. state.root is a single ordered heterogeneous list (groups + positioned sources).
                 // Use the children directly under rootElement.
                 const rootChildren = typeof rootElement.querySelectorAll === 'function'
                     ? rootElement.querySelectorAll(':scope > .group-container, :scope > .source-item')
@@ -697,66 +699,45 @@
                 };
             }
 
-            // Root host: targetList depends on slot neighbor type.
+            // Root host: targetList is state.root (heterogeneous — { type:'group', id }
+            // | { type:'source', key }, same shape as group.children). Both source and
+            // group drops are valid at any root index; slot detection picks the index in
+            // state.root directly. The ungrouped bin is a separate drop region resolved
+            // elsewhere (handled by the bin/empty-bin dropzone task), so this branch never
+            // returns state.ungrouped.
             if (candidates.length === 0) {
                 return {
                     kind: 'after-source',
                     targetGroup: null,
-                    targetList: ungrouped,
+                    targetList: root,
+                    isRootList: true,
                     insertIndex: 0,
                     targetGroupId: null,
                     hostGroupContainerEl: null,
                     slotKey: null
                 };
             }
-            // Auto-route across slot/drag-kind mismatch at the root.
-            //
-            // Root contains both ungrouped sources (state.ungrouped: string[]) and groups
-            // (state.groups: string[]) — they live in separate state arrays. When the
-            // cursor lands in a "wrong-kind" slot for the drag (e.g. source drag over a
-            // group slot, or group drag over an ungrouped source slot), we auto-route to
-            // the nearest same-kind neighbor so the drop lands somewhere sensible. Without
-            // routing the drop would be invalid (splice mismatched id into the wrong array).
-            const isSourceDrag = activeDragContext
-                && (activeDragContext.kind === 'source-single' || activeDragContext.kind === 'source-multi');
-            const isGroupDrag = activeDragContext && activeDragContext.kind === 'group';
+
+            const rootSlotIndex = (key, isSource) => {
+                for (let i = 0; i < root.length; i += 1) {
+                    const entry = root[i];
+                    if (!entry) continue;
+                    if (isSource && entry.type === 'source' && entry.key === key) return i;
+                    if (!isSource && entry.type === 'group' && entry.id === key) return i;
+                }
+                return -1;
+            };
 
             if (beforeIndex >= 0) {
                 const slot = candidates[beforeIndex];
-                if (slot.kind === 'source') {
-                    if (isGroupDrag) {
-                        // Group drag over a source slot — route to nearest group neighbor.
-                        const routed = routeToNearestNeighborKind({
-                            candidates, beforeIndex, targetCandidateKind: 'group',
-                            targetList: groups, clientY, unshiftedRect
-                        });
-                        if (routed) return routed;
-                    }
-                    const ungroupedIndex = ungrouped.indexOf(slot.key);
-                    return {
-                        kind: 'before-source',
-                        targetGroup: null,
-                        targetList: ungrouped,
-                        insertIndex: ungroupedIndex >= 0 ? ungroupedIndex : 0,
-                        targetGroupId: null,
-                        hostGroupContainerEl: null,
-                        slotKey: slot.key
-                    };
-                }
-                // slot.kind === 'group'
-                if (isSourceDrag) {
-                    const routed = routeToNearestNeighborKind({
-                        candidates, beforeIndex, targetCandidateKind: 'source',
-                        targetList: ungrouped, clientY, unshiftedRect
-                    });
-                    if (routed) return routed;
-                }
-                const groupsIndex = groups.indexOf(slot.key);
+                const slotIsSource = slot.kind === 'source';
+                const idx = rootSlotIndex(slot.key, slotIsSource);
                 return {
-                    kind: 'before-group',
+                    kind: slotIsSource ? 'before-source' : 'before-group',
                     targetGroup: null,
-                    targetList: groups,
-                    insertIndex: groupsIndex >= 0 ? groupsIndex : 0,
+                    targetList: root,
+                    isRootList: true,
+                    insertIndex: idx >= 0 ? idx : 0,
                     targetGroupId: null,
                     hostGroupContainerEl: null,
                     slotKey: slot.key
@@ -765,136 +746,17 @@
 
             // After all root children.
             const lastRoot = candidates[candidates.length - 1];
-            if (lastRoot.kind === 'group') {
-                if (isSourceDrag) {
-                    const routed = routeToNearestNeighborKind({
-                        candidates, beforeIndex: candidates.length, targetCandidateKind: 'source',
-                        targetList: ungrouped, clientY, unshiftedRect
-                    });
-                    if (routed) return routed;
-                }
-                const groupsIndex = groups.indexOf(lastRoot.key);
-                return {
-                    kind: 'after-group',
-                    targetGroup: null,
-                    targetList: groups,
-                    insertIndex: groupsIndex >= 0 ? groupsIndex + 1 : groups.length,
-                    targetGroupId: null,
-                    hostGroupContainerEl: null,
-                    slotKey: lastRoot.key
-                };
-            }
-            // lastRoot.kind === 'source'
-            if (isGroupDrag) {
-                const routed = routeToNearestNeighborKind({
-                    candidates, beforeIndex: candidates.length, targetCandidateKind: 'group',
-                    targetList: groups, clientY, unshiftedRect
-                });
-                if (routed) return routed;
-            }
-            const ungroupedIndex = ungrouped.indexOf(lastRoot.key);
+            const lastIsSource = lastRoot.kind === 'source';
+            const lastIdx = rootSlotIndex(lastRoot.key, lastIsSource);
             return {
-                kind: 'after-source',
+                kind: lastIsSource ? 'after-source' : 'after-group',
                 targetGroup: null,
-                targetList: ungrouped,
-                insertIndex: ungroupedIndex >= 0 ? ungroupedIndex + 1 : ungrouped.length,
+                targetList: root,
+                isRootList: true,
+                insertIndex: lastIdx >= 0 ? lastIdx + 1 : root.length,
                 targetGroupId: null,
                 hostGroupContainerEl: null,
                 slotKey: lastRoot.key
-            };
-        }
-
-        // Find the nearest candidate of a given kind at root (by distance from cursor to
-        // its un-shifted vertical mid-Y) and produce a before/after intent against the
-        // correct state list. Used by computeDropIntent to auto-route across
-        // source-slot / group-slot mismatches at the root (where ungrouped and groups
-        // live in separate arrays). Returns null when no candidate of the requested kind
-        // exists — caller falls through to a same-kind intent that computeIsInvalidDrop
-        // will then flag as invalid.
-        function routeToNearestNeighborKind({ candidates, beforeIndex, targetCandidateKind, targetList, clientY, unshiftedRect }) {
-            if (!candidates || candidates.length === 0) return null;
-            if (!Array.isArray(targetList)) return null;
-            const isSourceKindEarly = targetCandidateKind === 'source';
-            // Empty target list (e.g. user drags a source between two top-level groups but
-            // state.ungrouped is empty so there's no nearest-source neighbor). Without this
-            // fallback the route returns null → caller falls to before-group/after-group
-            // intent → computeIsInvalidDrop flags it invalid → drop is silently rejected.
-            // Instead, return a slotKey-less intent that splices into the (empty) targetList
-            // at index 0. handleDrop will then place the source into state.ungrouped, even
-            // if that means it visually lands wherever the ungrouped region renders rather
-            // than where the cursor was — a successful drop is better than a silent reject.
-            if (targetList.length === 0) {
-                return {
-                    kind: isSourceKindEarly ? 'after-source' : 'after-group',
-                    targetGroup: null,
-                    targetList,
-                    insertIndex: 0,
-                    targetGroupId: null,
-                    hostGroupContainerEl: null,
-                    slotKey: null
-                };
-            }
-            let upHit = null;
-            for (let i = beforeIndex - 1; i >= 0; i -= 1) {
-                if (candidates[i] && candidates[i].kind === targetCandidateKind) {
-                    upHit = candidates[i];
-                    break;
-                }
-            }
-            let downHit = null;
-            for (let i = beforeIndex; i < candidates.length; i += 1) {
-                if (candidates[i] && candidates[i].kind === targetCandidateKind) {
-                    downHit = candidates[i];
-                    break;
-                }
-            }
-            const dist = (hit) => {
-                if (!hit) return Infinity;
-                const r = unshiftedRect(hit.el);
-                if (!r) return Infinity;
-                return Math.abs((r.top + r.height / 2) - clientY);
-            };
-            const upDist = dist(upHit);
-            const downDist = dist(downHit);
-            if (!upHit && !downHit) {
-                // No same-kind neighbor in `candidates` but targetList isn't empty (some
-                // sources exist in state.ungrouped, just none in the rendered slot region).
-                // Append to targetList's end so drop still works.
-                return {
-                    kind: isSourceKindEarly ? 'after-source' : 'after-group',
-                    targetGroup: null,
-                    targetList,
-                    insertIndex: targetList.length,
-                    targetGroupId: null,
-                    hostGroupContainerEl: null,
-                    slotKey: null
-                };
-            }
-            const isSourceKind = targetCandidateKind === 'source';
-            // Up-neighbor → after; down-neighbor → before. Prefer the closer one.
-            if (upHit && (!downHit || upDist <= downDist)) {
-                const key = upHit.key;
-                const idx = targetList.indexOf(key);
-                return {
-                    kind: isSourceKind ? 'after-source' : 'after-group',
-                    targetGroup: null,
-                    targetList,
-                    insertIndex: idx >= 0 ? idx + 1 : targetList.length,
-                    targetGroupId: null,
-                    hostGroupContainerEl: null,
-                    slotKey: key
-                };
-            }
-            const key = downHit.key;
-            const idx = targetList.indexOf(key);
-            return {
-                kind: isSourceKind ? 'before-source' : 'before-group',
-                targetGroup: null,
-                targetList,
-                insertIndex: idx >= 0 ? idx : 0,
-                targetGroupId: null,
-                hostGroupContainerEl: null,
-                slotKey: key
             };
         }
 
