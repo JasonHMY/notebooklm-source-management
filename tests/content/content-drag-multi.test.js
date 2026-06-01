@@ -503,6 +503,89 @@ describe('content-drag-multi factory', () => {
             expect(callTracker.saveState).not.toHaveBeenCalled();
             expect(callTracker.render).not.toHaveBeenCalled();
         });
+
+        it('splices multiple {type:"source"} entries into state.root for a root reorder drop', () => {
+            const state = {
+                root: [{ type: 'group', id: 'g1' }, { type: 'source', key: 'X' }],
+                ungrouped: ['A', 'B', 'C']
+            };
+            const helpers = {
+                removeSourceFromParent: jest.fn((key) => {
+                    state.ungrouped = state.ungrouped.filter((k) => k !== key);
+                }),
+                sourceExists: jest.fn((key) => state.ungrouped.includes(key)
+                    || state.root.some((e) => e.type === 'source' && e.key === key)),
+                getGroupById: jest.fn(() => null)
+            };
+            const helper = createContentDragMulti();
+            const result = helper.applyMultiSourceDrop({
+                keys: ['A', 'B'],
+                intent: {
+                    kind: 'after-group',
+                    targetList: state.root,
+                    insertIndex: 1,
+                    targetGroup: null,
+                    isRootList: true
+                },
+                state,
+                helpers
+            });
+            expect(result.moved).toBe(2);
+            // A, B leave the bin and land between the group and source X as OBJECT entries.
+            expect(state.ungrouped).toEqual(['C']);
+            expect(state.root).toEqual([
+                { type: 'group', id: 'g1' },
+                { type: 'source', key: 'A' },
+                { type: 'source', key: 'B' },
+                { type: 'source', key: 'X' }
+            ]);
+        });
+
+        it('uses object entries when dropping into an empty state.root', () => {
+            const state = { root: [], ungrouped: ['A', 'B'] };
+            const helpers = {
+                removeSourceFromParent: jest.fn((key) => {
+                    state.ungrouped = state.ungrouped.filter((k) => k !== key);
+                }),
+                sourceExists: jest.fn((key) => state.ungrouped.includes(key)),
+                getGroupById: jest.fn(() => null)
+            };
+            const helper = createContentDragMulti();
+            const result = helper.applyMultiSourceDrop({
+                keys: ['A'],
+                intent: { kind: 'before-source', targetList: state.root, insertIndex: 0, targetGroup: null, isRootList: true },
+                state,
+                helpers
+            });
+            expect(result.moved).toBe(1);
+            expect(state.root).toEqual([{ type: 'source', key: 'A' }]);
+            expect(state.ungrouped).toEqual(['B']);
+        });
+
+        it('re-resolves the reassigned state.root after removeSourceFromParent (root stale-ref)', () => {
+            const state = { root: [{ type: 'source', key: 'Z' }], ungrouped: ['A'] };
+            const originalRoot = state.root;
+            const helpers = {
+                removeSourceFromParent: jest.fn((key) => {
+                    state.ungrouped = state.ungrouped.filter((k) => k !== key);
+                    state.root = state.root.filter((e) => !(e.type === 'source' && e.key === key));
+                }),
+                sourceExists: jest.fn((key) => state.ungrouped.includes(key)
+                    || state.root.some((e) => e.type === 'source' && e.key === key)),
+                getGroupById: jest.fn(() => null)
+            };
+            const helper = createContentDragMulti();
+            const result = helper.applyMultiSourceDrop({
+                keys: ['A'],
+                intent: { kind: 'after-source', targetList: state.root, insertIndex: 1, targetGroup: null, isRootList: true },
+                state,
+                helpers
+            });
+            expect(result.moved).toBe(1);
+            expect(state.root).toEqual([{ type: 'source', key: 'Z' }, { type: 'source', key: 'A' }]);
+            // splice went into the reassigned array, not the captured orphan.
+            expect(state.root).not.toBe(originalRoot);
+        });
     });
 
     describe('createAutoScrollController', () => {

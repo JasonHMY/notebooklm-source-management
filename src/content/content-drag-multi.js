@@ -208,7 +208,8 @@
                 for (let i = 0; i < insertIndex; i += 1) {
                     if (isMemberAt(i)) membersBeforeInsert += 1;
                 }
-                const hadObjectEntries = list.length > 0 && typeof list[0] === 'object';
+                const isRootList = Boolean(intent.isRootList);
+                const hadObjectEntries = isRootList || (list.length > 0 && typeof list[0] === 'object');
                 const adjustedInsertIndex = insertIndex - membersBeforeInsert;
 
                 for (let i = 0; i < validKeys.length; i += 1) {
@@ -225,6 +226,8 @@
                 let currentList = list;
                 if (intent.targetGroup && Array.isArray(intent.targetGroup.children)) {
                     currentList = intent.targetGroup.children;
+                } else if (isRootList && state && Array.isArray(state.root)) {
+                    currentList = state.root;
                 } else if (state && Array.isArray(state.ungrouped)) {
                     currentList = state.ungrouped;
                 }
