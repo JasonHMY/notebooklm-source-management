@@ -1964,6 +1964,53 @@ describe('batch count and source menu motion rendering', () => {
         ]);
     });
 
+    it('wraps the ungrouped bin in an .ungrouped-section container (header + sources inside)', () => {
+        const listContainer = createRenderTestElement('div', { id: 'sources-list' });
+        const sourcesByKey = new Map([
+            ['b1', { key: 'b1', title: 'Bin One', enabled: true }],
+            ['b2', { key: 'b2', title: 'Bin Two', enabled: true }]
+        ]);
+        const renderModule = createContentRender({
+            el: createRenderTestElement,
+            getDocument: () => ({
+                createDocumentFragment: createRenderTestFragment,
+                createElement: (tag) => createRenderTestElement(tag)
+            }),
+            getShadowRoot: () => ({
+                querySelector: jest.fn((selector) => (selector === '#sources-list' ? listContainer : null)),
+                getElementById: jest.fn((id) => (id === 'sources-list' ? listContainer : null)),
+                appendChild: jest.fn()
+            }),
+            getState: () => ({
+                root: [],
+                ungrouped: ['b1', 'b2'],
+                isBatchMode: false,
+                activeTagId: null
+            }),
+            getGroupsById: () => new Map(),
+            getSourcesByKey: () => sourcesByKey,
+            getMessage: (key) => key
+        });
+
+        renderModule.render();
+
+        const sections = findRenderTestNodesByClass(listContainer, 'ungrouped-section');
+        expect(sections).toHaveLength(1);
+        const section = sections[0];
+        // bin source-items + header are children of the section, NOT direct children of #sources-list
+        expect(listContainer.childNodes).toContain(section);
+        expect(findRenderTestNodesByClass(listContainer, 'ungrouped-header')).toHaveLength(1);
+        const headerInSection = findRenderTestNodesByClass(section, 'ungrouped-header');
+        expect(headerInSection).toHaveLength(1);
+        const binSources = findRenderTestNodesByClass(section, 'source-item').map((node) => node.dataset.sourceKey);
+        expect(binSources).toEqual(['b1', 'b2']);
+        // none of the bin source-items is a DIRECT child of #sources-list
+        const directSourceItems = listContainer.childNodes.filter((node) => (
+            node && typeof node === 'object' && String(node.className || '').split(/\s+/).includes('source-item')
+        ));
+        expect(directSourceItems).toHaveLength(0);
+    });
+
     it('renders persisted groups that are missing children arrays without crashing', () => {
         const listContainer = createRenderTestElement('div', { id: 'sources-list' });
         const groupsById = new Map([

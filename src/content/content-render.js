@@ -1472,17 +1472,21 @@
                 });
 
                 if (matchingUngrouped.length > 0) {
+                    const ungroupedSection = el('div', { className: 'ungrouped-section' });
+
                     const ungroupedHeader = doc.createElement('h4');
                     ungroupedHeader.className = 'ungrouped-header';
                     ungroupedHeader.textContent = getMessage('ui_ungrouped');
-                    fragment.appendChild(ungroupedHeader);
+                    ungroupedSection.appendChild(ungroupedHeader);
 
                     matchingUngrouped.forEach((key) => {
                         const sourceElement = renderSourceItem(sourcesByKey.get(key));
                         if (sourceElement) {
-                            fragment.appendChild(sourceElement);
+                            ungroupedSection.appendChild(sourceElement);
                         }
                     });
+
+                    fragment.appendChild(ungroupedSection);
                 }
             }
 
