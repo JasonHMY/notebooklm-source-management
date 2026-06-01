@@ -568,7 +568,7 @@ chrome.storage.local
 │   └── 排障: src/background/index.js, src/popup/index.js
 ├── sourcesPlusState_<projectId>
 │   ├── 用途: 每个 notebook 的主状态
-│   ├── 内容: groups, ungrouped, groupsById, sourceStateById, tagsById, sourceTagsById, tagOrder
+│   ├── 内容: root(根层级有序异构数组 group/source), ungrouped(底部未分组桶), groupsById, sourceStateById, tagsById, sourceTagsById, tagOrder
 │   ├── 写入: content -> background SAVE_STATE
 │   └── 排障: src/content/content-persistence.js, src/background/index.js
 ├── sourcesPlusState_<projectId>__backup
@@ -617,8 +617,8 @@ content runtime memory
 
 ```json
 {
-  "schemaVersion": 4,
-  "groups": ["group-id"],
+  "schemaVersion": 5,
+  "root": [{ "type": "group", "id": "group-id" }, { "type": "source", "key": "source-key" }],
   "ungrouped": ["source-key"],
   "groupsById": {
     "group-id": {
