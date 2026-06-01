@@ -744,6 +744,29 @@
                 };
             }
 
+            // Empty-bin trailing drop zone: when the bottom bin (state.ungrouped) is
+            // empty and the cursor is below ALL root content (no candidate matched
+            // beforeIndex, so the pointer is past every root entry's mid-Y), a SOURCE
+            // drag here means "send this source to the (currently empty) bin". Returns
+            // a targetGroup-less ungrouped intent so the root-level reflow in
+            // _processDragOver opens a slot at the bottom and the .sp-ungroup-dropzone
+            // hint is mounted. isEmptyBinTrailing tells _processDragOver to render the
+            // transient hint. Group drags fall through to sibling-reorder routing below.
+            const _isSourceDragTrailing = activeDragContext
+                && (activeDragContext.kind === 'source-single' || activeDragContext.kind === 'source-multi');
+            if (_isSourceDragTrailing && stateObj.ungrouped.length === 0) {
+                return {
+                    kind: 'after-source',
+                    targetGroup: null,
+                    targetList: stateObj.ungrouped,
+                    insertIndex: 0,
+                    targetGroupId: null,
+                    hostGroupContainerEl: null,
+                    slotKey: null,
+                    isEmptyBinTrailing: true
+                };
+            }
+
             // After all root children.
             const lastRoot = candidates[candidates.length - 1];
             const lastIsSource = lastRoot.kind === 'source';

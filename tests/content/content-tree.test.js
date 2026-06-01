@@ -3775,6 +3775,62 @@ describe('computeDropIntent', () => {
         expect(intent.targetList).toBe(groupsById.get('F').children);
         expect(intent.slotKey).toBe('X');
     });
+
+    it('returns an ungrouped trailing intent when the bin is empty and the cursor is below all root content', () => {
+        // state.root holds one positioned source A; the bottom bin (state.ungrouped) is empty.
+        const state = { ungrouped: [], root: [{ type: 'source', key: 'A' }] };
+        const tree = buildTree({ state });
+        const { sourcesListEl } = makeMockShadowList({
+            // A renders 100..140; the list viewport extends to bottom:1000 so there is a
+            // large trailing empty band below A.
+            items: [{ kind: 'source', key: 'A', top: 100, height: 40 }],
+            listRect: { top: 0, bottom: 1000, height: 1000 }
+        });
+
+        // Cursor at y=400 — well below A's bottom (140), inside the trailing band.
+        const intent = tree.computeDropIntent({
+            clientX: 100,
+            clientY: 400,
+            rootElement: sourcesListEl,
+            state,
+            groupsById: new Map(),
+            parentMap: new Map(),
+            activeDragContext: { kind: 'source-single' }
+        });
+        expect(intent).toBeTruthy();
+        expect(intent.kind).toBe('after-source');
+        expect(intent.targetList).toBe(state.ungrouped);
+        expect(intent.insertIndex).toBe(0);
+        expect(intent.targetGroup).toBeNull();
+        expect(intent.hostGroupContainerEl).toBeNull();
+        // Flag for the dropzone-rendering path so _processDragOver knows to mount the hint.
+        expect(intent.isEmptyBinTrailing).toBe(true);
+    });
+
+    it('does NOT return the empty-bin trailing intent when the bin already has sources', () => {
+        const state = { ungrouped: ['Z'], root: [{ type: 'source', key: 'A' }] };
+        const tree = buildTree({ state });
+        const { sourcesListEl } = makeMockShadowList({
+            items: [
+                { kind: 'source', key: 'A', top: 100, height: 40 },
+                // Z is a bin source; in the real DOM it lives inside .ungrouped-section and is
+                // NOT a :scope> child, so the mock omits it from root children — matching
+                // computeDropIntent's candidate scan. The bin being non-empty is read from state.
+                { kind: 'source', key: 'A2', top: 140, height: 40 }
+            ]
+        });
+        const intent = tree.computeDropIntent({
+            clientX: 100,
+            clientY: 400,
+            rootElement: sourcesListEl,
+            state: { ungrouped: ['Z'], root: [{ type: 'source', key: 'A' }, { type: 'source', key: 'A2' }] },
+            groupsById: new Map(),
+            parentMap: new Map(),
+            activeDragContext: { kind: 'source-single' }
+        });
+        expect(intent).toBeTruthy();
+        expect(intent.isEmptyBinTrailing).toBeUndefined();
+    });
 });
 
 describe('handleDragOver hover-expand', () => {
