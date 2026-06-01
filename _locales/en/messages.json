@@ -1237,6 +1237,9 @@
     "ui_keyboard_moved_ungrouped_toast": {
         "message": "Moved to Ungrouped"
     },
+    "ui_drop_to_ungroup_hint": {
+        "message": "Drop here to ungroup"
+    },
     "ui_empty_folders": {
         "message": "No folders available yet.\nCreate one first."
     },

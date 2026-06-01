@@ -1237,6 +1237,9 @@
     "ui_keyboard_moved_ungrouped_toast": {
         "message": "已移到未分组"
     },
+    "ui_drop_to_ungroup_hint": {
+        "message": "放到此处以取消分组"
+    },
     "ui_empty_folders": {
         "message": "当前没有可用的文件夹。\n请先创建一个。"
     },
