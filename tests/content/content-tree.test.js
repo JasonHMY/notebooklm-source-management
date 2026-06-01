@@ -1320,6 +1320,73 @@ describe('drop routes multi vs single source', () => {
         expect(state.ungrouped).toEqual(['D']);
     });
 
+    it('routes a multi-key drop between two root groups into state.root (not the bin)', () => {
+        const g1 = { id: 'g1', children: [] };
+        const g2 = { id: 'g2', children: [] };
+        const state = {
+            isBatchMode: true,
+            ungrouped: ['A', 'B'],
+            root: [{ type: 'group', id: 'g1' }, { type: 'group', id: 'g2' }]
+        };
+        const groupsById = new Map([['g1', g1], ['g2', g2]]);
+        const sourcesByKey = new Map([['A', { key: 'A' }], ['B', { key: 'B' }]]);
+        const pendingBatchKeys = new Set(['A', 'B']);
+        const saveState = jest.fn();
+        const render = jest.fn();
+        const showToast = jest.fn();
+        const buildParentMap = jest.fn();
+        const developerLog = jest.fn();
+        const runtime = {
+            dragReflowSession: {
+                draggedKeys: new Set(['A', 'B']),
+                // Drop between root groups g1 and g2 → before-group g2 against state.root.
+                currentIntent: {
+                    kind: 'before-group',
+                    targetGroup: null,
+                    targetList: state.root,
+                    insertIndex: 1,
+                    isRootList: true,
+                    slotKey: 'g2'
+                },
+                shiftedItems: new Map()
+            }
+        };
+        const interactions = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getSourcesByKey: () => sourcesByKey,
+            getParentMap: () => new Map(),
+            getPendingBatchKeys: () => pendingBatchKeys,
+            getShadowRoot: makeShadowRootWithList,
+            saveState,
+            render,
+            showToast,
+            buildParentMap,
+            developerLog,
+            dragMulti: createContentDragMulti({}),
+            getMessage: (key, args = []) => `${key}:${args.join(',')}`
+        });
+
+        interactions.handleDrop(createDropEvent({
+            dropTarget: null,
+            sourceKey: 'A',
+            sourceKeysJson: JSON.stringify(['A', 'B'])
+        }));
+
+        // The two positioned sources land between g1 and g2 in state.root; the bin is emptied.
+        expect(state.root).toEqual([
+            { type: 'group', id: 'g1' },
+            { type: 'source', key: 'A' },
+            { type: 'source', key: 'B' },
+            { type: 'group', id: 'g2' }
+        ]);
+        expect(state.ungrouped).toEqual([]);
+        expect(state.isBatchMode).toBe(false);
+        expect(showToast).toHaveBeenCalledTimes(1);
+        expect(saveState).toHaveBeenCalledWith({ immediate: true, critical: true });
+    });
+
     it('does not exit batch mode or toast on a no-op multi-drop', () => {
         const state = { isBatchMode: true, ungrouped: ['A', 'B'], groups: [] };
         const groupsById = new Map();
@@ -1631,72 +1698,11 @@ describe('drop routes multi vs single source', () => {
         );
     });
 
-    it('does not corrupt state.groups when intent is before-group at top level', () => {
-        const group = { id: 'g1', children: [] };
-        const state = { isBatchMode: true, ungrouped: ['A', 'B', 'C'], groups: ['g1'] };
-        const groupsById = new Map([['g1', group]]);
-        const sourcesByKey = new Map([
-            ['A', { key: 'A' }],
-            ['B', { key: 'B' }],
-            ['C', { key: 'C' }]
-        ]);
-        const pendingBatchKeys = new Set(['A', 'B']);
-        const saveState = jest.fn();
-        const render = jest.fn();
-        const showToast = jest.fn();
-        const buildParentMap = jest.fn();
-        const developerLog = jest.fn();
-        const dropTarget = {
-            dataset: { groupId: 'g1' },
-            classList: createClassList(['group-container'])
-        };
-        const runtime = {
-            dragReflowSession: {
-                draggedKeys: new Set(['A', 'B']),
-                currentIntent: {
-                    kind: 'before-group',
-                    targetGroup: null,
-                    targetList: state.groups,
-                    insertIndex: 0,
-                    targetGroupId: null,
-                    slotKey: 'g1'
-                },
-                shiftedItems: new Map()
-            }
-        };
-        const interactions = createContentTreeInteractions({
-            runtime,
-            getState: () => state,
-            getGroupsById: () => groupsById,
-            getSourcesByKey: () => sourcesByKey,
-            getParentMap: () => new Map(),
-            getPendingBatchKeys: () => pendingBatchKeys,
-            getShadowRoot: makeShadowRootWithList,
-            saveState,
-            render,
-            showToast,
-            buildParentMap,
-            developerLog,
-            dragMulti: createContentDragMulti({}),
-            getMessage: (key, args = []) => `${key}:${args.join(',')}`
-        });
-
-        interactions.handleDrop(createDropEvent({
-            dropTarget,
-            sourceKey: 'A',
-            sourceKeysJson: JSON.stringify(['A', 'B'])
-        }));
-
-        expect(state.groups).toEqual(['g1']);
-        expect(state.ungrouped).toEqual(['A', 'B', 'C']);
-        expect(group.children).toEqual([]);
-        expect(state.isBatchMode).toBe(true);
-        expect(pendingBatchKeys.size).toBe(2);
-        expect(saveState).not.toHaveBeenCalled();
-        expect(render).not.toHaveBeenCalled();
-        expect(showToast).not.toHaveBeenCalled();
-        expect(developerLog).not.toHaveBeenCalled();
-    });
+    // NOTE: the former v4 test "does not corrupt state.groups when intent is
+    // before-group at top level" was removed — it pinned the deleted guard that
+    // rejected top-level before/after-group source drops. Under v5 that is a valid
+    // positioned root drop, covered by "routes a multi-key drop between two root
+    // groups into state.root (not the bin)" above.
 
     it('single-source drop on folder header lands source at the TOP of existing children (index 0, not end)', () => {
         // Pre-existing folder with two children — we want the dragged source to
@@ -2752,9 +2758,9 @@ describe('handleDragOver invalid-drop feedback', () => {
         expect(dataTransfer.dropEffect).toBe('none');
     });
 
-    it('auto-routes multi-source drag between groups to ungrouped tail (valid, no invalid outline)', () => {
+    it('marks multi-source drag between two root groups as valid (positioned in state.root, no invalid outline)', () => {
         const ctx = setupCtx({
-            state: { isBatchMode: true, ungrouped: [], groups: ['g1', 'g2'] },
+            state: { isBatchMode: true, ungrouped: [], root: [{ type: 'group', id: 'g1' }, { type: 'group', id: 'g2' }] },
             pendingBatchKeys: new Set(['A', 'B']),
             groups: {
                 g1: { id: 'g1', children: [] },
@@ -2775,11 +2781,9 @@ describe('handleDragOver invalid-drop feedback', () => {
         });
         const g1El = ctx.elementMap.get('group:g1');
         const g2El = ctx.elementMap.get('group:g2');
-        // Pointer at y=150 sits between g1 and g2. With the empty-ungrouped fallback in
-        // routeToNearestNeighborKind, this resolves to after-source intent against the
-        // empty state.ungrouped array (insertIndex 0) — valid: handleDrop will splice
-        // the multi-source keys into state.ungrouped instead of silently rejecting.
-        // No red invalid outline, dropEffect stays 'move'.
+        // v5: y=150 sits between root groups g1 and g2 → before-group g2 against state.root.
+        // A source (single or multi) positioned between two root folders is a valid
+        // state.root insert, so no red invalid outline and dropEffect stays 'move'.
         expect(g1El.classList.has('drag-invalid')).toBe(false);
         expect(g2El.classList.has('drag-invalid')).toBe(false);
         expect(dataTransfer.dropEffect).toBe('move');
@@ -2864,7 +2868,9 @@ describe('handleDragOver physical reflow', () => {
     it('calls applyReflow with shifts when dragging over a source-item slot (no blue bar classes added)', () => {
         const dragReflow = makeDragReflowMock();
         const ctx = setupCtx({
-            state: { isBatchMode: false, ungrouped: ['A', 'B'], groups: [] },
+            // v5: A and B are positioned root sources (direct #sources-list children), so
+            // they live in state.root as object entries — not in the bottom bin.
+            state: { isBatchMode: false, root: [{ type: 'source', key: 'A' }, { type: 'source', key: 'B' }], ungrouped: [] },
             pendingBatchKeys: new Set(),
             dragReflow,
             items: [
@@ -3079,7 +3085,9 @@ describe('handleDragOver rAF coalescing', () => {
     }
 
     function setupCtx({ dragReflow, items }) {
-        const state = { isBatchMode: false, ungrouped: items.map((i) => i.key), groups: [] };
+        // v5: the mock renders items as direct #sources-list children → positioned root
+        // sources in state.root (object entries); the bottom bin stays empty.
+        const state = { isBatchMode: false, root: items.map((i) => ({ type: 'source', key: i.key })), ungrouped: [] };
         const { sourcesListEl, shadowRoot, elementMap } = makeMockShadowList({ items });
         const runtime = {};
         const tree = createContentTreeInteractions({
@@ -3172,15 +3180,17 @@ describe('handleDragOver rAF coalescing', () => {
             dragReflow,
             items: [
                 { kind: 'source', key: 'A', top: 100, height: 40 },
-                { kind: 'source', key: 'B', top: 140, height: 40 }
+                { kind: 'source', key: 'B', top: 140, height: 40 },
+                { kind: 'source', key: 'C', top: 180, height: 40 }
             ]
         });
         ctx.tree.handleDragOver(makeDragOverEvent(110));
         ctx.tree.handleDragOver(makeDragOverEvent(150));
         ctx.tree.handleDragOver(makeDragOverEvent(170));
         flushRaf();
-        // Slot at the upper half of B (140..180, mid 160) yields insertIndex=1.
-        // The third event y=170 is the lower half of B → insertIndex=2.
+        // v5: A,B,C are positioned root sources. y=170 sits in the upper half of C
+        // (180..220, mid 200) → before-source C → state.root index 2. The first event
+        // y=110 → before-source A index 0, so insertIndex=2 proves the latest snapshot won.
         const arg = dragReflow.computeReflow.mock.calls[0][0];
         expect(arg.insertIndex).toBe(2);
     });
@@ -3764,7 +3774,8 @@ describe('computeDropIntent', () => {
     // header's left half excludes the folder from chosenContainer → root-level
     // slot detection takes over.
     it('X-split corridor fires on a COLLAPSED folder — cursor in header left half excludes the folder', () => {
-        const state = { ungrouped: ['A'], groups: ['F'] };
+        // v5: A is a positioned root source and F a root folder; the bin is empty.
+        const state = { root: [{ type: 'source', key: 'A' }, { type: 'group', id: 'F' }], ungrouped: [] };
         const groupsById = new Map([
             ['F', { id: 'F', collapsed: true, children: [{ type: 'source', key: 'X' }] }]
         ]);
@@ -3779,8 +3790,9 @@ describe('computeDropIntent', () => {
 
         // Cursor at (50, 115): clientX=50 LEFT of header midX=100; clientY=115
         // IN F header Y range (100..130). F is collapsed → X-split fires →
-        // F excluded → no chosenContainer → root-level slot detection.
-        // routeToNearestNeighborKind for source-single drag picks A (above).
+        // F excluded → no chosenContainer → root-level slot detection. The cursor sits
+        // below every root entry's mid-Y and the bin is empty, so a source drag here
+        // resolves to the empty-bin-trailing intent (targetList === state.ungrouped).
         const intent = tree.computeDropIntent({
             clientX: 50,
             clientY: 115,
@@ -4545,7 +4557,7 @@ describe('handleDragOver hover-expand', () => {
 
         it('keeps an ancestor open when dropping a group above a sibling inside it', () => {
             const ctx = setupTreeInteractionsTestContext({
-                state: { isBatchMode: false, ungrouped: [], groups: ['g1', 'gD'] },
+                state: { isBatchMode: false, ungrouped: [], root: [{ type: 'group', id: 'g1' }, { type: 'group', id: 'gD' }] },
                 pendingBatchKeys: new Set(),
                 groups: {
                     g1: { id: 'g1', children: [{ type: 'group', id: 'g3' }], collapsed: false },

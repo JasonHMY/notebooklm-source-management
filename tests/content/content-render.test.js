@@ -1509,7 +1509,7 @@ describe('batch count and source menu motion rendering', () => {
         container.dataset.nativeLabelPreviousHeight = '360px';
         const actionLayer = createRenderTestElement('div', { id: 'sp-source-actions-layer' });
         const state = {
-            groups: ['imported'],
+            root: [{ type: 'group', id: 'imported' }],
             ungrouped: [],
             filterQuery: '',
             isBatchMode: false,
@@ -2042,7 +2042,7 @@ describe('batch count and source menu motion rendering', () => {
                 appendChild: jest.fn()
             }),
             getState: () => ({
-                groups: ['broken'],
+                root: [{ type: 'group', id: 'broken' }],
                 ungrouped: [],
                 isBatchMode: false,
                 activeTagId: null

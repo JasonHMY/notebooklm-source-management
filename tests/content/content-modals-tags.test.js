@@ -1628,7 +1628,7 @@ describe('tag persistence and filtering', () => {
         mod.setSourceTagIds('source1', [researchTagId, priorityTagId]);
 
         expect(mod.buildPersistableState()).toMatchObject({
-            schemaVersion: 4,
+            schemaVersion: 5,
             tagOrder: [researchTagId, priorityTagId],
             sourceTagsById: {
                 source1: [researchTagId, priorityTagId]
@@ -1660,8 +1660,8 @@ describe('tag persistence and filtering', () => {
             groupsById: { group1: { id: 'group1', title: 'Group', children: [] } },
             ungrouped: []
         })).toEqual({
-            schemaVersion: 2,
-            groups: ['group1'],
+            schemaVersion: 5,
+            root: [{ type: 'group', id: 'group1' }],
             groupsById: { group1: { id: 'group1', title: 'Group', children: [] } },
             ungrouped: [],
             sourceStateById: {},

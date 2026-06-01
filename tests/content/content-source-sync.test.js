@@ -3706,8 +3706,8 @@ describe('scanAndSyncSources', () => {
 
     it('renders the persisted source snapshot until source rows exist on the first restore', () => {
         const loadedState = {
-            schemaVersion: 3,
-            groups: ['group1'],
+            schemaVersion: 5,
+            root: [{ type: 'group', id: 'group1' }],
             groupsById: {
                 group1: {
                     id: 'group1',
@@ -3743,7 +3743,7 @@ describe('scanAndSyncSources', () => {
 
         expect(result).toEqual({ deferred: true, shouldUpgradeStorage: false });
         expect(mod._getPendingInitialLoadedState()).toEqual(loadedState);
-        expect(mod.state.groups).toEqual(['group1']);
+        expect(mod.state.root).toEqual([{ type: 'group', id: 'group1' }]);
         expect(mod.state.ungrouped).toEqual([]);
         expect(mod.groupsById.get('group1').children).toEqual([{ type: 'source', key: 'source_id_doc-1' }]);
         expect(mod.sourcesByKey.get('source_id_doc-1')).toMatchObject({
@@ -3866,8 +3866,8 @@ describe('scanAndSyncSources', () => {
     it('flushes deferred initial state once the initial load gate opens and rows already exist', () => {
         const { panel } = createMockPanel({ visible: true, contentVisible: true });
         const loadedState = {
-            schemaVersion: 3,
-            groups: ['group1'],
+            schemaVersion: 5,
+            root: [{ type: 'group', id: 'group1' }],
             groupsById: {
                 group1: {
                     id: 'group1',
@@ -3906,7 +3906,7 @@ describe('scanAndSyncSources', () => {
         ));
 
         mod._debouncedScanAndSyncForTest();
-        expect(mod.state.groups).toEqual(['group1']);
+        expect(mod.state.root).toEqual([{ type: 'group', id: 'group1' }]);
         expect(mod._getPendingInitialLoadedState()).toEqual(loadedState);
 
         expect(() => mod._completeInitialStateLoadForTest()).not.toThrow();
@@ -4270,7 +4270,7 @@ describe('mutation-driven persistence', () => {
             expect.objectContaining({ type: 'SAVE_STATE' }),
             expect.any(Function)
         );
-        expect(mod.state.groups).toEqual([]);
+        expect(mod.state.root).toEqual([]);
         expect(mod.state.ungrouped).toEqual([]);
     });
 

@@ -1095,7 +1095,16 @@
                 });
             };
 
-            (Array.isArray(state.groups) ? state.groups : []).forEach(visitGroup);
+            // v5: walk the unified root array (root folders + positioned root sources
+            // interleaved), mirroring render()'s root walk, then the bottom bin.
+            (Array.isArray(state.root) ? state.root : []).forEach((entry) => {
+                if (!entry) return;
+                if (entry.type === 'group' && entry.id) {
+                    visitGroup(entry.id);
+                } else if (entry.type === 'source' && entry.key) {
+                    orderedKeys.push(entry.key);
+                }
+            });
             (Array.isArray(state.ungrouped) ? state.ungrouped : []).forEach((sourceKey) => {
                 if (sourceKey) orderedKeys.push(sourceKey);
             });
@@ -1929,12 +1938,8 @@
                 if (intent.kind === 'before-source' || intent.kind === 'after-source') {
                     return intent.slotKey === draggedKey;
                 }
-                // Top-level before-group / after-group — would splice the source key into
-                // state.groups at an index computed against state.groups (semantically wrong).
-                // Reject symmetrically with the source-multi guard below.
-                const isAtTopLevel = intent.targetGroup == null;
-                const isBeforeOrAfter = intent.kind === 'before-group' || intent.kind === 'after-group';
-                if (isAtTopLevel && isBeforeOrAfter) return true;
+                // v5: a source positioned before/after a root group is a valid state.root
+                // insert (handleDrop splices { type:'source', key } into state.root). Not invalid.
                 return false;
             }
 
@@ -1946,11 +1951,8 @@
                 if (intent.kind === 'before-source' || intent.kind === 'after-source') {
                     return draggedSet.has(intent.slotKey);
                 }
-                // Top-level before-group / after-group intent — would splice source keys into state.groups
-                const isAtTopLevel = intent.targetGroup == null;
-                const isBeforeOrAfter = intent.kind === 'before-group' || intent.kind === 'after-group';
-                if (isAtTopLevel && isBeforeOrAfter) return true;
-
+                // v5: a positioned root drop before/after a root group is valid for multi-source
+                // too — applyMultiSourceDrop splices object entries into state.root.
                 return false;
             }
 
@@ -2837,7 +2839,13 @@
                     let keys = null;
                     try { keys = JSON.parse(sourceKeysRaw); } catch (err) { keys = null; }
                     if (Array.isArray(keys) && keys.length >= 2) {
-                        const allowedMultiIntents = new Set(['into-group', 'before-source', 'after-source']);
+                        // v5: a multi-source drop may also position between root entries
+                        // (before/after a root group), which applyMultiSourceDrop splices
+                        // into state.root — keep this in sync with computeIsInvalidDrop, which
+                        // no longer rejects top-level before-group/after-group source drops.
+                        const allowedMultiIntents = new Set([
+                            'into-group', 'before-source', 'after-source', 'before-group', 'after-group'
+                        ]);
                         if (!allowedMultiIntents.has(intentKind)) {
                             clearDragFeedback();
                             return;
@@ -2847,7 +2855,10 @@
                             targetList: intent.targetList,
                             insertIndex: intent.insertIndex,
                             targetGroup: intent.targetGroup,
-                            targetGroupId: intent.targetGroup ? intent.targetGroup.id : null
+                            targetGroupId: intent.targetGroup ? intent.targetGroup.id : null,
+                            // Carry isRootList so applyMultiSourceDrop splices object entries
+                            // into state.root (not the ungrouped bin) for positioned root drops.
+                            isRootList: Boolean(intent.isRootList)
                         };
                         clearReflowBeforeMutation();
                         const result = dragMulti.applyMultiSourceDrop({

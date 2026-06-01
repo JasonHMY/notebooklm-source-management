@@ -2310,7 +2310,7 @@ describe('manager launcher messaging', () => {
         mod._setProjectId('test-project');
         mod._setShadowRootForTest(mockShadowRoot);
         mod._setAttachedSourcePanelForTest(panel);
-        mod.state.groups = ['group1'];
+        mod.state.root = [{ type: 'group', id: 'group1' }];
         mod.groupsById.set('group1', {
             id: 'group1',
             title: 'Pinned',
@@ -2446,10 +2446,14 @@ describe('manager launcher messaging', () => {
             getAttribute: jest.fn(() => null),
             children: []
         };
+        // v5: loadState normalizes the stored v3 shape — groups -> root, schemaVersion -> 5.
         const expectedLoadedState = {
             ...loadedState,
+            schemaVersion: 5,
+            root: [{ type: 'group', id: 'group1' }],
             customHeight: null
         };
+        delete expectedLoadedState.groups;
 
         mod._setProjectId('test-project');
         global.document.querySelector = jest.fn(() => panel);
@@ -2524,7 +2528,7 @@ describe('manager launcher messaging', () => {
         mod._setProjectId('test-project');
         mod._setShadowRootForTest(detachShadowRoot);
         mod._setAttachedSourcePanelForTest(panel);
-        mod.state.groups = ['group1'];
+        mod.state.root = [{ type: 'group', id: 'group1' }];
         mod.groupsById.set('group1', {
             id: 'group1',
             title: 'Pinned',
@@ -2549,7 +2553,7 @@ describe('manager launcher messaging', () => {
         mod.syncManagerWithPanelLifecycle();
 
         expect(mod._getPendingPanelReattachStateForTest()).toEqual(expect.objectContaining({
-            groups: ['group1']
+            root: [{ type: 'group', id: 'group1' }]
         }));
         expect(detachHost.remove).toHaveBeenCalledTimes(1);
 
@@ -2634,7 +2638,7 @@ describe('manager launcher messaging', () => {
         mod._setProjectId('test-project');
         mod._setShadowRootForTest(detachShadowRoot);
         mod._setAttachedSourcePanelForTest(listPanel);
-        mod.state.groups = ['group1'];
+        mod.state.root = [{ type: 'group', id: 'group1' }];
         mod.groupsById.set('group1', {
             id: 'group1',
             title: 'Pinned',
@@ -2664,7 +2668,7 @@ describe('manager launcher messaging', () => {
             reason: 'source_detail_view'
         });
         expect(mod._getPendingPanelReattachStateForTest()).toEqual(expect.objectContaining({
-            groups: ['group1']
+            root: [{ type: 'group', id: 'group1' }]
         }));
 
         global.chrome.runtime.sendMessage.mockClear();
@@ -2727,7 +2731,7 @@ describe('manager launcher messaging', () => {
         mod._setProjectId('test-project');
         mod._setShadowRootForTest(detachShadowRoot);
         mod._setAttachedSourcePanelForTest(listPanel);
-        mod.state.groups = ['group1'];
+        mod.state.root = [{ type: 'group', id: 'group1' }];
         mod.groupsById.set('group1', {
             id: 'group1',
             title: 'Pinned',
@@ -2752,7 +2756,7 @@ describe('manager launcher messaging', () => {
         mod.syncManagerWithPanelLifecycle();
 
         expect(mod._getPendingPanelReattachStateForTest()).toEqual(expect.objectContaining({
-            groups: ['group1']
+            root: [{ type: 'group', id: 'group1' }]
         }));
 
         listContent.style.display = 'block';
@@ -2829,7 +2833,7 @@ describe('manager launcher messaging', () => {
         mod._setProjectId('test-project');
         mod._setShadowRootForTest(detachShadowRoot);
         mod._setAttachedSourcePanelForTest(listPanel);
-        mod.state.groups = ['group1'];
+        mod.state.root = [{ type: 'group', id: 'group1' }];
         mod.groupsById.set('group1', {
             id: 'group1',
             title: 'Pinned',
@@ -2885,7 +2889,7 @@ describe('manager launcher messaging', () => {
         mod._setProjectId('test-project');
         mod._setShadowRootForTest(detachShadowRoot);
         mod._setAttachedSourcePanelForTest(listPanel);
-        mod.state.groups = ['group1'];
+        mod.state.root = [{ type: 'group', id: 'group1' }];
         mod.groupsById.set('group1', {
             id: 'group1',
             title: 'Pinned',
@@ -2911,7 +2915,7 @@ describe('manager launcher messaging', () => {
         mod.syncManagerWithPanelLifecycle();
 
         expect(mod._getPendingPanelReattachStateForTest()).toEqual(expect.objectContaining({
-            groups: ['group1']
+            root: [{ type: 'group', id: 'group1' }]
         }));
 
         listContent.style.display = 'block';

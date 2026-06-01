@@ -1308,8 +1308,11 @@
                     isNewlyCreated: true
                 };
                 groupsById.set(group.id, group);
-                if (!state.groups.includes(group.id)) {
-                    state.groups.push(group.id);
+                // v5: root folders live in state.root as { type:'group', id } entries
+                // (state.groups was removed). Folders never go into the ungrouped bin.
+                state.root = Array.isArray(state.root) ? state.root : [];
+                if (!state.root.some((entry) => entry?.type === 'group' && entry.id === group.id)) {
+                    state.root.push({ type: 'group', id: group.id });
                 }
             }
             if (label.title) {
