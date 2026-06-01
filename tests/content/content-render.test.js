@@ -1835,7 +1835,7 @@ describe('batch count and source menu motion rendering', () => {
                 appendChild: jest.fn()
             }),
             getState: () => ({
-                groups: ['root'],
+                root: [{ type: 'group', id: 'root' }],
                 ungrouped: ['loose'],
                 isBatchMode: false,
                 activeTagId: null
@@ -1891,7 +1891,7 @@ describe('batch count and source menu motion rendering', () => {
                 appendChild: jest.fn()
             }),
             getState: () => ({
-                groups: [],
+                root: [],
                 ungrouped: longUngrouped,
                 isBatchMode: false,
                 activeTagId: null
@@ -1905,6 +1905,63 @@ describe('batch count and source menu motion rendering', () => {
         const longSources = findRenderTestNodesByClass(listContainer, 'source-item');
         expect(longSources[10].attrs.style).toBe('--sp-list-item-index:10;');
         expect(longSources[11].attrs.style).toBe('--sp-list-item-index:10;');
+    });
+
+    it('renders state.root entries interleaved in order (source between two folders)', () => {
+        const listContainer = createRenderTestElement('div', { id: 'sources-list' });
+        const groupsById = new Map([
+            ['g1', { id: 'g1', title: 'Folder 1', enabled: true, collapsed: false, children: [] }],
+            ['g2', { id: 'g2', title: 'Folder 2', enabled: true, collapsed: false, children: [] }]
+        ]);
+        const sourcesByKey = new Map([
+            ['mid', { key: 'mid', title: 'Mid Source', enabled: true }],
+            ['bin', { key: 'bin', title: 'Bin Source', enabled: true }]
+        ]);
+        const renderModule = createContentRender({
+            el: createRenderTestElement,
+            getDocument: () => ({
+                createDocumentFragment: createRenderTestFragment,
+                createElement: (tag) => createRenderTestElement(tag)
+            }),
+            getShadowRoot: () => ({
+                querySelector: jest.fn((selector) => (selector === '#sources-list' ? listContainer : null)),
+                getElementById: jest.fn((id) => (id === 'sources-list' ? listContainer : null)),
+                appendChild: jest.fn()
+            }),
+            getState: () => ({
+                root: [
+                    { type: 'group', id: 'g1' },
+                    { type: 'source', key: 'mid' },
+                    { type: 'group', id: 'g2' }
+                ],
+                ungrouped: ['bin'],
+                isBatchMode: false,
+                activeTagId: null
+            }),
+            getGroupsById: () => groupsById,
+            getSourcesByKey: () => sourcesByKey,
+            getMessage: (key) => key
+        });
+
+        renderModule.render();
+
+        const ordered = listContainer.childNodes
+            .filter((node) => node && typeof node === 'object')
+            .map((node) => {
+                const classes = String(node.className || '').split(/\s+/);
+                if (classes.includes('group-container')) return ['group', node.dataset.groupId];
+                if (classes.includes('source-item')) return ['source', node.dataset.sourceKey];
+                if (classes.includes('ungrouped-section')) return ['section', null];
+                return ['other', node.className];
+            });
+        // Task 1 (migration step 1 of 2): the bin still renders as a flat
+        // ungrouped-header + source items; Task 2 wraps it in .ungrouped-section.
+        // Assert only the interleaved root sequence proved by this step.
+        expect(ordered.slice(0, 3)).toEqual([
+            ['group', 'g1'],
+            ['source', 'mid'],
+            ['group', 'g2']
+        ]);
     });
 
     it('renders persisted groups that are missing children arrays without crashing', () => {

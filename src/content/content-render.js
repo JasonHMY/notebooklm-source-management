@@ -1239,9 +1239,12 @@
             const tagsById = getTagsById();
             const pendingBatchKeys = getPendingBatchKeys();
             const activeIsolationGroupId = getActiveIsolationGroupId();
+            const rootEntries = Array.isArray(state.root) ? state.root : [];
             const rootGroupIds = activeIsolationGroupId && groupsById.has(activeIsolationGroupId)
                 ? [activeIsolationGroupId]
-                : (Array.isArray(state.groups) ? state.groups : []);
+                : rootEntries
+                    .filter((entry) => entry && entry.type === 'group' && entry.id)
+                    .map((entry) => entry.id);
             const searchCriteria = parseSearchQuery(state.filterQuery || '');
             const sourceTitleHighlightTerms = getSearchHighlightTerms(searchCriteria, 'text');
             const tagHighlightTerms = getSearchHighlightTerms(searchCriteria, 'tag');
@@ -1438,13 +1441,29 @@
                 return groupEl;
             };
 
-            rootGroupIds.forEach((groupId) => {
-                const group = groupsById.get(groupId);
-                const groupElement = renderGroup(group, 0);
-                if (groupElement) {
-                    fragment.appendChild(groupElement);
+            if (activeIsolationGroupId) {
+                const isolatedGroupElement = renderGroup(groupsById.get(activeIsolationGroupId), 0);
+                if (isolatedGroupElement) {
+                    fragment.appendChild(isolatedGroupElement);
                 }
-            });
+            } else {
+                rootEntries.forEach((entry) => {
+                    if (!entry) return;
+                    if (entry.type === 'group') {
+                        const groupElement = renderGroup(groupsById.get(entry.id), 0);
+                        if (groupElement) {
+                            fragment.appendChild(groupElement);
+                        }
+                        return;
+                    }
+                    if (entry.type === 'source') {
+                        const sourceElement = renderSourceItem(sourcesByKey.get(entry.key));
+                        if (sourceElement) {
+                            fragment.appendChild(sourceElement);
+                        }
+                    }
+                });
+            }
 
             if (!activeIsolationGroupId) {
                 const matchingUngrouped = (Array.isArray(state.ungrouped) ? state.ungrouped : []).filter((key) => {
