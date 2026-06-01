@@ -5589,3 +5589,117 @@ describe('handleDragEnd post-drop hover refresh', () => {
         expect(listClasses.has('sp-drag-active')).toBe(false);
     });
 });
+
+describe('empty-bin ungroup dropzone (transient element)', () => {
+    let createContentTreeInteractions;
+
+    beforeEach(() => {
+        jest.resetModules();
+        setupGlobalMocks();
+        require('../../src/content/content-native-checkbox-sync.js');
+        createContentTreeInteractions = require('../../src/content/content-tree-interactions.js');
+    });
+    afterEach(teardownGlobalMocks);
+
+    function makeAppendableList(base) {
+        // Augment the mock sources-list with appendChild / removeChild / a children
+        // registry so the dropzone helper can mount + query its transient element.
+        const appended = [];
+        base.appendChild = jest.fn((node) => { appended.push(node); return node; });
+        base.removeChild = jest.fn((node) => {
+            const i = appended.indexOf(node);
+            if (i >= 0) appended.splice(i, 1);
+            return node;
+        });
+        const origQS = base.querySelector.bind(base);
+        base.querySelector = (sel) => {
+            if (sel === '.sp-ungroup-dropzone') {
+                return appended.find((n) => n.classList && n.classList.contains('sp-ungroup-dropzone')) || null;
+            }
+            return origQS(sel);
+        };
+        return appended;
+    }
+
+    // Document stub whose createElement yields a node with a working classList.contains
+    // and textContent (the default harness mock has neither) so the helper's
+    // getDocument().createElement(...) + createTextNode(...) path is inspectable.
+    function makeDocStub() {
+        return {
+            createElement: jest.fn(() => {
+                const classes = new Set();
+                return {
+                    set className(v) { classes.clear(); String(v).split(/\s+/).filter(Boolean).forEach((c) => classes.add(c)); },
+                    get className() { return Array.from(classes).join(' '); },
+                    classList: { contains: (c) => classes.has(c) },
+                    textContent: '',
+                    appendChild(node) { if (node && typeof node.__text === 'string') this.textContent += node.__text; return node; }
+                };
+            }),
+            createTextNode: jest.fn((text) => ({ __text: String(text) }))
+        };
+    }
+
+    it('mounts .sp-ungroup-dropzone when a source drag is below all root content and the bin is empty', () => {
+        const state = { ungrouped: [], root: [{ type: 'source', key: 'A' }] };
+        const { sourcesListEl, shadowRoot } = makeMockShadowList({
+            items: [{ kind: 'source', key: 'A', top: 100, height: 40 }],
+            listRect: { top: 0, bottom: 1000, height: 1000 }
+        });
+        const appended = makeAppendableList(sourcesListEl);
+
+        const docStub = makeDocStub();
+        const runtime = {};
+        const tree = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getParentMap: () => new Map(),
+            getShadowRoot: () => shadowRoot,
+            getDocument: () => docStub,
+            getMessage: (key) => (key === 'ui_drop_to_ungroup_hint' ? 'Drop here to ungroup' : key)
+        });
+        // Arm a drag session so reflow + intent path runs.
+        runtime.activeDragContext = { kind: 'source-single' };
+        runtime.dragReflowSession = { draggedKeys: new Set(['DRAG']), totalDraggedHeight: 40, currentIntent: null };
+
+        tree.handleDragOver({ preventDefault() {}, clientX: 100, clientY: 400, dataTransfer: {} });
+
+        const zone = sourcesListEl.querySelector('.sp-ungroup-dropzone');
+        expect(zone).toBeTruthy();
+        expect(zone.textContent).toBe('Drop here to ungroup');
+        expect(appended.length).toBe(1);
+    });
+
+    it('does NOT mount the dropzone (and removes a stale one) when the intent is not empty-bin-trailing', () => {
+        const state = { ungrouped: [], root: [{ type: 'source', key: 'A' }] };
+        const { sourcesListEl, shadowRoot } = makeMockShadowList({
+            items: [{ kind: 'source', key: 'A', top: 100, height: 40 }],
+            listRect: { top: 0, bottom: 1000, height: 1000 }
+        });
+        const appended = makeAppendableList(sourcesListEl);
+
+        const docStub = makeDocStub();
+        const runtime = {};
+        const tree = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getParentMap: () => new Map(),
+            getShadowRoot: () => shadowRoot,
+            getDocument: () => docStub,
+            getMessage: (key) => key
+        });
+        runtime.activeDragContext = { kind: 'source-single' };
+        runtime.dragReflowSession = { draggedKeys: new Set(['DRAG']), totalDraggedHeight: 40, currentIntent: null };
+
+        // First: below content + empty bin → mount.
+        tree.handleDragOver({ preventDefault() {}, clientX: 100, clientY: 400, dataTransfer: {} });
+        expect(sourcesListEl.querySelector('.sp-ungroup-dropzone')).toBeTruthy();
+
+        // Then: cursor in the upper half of A (y=110) → before-source intent, not trailing.
+        tree.handleDragOver({ preventDefault() {}, clientX: 100, clientY: 110, dataTransfer: {} });
+        expect(sourcesListEl.querySelector('.sp-ungroup-dropzone')).toBeNull();
+        expect(appended.length).toBe(0);
+    });
+});

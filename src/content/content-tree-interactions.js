@@ -2189,6 +2189,10 @@
                     runtime.dragReflowSession.currentIntent = { ...intent };
                 }
 
+                // Mount / unmount the transient "drop to ungroup" hint in the reflow-opened
+                // bottom slot. Only when the intent is the empty-bin trailing drop.
+                _setUngroupDropzoneVisible(intent.isEmptyBinTrailing === true);
+
                 // Hover-expand: derive pointerGroupId from the host group-container we already
                 // resolved. DECOUPLING: when a SOURCE drag's drop intent is a root-level reorder
                 // (X-split left-half escape, or the empty-ungrouped fallback → hostGroupContainerEl
@@ -2234,6 +2238,7 @@
                 }
             } else {
                 cancelAllHoverTimers();
+                _setUngroupDropzoneVisible(false);
             }
 
             if (autoScrollController && dragMulti && typeof dragMulti.computeAutoScrollVelocity === 'function') {
@@ -2254,6 +2259,38 @@
             }
         }
 
+        // Transient "drop to ungroup" hint shown in the bottom slot opened by reflow
+        // when a source drag hovers below all root content and the bin (state.ungrouped)
+        // is empty. Mounted as a direct child of #sources-list AFTER the root entries so
+        // it sits in the opened trailing slot; styled by .sp-ungroup-dropzone in
+        // content-style-text.js (Shadow DOM). Idempotent: re-entrant frames reuse the
+        // existing node. Torn down on leave / dragend via _setUngroupDropzoneVisible(false).
+        // el(...) is not in scope in this module (and not wired through its deps), so the
+        // node is built via getDocument().createElement + createTextNode — never innerHTML.
+        function _setUngroupDropzoneVisible(visible) {
+            const listEl = getSourceListContainer();
+            if (!listEl || typeof listEl.querySelector !== 'function') return;
+            const existing = listEl.querySelector('.sp-ungroup-dropzone');
+            if (!visible) {
+                if (existing && typeof listEl.removeChild === 'function') {
+                    try { listEl.removeChild(existing); } catch (_) { /* already detached */ }
+                }
+                return;
+            }
+            if (existing) return;
+            if (typeof listEl.appendChild !== 'function') return;
+            const documentObj = getDocument();
+            if (!documentObj || typeof documentObj.createElement !== 'function') return;
+            const zone = documentObj.createElement('div');
+            zone.className = 'sp-ungroup-dropzone';
+            if (typeof documentObj.createTextNode === 'function') {
+                zone.appendChild(documentObj.createTextNode(getMessage('ui_drop_to_ungroup_hint')));
+            } else {
+                zone.textContent = getMessage('ui_drop_to_ungroup_hint');
+            }
+            listEl.appendChild(zone);
+        }
+
         function handleDragLeave(e) {
             const dropTarget = e.target.closest('.group-container, .source-item');
             if (dropTarget) {
@@ -2269,6 +2306,7 @@
                 // (the RAF flush calls armHoverExpandTimerForGroup). clearDragFeedback
                 // is the only other cancel site and only fires on drop/dragend.
                 _cancelPendingDragOver();
+                _setUngroupDropzoneVisible(false);
             }
         }
 
@@ -2304,6 +2342,7 @@
             // Drop any dragover work that was queued for the next frame — running
             // it after the drag terminated would touch DOM with stale intent.
             _cancelPendingDragOver();
+            _setUngroupDropzoneVisible(false);
             runtime.activeDragContext = null;
             cancelAllHoverTimers();
             if (runtime.hoverExpandedGroupIds.size > 0) {
