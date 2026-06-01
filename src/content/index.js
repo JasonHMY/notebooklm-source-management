@@ -133,12 +133,12 @@
     } = sourceDescriptorHelpers;
 
     // --- State Management ---
-    // INVARIANT: state.groups is string[] of root-level group IDs — NEVER group
-    // objects. Resolve a group via groupsById.get(id). Splicing a source key
-    // into state.groups corrupts the root tree. state.ungrouped is string[] of
-    // bare source keys at root level. See CLAUDE.md "State shape" + computeDropIntent.
+    // INVARIANT: state.root is a heterogeneous ordered array of root-level entries
+    // ({ type:'group', id } | { type:'source', key }) — same shape as group.children.
+    // state.ungrouped is string[] of bare source keys in the bottom "Ungrouped" bin.
+    // A root source is in state.root XOR state.ungrouped. See CLAUDE.md "State shape".
     let state = {
-        groups: [], // Top-level group IDs (string[]), not group objects.
+        root: [], // Heterogeneous root entries: { type:'group', id } | { type:'source', key }.
         ungrouped: [],
         filterQuery: '',
         isBatchMode: false,

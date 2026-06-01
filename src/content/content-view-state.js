@@ -46,7 +46,7 @@
 
         const getState = typeof ctx.getState === 'function'
             ? ctx.getState
-            : () => (runtime.state || { groups: [], ungrouped: [], filterQuery: '', activeTagId: null });
+            : () => (runtime.state || { root: [], ungrouped: [], filterQuery: '', activeTagId: null });
         const getGroupsById = typeof ctx.getGroupsById === 'function'
             ? ctx.getGroupsById
             : () => (runtime.groupsById || new Map());
