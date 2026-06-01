@@ -384,6 +384,7 @@
         function hasRestorableStateSnapshot(snapshot) {
             if (!snapshot || typeof snapshot !== 'object') return false;
             if (Array.isArray(snapshot.groups) && snapshot.groups.length > 0) return true;
+            if (Array.isArray(snapshot.root) && snapshot.root.length > 0) return true;
             if (snapshot.groupsById && getMapLikeEntries(snapshot.groupsById).length > 0) return true;
             if (Array.isArray(snapshot.ungrouped) && snapshot.ungrouped.length > 0) return true;
             if (snapshot.sourceStateById && getMapLikeEntries(snapshot.sourceStateById).length > 0) return true;
@@ -1189,6 +1190,23 @@
             return saveLifecycleSnapshotToLocalStorage(key, persistableState);
         }
 
+        // state.root is heterogeneous: { type:'group', id } | { type:'source', key }.
+        // Untrusted on import/backup round-trips, so drop anything that is not a
+        // well-formed entry (mirrors the group.children defensive reads elsewhere).
+        function normalizeRootEntries(value) {
+            if (!Array.isArray(value)) return [];
+            const entries = [];
+            value.forEach((entry) => {
+                if (!entry || typeof entry !== 'object') return;
+                if (entry.type === 'group' && typeof entry.id === 'string' && entry.id) {
+                    entries.push({ type: 'group', id: entry.id });
+                } else if (entry.type === 'source' && typeof entry.key === 'string' && entry.key) {
+                    entries.push({ type: 'source', key: entry.key });
+                }
+            });
+            return entries;
+        }
+
         // customHeight is later written straight into style.height; an imported/persisted
         // non-numeric or non-positive value would leave a type-confused string in storage.
         // Coerce to a finite positive number or null (the resize handle + CSS still enforce
@@ -1207,7 +1225,7 @@
                 ctx.pendingStorageUpgrade = Boolean(ctx.pendingStructuralStateRepair);
                 const normalizedState = {
                     schemaVersion: storageSchemaVersion,
-                    root: Array.isArray(stateData.root) ? stateData.root : [],
+                    root: normalizeRootEntries(stateData.root),
                     groupsById: stateData.groupsById || {},
                     ungrouped: Array.isArray(stateData.ungrouped) ? stateData.ungrouped : [],
                     sourceStateById: stateData.sourceStateById || {},
@@ -1362,6 +1380,7 @@
             if (!snapshot || typeof snapshot !== 'object') return false;
             if (hasPersistedSourceRefs(snapshot)) return true;
             if (Array.isArray(snapshot.groups) && snapshot.groups.length > 0) return true;
+            if (Array.isArray(snapshot.root) && snapshot.root.length > 0) return true;
             if (snapshot.groupsById && getMapLikeEntries(snapshot.groupsById).length > 0) return true;
             if (snapshot.tagsById && getMapLikeEntries(snapshot.tagsById).length > 0) return true;
             if (Array.isArray(snapshot.tagOrder) && snapshot.tagOrder.length > 0) return true;

@@ -218,6 +218,61 @@ describe('saveState', () => {
         expect(Object.prototype.hasOwnProperty.call(normalized, 'groups')).toBe(false);
     });
 
+    it('drops non-array and malformed root entries when normalizing a v5 snapshot', () => {
+        const normalized = mod.normalizeLoadedState({
+            schemaVersion: 5,
+            root: 'not-an-array',
+            groupsById: {},
+            ungrouped: [],
+            sourceStateById: {},
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {}
+        });
+        expect(normalized.root).toEqual([]);
+    });
+
+    it('keeps only well-formed group and source entries in a v5 root', () => {
+        const normalized = mod.normalizeLoadedState({
+            schemaVersion: 5,
+            root: [
+                { type: 'group', id: 'good' },
+                { type: 'source', key: 'src' },
+                { type: 'group' },
+                { type: 'source' },
+                { type: 'mystery', id: 'x' },
+                null,
+                'bare-string',
+                { id: 'no-type' }
+            ],
+            groupsById: {},
+            ungrouped: [],
+            sourceStateById: {},
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {}
+        });
+        expect(normalized.root).toEqual([
+            { type: 'group', id: 'good' },
+            { type: 'source', key: 'src' }
+        ]);
+    });
+
+    it('treats a v5 snapshot whose only content is a root group as restorable and persistable', () => {
+        const snapshot = {
+            schemaVersion: 5,
+            root: [{ type: 'group', id: 'g1' }],
+            groupsById: { g1: { id: 'g1', children: [] } },
+            ungrouped: [],
+            sourceStateById: {},
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {}
+        };
+        expect(mod.hasRestorableStateSnapshot(snapshot)).toBe(true);
+        expect(mod.hasPersistableManagerState(snapshot)).toBe(true);
+    });
+
     it('debounces saves by default and persists the expected state', () => {
         const projectId = seedPersistedState();
         mod.saveState();
