@@ -4,7 +4,7 @@
     /**
      * createContentSourceSync(deps) — 源扫描 + state 同步主控。
      * 把 NotebookLM 原生 DOM (list view / label view / 折叠 label group / loading 行 / failed 行)
-     * 扫描成 source descriptor,再 reconcile 进 state.groups + state.ungrouped + sourcesByKey,
+     * 扫描成 source descriptor,再 reconcile 进 state.root + state.ungrouped + sourcesByKey,
      * 处理 SPA 切换 + 半截扫描 + native delete/rename 后的事后同步。MutationObserver 入口。
      *
      * @param {Object} deps 60+ 项依赖,大致四类(完整 destructuring 见 line 4+):
@@ -2273,7 +2273,7 @@
             let knownSourceRefs = new Set();
             if (isFirstLoad) {
                 const reconciledTree = reconcilePersistedTree(loadedState, sourceLookup);
-                state.groups = reconciledTree.groups;
+                state.root = reconciledTree.root;
                 state.ungrouped = reconciledTree.ungrouped;
                 groupsById.clear();
                 reconciledTree.groupsById.forEach((group, groupId) => {
@@ -2293,7 +2293,7 @@
                     });
                     return false;
                 }
-                state.groups = remappedState.groups;
+                state.root = remappedState.root;
                 state.ungrouped = remappedState.ungrouped;
                 groupsById.clear();
                 remappedState.groupsById.forEach((group, groupId) => {

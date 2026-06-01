@@ -138,7 +138,10 @@
 
             let folderFound = false;
             let modalItemIndex = 0;
-            const groupIds = Array.isArray(state.groups) ? state.groups : [];
+            // v5: root folders are the {type:'group'} entries of state.root.
+            const groupIds = (Array.isArray(state.root) ? state.root : [])
+                .filter((entry) => entry && entry.type === 'group' && entry.id)
+                .map((entry) => entry.id);
             const staggerStyle = typeof createModalItemStaggerStyle === 'function'
                 ? createModalItemStaggerStyle
                 : (index, baseStyle = '') => baseStyle;

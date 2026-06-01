@@ -224,7 +224,7 @@ describe('content modal move-to-folder', () => {
             const groupsById = new Map([['g1', targetGroup]]);
             const sourcesByKey = new Map([['s1', { key: 's1' }]]);
             const deps = createDeps({
-                getState: () => ({ groups: ['g1'], isBatchMode: false }),
+                getState: () => ({ root: [{ type: 'group', id: 'g1' }], isBatchMode: false }),
                 getGroupsById: () => groupsById,
                 getSourcesByKey: () => sourcesByKey
             });
@@ -245,7 +245,7 @@ describe('content modal move-to-folder', () => {
         it('falls back to ui_group_untitled when a folder has no title', () => {
             const groupsById = new Map([['g1', { id: 'g1', children: [] }]]);
             const deps = createDeps({
-                getState: () => ({ groups: ['g1'], isBatchMode: false }),
+                getState: () => ({ root: [{ type: 'group', id: 'g1' }], isBatchMode: false }),
                 getGroupsById: () => groupsById
             });
             const helper = createContentModalMove(deps);
@@ -288,7 +288,7 @@ describe('content modal move-to-folder', () => {
                 ['g2', { id: 'g2', title: 'B', children: [] }]
             ]);
             const deps = createDeps({
-                getState: () => ({ groups: ['g1', 'g2'], isBatchMode: false }),
+                getState: () => ({ root: [{ type: 'group', id: 'g1' }, { type: 'group', id: 'g2' }], isBatchMode: false }),
                 getGroupsById: () => groupsById
             });
             const helper = createContentModalMove(deps);

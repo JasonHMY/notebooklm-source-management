@@ -53,7 +53,7 @@ describe('content state reconciliation guards', () => {
 
         const remapped = reconcile.remapExistingStateToCurrentSources(sourceLookup, previousState);
 
-        expect(remapped.groups).toEqual([]);
+        expect(remapped.root).toEqual([]);
         expect(remapped.ungrouped).toEqual([]);
         expect(remapped.groupsById.get('legacy-empty').children).toEqual([]);
         expect(remapped.groupsById.get('legacy-source').children).toEqual([

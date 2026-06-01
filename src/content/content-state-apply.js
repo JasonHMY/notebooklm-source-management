@@ -59,7 +59,7 @@
             const sourcesByKey = runtime.sourcesByKey;
             const shadowRoot = runtime.shadowRoot;
 
-            state.groups = Array.isArray(normalizedState.groups) ? [...normalizedState.groups] : [];
+            state.root = Array.isArray(normalizedState.root) ? [...normalizedState.root] : [];
             state.ungrouped = Array.isArray(normalizedState.ungrouped) ? [...normalizedState.ungrouped] : [];
             state.tagOrder = Array.isArray(normalizedState.tagOrder) ? [...normalizedState.tagOrder] : [];
             state.isBatchMode = false;
@@ -112,7 +112,16 @@
                     }
                 });
             };
-            state.groups.forEach(visitGroupSources);
+            // v5: walk the heterogeneous root — recurse into root groups and treat
+            // positioned root sources as known so the orphan sweep below leaves them put.
+            state.root.forEach((entry) => {
+                if (!entry) return;
+                if (entry.type === 'group' && entry.id) {
+                    visitGroupSources(entry.id);
+                } else if (entry.type === 'source' && entry.key) {
+                    knownSourceKeys.add(entry.key);
+                }
+            });
             sourcesByKey?.forEach?.((source, sourceKey) => {
                 if (!knownSourceKeys.has(sourceKey)) {
                     state.ungrouped.push(sourceKey);

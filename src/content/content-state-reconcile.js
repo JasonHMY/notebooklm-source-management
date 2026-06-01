@@ -565,7 +565,7 @@
         }
 
         function remapExistingStateToCurrentSources(sourceLookup, previousState) {
-            const nextGroups = [];
+            const nextRoot = [];
             const nextUngrouped = [];
             const nextGroupsById = new Map();
             const nextSourceStateById = new Map();
@@ -613,9 +613,31 @@
                 });
             });
 
-            (Array.isArray(runtime.state?.groups) ? runtime.state.groups : []).forEach((groupId) => {
-                if (nextGroupsById.has(groupId)) {
-                    nextGroups.push(groupId);
+            // v5: preserve the heterogeneous root order (root groups + positioned root
+            // sources) from the live runtime state, re-resolving source keys to current rows.
+            (Array.isArray(runtime.state?.root) ? runtime.state.root : []).forEach((entry) => {
+                if (!entry) return;
+                if (entry.type === 'group') {
+                    if (entry.id && nextGroupsById.has(entry.id)) {
+                        nextRoot.push({ type: 'group', id: entry.id });
+                    }
+                    return;
+                }
+                if (entry.type !== 'source') return;
+
+                const sourceRecord = previousState.sourceRecordsByKey.get(entry.key) || null;
+                const resolvedKey = resolveCurrentSourceKey(entry.key, sourceRecord);
+                if (!resolvedKey || seenSourceRefs.has(resolvedKey)) return;
+
+                nextRoot.push({ type: 'source', key: resolvedKey });
+                seenSourceRefs.add(resolvedKey);
+
+                if (!nextSourceStateById.has(resolvedKey) && sourceRecord) {
+                    nextSourceStateById.set(resolvedKey, sourceRecord);
+                }
+
+                if (!nextSourceTagsById.has(resolvedKey) && previousState.sourceTagsById.has(entry.key)) {
+                    nextSourceTagsById.set(resolvedKey, [...previousState.sourceTagsById.get(entry.key)]);
                 }
             });
 
@@ -650,7 +672,7 @@
             });
 
             return {
-                groups: nextGroups,
+                root: nextRoot,
                 ungrouped: nextUngrouped,
                 groupsById: nextGroupsById,
                 sourceStateById: nextSourceStateById,
@@ -800,9 +822,33 @@
                 });
             });
 
-            const nextGroups = Array.isArray(loadedState && loadedState.groups)
-                ? loadedState.groups.filter(groupId => nextGroupsById.has(groupId))
-                : [];
+            // v5: rebuild the heterogeneous root order ({type:'group'|'source'}) from
+            // loadedState.root, preserving positioned root sources. Defensive fallback to
+            // the legacy state.groups (root group ids) when an un-migrated shape slips in.
+            const nextRoot = [];
+            const rawRootEntries = Array.isArray(loadedState && loadedState.root)
+                ? loadedState.root
+                : (Array.isArray(loadedState && loadedState.groups)
+                    ? loadedState.groups.map((id) => ({ type: 'group', id }))
+                    : []);
+            rawRootEntries.forEach((entry) => {
+                if (!entry) return;
+                if (entry.type === 'group') {
+                    if (entry.id && nextGroupsById.has(entry.id)) {
+                        nextRoot.push({ type: 'group', id: entry.id });
+                    }
+                    return;
+                }
+                if (entry.type === 'source') {
+                    const sourceRecord = loadedState && loadedState.sourceStateById
+                        ? loadedState.sourceStateById[entry.key]
+                        : null;
+                    const resolvedKey = resolveStoredSourceKey(entry.key, sourceLookup, sourceRecord);
+                    if (!resolvedKey || seenSourceRefs.has(resolvedKey)) return;
+                    nextRoot.push({ type: 'source', key: resolvedKey });
+                    seenSourceRefs.add(resolvedKey);
+                }
+            });
             const nextUngrouped = [];
 
             (Array.isArray(loadedState && loadedState.ungrouped) ? loadedState.ungrouped : []).forEach((storedKey) => {
@@ -817,7 +863,7 @@
             });
 
             return {
-                groups: nextGroups,
+                root: nextRoot,
                 groupsById: nextGroupsById,
                 ungrouped: nextUngrouped,
                 seenSourceRefs

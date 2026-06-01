@@ -397,7 +397,7 @@ describe('drag and drop ordering guards', () => {
     afterEach(teardownGlobalMocks);
 
     it('creates unique group ids when multiple groups are added in the same millisecond', () => {
-        const state = { groups: [], ungrouped: [] };
+        const state = { root: [], ungrouped: [] };
         const groupsById = new Map();
         const saveState = jest.fn();
         const render = jest.fn();
@@ -419,7 +419,10 @@ describe('drag and drop ordering guards', () => {
             nowSpy.mockRestore();
         }
 
-        expect(state.groups).toEqual(['group_12345', 'group_12345_1']);
+        expect(state.root).toEqual([
+            { type: 'group', id: 'group_12345' },
+            { type: 'group', id: 'group_12345_1' }
+        ]);
         expect(Array.from(groupsById.keys())).toEqual(['group_12345', 'group_12345_1']);
         expect(saveState).toHaveBeenCalledTimes(2);
         expect(render).toHaveBeenCalledTimes(2);

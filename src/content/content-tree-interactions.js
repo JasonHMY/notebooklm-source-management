@@ -244,7 +244,8 @@
         //      - If pointer in its `.group-children` band AND children empty → kind='into-group',
         //        insertIndex=0 (only one position possible).
         //      - Otherwise host = group.children, find slot within children DOM.
-        //   3. If no group contains the pointer → host = root list (state.groups + ungrouped).
+        //   3. If no group contains the pointer → host = root list (state.root; the empty
+        //      bottom bin / state.ungrouped is resolved as a separate trailing drop zone).
         //   4. Slot detection: for each non-folded child element, compare its un-shifted
         //      mid-Y against clientY; the first whose mid-Y > clientY becomes the insert slot.
         //      All elements past clientY → insertIndex = childCount.
@@ -254,11 +255,12 @@
         //
         // RETURNS: { targetGroup, targetList, insertIndex, targetGroupId, kind, ... } | null
         //   INVARIANT — `targetList` is HETEROGENEOUS, shape depends on target:
-        //     - state.ungrouped   → string[] of source keys
+        //     - state.ungrouped   → string[] of source keys (the bottom bin)
         //     - group.children    → object[] of { type: 'source', key } | { type: 'group', id }
-        //     - state.groups      → string[] of root-level group IDs
-        //   Callers that splice into targetList MUST pick entry shape per target.
-        //   NEVER splice a source key into state.groups — it corrupts the root tree.
+        //     - state.root        → object[] of { type: 'source', key } | { type: 'group', id }
+        //                           (root folders AND positioned root sources, interleaved)
+        //   Callers that splice into targetList MUST pick entry shape per target:
+        //   object entries for state.root / group.children, bare keys for state.ungrouped.
         //   See CLAUDE.md "Non-obvious gotchas" and resolveSiblingKeys above for
         //   an example of polymorphic targetList consumption.
         function computeDropIntent({ clientX, clientY, rootElement, state, groupsById, parentMap, activeDragContext, prevIntent }) {
@@ -609,7 +611,7 @@
                         }
                     }
                     // else: chosenContainer is top-level → host stays null → slot detection
-                    // below uses root list (state.ungrouped + state.groups view via DOM).
+                    // below uses the root list (state.root) via the DOM.
                 } else if (childrenEl) {
                     const _childrenRaw = unshiftedRect(childrenEl);
                     // Subtract the inherited container shift (see _containerShift above) so the
@@ -729,9 +731,9 @@
                 }
             }
 
-            // Resolve insertIndex against the actual targetList (state.groups / state.ungrouped / group.children).
+            // Resolve insertIndex against the actual targetList (state.root / state.ungrouped / group.children).
             // For group host: insert position in host array is the index of the slot key (or list length for after-last).
-            // For root host: insertIndex is in state.groups or state.ungrouped depending on slot kind.
+            // For root host: insertIndex is in state.root (positioned drop) or state.ungrouped (empty-bin trailing).
             if (host) {
                 if (candidates.length === 0) {
                     return {
@@ -933,8 +935,9 @@
             if (parentGroupId) {
                 parent.children.push({ type: 'group', id: newGroup.id });
             } else {
-                state.groups = Array.isArray(state.groups) ? state.groups : [];
-                state.groups.push(newGroup.id);
+                // v5: a new root folder is a { type:'group', id } entry in state.root.
+                state.root = Array.isArray(state.root) ? state.root : [];
+                state.root.push({ type: 'group', id: newGroup.id });
             }
 
             buildParentMap();
@@ -1466,8 +1469,10 @@
                                     state.ungrouped = Array.isArray(state.ungrouped) ? state.ungrouped : [];
                                     state.ungrouped.push(c.key);
                                 } else {
-                                    state.groups = Array.isArray(state.groups) ? state.groups : [];
-                                    state.groups.push(c.id);
+                                    // v5: a nested folder promoted to root becomes a
+                                    // { type:'group', id } entry in state.root.
+                                    state.root = Array.isArray(state.root) ? state.root : [];
+                                    state.root.push({ type: 'group', id: c.id });
                                 }
                             });
                         };

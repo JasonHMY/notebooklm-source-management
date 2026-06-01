@@ -376,7 +376,7 @@ describe('move-to-folder options', () => {
             return 1;
         };
 
-        const state = { groups: ['root', 'sibling'] };
+        const state = { root: [{ type: 'group', id: 'root' }, { type: 'group', id: 'sibling' }] };
         const groupsById = new Map([
             ['root', {
                 id: 'root',

@@ -49,7 +49,7 @@ describe('content state apply helper', () => {
 
     it('clears prior collections and writes snapshot groups, ungrouped and tag order', () => {
         const runtime = createRuntime({
-            state: { groups: ['old'], ungrouped: ['old-source'], tagOrder: ['old-tag'], activeTagId: 't1', isBatchMode: true },
+            state: { root: [{ type: 'group', id: 'old' }], ungrouped: ['old-source'], tagOrder: ['old-tag'], activeTagId: 't1', isBatchMode: true },
             groupsById: new Map([['old', { id: 'old', children: [] }]]),
             tagsById: new Map([['old-tag', { id: 'old-tag', label: 'X' }]]),
             sourceTagsById: new Map([['old-source', ['old-tag']]])
@@ -58,7 +58,7 @@ describe('content state apply helper', () => {
         const { applyPersistableSnapshotToRuntime } = createContentStateApply({ runtime, ...deps });
 
         const snapshot = {
-            groups: ['g1'],
+            root: [{ type: 'group', id: 'g1' }],
             ungrouped: ['s1'],
             tagOrder: ['t1'],
             groupsById: { g1: { id: 'g1', name: 'Folder', children: [] } },
@@ -70,7 +70,7 @@ describe('content state apply helper', () => {
         const result = applyPersistableSnapshotToRuntime(snapshot);
 
         expect(result).toBe(true);
-        expect(runtime.state.groups).toEqual(['g1']);
+        expect(runtime.state.root).toEqual([{ type: 'group', id: 'g1' }]);
         expect(runtime.state.ungrouped).toEqual(['s1']);
         expect(runtime.state.tagOrder).toEqual(['t1']);
         expect(runtime.state.isBatchMode).toBe(false);
@@ -117,7 +117,7 @@ describe('content state apply helper', () => {
         const { applyPersistableSnapshotToRuntime } = createContentStateApply({ runtime, ...deps });
 
         applyPersistableSnapshotToRuntime({
-            groups: ['g1'],
+            root: [{ type: 'group', id: 'g1' }],
             ungrouped: [],
             tagOrder: [],
             groupsById: { g1: { id: 'g1', children: [{ type: 'source', key: 'known' }] } },

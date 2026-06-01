@@ -58,7 +58,11 @@
             const groupsById = snapshot?.groupsById && typeof snapshot.groupsById === 'object'
                 ? snapshot.groupsById
                 : {};
-            const rootGroupIds = Array.isArray(snapshot?.groups) ? snapshot.groups : [];
+            // v5: root order is snapshot.root ({type:'group'|'source'}); legacy snapshots
+            // may still carry a flat groups id list. Only folder entries hold grouped sources.
+            const rootEntries = Array.isArray(snapshot?.root)
+                ? snapshot.root
+                : (Array.isArray(snapshot?.groups) ? snapshot.groups.map((id) => ({ type: 'group', id })) : []);
             const visitedGroups = new Set();
 
             const walkGroup = (groupId) => {
@@ -74,7 +78,9 @@
                 });
             };
 
-            rootGroupIds.forEach(walkGroup);
+            rootEntries.forEach((entry) => {
+                if (entry && entry.type === 'group' && entry.id) walkGroup(entry.id);
+            });
             return result;
         }
 
@@ -133,7 +139,10 @@
 
         function createStructurallyRepairedState(currentState, candidateState) {
             const repairedState = cloneSerializableData(currentState || {});
-            const candidateGroups = Array.isArray(candidateState?.groups) ? candidateState.groups : [];
+            // v5: take the candidate's heterogeneous root order (legacy fallback to groups).
+            const candidateRoot = Array.isArray(candidateState?.root)
+                ? candidateState.root
+                : (Array.isArray(candidateState?.groups) ? candidateState.groups.map((id) => ({ type: 'group', id })) : []);
             const candidateGroupsById = candidateState?.groupsById && typeof candidateState.groupsById === 'object'
                 ? candidateState.groupsById
                 : {};
@@ -144,7 +153,8 @@
                 ? candidateState.sourceStateById
                 : {};
 
-            repairedState.groups = cloneSerializableData(candidateGroups);
+            repairedState.root = cloneSerializableData(candidateRoot);
+            delete repairedState.groups;
             repairedState.groupsById = cloneSerializableData(candidateGroupsById);
             repairedState.sourceStateById = Object.assign(
                 {},
@@ -153,10 +163,18 @@
             );
 
             const groupedSourceKeys = collectSnapshotGroupedSourceKeys(repairedState);
+            // v5: positioned root sources already live in repairedState.root — don't also
+            // sweep them into the bin (that would duplicate the key across both lists).
+            const positionedRootSourceKeys = new Set(
+                (Array.isArray(repairedState.root) ? repairedState.root : [])
+                    .filter((entry) => entry && entry.type === 'source' && entry.key)
+                    .map((entry) => entry.key)
+            );
             const nextUngrouped = [];
             const seenUngrouped = new Set();
             const pushUngrouped = (sourceKey) => {
-                if (!sourceKey || groupedSourceKeys.has(sourceKey) || seenUngrouped.has(sourceKey)) return;
+                if (!sourceKey || groupedSourceKeys.has(sourceKey)
+                    || positionedRootSourceKeys.has(sourceKey) || seenUngrouped.has(sourceKey)) return;
                 nextUngrouped.push(sourceKey);
                 seenUngrouped.add(sourceKey);
             };

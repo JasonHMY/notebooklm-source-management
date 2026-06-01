@@ -1146,8 +1146,9 @@ describe('saveState', () => {
         mod.handleAddNewGroup();
 
         expect(global.chrome.runtime.sendMessage).toHaveBeenCalledTimes(1);
-        expect(mod.state.groups).toHaveLength(1);
-        expect(mod.groupsById.get(mod.state.groups[0])).toMatchObject({
+        expect(mod.state.root).toHaveLength(1);
+        expect(mod.state.root[0]).toMatchObject({ type: 'group' });
+        expect(mod.groupsById.get(mod.state.root[0].id)).toMatchObject({
             title: 'ui_new_group',
             enabled: true,
             collapsed: false
@@ -1979,9 +1980,9 @@ describe('loadState', () => {
     it('repairs empty folder source children from a compatible history snapshot during load', () => {
         const callback = jest.fn();
         const currentState = {
-            schemaVersion: 3,
+            schemaVersion: 5,
             _saveRevision: 259,
-            groups: ['group-00', 'group-02'],
+            root: [{ type: 'group', id: 'group-00' }, { type: 'group', id: 'group-02' }],
             groupsById: {
                 'group-00': { id: 'group-00', title: '00', children: [] },
                 'group-02': { id: 'group-02', title: '02', children: [{ type: 'group', id: 'group-a' }] },
@@ -1999,9 +2000,9 @@ describe('loadState', () => {
             sourceTagsById: {}
         };
         const goodSnapshot = {
-            schemaVersion: 3,
+            schemaVersion: 5,
             _saveRevision: 254,
-            groups: ['group-00', 'group-02'],
+            root: [{ type: 'group', id: 'group-00' }, { type: 'group', id: 'group-02' }],
             groupsById: {
                 'group-00': { id: 'group-00', title: '00', children: [{ type: 'source', key: 'source-a' }] },
                 'group-02': { id: 'group-02', title: '02', children: [{ type: 'group', id: 'group-a' }] },

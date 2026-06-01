@@ -167,7 +167,7 @@ describe('content state repair', () => {
 
             const repaired = repair.createStructurallyRepairedState(current, candidate);
 
-            expect(repaired.groups).toEqual(['a']);
+            expect(repaired.root).toEqual([{ type: 'group', id: 'a' }]);
             expect(repaired.groupsById).toEqual({ a: { children: [{ type: 'source', key: 's1' }] } });
             expect(repaired.sourceStateById.s1.title).toBe('current-s1');
             expect(repaired.ungrouped).toContain('legacy');
