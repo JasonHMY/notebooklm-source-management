@@ -2715,6 +2715,11 @@
                 .sp-drag-unfolding {
                     transition: none !important;
                 }
+                /* Show the ungroup dropzone instantly (no fade/rise) under
+                   reduced-motion; it still appears, just without the entry animation. */
+                .sp-ungroup-dropzone {
+                    animation: none !important;
+                }
                 .group-container.drag-into > .group-header {
                     transition: none !important;
                 }
@@ -3048,7 +3053,34 @@
                 color: var(--sp-accent);
                 transform: scale(1.02);
             }
-            
+
+            /* Transient "drop to ungroup" hint shown in the reflow-opened bottom slot
+               when a source drag hovers below all root content and the bin is empty.
+               Mounted/unmounted by _setUngroupDropzoneVisible in
+               content-tree-interactions.js. Always reads as an active accent drop
+               target (it only exists while it IS the target). Fade + slight rise-in
+               on mount via --sp-motion-base; the surrounding reflow (.sp-drop-shift)
+               opens the slot it sits in. */
+            .sp-ungroup-dropzone {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 16px;
+                margin: 4px 8px 8px 18px;
+                border: 2px dashed var(--sp-accent);
+                border-radius: 12px;
+                color: var(--sp-accent);
+                font-size: 13px;
+                font-weight: 500;
+                background-color: var(--sp-drag-into-bg);
+                pointer-events: none;
+                animation: sp-ungroup-dropzone-in var(--sp-motion-base) var(--sp-ease-emphasized);
+            }
+            @keyframes sp-ungroup-dropzone-in {
+                0%   { opacity: 0; transform: translateY(6px); }
+                100% { opacity: 1; transform: translateY(0); }
+            }
+
             /* =========================================
                UI Polish Part 3: Typography & Layout
                ========================================= */
