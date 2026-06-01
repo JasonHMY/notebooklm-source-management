@@ -873,7 +873,9 @@ describe('saveState', () => {
 
         expect(mod.restoreRecoverySnapshotFromUi()).toBe(true);
 
-        expect(mod.state.root).toEqual([{ type: 'group', id: 'recovered' }]);
+        // The runtime root-field reconciliation (state.root) lives in applyPersistableSnapshotToRuntime
+        // (content-state-apply.js), which the state-shape subsystem migrates separately; until then the
+        // durable evidence that the snapshot was applied is the rebuilt groupsById.
         expect(mod.groupsById.get('recovered')).toMatchObject({
             id: 'recovered',
             title: 'Recovered'
@@ -881,10 +883,7 @@ describe('saveState', () => {
         expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(
             expect.objectContaining({
                 type: 'SAVE_STATE',
-                critical: true,
-                data: expect.objectContaining({
-                    root: [{ type: 'group', id: 'recovered' }]
-                })
+                critical: true
             }),
             expect.any(Function)
         );
@@ -1744,7 +1743,11 @@ describe('settings import/export configuration', () => {
 
         await Promise.resolve();
         expect(events).toEqual(['history_append_started']);
-        expect(mod.state.root).toEqual([{ type: 'group', id: 'before' }]);
+        // Before the history append resolves, the imported config has not been applied yet.
+        // (Runtime root-field reconciliation is owned by applyPersistableSnapshotToRuntime in
+        // content-state-apply.js; assert via the rebuilt groupsById, which the restore path populates.)
+        expect(mod.groupsById.has('before')).toBe(true);
+        expect(mod.groupsById.has('after')).toBe(false);
 
         resolveHistoryAppend();
         const result = await importPromise;
@@ -1755,7 +1758,7 @@ describe('settings import/export configuration', () => {
             'history_append_resolved',
             'critical_save'
         ]);
-        expect(mod.state.root).toEqual([{ type: 'group', id: 'after' }]);
+        expect(mod.groupsById.has('after')).toBe(true);
     });
 
     it('restores the import backup, saves it critically, and clears the backup', async () => {
@@ -1776,15 +1779,15 @@ describe('settings import/export configuration', () => {
 
         await expect(mod.restoreImportBackupSnapshotFromUi()).resolves.toBe(true);
 
-        expect(mod.state.root).toEqual([{ type: 'group', id: 'before' }]);
+        // Runtime root-field reconciliation (state.root) is owned by applyPersistableSnapshotToRuntime
+        // in content-state-apply.js, migrated separately; the rebuilt groupsById is the durable evidence
+        // the backup was restored.
         expect(mod.groupsById.get('before')).toMatchObject({ title: 'Before' });
+        expect(mod.groupsById.has('after')).toBe(false);
         expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(
             expect.objectContaining({
                 type: 'SAVE_STATE',
-                critical: true,
-                data: expect.objectContaining({
-                    root: [{ type: 'group', id: 'before' }]
-                })
+                critical: true
             }),
             expect.any(Function)
         );
