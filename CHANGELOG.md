@@ -25,7 +25,7 @@
 - **短条目标题 (Short Entry)**: 标题已自解释的短条目，正文写清即可，可省略「影响」摘要。
 ```
 
-## [Unreleased] (未发布)
+## [2026-06-14] [26.6.14]
 
 ### Added
 - **来源可放到根层级任意位置(含文件夹之间) (Place Sources Anywhere at Root, Including Between Folders)**: **影响**: 现在可把来源拖到根层级任意位置——两个文件夹中间、文件夹之上/之下;桶为空时拖到列表底部会出现带动画的"移到未分组"落点区。 根层级状态模型从分离的 `state.groups`(文件夹)+ `state.ungrouped`(散源、强制排在所有文件夹之下)升级为统一的 `state.root` 异构有序数组(`{type:'group',id}|{type:'source',key}`,与 `group.children` 同构),文件夹与"已定位"散源可任意交错;`state.ungrouped` 保留为底部"未分组"桶(新导入源默认入桶、拖到底部送回桶),与"已定位"互斥。`computeDropIntent` 根落点合并进异构 `targetList=state.root`。

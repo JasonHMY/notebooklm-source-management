@@ -34,7 +34,7 @@ Separately from `chrome.storage.local`, page-lifecycle recovery writes a per-tab
 {
   "developerModeEnabled": false,
   "welcomeOnboardingSeenVersion": 1,
-  "whatsNewSeenVersion": "26.5.29",
+  "whatsNewSeenVersion": "26.6.14",
   "historyRetentionLimit": 20,
   "languageOverride": "auto",
   "commandShortcuts": {
