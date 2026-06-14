@@ -37,6 +37,7 @@ Separately from `chrome.storage.local`, page-lifecycle recovery writes a per-tab
   "whatsNewSeenVersion": "26.6.14",
   "historyRetentionLimit": 20,
   "languageOverride": "auto",
+  "dragMode": "classic",
   "commandShortcuts": {
     "quick-view-recent": "Meta+Shift+R"
   },
@@ -52,6 +53,7 @@ Separately from `chrome.storage.local`, page-lifecycle recovery writes a per-tab
 - `whatsNewSeenVersion` records the latest extension version string whose update-introduction modal the user has dismissed. Missing or an older dotted version means the current enabled What's New modal can be shown once for existing users.
 - `historyRetentionLimit` controls how many `sourcesPlusHistory_<projectId>` entries are retained. Valid values are `20`, `50`, and `100`; invalid or missing values fall back to `20`.
 - `languageOverride` controls extension UI language. Valid values are `auto`, `en`, `es`, and `zh_CN`; `auto` follows Chrome UI language.
+- `dragMode` selects the drag-and-drop behavior. Valid values are `classic` (default — blue insertion line, loose sources land only in folders or the bottom Ungrouped bin) and `reflow` (Beta — other sources move aside and a source can be positioned anywhere at root, including between folders); any other/missing value falls back to `classic`. Switching to `classic` sweeps any positioned root sources into the Ungrouped bin (classic cannot represent them).
 - `commandShortcuts` stores user-defined command palette shortcuts by command id. There are no default shortcuts; invalid command ids or malformed combos are ignored, and assigning a combo to one command removes the same combo from another command.
 - `visibleQuickViewKinds` controls which quick view rail buttons render in the source panel. Valid values are `all`, `ungrouped`, `disabled`, `tag`, `recent`, and `issues`; an empty array hides the rail while command palette actions and custom shortcuts remain available.
 - `appearance.hoverSpotlightEnabled` 控制 source / group header 悬浮时的蓝色 spotlight 光晕。默认 `true`，仅在显式 `false` 时关闭（只有严格 boolean false 才生效）。

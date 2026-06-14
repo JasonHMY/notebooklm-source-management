@@ -25,9 +25,11 @@ Notebook-scoped storage messages require a sender tab whose URL starts with `htt
 
 Global messages that are not notebook-state writes, such as extension enable/disable, preferences, tab focus/open, and web store feedback, are not tied to one notebook state key.
 
-`LOAD_PREFERENCES` returns `sourcesPlusPreferences` fields such as `developerModeEnabled`, `welcomeOnboardingSeenVersion`, `whatsNewSeenVersion`, `historyRetentionLimit`, `languageOverride`, `commandShortcuts`, `visibleQuickViewKinds`, and `appearance`. It also returns derived `usageState.hasExistingPluginData` and `usageState.hasStoredPreferences` booleans so content code can distinguish first-time users from users upgrading with existing local extension data. `SAVE_PREFERENCES` accepts partial preference updates and merges them with the existing stored object so toggling one preference does not clear the other stored preference fields.
+`LOAD_PREFERENCES` returns `sourcesPlusPreferences` fields such as `developerModeEnabled`, `welcomeOnboardingSeenVersion`, `whatsNewSeenVersion`, `historyRetentionLimit`, `languageOverride`, `dragMode`, `commandShortcuts`, `visibleQuickViewKinds`, and `appearance`. It also returns derived `usageState.hasExistingPluginData` and `usageState.hasStoredPreferences` booleans so content code can distinguish first-time users from users upgrading with existing local extension data. `SAVE_PREFERENCES` accepts partial preference updates and merges them with the existing stored object so toggling one preference does not clear the other stored preference fields.
 
 `appearance` is a nested object containing visual customization preferences. Currently includes `hoverSpotlightEnabled` (boolean, default true). `SAVE_PREFERENCES` deep-merges partial `appearance` updates so the background SW preserves sibling keys when more are added.
+
+`dragMode` is a top-level scalar enum (`classic` default / `reflow` Beta) normalized by `normalizeDragMode`; `SAVE_PREFERENCES` accepts `{ dragMode }` and merges it like other top-level scalars (unknown values fall back to `classic`).
 
 ## Storage message key rules
 

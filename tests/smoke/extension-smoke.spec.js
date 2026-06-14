@@ -949,6 +949,22 @@ test.describe.serial('extension smoke', () => {
     });
 
     test('restores an import backup and preserves dragged source ordering after reload', async () => {
+        // Root-level source reordering is a reflow-mode (Beta) feature; the default classic
+        // mode demotes a loose source dropped at root to the bottom bin. Enable reflow before
+        // the content script reads preferences on first load.
+        const reflowSeedBridge = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
+        try {
+            const reflowResp = await reflowSeedBridge.evaluate(async () => chrome.runtime.sendMessage({
+                type: 'SAVE_PREFERENCES',
+                preferences: { dragMode: 'reflow' }
+            }));
+            if (!reflowResp?.success) {
+                throw new Error(`Failed to enable reflow drag mode: ${reflowResp?.errorCode || 'unknown_error'}`);
+            }
+        } finally {
+            await reflowSeedBridge.close();
+        }
+
         const notebookPage = await env.context.newPage();
         await notebookPage.goto('https://notebooklm.google.com/notebook/import-sort');
         env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
@@ -1118,6 +1134,49 @@ test.describe.serial('extension smoke', () => {
             'Notebook import-sort source B',
             'Notebook import-sort source A'
         ]);
+    });
+
+    test('classic drag mode (default) shows the blue insertion line and never folds the dragged row', async () => {
+        // No reflow seed → the default classic mode is active.
+        const notebookPage = await env.context.newPage();
+        await notebookPage.goto('https://notebooklm.google.com/notebook/import-sort');
+        env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
+
+        await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
+        await notebookPage.evaluate(() => window.__waitForFixtureHydration('full'));
+
+        const result = await notebookPage.evaluate(async () => {
+            const getRoot = () => document.querySelector('#sources-plus-root')?.shadowRoot || null;
+            const sleep = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
+            const rows = () => Array.from(getRoot()?.querySelectorAll('.source-item') || []);
+            let current = rows();
+            for (let i = 0; i < 80 && current.length < 2; i += 1) { await sleep(25); current = rows(); }
+            if (current.length < 2) throw new Error('Expected at least two source rows.');
+
+            const dataTransfer = new DataTransfer();
+            current[0].dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer }));
+            await sleep(40); // give the (reflow-only) rAF-deferred fold a chance to run
+            const foldedAfterStart = getRoot().querySelectorAll('.sp-drag-folded').length;
+            const draggingAfterStart = getRoot().querySelectorAll('.dragging').length;
+
+            const targetRect = current[1].getBoundingClientRect();
+            current[1].dispatchEvent(new DragEvent('dragover', {
+                bubbles: true, cancelable: true, dataTransfer, clientY: targetRect.bottom - 1
+            }));
+            await sleep(40); // dragover rAF
+            const blueLines = getRoot().querySelectorAll('.drag-over-top, .drag-over-bottom').length;
+            const guideBars = getRoot().querySelectorAll('.sp-drag-guide').length;
+
+            current[0].dispatchEvent(new DragEvent('dragend', { bubbles: true, cancelable: true, dataTransfer }));
+            return { foldedAfterStart, draggingAfterStart, blueLines, guideBars };
+        });
+
+        // Classic: the dragged row is dimmed (.dragging) but never folded away, and feedback
+        // is the blue insertion line — not the reflow fold / guide bar.
+        expect(result.draggingAfterStart).toBeGreaterThan(0);
+        expect(result.foldedAfterStart).toBe(0);
+        expect(result.guideBars).toBe(0);
+        expect(result.blueLines).toBeGreaterThan(0);
     });
 
     test('rejects stale saves without overwriting newer storage state', async () => {

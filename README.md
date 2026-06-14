@@ -12,7 +12,7 @@ It runs directly inside NotebookLM's source panel. The toolbar icon is only a la
 - Group sources into custom folders.
 - Create nested folders, move sources into subfolders, and isolate one folder when you want to focus.
 - Reorder sources or whole groups with drag and drop.
-- Drop a source anywhere at the root level, including between two folders, or drop it at the bottom to move it back to "Ungrouped".
+- Choose your drag mode in Settings → Appearance: **classic** (default — a blue insertion line, loose sources land in folders or the bottom "Ungrouped" bin) or **reflow (Beta)** — other sources move aside as you drag and you can drop a source anywhere at the root level, including between two folders.
 - Search by source title, tag, or folder, with simple `tag:` and `folder:` filters.
 - Automatically expand folders that contain search results, then restore the previous collapsed state when search is cleared.
 - Add color-coded tags, filter by tag, and batch add or remove tags.
