@@ -558,6 +558,7 @@ describe('background.js message listener', () => {
                     languageOverride: 'auto',
                     commandShortcuts: {},
                     visibleQuickViewKinds: DEFAULT_VISIBLE_QUICK_VIEW_KINDS,
+                    dragMode: 'classic',
                     appearance: { hoverSpotlightEnabled: true }
                 }
             },
@@ -573,6 +574,7 @@ describe('background.js message listener', () => {
                 languageOverride: 'auto',
                 commandShortcuts: {},
                 visibleQuickViewKinds: DEFAULT_VISIBLE_QUICK_VIEW_KINDS,
+                dragMode: 'classic',
                 appearance: { hoverSpotlightEnabled: true }
             }
         });
@@ -598,6 +600,7 @@ describe('background.js message listener', () => {
                 languageOverride: 'auto',
                 commandShortcuts: {},
                 visibleQuickViewKinds: DEFAULT_VISIBLE_QUICK_VIEW_KINDS,
+                dragMode: 'classic',
                 appearance: { hoverSpotlightEnabled: true }
             },
             usageState: {
@@ -666,6 +669,7 @@ describe('background.js message listener', () => {
                     languageOverride: 'auto',
                     commandShortcuts: {},
                     visibleQuickViewKinds: DEFAULT_VISIBLE_QUICK_VIEW_KINDS,
+                    dragMode: 'classic',
                     appearance: { hoverSpotlightEnabled: true }
                 }
             },
@@ -681,6 +685,7 @@ describe('background.js message listener', () => {
                 languageOverride: 'auto',
                 commandShortcuts: {},
                 visibleQuickViewKinds: DEFAULT_VISIBLE_QUICK_VIEW_KINDS,
+                dragMode: 'classic',
                 appearance: { hoverSpotlightEnabled: true }
             }
         });
@@ -718,6 +723,7 @@ describe('background.js message listener', () => {
                     languageOverride: 'zh_CN',
                     commandShortcuts: {},
                     visibleQuickViewKinds: DEFAULT_VISIBLE_QUICK_VIEW_KINDS,
+                    dragMode: 'classic',
                     appearance: { hoverSpotlightEnabled: true }
                 }
             },
@@ -764,6 +770,7 @@ describe('background.js message listener', () => {
                         'quick-view-issues': 'Ctrl+Alt+I'
                     },
                     visibleQuickViewKinds: DEFAULT_VISIBLE_QUICK_VIEW_KINDS,
+                    dragMode: 'classic',
                     appearance: { hoverSpotlightEnabled: true }
                 }
             },
@@ -807,6 +814,7 @@ describe('background.js message listener', () => {
                         'quick-view-recent': 'Meta+Shift+R'
                     },
                     visibleQuickViewKinds: ['all', 'issues'],
+                    dragMode: 'classic',
                     appearance: { hoverSpotlightEnabled: true }
                 }
             },
@@ -2052,5 +2060,58 @@ describe('mergePreferences deep-merges appearance', () => {
             { appearance: null }
         );
         expect(merged.appearance.hoverSpotlightEnabled).toBe(false);
+    });
+});
+
+describe('dragMode preference', () => {
+    let normalizePreferences;
+    let mergePreferences;
+
+    beforeEach(() => {
+        global.chrome = {
+            runtime: {
+                id: 'abcdefghijklmnopabcdefghijklmnop',
+                onMessage: { addListener: jest.fn() },
+                getManifest: jest.fn(() => ({})),
+                lastError: undefined
+            },
+            tabs: { query: jest.fn(), update: jest.fn(), sendMessage: jest.fn(), create: jest.fn() },
+            windows: { update: jest.fn() },
+            storage: { local: { set: jest.fn(), get: jest.fn() } }
+        };
+        jest.isolateModules(() => {
+            ({ normalizePreferences, mergePreferences } = require('../src/background/index.js'));
+        });
+    });
+
+    afterEach(() => {
+        delete global.chrome;
+    });
+
+    it('normalizeDragMode falls back to classic for anything but reflow', () => {
+        const { normalizeDragMode } = require('../src/utils/preference-normalizers.js');
+        expect(normalizeDragMode('reflow')).toBe('reflow');
+        expect(normalizeDragMode('classic')).toBe('classic');
+        expect(normalizeDragMode('bogus')).toBe('classic');
+        expect(normalizeDragMode(undefined)).toBe('classic');
+        expect(normalizeDragMode(null)).toBe('classic');
+    });
+
+    it('defaults dragMode to classic when unset', () => {
+        expect(normalizePreferences({}).dragMode).toBe('classic');
+    });
+
+    it('normalizes dragMode through normalizePreferences', () => {
+        expect(normalizePreferences({ dragMode: 'reflow' }).dragMode).toBe('reflow');
+        expect(normalizePreferences({ dragMode: 'bogus' }).dragMode).toBe('classic');
+        expect(normalizePreferences({ dragMode: 42 }).dragMode).toBe('classic');
+    });
+
+    it('merges dragMode when provided, otherwise leaves it untouched', () => {
+        expect(mergePreferences({}, { dragMode: 'reflow' }).dragMode).toBe('reflow');
+        expect(mergePreferences({ dragMode: 'reflow' }, { dragMode: 'bogus' }).dragMode).toBe('classic');
+        const merged = mergePreferences({ dragMode: 'reflow' }, { developerModeEnabled: true });
+        expect(merged.dragMode).toBe('reflow');
+        expect(merged.developerModeEnabled).toBe(true);
     });
 });

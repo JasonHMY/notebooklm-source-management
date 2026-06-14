@@ -57,6 +57,10 @@
             : 'auto';
     }
 
+    function normalizeDragMode(value) {
+        return value === 'reflow' ? 'reflow' : 'classic';
+    }
+
     function normalizeCommandShortcutId(value) {
         const id = String(value || '').trim();
         return /^[a-z0-9][a-z0-9-]{0,79}$/.test(id) ? id : '';
@@ -155,6 +159,7 @@
         normalizeWhatsNewSeenVersion,
         normalizeHistoryRetentionLimit,
         normalizeLanguageOverride,
+        normalizeDragMode,
         normalizeCommandShortcutId,
         normalizeCommandShortcutKey,
         normalizeCommandShortcutCombo,

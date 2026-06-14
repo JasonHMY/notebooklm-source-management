@@ -36,6 +36,7 @@ const {
     normalizeWhatsNewSeenVersion,
     normalizeHistoryRetentionLimit,
     normalizeLanguageOverride,
+    normalizeDragMode,
     normalizeCommandShortcutId,
     normalizeCommandShortcutCombo,
     normalizeCommandShortcuts,
@@ -375,6 +376,7 @@ function normalizePreferences(preferences = {}) {
         whatsNewSeenVersion: normalizeWhatsNewSeenVersion(preferences?.whatsNewSeenVersion),
         historyRetentionLimit: normalizeHistoryRetentionLimit(preferences?.historyRetentionLimit),
         languageOverride: normalizeLanguageOverride(preferences?.languageOverride),
+        dragMode: normalizeDragMode(preferences?.dragMode),
         commandShortcuts: normalizeCommandShortcuts(preferences?.commandShortcuts),
         visibleQuickViewKinds: normalizeVisibleQuickViewKinds(preferences?.visibleQuickViewKinds),
         appearance: normalizeAppearancePreferences(preferences?.appearance)
@@ -435,6 +437,9 @@ function mergePreferences(existingPreferences = {}, nextPreferences = {}) {
     }
     if (Object.prototype.hasOwnProperty.call(nextPreferences || {}, 'languageOverride')) {
         merged.languageOverride = normalizeLanguageOverride(nextPreferences.languageOverride);
+    }
+    if (Object.prototype.hasOwnProperty.call(nextPreferences || {}, 'dragMode')) {
+        merged.dragMode = normalizeDragMode(nextPreferences.dragMode);
     }
     if (Object.prototype.hasOwnProperty.call(nextPreferences || {}, 'commandShortcuts')) {
         merged.commandShortcuts = mergeCommandShortcuts(merged.commandShortcuts, nextPreferences.commandShortcuts);
