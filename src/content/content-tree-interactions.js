@@ -59,6 +59,13 @@
         const getShadowRoot = typeof deps.getShadowRoot === 'function'
             ? deps.getShadowRoot
             : () => (deps.shadowRoot || runtime.shadowRoot || null);
+        // Drag mode preference ('classic' blue-line / 'reflow' avoidance Beta). Default
+        // 'reflow' here keeps the new engine active when no getter is injected (unit tests
+        // that predate the toggle); production index.js injects the real getDragMode, whose
+        // own default is 'classic'.
+        const getDragMode = typeof deps.getDragMode === 'function'
+            ? deps.getDragMode
+            : () => 'reflow';
         const getDocument = typeof deps.getDocument === 'function'
             ? deps.getDocument
             : () => (deps.document || runtime.document || globalThis.document || null);
@@ -263,7 +270,32 @@
         //   object entries for state.root / group.children, bare keys for state.ungrouped.
         //   See CLAUDE.md "Non-obvious gotchas" and resolveSiblingKeys above for
         //   an example of polymorphic targetList consumption.
-        function computeDropIntent({ clientX, clientY, rootElement, state, groupsById, parentMap, activeDragContext, prevIntent }) {
+        // Classic drag mode never positions a loose source at a root index — such a drop
+        // is demoted to the bottom ungrouped bin (26.5.26 behavior). The raw geometry
+        // resolver below is unchanged; this wrapper applies the mode gate at the single
+        // exit so both single- and multi-source drops (which reuse one intent) are covered.
+        // Group reorder at root and source-into-folder are NOT demoted.
+        function computeDropIntent(args) {
+            const intent = computeDropIntentRaw(args);
+            if (getDragMode() !== 'classic') return intent;
+            if (!intent || !intent.isRootList) return intent;
+            const ctx = args && args.activeDragContext;
+            const isSourceDrag = !!ctx && (ctx.kind === 'source-single' || ctx.kind === 'source-multi');
+            if (!isSourceDrag) return intent;
+            const ungrouped = args && args.state && Array.isArray(args.state.ungrouped) ? args.state.ungrouped : [];
+            return {
+                kind: 'after-source',
+                targetGroup: null,
+                targetList: ungrouped,
+                insertIndex: ungrouped.length,
+                targetGroupId: null,
+                hostGroupContainerEl: null,
+                slotKey: null,
+                isUngroupedBin: true
+            };
+        }
+
+        function computeDropIntentRaw({ clientX, clientY, rootElement, state, groupsById, parentMap, activeDragContext, prevIntent }) {
             if (typeof clientY !== 'number' || !rootElement || typeof rootElement.querySelectorAll !== 'function') {
                 return null;
             }

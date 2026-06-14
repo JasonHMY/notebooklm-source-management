@@ -3406,6 +3406,129 @@ describe('computeDropIntent', () => {
         expect(intent.targetGroup).toBeNull();
     });
 
+    it('classic mode: a source dropped at a root position is demoted to the ungrouped bin', () => {
+        const state = { root: [{ type: 'group', id: 'g1' }, { type: 'group', id: 'g2' }], ungrouped: [] };
+        const groupsById = new Map([['g1', { id: 'g1', children: [] }], ['g2', { id: 'g2', children: [] }]]);
+        const tree = createContentTreeInteractions({
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getParentMap: () => new Map(),
+            getDragMode: () => 'classic'
+        });
+        const { sourcesListEl } = makeMockShadowList({
+            items: [
+                { kind: 'group', id: 'g1', top: 100, headerHeight: 30, childrenStart: 130, childrenEnd: 130 },
+                { kind: 'group', id: 'g2', top: 200, headerHeight: 30, childrenStart: 230, childrenEnd: 230 }
+            ]
+        });
+        // pointer in the gap between g1 and g2 — a source landing here is a root position
+        const intent = tree.computeDropIntent({
+            clientY: 150,
+            rootElement: sourcesListEl,
+            state,
+            groupsById,
+            parentMap: new Map(),
+            activeDragContext: { kind: 'source-single', keys: ['X'] }
+        });
+        expect(intent).toBeTruthy();
+        expect(intent.isRootList).toBeFalsy();
+        expect(intent.targetList).toBe(state.ungrouped);
+        expect(intent.isUngroupedBin).toBe(true);
+        expect(intent.insertIndex).toBe(0);
+    });
+
+    it('reflow mode: the same root-position source drop stays a positioned root intent', () => {
+        const state = { root: [{ type: 'group', id: 'g1' }, { type: 'group', id: 'g2' }], ungrouped: [] };
+        const groupsById = new Map([['g1', { id: 'g1', children: [] }], ['g2', { id: 'g2', children: [] }]]);
+        const tree = createContentTreeInteractions({
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getParentMap: () => new Map(),
+            getDragMode: () => 'reflow'
+        });
+        const { sourcesListEl } = makeMockShadowList({
+            items: [
+                { kind: 'group', id: 'g1', top: 100, headerHeight: 30, childrenStart: 130, childrenEnd: 130 },
+                { kind: 'group', id: 'g2', top: 200, headerHeight: 30, childrenStart: 230, childrenEnd: 230 }
+            ]
+        });
+        const intent = tree.computeDropIntent({
+            clientY: 150,
+            rootElement: sourcesListEl,
+            state,
+            groupsById,
+            parentMap: new Map(),
+            activeDragContext: { kind: 'source-single', keys: ['X'] }
+        });
+        expect(intent).toBeTruthy();
+        expect(intent.isRootList).toBe(true);
+        expect(intent.targetList).toBe(state.root);
+        expect(intent.isUngroupedBin).toBeFalsy();
+    });
+
+    it('classic mode: a source dropped INTO a folder is not demoted (into-group preserved)', () => {
+        const state = { root: [{ type: 'group', id: 'g1' }], ungrouped: [] };
+        const groupsById = new Map([
+            ['g1', { id: 'g1', collapsed: false, children: [{ type: 'source', key: 'c1' }] }]
+        ]);
+        const tree = createContentTreeInteractions({
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getParentMap: () => new Map(),
+            getDragMode: () => 'classic'
+        });
+        const { sourcesListEl } = makeMockShadowList({
+            items: [
+                {
+                    kind: 'group', id: 'g1', top: 100, headerHeight: 40,
+                    childrenStart: 140, childrenEnd: 180,
+                    children: [{ kind: 'source', key: 'c1', top: 140, height: 40 }]
+                }
+            ]
+        });
+        // pointer on the header (y=110) → into-group, has targetGroup, not isRootList
+        const intent = tree.computeDropIntent({
+            clientX: 100,
+            clientY: 110,
+            rootElement: sourcesListEl,
+            state,
+            groupsById,
+            parentMap: new Map(),
+            activeDragContext: { kind: 'source-single', keys: ['X'] }
+        });
+        expect(intent).toBeTruthy();
+        expect(intent.targetGroup).toBe(groupsById.get('g1'));
+        expect(intent.isUngroupedBin).toBeFalsy();
+    });
+
+    it('classic mode: a GROUP reordered at root is not demoted (groups still reorder)', () => {
+        const state = { root: [{ type: 'group', id: 'g1' }, { type: 'group', id: 'g2' }], ungrouped: [] };
+        const groupsById = new Map([['g1', { id: 'g1', children: [] }], ['g2', { id: 'g2', children: [] }]]);
+        const tree = createContentTreeInteractions({
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getParentMap: () => new Map(),
+            getDragMode: () => 'classic'
+        });
+        const { sourcesListEl } = makeMockShadowList({
+            items: [
+                { kind: 'group', id: 'g1', top: 100, headerHeight: 30, childrenStart: 130, childrenEnd: 130 },
+                { kind: 'group', id: 'g2', top: 200, headerHeight: 30, childrenStart: 230, childrenEnd: 230 }
+            ]
+        });
+        const intent = tree.computeDropIntent({
+            clientY: 150,
+            rootElement: sourcesListEl,
+            state,
+            groupsById,
+            parentMap: new Map(),
+            activeDragContext: { kind: 'group', draggedGroupId: 'g2' }
+        });
+        expect(intent).toBeTruthy();
+        expect(intent.isUngroupedBin).toBeFalsy();
+        expect(intent.targetList).toBe(state.root);
+    });
+
     it('returns a before-source intent into an expanded folder when cursor is between its two children', () => {
         const state = { root: [{ type: 'group', id: 'g1' }], ungrouped: [] };
         const groupsById = new Map([
