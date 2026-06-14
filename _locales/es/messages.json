@@ -524,6 +524,21 @@
     "ui_settings_appearance_hover_spotlight_failed": {
         "message": "No se pudo actualizar el resaltado"
     },
+    "ui_settings_drag_mode_title": {
+        "message": "Activar arrastre con reflujo (Beta)"
+    },
+    "ui_settings_drag_mode_body": {
+        "message": "Beta: al arrastrar, las demás fuentes se apartan para abrir un hueco y puedes soltar una fuente entre carpetas. Desactivado (predeterminado) usa la línea azul de inserción clásica. Al volver al modo clásico, las fuentes colocadas entre carpetas pasan al contenedor «Sin agrupar» del final."
+    },
+    "ui_settings_drag_mode_enabled": {
+        "message": "Arrastre con reflujo (Beta) activado"
+    },
+    "ui_settings_drag_mode_disabled": {
+        "message": "Arrastre clásico restaurado"
+    },
+    "ui_settings_drag_mode_failed": {
+        "message": "No se pudo cambiar el modo de arrastre"
+    },
     "ui_settings_developer_logs_copied": {
         "message": "Logs de desarrollador copiados"
     },

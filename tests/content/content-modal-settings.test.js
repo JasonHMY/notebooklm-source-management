@@ -88,6 +88,8 @@ function createDeps(overrides = {}) {
         setDeveloperModeEnabled: jest.fn(() => Promise.resolve(false)),
         getHoverSpotlightEnabled: jest.fn(() => true),
         setHoverSpotlightEnabled: jest.fn(() => Promise.resolve(true)),
+        getDragMode: jest.fn(() => 'classic'),
+        setDragMode: jest.fn(() => Promise.resolve('classic')),
         clearDeveloperLogs: jest.fn(() => Promise.resolve(false)),
         getStateHistoryEntries: jest.fn(() => []),
         restoreStateHistoryEntry: jest.fn(() => Promise.resolve(false)),
@@ -334,6 +336,63 @@ describe('content modal settings', () => {
             await Promise.resolve();
             expect(toggle.attrs.checked).toBe(originalChecked);
             expect(showToast).toHaveBeenCalledWith('ui_settings_appearance_hover_spotlight_failed', expect.objectContaining({ variant: 'error' }));
+        });
+
+        it('renders a drag-mode (reflow Beta) toggle in the appearance section', () => {
+            const deps = createDeps();
+            const helper = createContentModalSettings(deps);
+            helper.renderSettingsModal();
+            const shadowRoot = deps.getShadowRoot();
+            expect(shadowRoot.querySelector('.sp-settings-drag-mode-toggle')).toBeTruthy();
+        });
+
+        it('drag-mode checkbox is checked only when dragMode is reflow', () => {
+            const deps = createDeps({ getDragMode: () => 'reflow' });
+            const helper = createContentModalSettings(deps);
+            helper.renderSettingsModal();
+            const shadowRoot = deps.getShadowRoot();
+            const toggle = shadowRoot.querySelector('.sp-settings-drag-mode-toggle');
+            expect(toggle.attrs.checked).toBe(true);
+        });
+
+        it('checking the drag-mode toggle enables reflow', async () => {
+            const setDragMode = jest.fn(() => Promise.resolve('reflow'));
+            const deps = createDeps({ setDragMode, getDragMode: () => 'classic' });
+            const helper = createContentModalSettings(deps);
+            helper.renderSettingsModal();
+            const shadowRoot = deps.getShadowRoot();
+            const toggle = shadowRoot.querySelector('.sp-settings-drag-mode-toggle');
+            toggle.listeners.change.forEach((handler) => handler({ target: { checked: true } }));
+            await Promise.resolve();
+            expect(setDragMode).toHaveBeenCalledWith('reflow');
+        });
+
+        it('unchecking the drag-mode toggle restores classic', async () => {
+            const setDragMode = jest.fn(() => Promise.resolve('classic'));
+            const deps = createDeps({ setDragMode, getDragMode: () => 'reflow' });
+            const helper = createContentModalSettings(deps);
+            helper.renderSettingsModal();
+            const shadowRoot = deps.getShadowRoot();
+            const toggle = shadowRoot.querySelector('.sp-settings-drag-mode-toggle');
+            toggle.listeners.change.forEach((handler) => handler({ target: { checked: false } }));
+            await Promise.resolve();
+            expect(setDragMode).toHaveBeenCalledWith('classic');
+        });
+
+        it('rolls back the drag-mode toggle and shows error toast when setDragMode rejects', async () => {
+            const setDragMode = jest.fn(() => Promise.reject(new Error('boom')));
+            const showToast = jest.fn();
+            const deps = createDeps({ setDragMode, showToast, getDragMode: () => 'classic' });
+            const helper = createContentModalSettings(deps);
+            helper.renderSettingsModal();
+            const shadowRoot = deps.getShadowRoot();
+            const toggle = shadowRoot.querySelector('.sp-settings-drag-mode-toggle');
+            // user checks it (classic → reflow), but the setter rejects
+            toggle.listeners.change.forEach((handler) => handler({ target: { checked: true } }));
+            await Promise.resolve();
+            await Promise.resolve();
+            expect(toggle.checked).toBe(false);
+            expect(showToast).toHaveBeenCalledWith('ui_settings_drag_mode_failed', expect.objectContaining({ variant: 'error' }));
         });
     });
 });

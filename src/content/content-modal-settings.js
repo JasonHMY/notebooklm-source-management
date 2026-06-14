@@ -49,6 +49,8 @@
             setDeveloperModeEnabled = () => Promise.resolve(false),
             getHoverSpotlightEnabled = () => true,
             setHoverSpotlightEnabled = () => Promise.resolve(true),
+            getDragMode = () => 'classic',
+            setDragMode = () => Promise.resolve('classic'),
             clearDeveloperLogs = () => Promise.resolve(false),
             getStateHistoryEntries = () => [],
             restoreStateHistoryEntry = () => Promise.resolve(false),
@@ -246,32 +248,64 @@
                 el('span', { className: 'sp-settings-helper-text' }, [getMessage('ui_settings_appearance_hover_spotlight_title')])
             ]);
 
+            const dragModeToggle = el('input', {
+                type: 'checkbox',
+                className: 'sp-settings-drag-mode-toggle',
+                checked: getDragMode() === 'reflow',
+                'aria-label': getMessage('ui_settings_drag_mode_title')
+            });
+            const dragModeRow = el('label', { className: 'sp-settings-action-row sp-settings-appearance-toggle-row' }, [
+                dragModeToggle,
+                el('span', { className: 'sp-settings-helper-text' }, [getMessage('ui_settings_drag_mode_title')])
+            ]);
+
             return el('section', { className: 'sp-settings-section sp-settings-appearance-section' }, [
                 el('div', { className: 'sp-settings-section-header' }, [
                     el('h4', { className: 'sp-settings-section-title' }, [getMessage('ui_settings_appearance_title')]),
-                    hoverSpotlightRow
+                    hoverSpotlightRow,
+                    dragModeRow
                 ]),
                 el('p', { className: 'sp-settings-helper-text sp-settings-appearance-body' }, [
                     getMessage('ui_settings_appearance_hover_spotlight_body')
+                ]),
+                el('p', { className: 'sp-settings-helper-text sp-settings-drag-mode-body' }, [
+                    getMessage('ui_settings_drag_mode_body')
                 ])
             ]);
         }
 
         function bindAppearanceSettingsActions(container) {
             const toggle = container.querySelector('.sp-settings-appearance-hover-spotlight-toggle');
-            if (!toggle) return;
-            toggle.addEventListener('change', (event) => {
-                const next = Boolean(event?.target?.checked ?? toggle.checked);
-                Promise.resolve(setHoverSpotlightEnabled(next))
-                    .then(() => {
-                        showToast(getMessage(next ? 'ui_settings_appearance_hover_spotlight_enabled' : 'ui_settings_appearance_hover_spotlight_disabled'), { variant: 'success' });
-                    })
-                    .catch(() => {
-                        toggle.checked = !next;
-                        if (toggle.attrs) toggle.attrs.checked = !next;
-                        showToast(getMessage('ui_settings_appearance_hover_spotlight_failed'), { variant: 'error' });
-                    });
-            });
+            if (toggle) {
+                toggle.addEventListener('change', (event) => {
+                    const next = Boolean(event?.target?.checked ?? toggle.checked);
+                    Promise.resolve(setHoverSpotlightEnabled(next))
+                        .then(() => {
+                            showToast(getMessage(next ? 'ui_settings_appearance_hover_spotlight_enabled' : 'ui_settings_appearance_hover_spotlight_disabled'), { variant: 'success' });
+                        })
+                        .catch(() => {
+                            toggle.checked = !next;
+                            if (toggle.attrs) toggle.attrs.checked = !next;
+                            showToast(getMessage('ui_settings_appearance_hover_spotlight_failed'), { variant: 'error' });
+                        });
+                });
+            }
+            const dragToggle = container.querySelector('.sp-settings-drag-mode-toggle');
+            if (dragToggle) {
+                dragToggle.addEventListener('change', (event) => {
+                    const enabled = Boolean(event?.target?.checked ?? dragToggle.checked);
+                    const nextMode = enabled ? 'reflow' : 'classic';
+                    Promise.resolve(setDragMode(nextMode))
+                        .then(() => {
+                            showToast(getMessage(enabled ? 'ui_settings_drag_mode_enabled' : 'ui_settings_drag_mode_disabled'), { variant: 'success' });
+                        })
+                        .catch(() => {
+                            dragToggle.checked = !enabled;
+                            if (dragToggle.attrs) dragToggle.attrs.checked = !enabled;
+                            showToast(getMessage('ui_settings_drag_mode_failed'), { variant: 'error' });
+                        });
+                });
+            }
         }
 
         function bindDeveloperSettingsActions(container) {

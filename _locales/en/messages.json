@@ -524,6 +524,21 @@
     "ui_settings_appearance_hover_spotlight_failed": {
         "message": "Could not update hover spotlight"
     },
+    "ui_settings_drag_mode_title": {
+        "message": "Enable reflow drag (Beta)"
+    },
+    "ui_settings_drag_mode_body": {
+        "message": "Beta: while dragging, other sources move aside to open a slot, and you can drop a source between folders. Off (default) uses the classic blue insertion line. Switching back to classic moves any sources placed between folders to the bottom Ungrouped bin."
+    },
+    "ui_settings_drag_mode_enabled": {
+        "message": "Reflow drag (Beta) enabled"
+    },
+    "ui_settings_drag_mode_disabled": {
+        "message": "Classic drag restored"
+    },
+    "ui_settings_drag_mode_failed": {
+        "message": "Could not change drag mode"
+    },
     "ui_settings_developer_logs_copied": {
         "message": "Developer logs copied"
     },

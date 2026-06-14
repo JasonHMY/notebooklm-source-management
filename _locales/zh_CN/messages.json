@@ -524,6 +524,21 @@
     "ui_settings_appearance_hover_spotlight_failed": {
         "message": "无法更新悬浮光晕设置"
     },
+    "ui_settings_drag_mode_title": {
+        "message": "启用避让拖拽(Beta)"
+    },
+    "ui_settings_drag_mode_body": {
+        "message": "Beta:拖动时其它来源会避让让出空位,并且可以把来源拖到文件夹之间。关闭(默认)使用经典蓝色插入线。切回经典时,已放在文件夹之间的来源会移动到底部「未分组」桶。"
+    },
+    "ui_settings_drag_mode_enabled": {
+        "message": "已启用避让拖拽(Beta)"
+    },
+    "ui_settings_drag_mode_disabled": {
+        "message": "已恢复经典拖拽"
+    },
+    "ui_settings_drag_mode_failed": {
+        "message": "无法切换拖拽模式"
+    },
     "ui_settings_developer_logs_copied": {
         "message": "开发者日志已复制"
     },

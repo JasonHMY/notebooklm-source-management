@@ -462,6 +462,7 @@
         getHoverSpotlightEnabled,
         setHoverSpotlightEnabled,
         getDragMode,
+        setDragMode,
         getWelcomeOnboardingSeenVersion,
         setWelcomeOnboardingSeenVersion,
         getWhatsNewSeenVersion,
@@ -684,6 +685,8 @@
             applyAppearancePreferencesToHost();
             return result;
         },
+        getDragMode,
+        setDragMode: (mode) => applyDragModeChange(mode),
         markWelcomeOnboardingSeen: () => markWelcomeOnboardingSeen(),
         getDeveloperLogExportText: (...args) => getDeveloperLogExportText(...args),
         clearDeveloperLogs: (...args) => clearDeveloperLogs(...args),
@@ -1651,6 +1654,23 @@
         } else {
             extensionHost.classList.add('sp-appearance-no-spotlight');
         }
+    }
+
+    // Persist a drag-mode change, then (when switching to classic) sweep any positioned
+    // root sources into the bottom ungrouped bin and re-render — classic mode cannot
+    // represent sources placed between folders. Used by the settings toggle and the
+    // What's-New "enable Beta" button.
+    async function applyDragModeChange(mode) {
+        const result = await setDragMode(mode);
+        if (getDragMode() === 'classic'
+            && treeInteractionsModule
+            && typeof treeInteractionsModule.sweepPositionedRootSourcesToBin === 'function'
+            && treeInteractionsModule.sweepPositionedRootSourcesToBin(state)) {
+            buildParentMap();
+            render();
+            saveState();
+        }
+        return result;
     }
 
     function applyLanguageOverrideFromPreferences() {

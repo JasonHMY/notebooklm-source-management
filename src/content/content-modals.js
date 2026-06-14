@@ -171,6 +171,12 @@
         const setHoverSpotlightEnabled = typeof deps.setHoverSpotlightEnabled === 'function'
             ? deps.setHoverSpotlightEnabled
             : () => Promise.resolve(true);
+        const getDragMode = typeof deps.getDragMode === 'function'
+            ? deps.getDragMode
+            : () => 'classic';
+        const setDragMode = typeof deps.setDragMode === 'function'
+            ? deps.setDragMode
+            : () => Promise.resolve('classic');
         const markWelcomeOnboardingSeen = typeof deps.markWelcomeOnboardingSeen === 'function'
             ? deps.markWelcomeOnboardingSeen
             : () => Promise.resolve(false);
@@ -569,6 +575,8 @@
                 setDeveloperModeEnabled,
                 getHoverSpotlightEnabled,
                 setHoverSpotlightEnabled,
+                getDragMode,
+                setDragMode,
                 clearDeveloperLogs,
                 getStateHistoryEntries,
                 restoreStateHistoryEntry: (...args) => restoreStateHistoryEntry(...args),
