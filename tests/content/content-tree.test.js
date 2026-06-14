@@ -3360,6 +3360,64 @@ describe('resolveSiblingKeys helper', () => {
     });
 });
 
+describe('sweepPositionedRootSourcesToBin', () => {
+    let createContentTreeInteractions;
+
+    beforeEach(() => {
+        jest.resetModules();
+        setupGlobalMocks();
+        require('../../src/content/content-native-checkbox-sync.js');
+        createContentTreeInteractions = require('../../src/content/content-tree-interactions.js');
+    });
+
+    afterEach(teardownGlobalMocks);
+
+    it('moves positioned root sources to the end of the ungrouped bin, preserving order', () => {
+        const tree = createContentTreeInteractions({});
+        const state = {
+            root: [
+                { type: 'group', id: 'A' },
+                { type: 'source', key: 'x' },
+                { type: 'group', id: 'B' },
+                { type: 'source', key: 'y' }
+            ],
+            ungrouped: ['z']
+        };
+        const changed = tree.sweepPositionedRootSourcesToBin(state);
+        expect(changed).toBe(true);
+        expect(state.root).toEqual([{ type: 'group', id: 'A' }, { type: 'group', id: 'B' }]);
+        expect(state.ungrouped).toEqual(['z', 'x', 'y']);
+    });
+
+    it('is a no-op when there are no positioned root sources', () => {
+        const tree = createContentTreeInteractions({});
+        const state = { root: [{ type: 'group', id: 'A' }], ungrouped: ['z'] };
+        const beforeRoot = state.root;
+        const changed = tree.sweepPositionedRootSourcesToBin(state);
+        expect(changed).toBe(false);
+        expect(state.root).toBe(beforeRoot);
+        expect(state.ungrouped).toEqual(['z']);
+    });
+
+    it('is idempotent (second run is a no-op)', () => {
+        const tree = createContentTreeInteractions({});
+        const state = { root: [{ type: 'source', key: 'x' }, { type: 'group', id: 'A' }], ungrouped: [] };
+        expect(tree.sweepPositionedRootSourcesToBin(state)).toBe(true);
+        expect(tree.sweepPositionedRootSourcesToBin(state)).toBe(false);
+        expect(state.root).toEqual([{ type: 'group', id: 'A' }]);
+        expect(state.ungrouped).toEqual(['x']);
+    });
+
+    it('tolerates missing/invalid state, root, and ungrouped', () => {
+        const tree = createContentTreeInteractions({});
+        expect(tree.sweepPositionedRootSourcesToBin({})).toBe(false);
+        expect(tree.sweepPositionedRootSourcesToBin(null)).toBe(false);
+        const state = { root: [{ type: 'source', key: 'x' }] };
+        expect(tree.sweepPositionedRootSourcesToBin(state)).toBe(true);
+        expect(state.ungrouped).toEqual(['x']);
+    });
+});
+
 describe('computeDropIntent', () => {
     let createContentTreeInteractions;
 

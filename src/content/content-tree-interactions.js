@@ -3370,6 +3370,25 @@
             });
         }
 
+        // Classic mode cannot represent positioned root sources, so switching to classic
+        // sweeps any { type:'source' } entries out of state.root into the bottom ungrouped
+        // bin (preserving relative order). Pure + idempotent; returns true iff it changed
+        // state. Called by the setDragMode wrapper and on load when mode is classic.
+        function sweepPositionedRootSourcesToBin(state) {
+            if (!state || !Array.isArray(state.root)) return false;
+            const moved = [];
+            const nextRoot = [];
+            state.root.forEach((entry) => {
+                if (entry && entry.type === 'source') moved.push(entry.key);
+                else nextRoot.push(entry);
+            });
+            if (moved.length === 0) return false;
+            state.root = nextRoot;
+            if (!Array.isArray(state.ungrouped)) state.ungrouped = [];
+            state.ungrouped.push(...moved);
+            return true;
+        }
+
         return {
             handleAddNewGroup,
             syncSourceToPage,
@@ -3398,6 +3417,7 @@
             getGroupAncestorChain,
             resolveSiblingKeys,
             computeDropIntent,
+            sweepPositionedRootSourcesToBin,
             applyReflowAfterRender
         };
     }
