@@ -23,6 +23,9 @@
             bindModalKeyboardNavigation,
             markWhatsNewSeen,
             createWelcomeFeatureRow,
+            getDragMode = () => 'classic',
+            setDragMode = () => Promise.resolve('classic'),
+            showToast,
             requestAnimationFrame: rafFn = globalThis.requestAnimationFrame
         } = deps;
 
@@ -94,9 +97,21 @@
                 ]),
                 closeButton
             ]);
+            // One-tap "enable reflow drag (Beta)" button right after the drag feature row.
+            // When the Beta is already on, render it as a disabled "already enabled" chip.
+            const isReflowMode = getDragMode() === 'reflow';
+            const enableBetaBtn = el('button', Object.assign({
+                type: 'button',
+                className: isReflowMode
+                    ? 'sp-button sp-whats-new-enable-beta-btn is-disabled'
+                    : 'sp-button sp-whats-new-enable-beta-btn sp-glare-hover'
+            }, isReflowMode ? { disabled: 'disabled', 'aria-disabled': 'true' } : {}), [
+                getMessage(isReflowMode ? 'ui_whats_new_drag_enabled' : 'ui_whats_new_enable_beta')
+            ]);
             const content = el('div', { className: 'sp-folder-modal-content sp-welcome-content' }, [
                 el('div', { className: 'sp-welcome-feature-list' }, [
                     featureRow('drag_pan', 'ui_whats_new_drag_title', 'ui_whats_new_drag_body'),
+                    enableBetaBtn,
                     featureRow('verified', 'ui_whats_new_stability_title', 'ui_whats_new_stability_body')
                 ])
             ]);
@@ -115,6 +130,18 @@
             closeButton.addEventListener('click', closeAfterSeen);
             footer.querySelector('.sp-whats-new-primary-btn')?.addEventListener('click', closeAfterSeen);
             backdrop.addEventListener('click', closeAfterSeen);
+            enableBetaBtn.addEventListener('click', () => {
+                if (getDragMode() === 'reflow') return;
+                Promise.resolve(setDragMode('reflow'))
+                    .then(() => {
+                        if (typeof showToast === 'function') {
+                            showToast(getMessage('ui_whats_new_drag_switched_toast'), { variant: 'success' });
+                        }
+                        markSeenOnce();
+                        closeWhatsNewModal();
+                    })
+                    .catch(() => { /* keep the modal open so the user can retry or dismiss */ });
+            });
 
             const modalKeyboard = bindModalKeyboardNavigation(modal, {
                 closeModal: closeAfterSeen,

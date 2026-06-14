@@ -606,10 +606,10 @@
         "message": "Un vistazo rápido a las novedades principales de esta versión."
     },
     "ui_whats_new_drag_title": {
-        "message": "Coloca fuentes en cualquier lugar del nivel raíz"
+        "message": "Coloca fuentes en cualquier lugar del nivel raíz (Beta)"
     },
     "ui_whats_new_drag_body": {
-        "message": "Ahora puedes soltar una fuente en cualquier punto del nivel superior: entre dos carpetas, o encima y debajo de ellas, no solo al final. Las carpetas y las fuentes sueltas pueden ir en cualquier orden."
+        "message": "Beta opcional: al arrastrar, las demás fuentes se apartan y puedes soltar una fuente en cualquier punto del nivel superior: entre dos carpetas, o encima y debajo de ellas. Desactivado por defecto (línea azul clásica). Actívalo abajo o en Ajustes."
     },
     "ui_whats_new_stability_title": {
         "message": "Correcciones y accesibilidad"
@@ -619,6 +619,15 @@
     },
     "ui_whats_new_primary": {
         "message": "Entendido"
+    },
+    "ui_whats_new_enable_beta": {
+        "message": "Activar arrastre con reflujo (Beta)"
+    },
+    "ui_whats_new_drag_enabled": {
+        "message": "Arrastre con reflujo (Beta) activado"
+    },
+    "ui_whats_new_drag_switched_toast": {
+        "message": "Arrastre con reflujo (Beta) activado"
     },
     "ui_source_repair_title": {
         "message": "Reparar fuentes"

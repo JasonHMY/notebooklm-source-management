@@ -412,7 +412,10 @@
                 closeManagedModal,
                 bindModalKeyboardNavigation,
                 markWhatsNewSeen,
-                createWelcomeFeatureRow
+                createWelcomeFeatureRow,
+                getDragMode,
+                setDragMode,
+                showToast
             })
             : null;
         const renderWhatsNewModal = whatsNewModalModule?.renderWhatsNewModal || (() => false);

@@ -606,10 +606,10 @@
         "message": "A quick look at this release's main updates."
     },
     "ui_whats_new_drag_title": {
-        "message": "Place sources anywhere at root"
+        "message": "Place sources anywhere at root (Beta)"
     },
     "ui_whats_new_drag_body": {
-        "message": "Drop a source anywhere at the top level now — between two folders, or above and below them, not just at the bottom. Folders and loose sources can sit in any order."
+        "message": "New opt-in Beta: while dragging, other sources move aside and you can drop a source anywhere at the top level — between two folders, or above and below them. Off by default (classic blue insertion line). Turn it on below or in Settings."
     },
     "ui_whats_new_stability_title": {
         "message": "Fixes and accessibility"
@@ -619,6 +619,15 @@
     },
     "ui_whats_new_primary": {
         "message": "Got it"
+    },
+    "ui_whats_new_enable_beta": {
+        "message": "Enable reflow drag (Beta)"
+    },
+    "ui_whats_new_drag_enabled": {
+        "message": "Reflow drag (Beta) is on"
+    },
+    "ui_whats_new_drag_switched_toast": {
+        "message": "Reflow drag (Beta) enabled"
     },
     "ui_source_repair_title": {
         "message": "Source Repair"

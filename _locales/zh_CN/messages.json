@@ -606,10 +606,10 @@
         "message": "快速了解这次的主要更新。"
     },
     "ui_whats_new_drag_title": {
-        "message": "来源可放到根层级任意位置"
+        "message": "来源可放到根层级任意位置(Beta)"
     },
     "ui_whats_new_drag_body": {
-        "message": "现在能把来源拖到根层级的任意位置——两个文件夹中间、文件夹的上方或下方，不再只能排在所有文件夹下面；文件夹和散源可以任意交错排列。"
+        "message": "可选 Beta:拖动时其它来源会避让让位,可把来源拖到根层级任意位置——两个文件夹中间、文件夹上方或下方。默认关闭(经典蓝色插入线)。可在下方或设置里开启。"
     },
     "ui_whats_new_stability_title": {
         "message": "修复与无障碍"
@@ -619,6 +619,15 @@
     },
     "ui_whats_new_primary": {
         "message": "知道了"
+    },
+    "ui_whats_new_enable_beta": {
+        "message": "启用避让拖拽(Beta)"
+    },
+    "ui_whats_new_drag_enabled": {
+        "message": "避让拖拽(Beta)已开启"
+    },
+    "ui_whats_new_drag_switched_toast": {
+        "message": "已启用避让拖拽(Beta)"
     },
     "ui_source_repair_title": {
         "message": "来源修复"

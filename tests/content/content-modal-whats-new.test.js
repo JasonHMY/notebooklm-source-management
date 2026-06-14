@@ -176,4 +176,39 @@ describe('content modal whats-new', () => {
         rafCallbacks[0]();
         expect(modal.classList.add).toHaveBeenCalledWith('visible');
     });
+
+    it('renders an enable-Beta button when dragMode is classic', () => {
+        const deps = createDeps({ getDragMode: () => 'classic' });
+        const helper = createContentModalWhatsNew(deps);
+        helper.renderWhatsNewModal();
+        const btn = deps.getShadowRoot().querySelector('.sp-whats-new-enable-beta-btn');
+        expect(btn).toBeTruthy();
+    });
+
+    it('clicking the enable-Beta button switches to reflow, marks seen, and closes', async () => {
+        const setDragMode = jest.fn(() => Promise.resolve('reflow'));
+        const showToast = jest.fn();
+        const deps = createDeps({ getDragMode: () => 'classic', setDragMode, showToast });
+        const helper = createContentModalWhatsNew(deps);
+        helper.renderWhatsNewModal();
+        const btn = deps.getShadowRoot().querySelector('.sp-whats-new-enable-beta-btn');
+        btn.listeners.click[0]();
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(setDragMode).toHaveBeenCalledWith('reflow');
+        expect(deps.markWhatsNewSeen).toHaveBeenCalledTimes(1);
+        expect(deps.closeManagedModal).toHaveBeenCalled();
+    });
+
+    it('renders the enable-Beta button as already-enabled (disabled, no-op) when dragMode is reflow', () => {
+        const setDragMode = jest.fn(() => Promise.resolve('reflow'));
+        const deps = createDeps({ getDragMode: () => 'reflow', setDragMode });
+        const helper = createContentModalWhatsNew(deps);
+        helper.renderWhatsNewModal();
+        const btn = deps.getShadowRoot().querySelector('.sp-whats-new-enable-beta-btn');
+        expect(btn).toBeTruthy();
+        expect(String(btn.className)).toContain('is-disabled');
+        if (Array.isArray(btn.listeners.click)) btn.listeners.click.forEach((h) => h());
+        expect(setDragMode).not.toHaveBeenCalled();
+    });
 });
