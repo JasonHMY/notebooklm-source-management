@@ -2742,6 +2742,44 @@
                 transition: background-color var(--sp-motion-fast) var(--sp-ease-standard), border-radius var(--sp-motion-fast) var(--sp-ease-standard);
             }
 
+            /* Classic drag mode (dragMode='classic') feedback: a blue insertion line on the
+               target row's top/bottom edge with an accent dot — restored from 26.5.26. The
+               reflow/avoidance mode never adds these classes. */
+            .drag-over-top {
+                border-top: 2px solid var(--sp-accent) !important;
+                position: relative;
+                box-shadow: 0 -6px 14px rgba(0, 122, 255, 0.12);
+            }
+            .drag-over-top::before {
+                content: '';
+                position: absolute;
+                top: -5px;
+                left: -5px;
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                background-color: var(--sp-accent);
+                border: 2px solid var(--sp-bg-primary, white);
+                z-index: 10;
+            }
+            .drag-over-bottom {
+                border-bottom: 2px solid var(--sp-accent) !important;
+                position: relative;
+                box-shadow: 0 6px 14px rgba(0, 122, 255, 0.12);
+            }
+            .drag-over-bottom::after {
+                content: '';
+                position: absolute;
+                bottom: -5px;
+                left: -5px;
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                background-color: var(--sp-accent);
+                border: 2px solid var(--sp-bg-primary, white);
+                z-index: 10;
+            }
+
             .sp-toast {
                 visibility: hidden;
                 min-width: 200px;

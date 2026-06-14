@@ -1855,7 +1855,9 @@
                     }
                 }
 
-                if (dragReflow && typeof dragReflow.prepareDragSession === 'function') {
+                // Classic mode has no avoidance reflow — skip session + fold so the dragged
+                // row stays in place and feedback is the blue insertion line (26.5.26).
+                if (getDragMode() !== 'classic' && dragReflow && typeof dragReflow.prepareDragSession === 'function') {
                     const rootElement = getSourceListContainer();
                     const session = dragReflow.prepareDragSession({
                         draggedKeys: keys,
@@ -1936,7 +1938,7 @@
                     // the dragged group's way at all. Find the group-container element by
                     // its data-group-id and pass its id as the draggedKey; prepareDragSession
                     // measures its full offsetHeight (header + children area).
-                    if (dragReflow && typeof dragReflow.prepareDragSession === 'function') {
+                    if (getDragMode() !== 'classic' && dragReflow && typeof dragReflow.prepareDragSession === 'function') {
                         const rootElement = getSourceListContainer();
                         const session = dragReflow.prepareDragSession({
                             draggedKeys: [key],
@@ -2143,6 +2145,15 @@
                             }
                         });
                     }
+                    // Classic mode blue-line markers from the previous frame.
+                    const staleLines = sourceListEl.querySelectorAll('.drag-over-top, .drag-over-bottom');
+                    if (staleLines && typeof staleLines.forEach === 'function') {
+                        staleLines.forEach((node) => {
+                            if (node && node.classList && typeof node.classList.remove === 'function') {
+                                node.classList.remove('drag-over-top', 'drag-over-bottom');
+                            }
+                        });
+                    }
                     // Clear last frame's folder-guide marker; it is re-applied below for
                     // whichever folder the pointer is currently inside.
                     const staleGuide = sourceListEl.querySelectorAll('.sp-drag-guide');
@@ -2162,6 +2173,21 @@
                     && intent.hostGroupContainerEl.classList
                     && typeof intent.hostGroupContainerEl.classList.add === 'function') {
                     intent.hostGroupContainerEl.classList.add('drag-into');
+                }
+                // Classic mode: a before/after slot shows a blue line on the target row
+                // instead of the reflow avoidance shift. into-group is already covered by the
+                // .drag-into highlight above; root-source drops are demoted to the bin
+                // (slotKey null) so they show no line.
+                if (getDragMode() === 'classic' && !isInvalid && intent.kind !== 'into-group' && intent.slotKey
+                    && sourceListEl && typeof sourceListEl.querySelector === 'function') {
+                    const lineAttr = (intent.kind === 'before-group' || intent.kind === 'after-group')
+                        ? 'data-group-id'
+                        : 'data-source-key';
+                    const lineEl = sourceListEl.querySelector(`[${lineAttr}="${cssEscape(intent.slotKey)}"]`);
+                    if (lineEl && lineEl.classList && typeof lineEl.classList.add === 'function') {
+                        const isBefore = intent.kind === 'before-source' || intent.kind === 'before-group';
+                        lineEl.classList.add(isBefore ? 'drag-over-top' : 'drag-over-bottom');
+                    }
                 }
                 if (isInvalid) {
                     if (args.dataTransfer) {
@@ -2189,7 +2215,7 @@
                 // slot — previews where the dragged source lands, including the empty slot
                 // when dropping at the very end. Per-frame so it follows the cursor (the
                 // sweep above already cleared the previous target's marker).
-                if (!isInvalid && intent.hostGroupContainerEl
+                if (getDragMode() !== 'classic' && !isInvalid && intent.hostGroupContainerEl
                     && typeof intent.hostGroupContainerEl.querySelector === 'function') {
                     const guideChildren = intent.hostGroupContainerEl.querySelector('.group-children');
                     const slotH = runtime.dragReflowSession ? runtime.dragReflowSession.totalDraggedHeight : 0;
@@ -2440,10 +2466,10 @@
         function clearDragFeedback(root = getShadowRoot()) {
             let count = 0;
             if (root && typeof root.querySelectorAll === 'function') {
-                const nodes = Array.from(root.querySelectorAll('.dragging, .drag-into, .drag-invalid'));
+                const nodes = Array.from(root.querySelectorAll('.dragging, .drag-into, .drag-invalid, .drag-over-top, .drag-over-bottom'));
                 nodes.forEach((node) => {
                     if (node?.classList && typeof node.classList.remove === 'function') {
-                        node.classList.remove('dragging', 'drag-into', 'drag-invalid');
+                        node.classList.remove('dragging', 'drag-into', 'drag-invalid', 'drag-over-top', 'drag-over-bottom');
                     }
                 });
                 count = nodes.length;
@@ -3046,6 +3072,8 @@
         // cursorY parameters retained for backward compatibility with callers — no longer
         // used because opacity fade-in needs no positional input.
         function applyDropLandingAndFlash(landedKeys, _cursorX, _cursorY, preRects) {
+            // Classic mode has no fly-in / FLIP landing animation (26.5.26 dropped instantly).
+            if (getDragMode() === 'classic') return;
             if (!Array.isArray(landedKeys) || landedKeys.length === 0) return;
             const rootElement = getSourceListContainer();
             if (!rootElement || typeof rootElement.querySelector !== 'function') return;

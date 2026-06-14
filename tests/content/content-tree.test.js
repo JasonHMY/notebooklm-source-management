@@ -868,7 +868,7 @@ describe('drag and drop ordering guards', () => {
 
         expect(interactions.clearDragFeedback()).toBe(2);
         markedNodes.forEach((node) => {
-            expect(node.classList.remove).toHaveBeenCalledWith('dragging', 'drag-into', 'drag-invalid');
+            expect(node.classList.remove).toHaveBeenCalledWith('dragging', 'drag-into', 'drag-invalid', 'drag-over-top', 'drag-over-bottom');
         });
     });
 
@@ -2700,7 +2700,7 @@ describe('handleDragOver invalid-drop feedback', () => {
     let createContentTreeInteractions;
     let createContentDragMulti;
 
-    function setupCtx({ state, pendingBatchKeys, groups, parentMap, items }) {
+    function setupCtx({ state, pendingBatchKeys, groups, parentMap, items, dragMode }) {
         const runtime = {};
         const groupsById = new Map();
         if (groups && typeof groups === 'object') {
@@ -2717,6 +2717,7 @@ describe('handleDragOver invalid-drop feedback', () => {
             getPendingBatchKeys: () => pendingBatchKeys,
             getShadowRoot: () => shadowRoot,
             getParentMap: () => (parentMap || new Map()),
+            getDragMode: () => (dragMode || 'reflow'),
             isDescendant: globalThis.isDescendant,
             dragMulti: createContentDragMulti({})
         });
@@ -2754,6 +2755,90 @@ describe('handleDragOver invalid-drop feedback', () => {
         const slotEl = ctx.elementMap.get('source:A');
         expect(slotEl.classList.has('drag-invalid')).toBe(true);
         expect(dataTransfer.dropEffect).toBe('none');
+    });
+
+    it('classic mode: into-group highlights the folder header (drag-into) without the reflow guide bar', () => {
+        const ctx = setupCtx({
+            state: { isBatchMode: false, ungrouped: [], root: [{ type: 'group', id: 'g1' }] },
+            pendingBatchKeys: new Set(),
+            groups: { g1: { id: 'g1', children: [] } },
+            dragMode: 'classic',
+            items: [
+                { kind: 'group', id: 'g1', top: 100, headerHeight: 40, childrenStart: 140, childrenEnd: 140 }
+            ]
+        });
+        ctx.runtime.activeDragContext = { kind: 'source-single', keys: ['X'] };
+        ctx.tree.handleDragOver({
+            target: { closest: () => null },
+            clientX: 100,
+            clientY: 110, // on g1 header → into-group
+            preventDefault: jest.fn(),
+            dataTransfer: { dropEffect: 'move' }
+        });
+        const g1 = ctx.elementMap.get('group:g1');
+        expect(g1.classList.has('drag-into')).toBe(true);
+        const childrenEl = g1.querySelector('.group-children');
+        expect(childrenEl.classList.has('sp-drag-guide')).toBe(false);
+    });
+
+    it('classic mode: a within-folder slot gets the blue line (drag-over-top), not the reflow guide', () => {
+        const ctx = setupCtx({
+            state: { isBatchMode: false, ungrouped: [], root: [{ type: 'group', id: 'g1' }] },
+            pendingBatchKeys: new Set(),
+            groups: { g1: { id: 'g1', children: [{ type: 'source', key: 'c1' }, { type: 'source', key: 'c2' }] } },
+            dragMode: 'classic',
+            items: [
+                {
+                    kind: 'group', id: 'g1', top: 100, headerHeight: 40,
+                    childrenStart: 140, childrenEnd: 220,
+                    children: [
+                        { kind: 'source', key: 'c1', top: 140, height: 40 },
+                        { kind: 'source', key: 'c2', top: 180, height: 40 }
+                    ]
+                }
+            ]
+        });
+        ctx.runtime.activeDragContext = { kind: 'source-single', keys: ['X'] };
+        ctx.tree.handleDragOver({
+            target: { closest: () => null },
+            clientX: 100,
+            clientY: 145, // upper half of c1 (mid 160) → before-source c1
+            preventDefault: jest.fn(),
+            dataTransfer: { dropEffect: 'move' }
+        });
+        const c1 = ctx.elementMap.get('source:c1');
+        expect(c1.classList.has('drag-over-top')).toBe(true);
+        const childrenEl = ctx.elementMap.get('group:g1').querySelector('.group-children');
+        expect(childrenEl.classList.has('sp-drag-guide')).toBe(false);
+    });
+
+    it('reflow mode: the same within-folder slot does not get the classic blue line', () => {
+        const ctx = setupCtx({
+            state: { isBatchMode: false, ungrouped: [], root: [{ type: 'group', id: 'g1' }] },
+            pendingBatchKeys: new Set(),
+            groups: { g1: { id: 'g1', children: [{ type: 'source', key: 'c1' }, { type: 'source', key: 'c2' }] } },
+            dragMode: 'reflow',
+            items: [
+                {
+                    kind: 'group', id: 'g1', top: 100, headerHeight: 40,
+                    childrenStart: 140, childrenEnd: 220,
+                    children: [
+                        { kind: 'source', key: 'c1', top: 140, height: 40 },
+                        { kind: 'source', key: 'c2', top: 180, height: 40 }
+                    ]
+                }
+            ]
+        });
+        ctx.runtime.activeDragContext = { kind: 'source-single', keys: ['X'] };
+        ctx.tree.handleDragOver({
+            target: { closest: () => null },
+            clientX: 100,
+            clientY: 145,
+            preventDefault: jest.fn(),
+            dataTransfer: { dropEffect: 'move' }
+        });
+        const c1 = ctx.elementMap.get('source:c1');
+        expect(c1.classList.has('drag-over-top')).toBe(false);
     });
 
     it('marks group-container invalid when dragging a group over its own descendant', () => {
