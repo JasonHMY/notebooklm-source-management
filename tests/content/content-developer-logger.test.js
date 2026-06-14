@@ -387,4 +387,81 @@ describe('content developer logger', () => {
             expect(logger.getHoverSpotlightEnabled()).toBe(true);
         });
     });
+
+    describe('dragMode preference', () => {
+        it('defaults dragMode to classic before preferences are loaded', () => {
+            const { chromeApi } = createRuntimeMock();
+            const logger = createContentDeveloperLogger({
+                chrome: chromeApi,
+                getProjectId: () => 'project-dev'
+            });
+            expect(logger.getDragMode()).toBe('classic');
+        });
+
+        it('loadDeveloperPreferences applies dragMode from background response', async () => {
+            const sendMessage = jest.fn((message, cb) => {
+                if (message?.type === 'LOAD_PREFERENCES') {
+                    cb?.({
+                        success: true,
+                        preferences: { dragMode: 'reflow' },
+                        usageState: { hasExistingPluginData: false, hasStoredPreferences: false }
+                    });
+                    return;
+                }
+                cb?.({ success: false, errorCode: 'unexpected_message' });
+            });
+            const logger = createContentDeveloperLogger({
+                chrome: { runtime: { sendMessage, lastError: null } },
+                getProjectId: () => 'project-dev'
+            });
+            await logger.loadDeveloperPreferences();
+            expect(logger.getDragMode()).toBe('reflow');
+        });
+
+        it('setDragMode optimistically updates and persists via SAVE_PREFERENCES', async () => {
+            const sent = [];
+            const sendMessage = jest.fn((message, cb) => {
+                sent.push(message);
+                if (message?.type === 'SAVE_PREFERENCES') {
+                    cb?.({ success: true, preferences: { dragMode: 'reflow' } });
+                    return;
+                }
+                cb?.({ success: false, errorCode: 'unexpected_message' });
+            });
+            const logger = createContentDeveloperLogger({
+                chrome: { runtime: { sendMessage, lastError: null } },
+                getProjectId: () => 'project-dev'
+            });
+            const result = await logger.setDragMode('reflow');
+            expect(result).toBe('reflow');
+            expect(logger.getDragMode()).toBe('reflow');
+            const saveMessage = sent.find((m) => m?.type === 'SAVE_PREFERENCES');
+            expect(saveMessage?.preferences?.dragMode).toBe('reflow');
+        });
+
+        it('setDragMode rolls back optimistic update when save fails', async () => {
+            const { chromeApi } = createRuntimeMock({
+                savePreferencesResponse: { success: false, errorCode: 'runtime_failure' }
+            });
+            const logger = createContentDeveloperLogger({
+                chrome: chromeApi,
+                getProjectId: () => 'project-dev'
+            });
+            await expect(logger.setDragMode('reflow')).rejects.toThrow();
+            expect(logger.getDragMode()).toBe('classic');
+        });
+
+        it('setDragMode normalizes unknown values to classic', async () => {
+            const { chromeApi } = createRuntimeMock({
+                savePreferencesResponse: { success: true, preferences: { dragMode: 'classic' } }
+            });
+            const logger = createContentDeveloperLogger({
+                chrome: chromeApi,
+                getProjectId: () => 'project-dev'
+            });
+            const result = await logger.setDragMode('bogus');
+            expect(result).toBe('classic');
+            expect(logger.getDragMode()).toBe('classic');
+        });
+    });
 });

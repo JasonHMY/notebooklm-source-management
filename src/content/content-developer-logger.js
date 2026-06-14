@@ -68,6 +68,7 @@
         let commandShortcuts = {};
         let visibleQuickViewKinds = [...QUICK_VIEW_BUTTON_KINDS];
         let appearancePreferences = { hoverSpotlightEnabled: true };
+        let dragMode = 'classic';
         let developerLogs = [];
         let nextLogSequence = 1;
 
@@ -81,6 +82,7 @@
             normalizeWhatsNewSeenVersion,
             normalizeHistoryRetentionLimit,
             normalizeLanguageOverride,
+            normalizeDragMode,
             normalizeCommandShortcutId,
             normalizeCommandShortcutCombo,
             normalizeCommandShortcuts,
@@ -240,6 +242,7 @@
             commandShortcuts = normalizeCommandShortcuts(preferences?.commandShortcuts);
             visibleQuickViewKinds = normalizeVisibleQuickViewKinds(preferences?.visibleQuickViewKinds);
             appearancePreferences = normalizeAppearancePreferences(preferences?.appearance);
+            dragMode = normalizeDragMode(preferences?.dragMode);
         }
 
         function applyLoadedPreferenceUsageState(usageState = {}) {
@@ -428,6 +431,23 @@
             return appearancePreferences.hoverSpotlightEnabled;
         }
 
+        async function setDragMode(mode) {
+            const previousValue = dragMode;
+            const nextValue = normalizeDragMode(mode);
+            dragMode = nextValue;
+            try {
+                await savePreferences({ dragMode: nextValue });
+            } catch (error) {
+                dragMode = previousValue;
+                throw error;
+            }
+            return dragMode;
+        }
+
+        function getDragMode() {
+            return dragMode;
+        }
+
         async function loadDeveloperLogs() {
             const key = getDeveloperLogKey();
             if (!key) {
@@ -566,6 +586,8 @@
             setVisibleQuickViewKinds,
             getHoverSpotlightEnabled,
             setHoverSpotlightEnabled,
+            getDragMode,
+            setDragMode,
             loadDeveloperPreferences,
             loadDeveloperLogs,
             getDeveloperLogs,
