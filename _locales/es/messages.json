@@ -591,16 +591,16 @@
         "message": "Un vistazo rápido a las novedades principales de esta versión."
     },
     "ui_whats_new_drag_title": {
-        "message": "Mejoras en arrastrar y soltar"
+        "message": "Coloca fuentes en cualquier lugar del nivel raíz"
     },
     "ui_whats_new_drag_body": {
-        "message": "Al arrastrar, la fuente se pliega y abre un hueco que sigue al cursor; al soltar en una carpeta aparece una barra guía azul con vista previa; más suave y fluido en general."
+        "message": "Ahora puedes soltar una fuente en cualquier punto del nivel superior: entre dos carpetas, o encima y debajo de ellas, no solo al final. Las carpetas y las fuentes sueltas pueden ir en cualquier orden."
     },
     "ui_whats_new_stability_title": {
-        "message": "Correcciones de estabilidad"
+        "message": "Correcciones y accesibilidad"
     },
     "ui_whats_new_stability_body": {
-        "message": "Arreglos de temblores y parpadeos ocasionales al arrastrar, un bloqueo por almacenamiento lleno que impedía borrar fuentes, y varios problemas de límites y sincronización."
+        "message": "Insertar en una carpeta justo después de que se expande ahora deja hueco correctamente, además de corregir el temblor del punto de soltado en subcarpetas anidadas y una zona sin respuesta al arrastrar sobre carpetas contraídas. Añade compatibilidad con teclado y lector de pantalla y protecciones de almacenamiento más estrictas."
     },
     "ui_whats_new_primary": {
         "message": "Entendido"

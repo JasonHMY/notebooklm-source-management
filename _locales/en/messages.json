@@ -591,16 +591,16 @@
         "message": "A quick look at this release's main updates."
     },
     "ui_whats_new_drag_title": {
-        "message": "Drag-and-drop refinements"
+        "message": "Place sources anywhere at root"
     },
     "ui_whats_new_drag_body": {
-        "message": "Sources fold out and open an insertion slot that follows your cursor; dropping into a folder shows a blue guide bar with a live preview; smoother and more responsive overall."
+        "message": "Drop a source anywhere at the top level now — between two folders, or above and below them, not just at the bottom. Folders and loose sources can sit in any order."
     },
     "ui_whats_new_stability_title": {
-        "message": "Stability fixes"
+        "message": "Fixes and accessibility"
     },
     "ui_whats_new_stability_body": {
-        "message": "Fixes for occasional drag jitter and flicker, a storage-full deadlock that blocked deleting sources, and several edge-case and timing issues."
+        "message": "Inserting into a folder right after it auto-expands now makes way correctly, plus fixes for drop-position jitter in nested subfolders and a no-feedback dead zone over collapsed folders. Adds keyboard and screen-reader support and tighter storage safeguards."
     },
     "ui_whats_new_primary": {
         "message": "Got it"
