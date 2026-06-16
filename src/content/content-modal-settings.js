@@ -238,39 +238,44 @@
         function createAppearanceSettingsSection() {
             const hoverSpotlightToggle = el('input', {
                 type: 'checkbox',
-                className: 'sp-settings-appearance-hover-spotlight-toggle',
+                className: 'sp-group-toggle-checkbox sp-settings-appearance-hover-spotlight-toggle',
                 checked: getHoverSpotlightEnabled(),
                 'aria-label': getMessage('ui_settings_appearance_hover_spotlight_title')
             });
-
-            const hoverSpotlightRow = el('label', { className: 'sp-settings-action-row sp-settings-appearance-toggle-row' }, [
-                hoverSpotlightToggle,
-                el('span', { className: 'sp-settings-helper-text' }, [getMessage('ui_settings_appearance_hover_spotlight_title')])
+            const hoverSpotlightRow = el('div', { className: 'sp-settings-preference-row' }, [
+                el('div', { className: 'sp-settings-preference-copy' }, [
+                    el('div', { className: 'sp-settings-preference-title' }, [getMessage('ui_settings_appearance_hover_spotlight_title')]),
+                    el('p', { className: 'sp-settings-helper-text' }, [getMessage('ui_settings_appearance_hover_spotlight_body')])
+                ]),
+                el('label', { className: 'sp-toggle-switch' }, [
+                    hoverSpotlightToggle,
+                    el('span', { className: 'sp-toggle-slider' })
+                ])
             ]);
 
             const dragModeToggle = el('input', {
                 type: 'checkbox',
-                className: 'sp-settings-drag-mode-toggle',
+                className: 'sp-group-toggle-checkbox sp-settings-drag-mode-toggle',
                 checked: getDragMode() === 'reflow',
                 'aria-label': getMessage('ui_settings_drag_mode_title')
             });
-            const dragModeRow = el('label', { className: 'sp-settings-action-row sp-settings-appearance-toggle-row' }, [
-                dragModeToggle,
-                el('span', { className: 'sp-settings-helper-text' }, [getMessage('ui_settings_drag_mode_title')])
+            const dragModeRow = el('div', { className: 'sp-settings-preference-row' }, [
+                el('div', { className: 'sp-settings-preference-copy' }, [
+                    el('div', { className: 'sp-settings-preference-title' }, [getMessage('ui_settings_drag_mode_title')]),
+                    el('p', { className: 'sp-settings-helper-text' }, [getMessage('ui_settings_drag_mode_body')])
+                ]),
+                el('label', { className: 'sp-toggle-switch' }, [
+                    dragModeToggle,
+                    el('span', { className: 'sp-toggle-slider' })
+                ])
             ]);
 
             return el('section', { className: 'sp-settings-section sp-settings-appearance-section' }, [
                 el('div', { className: 'sp-settings-section-header' }, [
-                    el('h4', { className: 'sp-settings-section-title' }, [getMessage('ui_settings_appearance_title')]),
-                    hoverSpotlightRow,
-                    dragModeRow
+                    el('h4', { className: 'sp-settings-section-title' }, [getMessage('ui_settings_appearance_title')])
                 ]),
-                el('p', { className: 'sp-settings-helper-text sp-settings-appearance-body' }, [
-                    getMessage('ui_settings_appearance_hover_spotlight_body')
-                ]),
-                el('p', { className: 'sp-settings-helper-text sp-settings-drag-mode-body' }, [
-                    getMessage('ui_settings_drag_mode_body')
-                ])
+                hoverSpotlightRow,
+                dragModeRow
             ]);
         }
 

@@ -395,4 +395,33 @@ describe('content modal settings', () => {
             expect(showToast).toHaveBeenCalledWith('ui_settings_drag_mode_failed', expect.objectContaining({ variant: 'error' }));
         });
     });
+
+    describe('appearance settings standardization', () => {
+        it('wraps both appearance toggles in sp-toggle-switch with sp-group-toggle-checkbox inputs', () => {
+            const deps = createDeps();
+            const { renderSettingsModal } = createContentModalSettings(deps);
+            renderSettingsModal();
+            const shadowRoot = deps.getShadowRoot();
+            const appearance = shadowRoot.querySelector('.sp-settings-appearance-section');
+            expect(appearance.querySelectorAll('.sp-toggle-switch').length).toBe(2);
+            expect(appearance.querySelectorAll('.sp-toggle-slider').length).toBe(2);
+            const hover = shadowRoot.querySelector('.sp-settings-appearance-hover-spotlight-toggle');
+            expect(String(hover.className).split(/\s+/)).toContain('sp-group-toggle-checkbox');
+            const drag = shadowRoot.querySelector('.sp-settings-drag-mode-toggle');
+            expect(String(drag.className).split(/\s+/)).toContain('sp-group-toggle-checkbox');
+        });
+
+        it('lays out appearance items as preference rows with no detached body paragraphs', () => {
+            const deps = createDeps();
+            const { renderSettingsModal } = createContentModalSettings(deps);
+            renderSettingsModal();
+            const shadowRoot = deps.getShadowRoot();
+            const appearance = shadowRoot.querySelector('.sp-settings-appearance-section');
+            expect(appearance.querySelectorAll('.sp-settings-preference-row').length).toBe(2);
+            expect(shadowRoot.querySelector('.sp-settings-appearance-body')).toBeNull();
+            expect(shadowRoot.querySelector('.sp-settings-drag-mode-body')).toBeNull();
+            expect(deps.getMessage).toHaveBeenCalledWith('ui_settings_appearance_hover_spotlight_body');
+            expect(deps.getMessage).toHaveBeenCalledWith('ui_settings_drag_mode_body');
+        });
+    });
 });
