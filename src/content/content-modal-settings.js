@@ -196,25 +196,33 @@
             return true;
         }
 
+        function createSettingsSubsection(className, titleKey, children = []) {
+            return el('div', { className: ['sp-settings-subsection', className].filter(Boolean).join(' ') }, [
+                el('h5', { className: 'sp-settings-subsection-title' }, [getMessage(titleKey)]),
+                ...children
+            ]);
+        }
+
         function createDeveloperSettingsSection() {
             const developerModeToggle = el('input', {
                 type: 'checkbox',
-                className: 'sp-settings-developer-mode-toggle',
+                className: 'sp-group-toggle-checkbox sp-settings-developer-mode-toggle',
                 checked: getDeveloperModeEnabled(),
                 'aria-label': getMessage('ui_settings_developer_mode_title')
             });
 
-            return el('section', { className: 'sp-settings-section sp-settings-developer-section' }, [
-                el('div', { className: 'sp-settings-section-header' }, [
-                    el('h4', { className: 'sp-settings-section-title' }, [getMessage('ui_settings_developer_features')]),
-                    el('label', { className: 'sp-settings-action-row sp-settings-developer-toggle-row' }, [
-                        developerModeToggle,
-                        el('span', { className: 'sp-settings-helper-text' }, [getMessage('ui_settings_developer_mode_toggle')])
-                    ])
+            const developerModeRow = el('div', { className: 'sp-settings-preference-row' }, [
+                el('div', { className: 'sp-settings-preference-copy' }, [
+                    el('div', { className: 'sp-settings-preference-title' }, [getMessage('ui_settings_developer_mode_toggle')]),
+                    el('p', { className: 'sp-settings-helper-text' }, [getMessage('ui_settings_developer_mode_body')])
                 ]),
-                el('p', { className: 'sp-settings-helper-text sp-settings-developer-body' }, [
-                    getMessage('ui_settings_developer_mode_body')
-                ]),
+                el('label', { className: 'sp-toggle-switch' }, [
+                    developerModeToggle,
+                    el('span', { className: 'sp-toggle-slider' })
+                ])
+            ]);
+
+            const logsSubsection = createSettingsSubsection('sp-settings-developer-logs-section', 'ui_settings_developer_logs_title', [
                 el('div', { className: 'sp-settings-action-row sp-settings-developer-actions' }, [
                     el('button', { type: 'button', className: 'sp-button sp-settings-copy-developer-logs-btn sp-glare-hover' }, [
                         getMessage('ui_settings_copy_developer_logs')
@@ -224,7 +232,12 @@
                     ]),
                     el('button', { type: 'button', className: 'sp-button sp-settings-clear-developer-logs-btn sp-glare-hover' }, [
                         getMessage('ui_settings_clear_developer_logs')
-                    ]),
+                    ])
+                ])
+            ]);
+
+            const testToolsSubsection = createSettingsSubsection('sp-settings-developer-test-section', 'ui_settings_developer_test_tools_title', [
+                el('div', { className: 'sp-settings-action-row sp-settings-developer-actions' }, [
                     el('button', { type: 'button', className: 'sp-button sp-settings-test-welcome-btn sp-glare-hover' }, [
                         getMessage('ui_settings_test_welcome_modal')
                     ]),
@@ -232,6 +245,15 @@
                         getMessage('ui_settings_test_whats_new_modal')
                     ])
                 ])
+            ]);
+
+            return el('section', { className: 'sp-settings-section sp-settings-developer-section' }, [
+                el('div', { className: 'sp-settings-section-header' }, [
+                    el('h4', { className: 'sp-settings-section-title' }, [getMessage('ui_settings_developer_features')])
+                ]),
+                developerModeRow,
+                logsSubsection,
+                testToolsSubsection
             ]);
         }
 
@@ -492,13 +514,6 @@
 
                 return { body, section, setExpanded, toggle };
             };
-
-            const createSettingsSubsection = (className, titleKey, children = []) => (
-                el('div', { className: ['sp-settings-subsection', className].filter(Boolean).join(' ') }, [
-                    el('h5', { className: 'sp-settings-subsection-title' }, [getMessage(titleKey)]),
-                    ...children
-                ])
-            );
 
             const exportSubsection = createSettingsSubsection('sp-settings-export-section', 'ui_settings_export_title', [
                 el('div', { className: 'sp-settings-action-row sp-settings-collapsible-actions' }, [

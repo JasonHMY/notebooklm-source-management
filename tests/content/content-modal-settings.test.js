@@ -424,4 +424,36 @@ describe('content modal settings', () => {
             expect(deps.getMessage).toHaveBeenCalledWith('ui_settings_drag_mode_body');
         });
     });
+
+    describe('developer settings standardization', () => {
+        const devDeps = () => createDeps({ getDeveloperModeEnabled: jest.fn(() => true) });
+
+        it('wraps the developer-mode toggle in a sp-toggle-switch inside a preference row', () => {
+            const deps = devDeps();
+            const { renderSettingsModal } = createContentModalSettings(deps);
+            renderSettingsModal();
+            const shadowRoot = deps.getShadowRoot();
+            const dev = shadowRoot.querySelector('.sp-settings-developer-section');
+            expect(dev.querySelector('.sp-toggle-switch')).toBeTruthy();
+            expect(dev.querySelector('.sp-settings-preference-row')).toBeTruthy();
+            const toggle = shadowRoot.querySelector('.sp-settings-developer-mode-toggle');
+            expect(String(toggle.className).split(/\s+/)).toContain('sp-group-toggle-checkbox');
+        });
+
+        it('splits developer buttons into logs and test-tools subsections, keeping all five buttons', () => {
+            const deps = devDeps();
+            const { renderSettingsModal } = createContentModalSettings(deps);
+            renderSettingsModal();
+            const shadowRoot = deps.getShadowRoot();
+            const dev = shadowRoot.querySelector('.sp-settings-developer-section');
+            expect(dev.querySelectorAll('.sp-settings-subsection').length).toBe(2);
+            expect(deps.getMessage).toHaveBeenCalledWith('ui_settings_developer_logs_title');
+            expect(deps.getMessage).toHaveBeenCalledWith('ui_settings_developer_test_tools_title');
+            expect(shadowRoot.querySelector('.sp-settings-copy-developer-logs-btn')).toBeTruthy();
+            expect(shadowRoot.querySelector('.sp-settings-download-developer-logs-btn')).toBeTruthy();
+            expect(shadowRoot.querySelector('.sp-settings-clear-developer-logs-btn')).toBeTruthy();
+            expect(shadowRoot.querySelector('.sp-settings-test-welcome-btn')).toBeTruthy();
+            expect(shadowRoot.querySelector('.sp-settings-test-whats-new-btn')).toBeTruthy();
+        });
+    });
 });
