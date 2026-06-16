@@ -774,7 +774,7 @@ describe('modal option motion', () => {
         const modal = shadowRoot.getElementById('sp-settings-modal');
         expect(modal).toBeTruthy();
         const settingsContent = shadowRoot.querySelector('.sp-settings-modal-content');
-        expect(settingsContent.children[0].classList.contains('sp-settings-backup-section')).toBe(true);
+        expect(settingsContent.children[0].classList.contains('sp-settings-preferences-section')).toBe(true);
         expect(shadowRoot.querySelector('.sp-settings-export-textarea').value).toContain('notebooklm-source-management-config');
         expect(shadowRoot.querySelector('.sp-settings-import-preview').textContent).toContain('ui_settings_import_preview_summary:2,3,1,4');
         expect(shadowRoot.querySelector('.sp-settings-import-preview').textContent).toContain('ui_settings_import_preview_matched:1');
