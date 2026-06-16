@@ -25,7 +25,7 @@
 - **短条目标题 (Short Entry)**: 标题已自解释的短条目，正文写清即可，可省略「影响」摘要。
 ```
 
-## [Unreleased] (未发布)
+## [2026-06-16] [26.6.16]
 
 ### Changed
 - **规范化「设置」面板布局 (Standardize the Settings Panel Layout)**: **影响**: 「外观自定义」「开发者功能」里的选项改成和「偏好设置」一样的整齐行(左边名称+说明、右边一个滑动开关),原生方框勾选换成与文件夹启用开关一致的滑动开关;分区顺序调整为 偏好设置 → 外观自定义 → 备份与恢复 → 帮助与反馈 →(出问题时)源指纹修复 → 开发者功能;开发者按钮分成「日志」「测试工具」两组。所有开关/按钮的功能与原来完全一致。 纯 UI 重构:`createAppearanceSettingsSection` / `createDeveloperSettingsSection` 改为统一的 `.sp-settings-preference-row`(控件移出 `.sp-settings-section-header`),三个开关(悬浮光晕 / 避让拖拽 Beta / 开发者模式)从原生 checkbox 包成 `.sp-toggle-switch`(input 保留原类名 + 追加 `sp-group-toggle-checkbox`,`change` 绑定不变),新增 `.sp-settings-preference-row > .sp-toggle-switch` 右对齐规则;`renderSettingsModal` 调整 append 顺序;`createSettingsSubsection` 提升到工厂作用域供开发者区复用,开发者 5 按钮拆成「日志」(复制/下载/清空)+「测试工具」(测试欢迎/测试更新介绍)两个带小标题子分区(新增 `ui_settings_developer_logs_title` / `ui_settings_developer_test_tools_title` 三语 key)。无功能 / 状态 / 存储 / 消息协议变更;新增 5 个结构单测,现有外观/开发者单测因 input 类名 + change 绑定保留而不变。
