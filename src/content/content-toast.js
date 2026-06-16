@@ -82,7 +82,7 @@
 
             const item = toastQueue.shift();
             activeToastItem = item;
-            toast.className = `sp-toast sp-toast-${item.variant}`;
+            toast.className = `sp-toast sp-toast-${item.variant}${item.elevated ? ' sp-toast-elevated' : ''}`;
             toast.setAttribute('role', 'status');
             toast.setAttribute('aria-live', 'polite');
 

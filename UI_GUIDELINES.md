@@ -346,6 +346,7 @@ Current practical layer system:
 - `10000`: overlay backdrop
 - `10001`: modal
 - `10002`: source action menu layer
+- `10003`: elevated toast (`.sp-toast-elevated`) — a toast lifted above an open modal + its frosted backdrop so it stays readable (e.g. a settings failure toast). Opt in per-toast via the `{ elevated: true }` showToast option; normal toasts stay at `9999`.
 
 Rules:
 
@@ -917,6 +918,7 @@ Rules:
 
 - Use toast for short confirmation only.
 - Do not use toast for workflows that require decision-making.
+- A toast shown while a modal with a frosted backdrop is open is obscured by the backdrop blur (toast `z=9999` < backdrop `z=10000`). In that context, suppress low-value success toasts and lift important ones above the modal with `.sp-toast-elevated` (`z=10003`) via the `{ elevated: true }` showToast option. The settings modal applies this: success confirmations are suppressed while it is open, and failures are shown elevated (see §5.8).
 
 ### 13.3 Empty states
 

@@ -95,6 +95,25 @@
             return closeManagedModal('sp-settings-modal', 'sp-settings-backdrop', options);
         }
 
+        function isSettingsModalOpen() {
+            const root = getShadowRoot();
+            return Boolean(root && typeof root.querySelector === 'function' && root.querySelector('#sp-settings-modal'));
+        }
+
+        // Settings results: the modal's frosted backdrop sits above the toast layer, so a
+        // success confirmation shown while the modal is open is just blurred noise — suppress it.
+        // Failures always surface, and while the modal is open they are lifted above the
+        // backdrop (sp-toast-elevated) so they stay readable.
+        function announceSettingsResult(messageKey, variant) {
+            const settingsOpen = isSettingsModalOpen();
+            if (variant === 'success') {
+                if (settingsOpen) return;
+                showToast(getMessage(messageKey), { variant: 'success' });
+                return;
+            }
+            showToast(getMessage(messageKey), { variant: 'error', elevated: settingsOpen });
+        }
+
         function normalizeVisibleQuickViewKinds(value) {
             if (!Array.isArray(value)) return QUICK_VIEW_BUTTON_OPTIONS.map(([kind]) => kind);
             const requestedKinds = new Set(value.map((kind) => String(kind || '').trim().toLowerCase()));
@@ -308,12 +327,12 @@
                     const next = Boolean(event?.target?.checked ?? toggle.checked);
                     Promise.resolve(setHoverSpotlightEnabled(next))
                         .then(() => {
-                            showToast(getMessage(next ? 'ui_settings_appearance_hover_spotlight_enabled' : 'ui_settings_appearance_hover_spotlight_disabled'), { variant: 'success' });
+                            announceSettingsResult(next ? 'ui_settings_appearance_hover_spotlight_enabled' : 'ui_settings_appearance_hover_spotlight_disabled', 'success');
                         })
                         .catch(() => {
                             toggle.checked = !next;
                             if (toggle.attrs) toggle.attrs.checked = !next;
-                            showToast(getMessage('ui_settings_appearance_hover_spotlight_failed'), { variant: 'error' });
+                            announceSettingsResult('ui_settings_appearance_hover_spotlight_failed', 'error');
                         });
                 });
             }
@@ -324,12 +343,12 @@
                     const nextMode = enabled ? 'reflow' : 'classic';
                     Promise.resolve(setDragMode(nextMode))
                         .then(() => {
-                            showToast(getMessage(enabled ? 'ui_settings_drag_mode_enabled' : 'ui_settings_drag_mode_disabled'), { variant: 'success' });
+                            announceSettingsResult(enabled ? 'ui_settings_drag_mode_enabled' : 'ui_settings_drag_mode_disabled', 'success');
                         })
                         .catch(() => {
                             dragToggle.checked = !enabled;
                             if (dragToggle.attrs) dragToggle.attrs.checked = !enabled;
-                            showToast(getMessage('ui_settings_drag_mode_failed'), { variant: 'error' });
+                            announceSettingsResult('ui_settings_drag_mode_failed', 'error');
                         });
                 });
             }
@@ -340,10 +359,10 @@
                 const enabled = Boolean(event?.target?.checked ?? container.querySelector('.sp-settings-developer-mode-toggle')?.checked);
                 Promise.resolve(setDeveloperModeEnabled(enabled))
                     .then(() => {
-                        showToast(getMessage(enabled ? 'ui_settings_developer_mode_enabled' : 'ui_settings_developer_mode_disabled'), { variant: 'success' });
+                        announceSettingsResult(enabled ? 'ui_settings_developer_mode_enabled' : 'ui_settings_developer_mode_disabled', 'success');
                     })
                     .catch(() => {
-                        showToast(getMessage('ui_settings_developer_mode_failed'), { variant: 'error' });
+                        announceSettingsResult('ui_settings_developer_mode_failed', 'error');
                     });
             });
             container.querySelector('.sp-settings-copy-developer-logs-btn')?.addEventListener('click', () => {
@@ -363,12 +382,10 @@
             container.querySelector('.sp-settings-clear-developer-logs-btn')?.addEventListener('click', () => {
                 Promise.resolve(clearDeveloperLogs())
                     .then((ok) => {
-                        showToast(getMessage(ok ? 'ui_settings_developer_logs_cleared' : 'ui_settings_developer_logs_clear_failed'), {
-                            variant: ok ? 'success' : 'error'
-                        });
+                        announceSettingsResult(ok ? 'ui_settings_developer_logs_cleared' : 'ui_settings_developer_logs_clear_failed', ok ? 'success' : 'error');
                     })
                     .catch(() => {
-                        showToast(getMessage('ui_settings_developer_logs_clear_failed'), { variant: 'error' });
+                        announceSettingsResult('ui_settings_developer_logs_clear_failed', 'error');
                     });
             });
         }
@@ -671,11 +688,11 @@
                 const nextLimit = Number(event?.target?.value) || 20;
                 Promise.resolve(setHistoryRetentionLimit(nextLimit))
                     .then(() => {
-                        showToast(getMessage('ui_history_retention_updated'), { variant: 'success' });
+                        announceSettingsResult('ui_history_retention_updated', 'success');
                         renderSettingsModal(normalizedModalState);
                     })
                     .catch(() => {
-                        showToast(getMessage('ui_history_retention_update_failed'), { variant: 'error' });
+                        announceSettingsResult('ui_history_retention_update_failed', 'error');
                     });
             });
             content.querySelector('.sp-history-create-restore-point-btn')?.addEventListener('click', () => {

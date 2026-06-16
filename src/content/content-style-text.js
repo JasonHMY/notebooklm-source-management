@@ -2815,6 +2815,10 @@
 	                box-shadow: var(--sp-shadow-toast);
 	            }
 
+	            .sp-toast-elevated {
+	                z-index: 10003;
+	            }
+
 	            .sp-toast-success {
 	                background-color: rgba(34, 128, 75, 0.92);
 	                color: #fff;

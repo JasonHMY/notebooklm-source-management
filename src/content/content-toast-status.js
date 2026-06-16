@@ -25,7 +25,8 @@
                 onAction: typeof normalizedOptions.onAction === 'function' ? normalizedOptions.onAction : null,
                 durationMs: Number.isFinite(normalizedOptions.durationMs) && normalizedOptions.durationMs > 0
                     ? normalizedOptions.durationMs
-                    : null
+                    : null,
+                elevated: Boolean(normalizedOptions.elevated)
             };
         }
 

@@ -396,6 +396,37 @@ describe('content modal settings', () => {
         });
     });
 
+    describe('settings toast visibility (frosted modal)', () => {
+        it('suppresses the success toast while the settings modal is open', async () => {
+            const setHoverSpotlightEnabled = jest.fn(() => Promise.resolve(true));
+            const showToast = jest.fn();
+            const deps = createDeps({ setHoverSpotlightEnabled, showToast });
+            const helper = createContentModalSettings(deps);
+            helper.renderSettingsModal();
+            const shadowRoot = deps.getShadowRoot();
+            const toggle = shadowRoot.querySelector('.sp-settings-appearance-hover-spotlight-toggle');
+            toggle.listeners.change.forEach((handler) => handler({ target: toggle }));
+            await Promise.resolve();
+            await Promise.resolve();
+            expect(setHoverSpotlightEnabled).toHaveBeenCalled();
+            expect(showToast).not.toHaveBeenCalled();
+        });
+
+        it('shows the failure toast elevated above the modal while settings is open', async () => {
+            const setHoverSpotlightEnabled = jest.fn(() => Promise.reject(new Error('boom')));
+            const showToast = jest.fn();
+            const deps = createDeps({ setHoverSpotlightEnabled, showToast });
+            const helper = createContentModalSettings(deps);
+            helper.renderSettingsModal();
+            const shadowRoot = deps.getShadowRoot();
+            const toggle = shadowRoot.querySelector('.sp-settings-appearance-hover-spotlight-toggle');
+            toggle.listeners.change.forEach((handler) => handler({ target: toggle }));
+            await Promise.resolve();
+            await Promise.resolve();
+            expect(showToast).toHaveBeenCalledWith('ui_settings_appearance_hover_spotlight_failed', expect.objectContaining({ variant: 'error', elevated: true }));
+        });
+    });
+
     describe('appearance settings standardization', () => {
         it('wraps both appearance toggles in sp-toggle-switch with sp-group-toggle-checkbox inputs', () => {
             const deps = createDeps();
