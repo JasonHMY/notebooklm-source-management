@@ -555,11 +555,11 @@
                 initiallyExpanded: Boolean(importText.trim() || preview),
                 children: [exportSubsection, importSubsection, historySubsection]
             });
-            content.appendChild(backupSection.section);
             content.appendChild(createLanguagePreferenceSection());
             const appearanceSection = createAppearanceSettingsSection();
             content.appendChild(appearanceSection);
             bindAppearanceSettingsActions(appearanceSection);
+            content.appendChild(backupSection.section);
 
             const sourceRepairReport = getSourceRepairReport();
             const sourceRepairIssueCount = (sourceRepairReport?.unmatchedSources || 0) + (sourceRepairReport?.ambiguousSources || 0);

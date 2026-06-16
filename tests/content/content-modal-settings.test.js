@@ -456,4 +456,24 @@ describe('content modal settings', () => {
             expect(shadowRoot.querySelector('.sp-settings-test-whats-new-btn')).toBeTruthy();
         });
     });
+
+    describe('settings section ordering', () => {
+        it('orders sections preferences, appearance, backup, help', () => {
+            const deps = createDeps({
+                createLanguagePreferenceSection: jest.fn(() => createElement('section', {
+                    className: 'sp-settings-section sp-settings-preferences-section'
+                }))
+            });
+            const { renderSettingsModal } = createContentModalSettings(deps);
+            renderSettingsModal();
+            const shadowRoot = deps.getShadowRoot();
+            const content = shadowRoot.querySelector('.sp-folder-modal-content');
+            const order = content.children.map((c) => String(c.className || ''));
+            const idx = (cls) => order.findIndex((c) => c.includes(cls));
+            expect(idx('sp-settings-preferences-section')).toBeGreaterThanOrEqual(0);
+            expect(idx('sp-settings-preferences-section')).toBeLessThan(idx('sp-settings-appearance-section'));
+            expect(idx('sp-settings-appearance-section')).toBeLessThan(idx('sp-settings-backup-section'));
+            expect(idx('sp-settings-backup-section')).toBeLessThan(idx('sp-settings-help-section'));
+        });
+    });
 });
