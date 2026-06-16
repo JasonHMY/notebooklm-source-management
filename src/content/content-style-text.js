@@ -2269,6 +2269,10 @@
                 font-weight: 700;
                 line-height: 1.35;
             }
+            .sp-settings-preference-row > .sp-toggle-switch {
+                justify-self: end;
+                margin-right: 0;
+            }
             .sp-settings-select {
                 min-width: 132px;
                 max-width: 220px;
