@@ -237,16 +237,17 @@ test.describe.serial('extension smoke', () => {
 
         await sendNotebookMessage(projectId, { type: 'SWITCH_SOURCE_VIEW', viewKind: 'label' });
 
-        // The native source-view switch + background developer-log write can take >10s to
-        // land under full-suite load (this poll is flaky at 10s on a borderline machine),
-        // so allow a wider window for the view_switch log entry to be persisted.
+        // The native source-view switch retries before it resolves, and the background
+        // developer-log write that follows can land >20s later when the machine is loaded
+        // (e.g. during `verify:full`, right after the unit suite). The log does get written —
+        // this poll was observed flaky at both 10s and 20s — so give it a generous window.
         await expect.poll(async () => {
             const state = await readDeveloperLogs(projectId, bridgePage);
             return state.logs.some((entry) => (
                 entry.category === 'view_switch' &&
                 (entry.event === 'source_view_switch_succeeded' || entry.event === 'source_view_switch_failed')
             ));
-        }, { timeout: 20_000 }).toBeTruthy();
+        }, { timeout: 35_000 }).toBeTruthy();
 
         const enabledState = await readDeveloperLogs(projectId, bridgePage);
         expect(JSON.stringify(enabledState.logs)).not.toContain('Academic Research Notes');
