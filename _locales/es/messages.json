@@ -482,6 +482,12 @@
     "ui_settings_developer_mode_body": {
         "message": "Al activarlo, la extensión registra cambios de estado, errores y acciones depurados para diagnosticar problemas."
     },
+    "ui_settings_developer_logs_title": {
+        "message": "Registros"
+    },
+    "ui_settings_developer_test_tools_title": {
+        "message": "Herramientas de prueba"
+    },
     "ui_settings_copy_developer_logs": {
         "message": "Copiar logs de desarrollador"
     },

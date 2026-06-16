@@ -482,6 +482,12 @@
     "ui_settings_developer_mode_body": {
         "message": "When enabled, the extension records sanitized state changes, errors, and action logs for debugging."
     },
+    "ui_settings_developer_logs_title": {
+        "message": "Logs"
+    },
+    "ui_settings_developer_test_tools_title": {
+        "message": "Test tools"
+    },
     "ui_settings_copy_developer_logs": {
         "message": "Copy developer logs"
     },

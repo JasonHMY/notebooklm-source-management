@@ -482,6 +482,12 @@
     "ui_settings_developer_mode_body": {
         "message": "开启后会记录脱敏的状态变更、错误和操作日志，便于排查问题。"
     },
+    "ui_settings_developer_logs_title": {
+        "message": "日志"
+    },
+    "ui_settings_developer_test_tools_title": {
+        "message": "测试工具"
+    },
     "ui_settings_copy_developer_logs": {
         "message": "复制开发者日志"
     },
