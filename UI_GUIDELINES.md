@@ -847,7 +847,9 @@ What's New:
 
 Settings preferences:
 
-- Lightweight preferences such as language, history retention, command palette entry, and quick view button management should use `.sp-settings-preference-row`.
+- Lightweight preferences such as language, history retention, command palette entry, quick view button management, appearance toggles, and the developer-mode toggle should use `.sp-settings-preference-row` (left "title + helper", right control). Do not place controls inside `.sp-settings-section-header` — the header carries only the section title.
+- Persistent on/off settings use `.sp-toggle-switch` (input gets `sp-group-toggle-checkbox` + the settings-specific class, wrapped in `<label class="sp-toggle-switch">` with a `.sp-toggle-slider`), not native checkboxes — consistent with §9.2. A switch inside a preference row is right-aligned via `.sp-settings-preference-row > .sp-toggle-switch { justify-self: end }`.
+- Group long button clusters into titled `.sp-settings-subsection`s (e.g. the developer section splits Logs and Test tools), matching the backup section's export/import/history grouping.
 - Keep preference copy short and functional; do not add explanatory cards inside settings sections.
 
 Command palette:
