@@ -1200,10 +1200,11 @@ describe('background.js message listener', () => {
     });
 
     it('trims state history once when projected save payload is over the critical quota threshold', () => {
-        const existingHistory = [1, 2, 3, 4, 5].map((index) => ({
+        const makeHistoryEntry = (index, manual = false) => ({
             id: `history-${index}`,
             createdAt: `2026-04-22T00:0${index}:00.000Z`,
-            reason: 'save',
+            reason: manual ? 'manual_restore_point' : 'save',
+            manual,
             snapshot: {
                 groups: [`old-${index}`],
                 groupsById: { [`old-${index}`]: { id: `old-${index}`, children: [] } },
@@ -1211,7 +1212,12 @@ describe('background.js message listener', () => {
                     [`source-${index}`]: { enabled: true, title: 'x'.repeat(900) }
                 }
             }
-        }));
+        });
+        const existingHistory = [
+            ...[1, 2, 3, 4, 5].map((index) => makeHistoryEntry(index)),
+            makeHistoryEntry(6, true),
+            makeHistoryEntry(7, true)
+        ];
         const request = {
             type: 'SAVE_STATE',
             key: 'sourcesPlusState_123',
@@ -1229,6 +1235,47 @@ describe('background.js message listener', () => {
         });
 
         listener(request, validSender, mockSendResponse);
+
+        const savedPayload = global.chrome.storage.local.set.mock.calls[0][0];
+        expect(savedPayload.sourcesPlusHistory_123.map((entry) => entry.id)).toEqual([
+            expect.stringMatching(/^history:/),
+            'history-6',
+            'history-7'
+        ]);
+        expect(mockSendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: true,
+            historyEntryCount: 3,
+            historyTrimmed: true
+        }));
+    });
+
+    it('keeps only the newest automatic history entry when quota trimming an all-automatic history', () => {
+        const existingHistory = [1, 2, 3, 4, 5].map((index) => ({
+            id: `history-${index}`,
+            createdAt: `2026-04-22T00:0${index}:00.000Z`,
+            reason: 'save',
+            snapshot: {
+                groups: [`old-${index}`],
+                groupsById: { [`old-${index}`]: { id: `old-${index}`, children: [] } },
+                sourceStateById: {
+                    [`source-${index}`]: { enabled: true, title: 'x'.repeat(900) }
+                }
+            }
+        }));
+        global.chrome.storage.local.QUOTA_BYTES = 5200;
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({ sourcesPlusHistory_123: existingHistory });
+        });
+
+        listener({
+            type: 'SAVE_STATE',
+            key: 'sourcesPlusState_123',
+            data: {
+                groups: ['current'],
+                groupsById: { current: { id: 'current', children: [] } },
+                sourceStateById: { source_current: { enabled: true, title: 'Current' } }
+            }
+        }, validSender, mockSendResponse);
 
         const savedPayload = global.chrome.storage.local.set.mock.calls[0][0];
         expect(savedPayload.sourcesPlusHistory_123).toHaveLength(1);
@@ -1295,6 +1342,41 @@ describe('background.js message listener', () => {
         // who filled their quota could never delete sources to recover (hard lock).
         expect(global.chrome.storage.local.set).toHaveBeenCalled();
         expect(mockSendResponse).toHaveBeenCalledWith(expect.objectContaining({ success: true }));
+    });
+
+    it('rejects an oversized all-manual history append without mutating storage', () => {
+        const makeEntry = (index) => ({
+            id: `manual-${index}`,
+            createdAt: `2026-04-22T00:0${index}:00.000Z`,
+            reason: 'manual_restore_point',
+            manual: true,
+            snapshot: {
+                groups: [`group-${index}`],
+                groupsById: { [`group-${index}`]: { id: `group-${index}`, children: [] } },
+                sourceStateById: {
+                    [`source-${index}`]: { enabled: true, title: 'x'.repeat(1400) }
+                }
+            }
+        });
+        const existingHistory = [makeEntry(1), makeEntry(2)];
+        global.chrome.storage.local.QUOTA_BYTES = 2500;
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({ sourcesPlusHistory_123: existingHistory });
+        });
+
+        listener({
+            type: 'APPEND_STATE_HISTORY',
+            key: 'sourcesPlusHistory_123',
+            entry: makeEntry(3)
+        }, validSender, mockSendResponse);
+
+        expect(global.chrome.storage.local.set).not.toHaveBeenCalled();
+        expect(mockSendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: false,
+            errorCode: 'storage_quota_exceeded',
+            historyEntryCount: 3,
+            historyTrimmed: false
+        }));
     });
 
     it('should handle LOAD_STATE message successfully', () => {

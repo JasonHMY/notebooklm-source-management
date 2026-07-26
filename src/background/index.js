@@ -857,12 +857,23 @@ function createStateStoragePayload({
     };
 }
 
+function trimHistoryForQuota(entries) {
+    const history = Array.isArray(entries) ? entries : [];
+    const newestAutomaticIndex = history.findIndex((entry) => !entry?.manual);
+    return history.filter((entry, index) => (
+        Boolean(entry?.manual) || index === newestAutomaticIndex
+    ));
+}
+
 function trimStateStorageHistory(payloadInfo, historyKey, extraBytes = 0) {
     if (!payloadInfo || !Array.isArray(payloadInfo.history) || payloadInfo.history.length <= 1) {
         return payloadInfo;
     }
 
-    const trimmedHistory = payloadInfo.history.slice(0, 1);
+    const trimmedHistory = trimHistoryForQuota(payloadInfo.history);
+    if (trimmedHistory.length === payloadInfo.history.length) {
+        return payloadInfo;
+    }
     const payload = Object.assign({}, payloadInfo.payload, {
         [historyKey]: trimmedHistory
     });
@@ -1063,10 +1074,13 @@ function appendStateHistoryNow(request, sendResponse) {
             let usageInfo = createStorageUsageInfo(payload, getStorageQuotaBytes(), extraBytes);
             let historyTrimmed = false;
             if (isStorageCritical(usageInfo) && history.length > 1) {
-                nextHistory = history.slice(0, 1);
-                payload = { [key]: nextHistory };
-                usageInfo = createStorageUsageInfo(payload, getStorageQuotaBytes(), extraBytes);
-                historyTrimmed = true;
+                const trimmedHistory = trimHistoryForQuota(history);
+                if (trimmedHistory.length < history.length) {
+                    nextHistory = trimmedHistory;
+                    payload = { [key]: nextHistory };
+                    usageInfo = createStorageUsageInfo(payload, getStorageQuotaBytes(), extraBytes);
+                    historyTrimmed = true;
+                }
             }
             if (isStorageCritical(usageInfo)) {
                 sendResponse(Object.assign({
