@@ -125,4 +125,52 @@ describe('content state reconciliation guards', () => {
         ]);
         expect(reconciled.ungrouped).toEqual([]);
     });
+
+    it('reconcilePersistedTree applies group, root and bin precedence with canonical entry shapes', () => {
+        const reconcile = createReconcileModule({ groupsById: new Map(), state: {} });
+        const sourceLookup = reconcile.buildSourceLookup([
+            { key: 'dup', title: 'Duplicate', normalizedTitle: 'duplicate', stableToken: '', fingerprint: '' },
+            { key: 'root-only', title: 'Root Only', normalizedTitle: 'root only', stableToken: '', fingerprint: '' },
+            { key: 'bin-only', title: 'Bin Only', normalizedTitle: 'bin only', stableToken: '', fingerprint: '' }
+        ]);
+        const loadedState = {
+            schemaVersion: 5,
+            root: [
+                { type: 'group', id: 'outer' },
+                { type: 'source', key: 'dup' },
+                { type: 'source', key: 'root-only' }
+            ],
+            groupsById: {
+                outer: {
+                    id: 'outer',
+                    children: [{ type: 'group', id: 'inner' }]
+                },
+                inner: {
+                    id: 'inner',
+                    children: [{ type: 'source', key: 'dup' }]
+                }
+            },
+            ungrouped: ['dup', 'root-only', 'bin-only'],
+            sourceStateById: {}
+        };
+
+        const reconciled = reconcile.reconcilePersistedTree(loadedState, sourceLookup);
+
+        expect(reconciled.groupsById.get('outer').children).toEqual([
+            { type: 'group', id: 'inner' }
+        ]);
+        expect(reconciled.groupsById.get('inner').children).toEqual([
+            { type: 'source', key: 'dup' }
+        ]);
+        expect(reconciled.root).toEqual([
+            { type: 'group', id: 'outer' },
+            { type: 'source', key: 'root-only' }
+        ]);
+        expect(reconciled.ungrouped).toEqual(['bin-only']);
+        expect(reconciled.seenSourceRefs).toEqual(new Set(['dup', 'root-only', 'bin-only']));
+        expect(reconciled.root.every((entry) => (
+            entry && typeof entry === 'object' && typeof entry.type === 'string'
+        ))).toBe(true);
+        expect(reconciled.ungrouped.every((entry) => typeof entry === 'string')).toBe(true);
+    });
 });

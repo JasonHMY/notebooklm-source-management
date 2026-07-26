@@ -13,6 +13,8 @@ Roadmap Start SHA: `2acbc1af65b394be448119da15312a5ec73634ca`
 Storage Plan Start SHA: `050696e5dc3e316a9849140b79b732364c5e070a`
 Drag Plan Start SHA: `083985bbaec2a7b1df99eabccff926e96967a624`
 
+Architecture Plan Start SHA: `73197d760ab1001f7440a1094e9688fcb97799f2`
+
 ## Commands and Results
 
 | Command | Result | Evidence |
@@ -62,5 +64,5 @@ and 1,058, all below their respective Before baselines.
 
 ## Deferred Non-Blocking Observations
 
-- Architecture & Accessibility has not started; its start SHA will be captured immediately before its characterization task.
+- Architecture & Accessibility characterization has started from the recorded Architecture Plan Start SHA; the planned deep Modules and Adapters have not yet been implemented.
 - No source titles, notebook identifiers, private URLs, or other notebook data were captured.

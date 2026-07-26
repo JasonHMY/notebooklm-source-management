@@ -28,6 +28,7 @@
 ## [Unreleased] (未发布)
 
 ### Changed
+- **锁定树放置行为基线 (Characterize Tree Placement Behavior)**: **影响**: 对扩展使用无可感知变化。 新增单项、批量、移动弹窗与 restore/reconcile 的行为矩阵，锁定 source XOR、group > root > bin 优先级、同容器索引修正、no-op、循环拒绝原子性、批量输入顺序、目标文件夹尾部追加、live orphan、canonical entry shape、子文件夹原子创建与 non-empty nested group 删除提升规则；仅增加或修正测试与起始 SHA 记录，未修改 runtime。
 - **拖拽性能可选基准 (Opt-in Drag Performance Benchmark)**: **影响**: 对扩展使用无可感知变化。 新增 `npm run benchmark:drag`，仅在 `DRAG_BENCHMARK=1` 时运行真实扩展上下文中的 100/500 行、单项/50 项选择 reflow 拖拽样本；每个 prepare 样本会在计时外先还原真实下一次 pointerdown 后的 host/pseudo-hover 状态、完成 layout settle 并把全部 instrumentation 归零，再同时观察 `getBoundingClientRect`、`offsetHeight` 与实际 DOM mutation；manager-active callback 以 isolated-world logical rAF ID 精确绑定每次 dragover，只汇总 20 次同步 prepare 与 50 个目标 callback 的三类 DOM 调用增量。默认 smoke/CI 不执行该 timing 基准；同一修正版 harness 的 Before/After 和最终 10% 验收结果已记录在拖拽性能报告。
 - **记录拖拽加固完成证据 (Record Drag Hardening Completion Evidence)**: **影响**: 对扩展使用无可感知变化。 优化路线图基线与拖拽性能报告现记录 Drag Correctness & Performance 工作流的最终已验证提交 `e701c2e6f31c27973f668c67c983227a3286bbc9`、重点 Jest/unit/headless smoke/Chromium layout/package/范围检查结果，以及 100/500 行单项和 50 项选择的最终 CPU、强制布局与 DOM 调用预算；四组性能门均通过。
 - **记录存储加固完成证据 (Record Storage Hardening Completion Evidence)**: **影响**: 对扩展使用无可感知变化。 优化路线图基线报告现记录 Storage Integrity 工作流的最终已验证提交 `39bdfa04b49cd939be8d20f66adc16c4d607a66f`、lint/重点 Jest/unit/headless smoke/package 与安全/范围检查结果，以及最终复核结论。

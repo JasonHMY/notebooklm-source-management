@@ -481,6 +481,55 @@ describe('drag and drop ordering guards', () => {
         expect(buildParentMap).toHaveBeenCalledTimes(2);
     });
 
+    it('commits a subgroup record and parent edge before observers run', () => {
+        const state = {
+            root: [{ type: 'group', id: 'parent' }],
+            ungrouped: []
+        };
+        const parent = {
+            id: 'parent',
+            children: [{ type: 'source', key: 'existing' }]
+        };
+        const groupsById = new Map([['parent', parent]]);
+        const assertCommitted = () => {
+            expect(parent.children).toEqual([
+                { type: 'source', key: 'existing' },
+                { type: 'group', id: 'group_12345' }
+            ]);
+            expect(groupsById.get('group_12345')).toMatchObject({
+                id: 'group_12345',
+                children: [],
+                enabled: true,
+                collapsed: false,
+                isNewlyCreated: true
+            });
+        };
+        const buildParentMap = jest.fn(assertCommitted);
+        const render = jest.fn(assertCommitted);
+        const saveState = jest.fn(assertCommitted);
+        const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(12345);
+        const interactions = createContentTreeInteractions({
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            buildParentMap,
+            render,
+            saveState,
+            getMessage: (key) => key
+        });
+
+        try {
+            expect(interactions.handleAddNewGroup('parent')).toBe(true);
+        } finally {
+            nowSpy.mockRestore();
+        }
+
+        assertCommitted();
+        expect(state.root).toEqual([{ type: 'group', id: 'parent' }]);
+        expect(buildParentMap).toHaveBeenCalledTimes(1);
+        expect(render).toHaveBeenCalledTimes(1);
+        expect(saveState).toHaveBeenCalledWith({ immediate: true, critical: true });
+    });
+
     it('does not create an orphan subgroup when the parent group has gone stale', () => {
         const state = { groups: [], ungrouped: [] };
         const groupsById = new Map();
@@ -594,10 +643,88 @@ describe('drag and drop ordering guards', () => {
         expect(state.root).toEqual([{ type: 'source', key: 'src-keep' }]);
     });
 
+    it('preserves source XOR when a single source moves from a group to positioned root', () => {
+        const state = {
+            root: [
+                { type: 'group', id: 'origin' },
+                { type: 'group', id: 'anchor' }
+            ],
+            ungrouped: ['bin-other']
+        };
+        const origin = {
+            id: 'origin',
+            children: [{ type: 'source', key: 'S' }]
+        };
+        const anchor = { id: 'anchor', children: [] };
+        const groupsById = new Map([
+            ['origin', origin],
+            ['anchor', anchor]
+        ]);
+        const parentMap = new Map([['S', 'origin']]);
+        const saveState = jest.fn();
+        const render = jest.fn();
+        const buildParentMap = jest.fn();
+        const runtime = {
+            dragReflowSession: {
+                draggedKeys: new Set(['S']),
+                currentIntent: {
+                    kind: 'before-group',
+                    targetGroup: null,
+                    targetList: state.root,
+                    insertIndex: 1,
+                    targetGroupId: null,
+                    slotKey: 'anchor',
+                    isRootList: true
+                },
+                shiftedItems: new Map()
+            }
+        };
+        const interactions = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getSourcesByKey: () => new Map([['S', { key: 'S' }]]),
+            getParentMap: () => parentMap,
+            getShadowRoot: () => ({ querySelectorAll: jest.fn(() => []) }),
+            saveState,
+            render,
+            buildParentMap
+        });
+
+        interactions.handleDrop(createDropEvent({
+            dropTarget: {
+                dataset: { groupId: 'anchor' },
+                classList: createClassList(['group-container'])
+            },
+            sourceKey: 'S'
+        }));
+
+        expect(origin.children).toEqual([]);
+        expect(state.root).toEqual([
+            { type: 'group', id: 'origin' },
+            { type: 'source', key: 'S' },
+            { type: 'group', id: 'anchor' }
+        ]);
+        expect(state.ungrouped).toEqual(['bin-other']);
+        const occurrences = [
+            ...Array.from(groupsById.values()).flatMap((group) => (
+                (Array.isArray(group.children) ? group.children : [])
+                    .filter((entry) => entry.type === 'source' && entry.key === 'S')
+            )),
+            ...state.root.filter((entry) => entry.type === 'source' && entry.key === 'S'),
+            ...state.ungrouped.filter((key) => key === 'S')
+        ];
+        expect(occurrences).toHaveLength(1);
+        expect(buildParentMap).toHaveBeenCalledTimes(1);
+        expect(render).toHaveBeenCalledTimes(1);
+        expect(saveState).toHaveBeenCalledWith({ immediate: true, critical: true });
+    });
+
     it('does not save or render when a source is dropped back into the same position', () => {
         const state = { groups: [], ungrouped: ['source-1', 'source-2'] };
         const saveState = jest.fn();
         const render = jest.fn();
+        const buildParentMap = jest.fn();
         const dropTarget = {
             dataset: { sourceKey: 'source-1' },
             classList: createClassList(['source-item'])
@@ -623,7 +750,8 @@ describe('drag and drop ordering guards', () => {
             getParentMap: () => new Map(),
             getShadowRoot: () => ({ querySelectorAll: jest.fn(() => []) }),
             saveState,
-            render
+            render,
+            buildParentMap
         });
 
         interactions.handleDrop(createDropEvent({ dropTarget, sourceKey: 'source-1' }));
@@ -631,6 +759,7 @@ describe('drag and drop ordering guards', () => {
         expect(state.ungrouped).toEqual(['source-1', 'source-2']);
         expect(render).not.toHaveBeenCalled();
         expect(saveState).not.toHaveBeenCalled();
+        expect(buildParentMap).not.toHaveBeenCalled();
     });
 
     it('saves legal source moves after applying the final insertion index', () => {
@@ -668,6 +797,68 @@ describe('drag and drop ordering guards', () => {
         interactions.handleDrop(createDropEvent({ dropTarget, sourceKey: 'source-1' }));
 
         expect(state.ungrouped).toEqual(['source-2', 'source-1']);
+        expect(render).toHaveBeenCalledTimes(1);
+        expect(saveState).toHaveBeenCalledWith({ immediate: true, critical: true });
+    });
+
+    it('removes the original group-child slot before correcting a forward insertion index', () => {
+        const group = {
+            id: 'g1',
+            children: [
+                { type: 'source', key: 'A' },
+                { type: 'source', key: 'B' },
+                { type: 'source', key: 'C' },
+                { type: 'source', key: 'D' }
+            ]
+        };
+        const state = {
+            root: [{ type: 'group', id: 'g1' }],
+            ungrouped: []
+        };
+        const saveState = jest.fn();
+        const render = jest.fn();
+        const buildParentMap = jest.fn();
+        const runtime = {
+            dragReflowSession: {
+                draggedKeys: new Set(['B']),
+                currentIntent: {
+                    kind: 'after-source',
+                    targetGroup: group,
+                    targetList: group.children,
+                    insertIndex: 3,
+                    targetGroupId: 'g1',
+                    slotKey: 'C'
+                },
+                shiftedItems: new Map()
+            }
+        };
+        const interactions = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => new Map([['g1', group]]),
+            getSourcesByKey: () => new Map([['B', { key: 'B' }]]),
+            getParentMap: () => new Map([['B', 'g1']]),
+            getShadowRoot: () => ({ querySelectorAll: jest.fn(() => []) }),
+            saveState,
+            render,
+            buildParentMap
+        });
+
+        interactions.handleDrop(createDropEvent({
+            dropTarget: {
+                dataset: { sourceKey: 'C' },
+                classList: createClassList(['source-item'])
+            },
+            sourceKey: 'B'
+        }));
+
+        expect(group.children).toEqual([
+            { type: 'source', key: 'A' },
+            { type: 'source', key: 'C' },
+            { type: 'source', key: 'B' },
+            { type: 'source', key: 'D' }
+        ]);
+        expect(buildParentMap).toHaveBeenCalledTimes(1);
         expect(render).toHaveBeenCalledTimes(1);
         expect(saveState).toHaveBeenCalledWith({ immediate: true, critical: true });
     });
@@ -790,6 +981,7 @@ describe('drag and drop ordering guards', () => {
         };
         const saveState = jest.fn();
         const render = jest.fn();
+        const buildParentMap = jest.fn();
         const dropTarget = { dataset: { sourceKey: 'src-1' }, classList: createClassList(['source-item']) };
         const runtime = {
             dragReflowSession: {
@@ -812,7 +1004,8 @@ describe('drag and drop ordering guards', () => {
             getParentMap: () => new Map(),
             getShadowRoot: () => ({ querySelectorAll: jest.fn(() => []) }),
             saveState,
-            render
+            render,
+            buildParentMap
         });
 
         interactions.handleDrop(createDropEvent({ dropTarget, sourceKey: 'src-1' }));
@@ -824,6 +1017,7 @@ describe('drag and drop ordering guards', () => {
         ]);
         expect(render).not.toHaveBeenCalled();
         expect(saveState).not.toHaveBeenCalled();
+        expect(buildParentMap).not.toHaveBeenCalled();
     });
 
     it('does not save or render when a positioned root GROUP is dropped back into its own slot', () => {
@@ -836,6 +1030,7 @@ describe('drag and drop ordering guards', () => {
         };
         const saveState = jest.fn();
         const render = jest.fn();
+        const buildParentMap = jest.fn();
         const dropTarget = { dataset: { groupId: 'g2' }, classList: createClassList(['group-container']) };
         const runtime = {
             dragReflowSession: {
@@ -859,7 +1054,8 @@ describe('drag and drop ordering guards', () => {
             getShadowRoot: () => ({ querySelectorAll: jest.fn(() => []) }),
             isDescendant: global.isDescendant,
             saveState,
-            render
+            render,
+            buildParentMap
         });
 
         interactions.handleDrop(createDropEvent({ dropTarget, groupId: 'g2' }));
@@ -870,9 +1066,13 @@ describe('drag and drop ordering guards', () => {
         ]);
         expect(render).not.toHaveBeenCalled();
         expect(saveState).not.toHaveBeenCalled();
+        expect(buildParentMap).not.toHaveBeenCalled();
     });
 
-    it('prevents moving a group into itself or its own subtree', () => {
+    it.each([
+        ['itself', 'root'],
+        ['its descendant', 'child']
+    ])('rejects moving a group into %s atomically', (_label, targetGroupId) => {
         const state = { root: [{ type: 'group', id: 'root' }], ungrouped: [] };
         const groupsById = new Map([
             ['root', {
@@ -887,26 +1087,132 @@ describe('drag and drop ordering guards', () => {
         const parentMap = new Map([['child', 'root']]);
         const saveState = jest.fn();
         const render = jest.fn();
+        const buildParentMap = jest.fn();
+        const isDescendant = jest.fn(global.isDescendant);
+        const targetGroup = groupsById.get(targetGroupId);
         const dropTarget = {
-            dataset: { groupId: 'child' },
+            dataset: { groupId: targetGroupId },
             classList: createClassList(['group-container', 'drag-into'])
         };
+        const runtime = {
+            dragReflowSession: {
+                draggedKeys: new Set(['root']),
+                currentIntent: {
+                    kind: 'into-group',
+                    targetGroup,
+                    targetList: targetGroup.children,
+                    insertIndex: 0,
+                    targetGroupId,
+                    slotKey: null
+                },
+                shiftedItems: new Map()
+            }
+        };
+        const beforeState = JSON.parse(JSON.stringify(state));
+        const beforeGroups = JSON.parse(JSON.stringify(Array.from(groupsById.entries())));
         const interactions = createContentTreeInteractions({
+            runtime,
             getState: () => state,
             getGroupsById: () => groupsById,
             getParentMap: () => parentMap,
             getShadowRoot: () => ({ querySelectorAll: jest.fn(() => []) }),
-            isDescendant: global.isDescendant,
+            isDescendant,
             saveState,
-            render
+            render,
+            buildParentMap
         });
 
         interactions.handleDrop(createDropEvent({ dropTarget, groupId: 'root' }));
 
-        expect(state.root).toEqual([{ type: 'group', id: 'root' }]);
-        expect(groupsById.get('root').children).toEqual([{ type: 'group', id: 'child' }]);
+        expect(isDescendant).toHaveBeenCalledWith(targetGroup, groupsById.get('root'), groupsById);
+        expect(state).toEqual(beforeState);
+        expect(Array.from(groupsById.entries())).toEqual(beforeGroups);
         expect(render).not.toHaveBeenCalled();
         expect(saveState).not.toHaveBeenCalled();
+        expect(buildParentMap).not.toHaveBeenCalled();
+    });
+
+    it('deleting a non-empty nested group sends direct sources to the bin and promotes child groups to root in order', () => {
+        const state = {
+            root: [
+                { type: 'group', id: 'existing-root' },
+                { type: 'group', id: 'parent' }
+            ],
+            ungrouped: ['existing-bin'],
+            isBatchMode: false
+        };
+        const parent = {
+            id: 'parent',
+            children: [
+                { type: 'source', key: 'parent-source' },
+                { type: 'group', id: 'doomed' },
+                { type: 'group', id: 'parent-sibling' }
+            ]
+        };
+        const doomed = {
+            id: 'doomed',
+            title: 'Doomed',
+            children: [
+                { type: 'source', key: 'S1' },
+                { type: 'group', id: 'child-a' },
+                { type: 'source', key: 'S2' },
+                { type: 'group', id: 'child-b' }
+            ]
+        };
+        const groupsById = new Map([
+            ['existing-root', { id: 'existing-root', children: [] }],
+            ['parent', parent],
+            ['doomed', doomed],
+            ['parent-sibling', { id: 'parent-sibling', children: [] }],
+            ['child-a', { id: 'child-a', children: [] }],
+            ['child-b', { id: 'child-b', children: [] }]
+        ]);
+        const confirm = jest.fn(() => true);
+        const saveState = jest.fn();
+        const render = jest.fn();
+        const buildParentMap = jest.fn();
+        const groupContainer = { dataset: { groupId: 'doomed' } };
+        const deleteButton = {};
+        const target = {
+            classList: { contains: jest.fn(() => false) },
+            closest: jest.fn((selector) => {
+                if (selector === '.group-container') return groupContainer;
+                if (selector === '.sp-delete-button') return deleteButton;
+                return null;
+            })
+        };
+        const interactions = createContentTreeInteractions({
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getSourcesByKey: () => new Map(),
+            getPendingBatchKeys: () => new Set(),
+            getWindow: () => ({ confirm }),
+            getMessage: (key) => key,
+            saveState,
+            render,
+            buildParentMap
+        });
+
+        interactions.handleInteraction({ target });
+
+        expect(confirm).toHaveBeenCalledTimes(1);
+        expect(state.ungrouped).toEqual(['existing-bin', 'S1', 'S2']);
+        expect(state.root).toEqual([
+            { type: 'group', id: 'existing-root' },
+            { type: 'group', id: 'parent' },
+            { type: 'group', id: 'child-a' },
+            { type: 'group', id: 'child-b' }
+        ]);
+        expect(parent.children).toEqual([
+            { type: 'source', key: 'parent-source' },
+            { type: 'group', id: 'parent-sibling' }
+        ]);
+        expect(groupsById.has('doomed')).toBe(false);
+        expect(groupsById.has('child-a')).toBe(true);
+        expect(groupsById.has('child-b')).toBe(true);
+        expect(buildParentMap).toHaveBeenCalledTimes(1);
+        expect(saveState).toHaveBeenCalledWith({ immediate: true, critical: true });
+        expect(render).toHaveBeenCalledTimes(1);
     });
 
     it('clears dragging and drop marker classes on drag end', () => {
@@ -1608,6 +1914,9 @@ describe('drop routes multi vs single source', () => {
         expect(state.isBatchMode).toBe(true);
         expect(pendingBatchKeys.size).toBe(2);
         expect(developerLog).not.toHaveBeenCalled();
+        expect(saveState).not.toHaveBeenCalled();
+        expect(render).not.toHaveBeenCalled();
+        expect(buildParentMap).not.toHaveBeenCalled();
     });
 
     it('single-source drop moves a source from group A to group B children, updating both groups consistently', () => {

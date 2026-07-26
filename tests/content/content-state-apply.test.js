@@ -79,6 +79,56 @@ describe('content state apply helper', () => {
         expect(runtime.state.ungrouped).toEqual(['orphan']);
     });
 
+    it('applies reachable group, positioned root and bin precedence with canonical entry shapes', () => {
+        const runtime = createRuntime({
+            sourcesByKey: new Map([
+                ['dup', { key: 'dup' }],
+                ['root-only', { key: 'root-only' }],
+                ['bin-only', { key: 'bin-only' }],
+                ['orphan', { key: 'orphan' }]
+            ])
+        });
+        const deps = createDeps();
+        const { applyPersistableSnapshotToRuntime } = createContentStateApply({ runtime, ...deps });
+
+        const result = applyPersistableSnapshotToRuntime({
+            root: [
+                { type: 'group', id: 'outer' },
+                { type: 'source', key: 'dup' },
+                { type: 'source', key: 'root-only' }
+            ],
+            ungrouped: ['dup', 'root-only', 'bin-only'],
+            groupsById: {
+                outer: {
+                    id: 'outer',
+                    children: [{ type: 'group', id: 'inner' }]
+                },
+                inner: {
+                    id: 'inner',
+                    children: [{ type: 'source', key: 'dup' }]
+                }
+            },
+            sourceStateById: {}
+        });
+
+        expect(result).toBe(true);
+        expect(runtime.groupsById.get('outer').children).toEqual([
+            { type: 'group', id: 'inner' }
+        ]);
+        expect(runtime.groupsById.get('inner').children).toEqual([
+            { type: 'source', key: 'dup' }
+        ]);
+        expect(runtime.state.root).toEqual([
+            { type: 'group', id: 'outer' },
+            { type: 'source', key: 'root-only' }
+        ]);
+        expect(runtime.state.ungrouped).toEqual(['bin-only', 'orphan']);
+        expect(runtime.state.root.every((entry) => (
+            entry && typeof entry === 'object' && typeof entry.type === 'string'
+        ))).toBe(true);
+        expect(runtime.state.ungrouped.every((entry) => typeof entry === 'string')).toBe(true);
+    });
+
     it('clears prior collections and writes snapshot groups, ungrouped and tag order', () => {
         const runtime = createRuntime({
             state: { root: [{ type: 'group', id: 'old' }], ungrouped: ['old-source'], tagOrder: ['old-tag'], activeTagId: 't1', isBatchMode: true },
@@ -156,8 +206,7 @@ describe('content state apply helper', () => {
             sourceStateById: {}
         });
 
-        expect(runtime.state.ungrouped).toContain('orphan');
-        expect(runtime.state.ungrouped).not.toContain('known');
+        expect(runtime.state.ungrouped).toEqual(['orphan']);
     });
 
     it('clears activeTagId when the tag is no longer present after apply', () => {

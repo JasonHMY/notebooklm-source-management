@@ -447,22 +447,52 @@ describe('content-drag-multi factory', () => {
             };
         }
 
-        it('moves three sources into a group at the TOP, preserving relative order', () => {
+        it('moves three sources into a group at the TOP, preserving caller input order', () => {
             const state = makeState();
             const helpers = makeHelpers(state);
             const helper = createContentDragMulti();
             const result = helper.applyMultiSourceDrop({
-                keys: ['A', 'C', 'D'],
+                keys: ['D', 'A', 'C'],
                 intent: { kind: 'into-group', targetGroupId: 'g1' },
                 state,
                 helpers
             });
             expect(result.moved).toBe(3);
             expect(state.ungrouped).toEqual(['B']);
-            // Dragged batch lands at the TOP (index 0..N) preserving A→C→D order;
+            // Dragged batch lands at the TOP (index 0..N) preserving D→A→C caller order;
             // existing children E, F follow. Matches single-source header-drop
             // semantics where the dropped source appears at the top of the folder.
-            expect(state.groups[0].children.map((c) => c.key)).toEqual(['A', 'C', 'D', 'E', 'F']);
+            expect(state.groups[0].children.map((c) => c.key)).toEqual(['D', 'A', 'C', 'E', 'F']);
+        });
+
+        it('moves grouped sources into the ungrouped bin as bare keys in caller input order', () => {
+            const state = {
+                ungrouped: ['Z'],
+                groups: [{
+                    id: 'g1',
+                    children: [
+                        { type: 'source', key: 'A' },
+                        { type: 'source', key: 'B' }
+                    ]
+                }]
+            };
+            const helpers = makeHelpers(state);
+            const helper = createContentDragMulti();
+            const result = helper.applyMultiSourceDrop({
+                keys: ['B', 'A'],
+                intent: {
+                    kind: 'before-source',
+                    targetList: state.ungrouped,
+                    insertIndex: 0
+                },
+                state,
+                helpers
+            });
+
+            expect(result).toEqual({ moved: 2, skipped: 0 });
+            expect(state.groups[0].children).toEqual([]);
+            expect(state.ungrouped).toEqual(['B', 'A', 'Z']);
+            expect(state.ungrouped.every((entry) => typeof entry === 'string')).toBe(true);
         });
 
         it('skips keys that no longer exist in state', () => {
@@ -539,21 +569,6 @@ describe('content-drag-multi factory', () => {
             });
             expect(result.moved).toBe(0);
             expect(state.ungrouped).toEqual(['A', 'B']);
-        });
-
-        it('does not call saveState or render', () => {
-            const state = makeState();
-            const helpers = makeHelpers(state);
-            const helper = createContentDragMulti();
-            const callTracker = { saveState: jest.fn(), render: jest.fn() };
-            helper.applyMultiSourceDrop({
-                keys: ['A'],
-                intent: { kind: 'into-group', targetGroupId: 'g1' },
-                state,
-                helpers
-            });
-            expect(callTracker.saveState).not.toHaveBeenCalled();
-            expect(callTracker.render).not.toHaveBeenCalled();
         });
 
         it('splices multiple {type:"source"} entries into state.root for a root reorder drop', () => {

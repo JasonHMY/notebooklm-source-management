@@ -141,19 +141,24 @@ describe('content modal move-to-folder', () => {
             expect(deps.saveState).not.toHaveBeenCalled();
         });
 
-        it('moves each source into the target group, runs saveState/render and closes', () => {
-            const targetGroup = { id: 't', children: [] };
+        it('appends each source to the target group in caller order, then saves, renders and closes', () => {
+            const targetGroup = {
+                id: 't',
+                children: [{ type: 'source', key: 'existing' }]
+            };
             const groupsById = new Map([['t', targetGroup]]);
             const sourcesByKey = new Map([['s1', { key: 's1' }], ['s2', { key: 's2' }]]);
             const deps = createDeps({ getGroupsById: () => groupsById, getSourcesByKey: () => sourcesByKey });
             const helper = createContentModalMove(deps);
 
-            helper.executeMoveToFolder(['s1', 's2'], 't');
+            helper.executeMoveToFolder(['s2', 's1'], 't');
 
             expect(targetGroup.children).toEqual([
-                { type: 'source', key: 's1' },
-                { type: 'source', key: 's2' }
+                { type: 'source', key: 'existing' },
+                { type: 'source', key: 's2' },
+                { type: 'source', key: 's1' }
             ]);
+            expect(deps.removeSourceFromTree.mock.calls).toEqual([['s2'], ['s1']]);
             expect(deps.removeSourceFromTree).toHaveBeenCalledTimes(2);
             expect(deps.buildParentMap).toHaveBeenCalledTimes(1);
             expect(deps.saveState).toHaveBeenCalledWith({ immediate: true, critical: true });
