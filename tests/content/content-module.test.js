@@ -29,6 +29,7 @@ describe('content module loading', () => {
         );
 
         expect(Object.values(firstFactories).every((factory) => typeof factory === 'function')).toBe(true);
+        expect(typeof global.NSM_CREATE_CONTENT_TREE_PLACEMENT).toBe('function');
         expect(typeof global.NSM_SOURCE_DESCRIPTOR_HELPERS).toBe('object');
 
         teardownGlobalMocks();

@@ -58,6 +58,7 @@
     const createContentPanelDom = globalThis.NSM_CREATE_CONTENT_PANEL_DOM;
     const createContentSourceActions = globalThis.NSM_CREATE_CONTENT_SOURCE_ACTIONS;
     const createContentTags = globalThis.NSM_CREATE_CONTENT_TAGS;
+    const createContentTreePlacement = globalThis.NSM_CREATE_CONTENT_TREE_PLACEMENT;
     const createContentStateReconcile = globalThis.NSM_CREATE_CONTENT_STATE_RECONCILE;
     const createContentDeveloperLogger = globalThis.NSM_CREATE_CONTENT_DEVELOPER_LOGGER;
     const createContentRuntimeState = globalThis.NSM_CREATE_CONTENT_RUNTIME_STATE;
@@ -87,6 +88,7 @@
         typeof createContentPanelDom !== 'function' ||
         typeof createContentSourceActions !== 'function' ||
         typeof createContentTags !== 'function' ||
+        typeof createContentTreePlacement !== 'function' ||
         typeof createContentStateReconcile !== 'function' ||
         typeof createContentDeveloperLogger !== 'function' ||
         typeof createContentRuntimeState !== 'function' ||
@@ -428,6 +430,11 @@
         setSourceTagIds,
         deleteTag
     } = tagsModule;
+
+    const _treePlacementModule = createContentTreePlacement({
+        getState: () => state,
+        getGroupsById: () => groupsById
+    });
 
     const stateReconcileModule = createContentStateReconcile({
         runtime: runtimeContext,
