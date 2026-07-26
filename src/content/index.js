@@ -206,6 +206,7 @@
     let pendingStructuralStateRepair = null;
     let lastStructuralStateRepair = null;
     let developerPreferencesLoadPromise = null;
+    let pendingInitialStateApplyWaiters = [];
     let welcomeOnboardingPromptedThisSession = false;
     let whatsNewPromptedThisSession = false;
     const NATIVE_ACTION_FAILURE_HISTORY_LIMIT = 5;
@@ -463,6 +464,7 @@
         setHoverSpotlightEnabled,
         getDragMode,
         setDragMode,
+        getPreferencesLoadStatus,
         getWelcomeOnboardingSeenVersion,
         setWelcomeOnboardingSeenVersion,
         getWhatsNewSeenVersion,
@@ -1656,20 +1658,151 @@
         }
     }
 
-    // Persist a drag-mode change, then (when switching to classic) sweep any positioned
-    // root sources into the bottom ungrouped bin and re-render — classic mode cannot
-    // represent sources placed between folders. Used by the settings toggle and the
-    // What's-New "enable Beta" button.
+    function isClassicPlacementInstanceLive(expectedProjectId, instanceToken, boundState = null) {
+        if (
+            !expectedProjectId
+            || projectId !== expectedProjectId
+            || getProjectId() !== expectedProjectId
+            || activeManagerInstanceToken !== instanceToken
+        ) {
+            return false;
+        }
+        return !boundState || state === boundState;
+    }
+
+    function resolvePendingInitialStateApplyWaiters() {
+        const waiters = pendingInitialStateApplyWaiters;
+        pendingInitialStateApplyWaiters = [];
+        waiters.forEach((resolve) => resolve());
+    }
+
+    function waitForPendingInitialStateApply() {
+        if (!isAwaitingInitialStateLoad && !pendingInitialLoadedState) {
+            return Promise.resolve();
+        }
+        return new Promise((resolve) => {
+            pendingInitialStateApplyWaiters.push(resolve);
+        });
+    }
+
+    async function enforceClassicPlacementInvariant({
+        trigger = 'unknown',
+        expectedProjectId = projectId,
+        instanceToken = activeManagerInstanceToken
+    } = {}) {
+        await ensureDeveloperPreferencesLoaded();
+        if (getPreferencesLoadStatus() !== 'loaded') {
+            return {
+                changed: false,
+                saved: false,
+                reason: 'preferences_unverified'
+            };
+        }
+        if (!isClassicPlacementInstanceLive(expectedProjectId, instanceToken)) {
+            return {
+                changed: false,
+                saved: false,
+                reason: 'stale_instance'
+            };
+        }
+
+        await waitForPendingInitialStateApply();
+        if (!isClassicPlacementInstanceLive(expectedProjectId, instanceToken)) {
+            return {
+                changed: false,
+                saved: false,
+                reason: 'stale_instance'
+            };
+        }
+
+        const boundState = state;
+        if (getDragMode() !== 'classic') {
+            return {
+                changed: false,
+                saved: false,
+                reason: 'not_classic'
+            };
+        }
+        if (!Array.isArray(boundState.root) || !boundState.root.some((entry) => entry?.type === 'source')) {
+            return { changed: false, saved: false };
+        }
+
+        const preSweepSnapshot = cloneSerializableData(buildPersistableState(boundState));
+        let checkpointResult;
+        try {
+            checkpointResult = await appendStateHistorySnapshot(
+                preSweepSnapshot,
+                'before_classic_mode_sweep'
+            );
+        } catch (error) {
+            return {
+                changed: false,
+                saved: false,
+                reason: 'checkpoint_failed'
+            };
+        }
+        if (checkpointResult === false || checkpointResult?.ok === false) {
+            return {
+                changed: false,
+                saved: false,
+                reason: 'checkpoint_failed'
+            };
+        }
+
+        if (!isClassicPlacementInstanceLive(expectedProjectId, instanceToken, boundState)) {
+            return {
+                changed: false,
+                saved: false,
+                reason: 'stale_instance'
+            };
+        }
+        if (
+            !treeInteractionsModule
+            || typeof treeInteractionsModule.sweepPositionedRootSourcesToBin !== 'function'
+            || !treeInteractionsModule.sweepPositionedRootSourcesToBin(boundState)
+        ) {
+            return { changed: false, saved: false };
+        }
+
+        buildParentMap();
+        render();
+        let saveResult;
+        try {
+            saveResult = await saveState({
+                immediate: true,
+                critical: true,
+                recordUndo: false,
+                reason: 'classic_mode_root_sweep'
+            });
+        } catch (error) {
+            return {
+                changed: true,
+                saved: false,
+                reason: 'save_failed'
+            };
+        }
+        if (!saveResult || saveResult.ok !== true) {
+            return {
+                changed: true,
+                saved: false,
+                reason: saveResult?.reason || 'save_failed'
+            };
+        }
+        developerLog('info', 'persistence', 'classic_placement_invariant_enforced', {
+            trigger: String(trigger || 'unknown')
+        });
+        return { changed: true, saved: true };
+    }
+
+    // Persist the preference first, then enforce the same Classic placement invariant
+    // used by every load/finalize path.
     async function applyDragModeChange(mode) {
         const result = await setDragMode(mode);
-        if (getDragMode() === 'classic'
-            && treeInteractionsModule
-            && typeof treeInteractionsModule.sweepPositionedRootSourcesToBin === 'function'
-            && treeInteractionsModule.sweepPositionedRootSourcesToBin(state)) {
-            buildParentMap();
-            render();
-            saveState();
-        }
+        await enforceClassicPlacementInvariant({
+            trigger: 'mode_change',
+            expectedProjectId: projectId,
+            instanceToken: activeManagerInstanceToken
+        });
         return result;
     }
 
@@ -3832,6 +3965,7 @@
         pendingStorageUpgrade = false;
         pendingInitialLoadedState = null;
         isAwaitingInitialStateLoad = false;
+        resolvePendingInitialStateApplyWaiters();
         sourceDetailViewRequested = false;
         sourceDetailViewReadySuppressionUntil = 0;
         attachedSourcePanel = null;
@@ -3948,9 +4082,13 @@
     }
 
     function completeInitialStateLoad() {
+        const hadPendingInitialLoadedState = Boolean(pendingInitialLoadedState);
         isAwaitingInitialStateLoad = false;
 
         if (!pendingInitialLoadedState || getSourcePanelState(findSourcePanel()).state !== 'ready') {
+            if (!pendingInitialLoadedState) {
+                resolvePendingInitialStateApplyWaiters();
+            }
             return;
         }
 
@@ -3959,12 +4097,20 @@
             return;
         }
 
+        resolvePendingInitialStateApplyWaiters();
         render();
         if (pendingRestore.shouldUpgradeStorage) {
             pendingStorageUpgrade = false;
             saveState({ recordUndo: false });
         }
         resetUndoHistoryBaseline();
+        if (hadPendingInitialLoadedState) {
+            enforceClassicPlacementInvariant({
+                trigger: 'deferred_flush',
+                expectedProjectId: projectId,
+                instanceToken: activeManagerInstanceToken
+            }).catch(() => {});
+        }
     }
 
     function syncRouteWithCurrentLocation() {
@@ -4203,6 +4349,7 @@
         activeManagerInstanceToken += 1;
         activeLoadStateRequestId = null;
         const managerInstanceToken = activeManagerInstanceToken;
+        const managerProjectId = projectId;
 
         bindPanelLifecycleHooks(sourcePanel);
 
@@ -4377,6 +4524,11 @@
                 restorePersistedSourceViewDisplayKind(reattachState);
                 saveState({ immediate: true, critical: true, recordUndo: false });
                 resetUndoHistoryBaseline();
+                enforceClassicPlacementInvariant({
+                    trigger: 'panel_reattach',
+                    expectedProjectId: managerProjectId,
+                    instanceToken: managerInstanceToken
+                }).catch(() => {});
                 maybeRenderOnboardingModals().catch(() => {});
                 return;
             }
@@ -4387,9 +4539,14 @@
                 completeInitialStateLoad();
                 restorePersistedSourceViewDisplayKind(loadedState);
                 resetUndoHistoryBaseline();
+                enforceClassicPlacementInvariant({
+                    trigger: 'normal_load',
+                    expectedProjectId: managerProjectId,
+                    instanceToken: managerInstanceToken
+                }).catch(() => {});
                 maybeRenderOnboardingModals().catch(() => {});
             }, {
-                expectedProjectId: projectId,
+                expectedProjectId: managerProjectId,
                 instanceToken: managerInstanceToken
             });
         } else {
@@ -4651,6 +4808,7 @@
             getDeveloperLogs,
             getDeveloperLogExportText,
             clearDeveloperLogs,
+            enforceClassicPlacementInvariant,
             getManagerStatus,
             focusManagerPanel,
             handleAddNewGroup,
@@ -4784,6 +4942,12 @@
             _getFreshRowCache: () => freshRowCache,
             _getPendingStorageUpgrade: () => pendingStorageUpgrade,
             _getPendingInitialLoadedState: () => pendingInitialLoadedState,
+            _getActiveManagerInstanceTokenForTest: () => activeManagerInstanceToken,
+            _enforceClassicPlacementInvariantForTest: enforceClassicPlacementInvariant,
+            _ensureDeveloperPreferencesLoadedForTest: ensureDeveloperPreferencesLoaded,
+            _applyDragModeChangeForTest: applyDragModeChange,
+            _replaceStateReferenceForTest: (nextState) => { state = nextState; },
+            _resolvePendingInitialStateApplyWaitersForTest: resolvePendingInitialStateApplyWaiters,
             _getAwaitingInitialStateLoadForTest: () => isAwaitingInitialStateLoad,
             _getPendingPanelReattachStateForTest: () => pendingPanelReattachState,
             _getAttachedSourcePanelForTest: () => attachedSourcePanel,
@@ -4887,6 +5051,7 @@
                 pendingStorageUpgrade = false;
                 pendingInitialLoadedState = null;
                 isAwaitingInitialStateLoad = false;
+                resolvePendingInitialStateApplyWaiters();
                 developerPreferencesLoadPromise = null;
                 welcomeOnboardingPromptedThisSession = false;
                 whatsNewPromptedThisSession = false;

@@ -49,6 +49,26 @@ describe('manager launcher messaging', () => {
         await Promise.resolve();
     }
 
+    async function flushUntil(predicate, limit = 40) {
+        for (let index = 0; index < limit && !predicate(); index += 1) {
+            await Promise.resolve();
+        }
+    }
+
+    function createCompletePreferences(dragMode = 'classic') {
+        return {
+            developerModeEnabled: false,
+            welcomeOnboardingSeenVersion: 0,
+            whatsNewSeenVersion: '',
+            historyRetentionLimit: 20,
+            languageOverride: 'auto',
+            dragMode,
+            commandShortcuts: {},
+            visibleQuickViewKinds: ['all', 'ungrouped', 'disabled', 'tag', 'recent', 'issues'],
+            appearance: { hoverSpotlightEnabled: true }
+        };
+    }
+
     function createOnboardingShadowRoot() {
         const appendedNodes = [];
         const shadowRoot = {
@@ -3166,5 +3186,501 @@ describe('manager launcher messaging', () => {
             ready: false,
             reason: 'not_on_notebook_page'
         });
+    });
+
+    it('checkpoints and critically saves a positioned root source through the shared Classic invariant', async () => {
+        mod._setProjectId('notebook-a');
+        mod.state.root = [
+            { type: 'group', id: 'group-a' },
+            { type: 'source', key: 'source-a' }
+        ];
+        mod.state.ungrouped = [];
+        mod.groupsById.set('group-a', { id: 'group-a', title: 'A', children: [] });
+        mod.sourcesByKey.set('source-a', {
+            key: 'source-a',
+            enabled: true,
+            title: 'Source A',
+            normalizedTitle: 'source a',
+            stableToken: 'source-a-token',
+            fingerprint: 'source a||article',
+            identityType: 'stable-token'
+        });
+        global.chrome.runtime.sendMessage.mockClear();
+
+        const result = await mod._enforceClassicPlacementInvariantForTest({
+            trigger: 'normal_load',
+            expectedProjectId: 'notebook-a',
+            instanceToken: mod._getActiveManagerInstanceTokenForTest()
+        });
+
+        expect(result).toEqual({ changed: true, saved: true });
+        expect(mod.state.root).toEqual([{ type: 'group', id: 'group-a' }]);
+        expect(mod.state.ungrouped).toEqual(['source-a']);
+        const runtimeMessages = global.chrome.runtime.sendMessage.mock.calls.map(([message]) => message);
+        const checkpointIndex = runtimeMessages.findIndex((message) => message.type === 'APPEND_STATE_HISTORY');
+        const saveIndex = runtimeMessages.findIndex((message) => message.type === 'SAVE_STATE');
+        expect(checkpointIndex).toBeGreaterThanOrEqual(0);
+        expect(saveIndex).toBeGreaterThan(checkpointIndex);
+        expect(runtimeMessages[checkpointIndex]).toMatchObject({
+            type: 'APPEND_STATE_HISTORY',
+            entry: {
+                reason: 'before_classic_mode_sweep',
+                snapshot: {
+                    root: [
+                        { type: 'group', id: 'group-a' },
+                        { type: 'source', key: 'source-a' }
+                    ]
+                }
+            }
+        });
+        expect(runtimeMessages[saveIndex]).toMatchObject({
+            type: 'SAVE_STATE',
+            critical: true
+        });
+        expect(global.sessionStorage.setItem).toHaveBeenCalledWith(
+            'sourcesPlusRecovery_notebook-a',
+            expect.stringContaining('"reason":"classic_mode_root_sweep"')
+        );
+    });
+
+    it('does not mutate or save when the notebook changes while the Classic checkpoint is pending', async () => {
+        let settleCheckpoint;
+        mod._setProjectId('notebook-a');
+        mod.state.root = [{ type: 'source', key: 'source-a' }];
+        mod.state.ungrouped = [];
+        mod.sourcesByKey.set('source-a', {
+            key: 'source-a',
+            enabled: true,
+            title: 'Source A',
+            normalizedTitle: 'source a',
+            stableToken: 'source-a-token',
+            fingerprint: 'source a||article',
+            identityType: 'stable-token'
+        });
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'LOAD_PREFERENCES') {
+                cb?.({
+                    success: true,
+                    preferences: {
+                        developerModeEnabled: false,
+                        welcomeOnboardingSeenVersion: 0,
+                        whatsNewSeenVersion: '',
+                        historyRetentionLimit: 20,
+                        languageOverride: 'auto',
+                        dragMode: 'classic',
+                        commandShortcuts: {},
+                        visibleQuickViewKinds: ['all', 'ungrouped', 'disabled', 'tag', 'recent', 'issues'],
+                        appearance: { hoverSpotlightEnabled: true }
+                    }
+                });
+                return;
+            }
+            if (message?.type === 'APPEND_STATE_HISTORY') {
+                settleCheckpoint = cb;
+            }
+        });
+        const beforeState = JSON.stringify({
+            root: mod.state.root,
+            ungrouped: mod.state.ungrouped
+        });
+
+        const pendingInvariant = mod._enforceClassicPlacementInvariantForTest({
+            trigger: 'normal_load',
+            expectedProjectId: 'notebook-a',
+            instanceToken: mod._getActiveManagerInstanceTokenForTest()
+        });
+        for (let index = 0; index < 30 && !settleCheckpoint; index += 1) {
+            await Promise.resolve();
+        }
+        expect(settleCheckpoint).toEqual(expect.any(Function));
+
+        mod._setProjectId('notebook-b');
+        settleCheckpoint({ success: true, history: [] });
+
+        await expect(pendingInvariant).resolves.toEqual({
+            changed: false,
+            saved: false,
+            reason: 'stale_instance'
+        });
+        expect(JSON.stringify({
+            root: mod.state.root,
+            ungrouped: mod.state.ungrouped
+        })).toBe(beforeState);
+        expect(global.chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+            expect.objectContaining({ type: 'SAVE_STATE' }),
+            expect.any(Function)
+        );
+    });
+
+    it('routes normal load, deferred flush, panel reattach, and mode change through one invariant', () => {
+        const source = fs.readFileSync(
+            path.join(__dirname, '../../src/content/index.js'),
+            'utf8'
+        );
+
+        [
+            'normal_load',
+            'deferred_flush',
+            'panel_reattach',
+            'mode_change'
+        ].forEach((trigger) => {
+            expect(source).toContain(`trigger: '${trigger}'`);
+        });
+        expect(source.match(/treeInteractionsModule\.sweepPositionedRootSourcesToBin\(/g)).toHaveLength(1);
+    });
+
+    it('waits for verified reflow preferences and leaves positioned root sources unchanged', async () => {
+        let settlePreferences;
+        mod._setProjectId('notebook-a');
+        mod.state.root = [{ type: 'source', key: 'source-a' }];
+        mod.state.ungrouped = [];
+        mod.sourcesByKey.set('source-a', {
+            key: 'source-a',
+            enabled: true,
+            title: 'Source A',
+            normalizedTitle: 'source a',
+            fingerprint: 'source a||article',
+            identityType: 'fingerprint'
+        });
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'LOAD_PREFERENCES') {
+                settlePreferences = cb;
+            }
+        });
+
+        const pendingInvariant = mod._enforceClassicPlacementInvariantForTest({
+            trigger: 'normal_load',
+            expectedProjectId: 'notebook-a',
+            instanceToken: mod._getActiveManagerInstanceTokenForTest()
+        });
+        await flushUntil(() => Boolean(settlePreferences));
+
+        expect(mod.state.root).toEqual([{ type: 'source', key: 'source-a' }]);
+        expect(global.chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+            expect.objectContaining({ type: 'APPEND_STATE_HISTORY' }),
+            expect.any(Function)
+        );
+
+        settlePreferences({
+            success: true,
+            preferences: createCompletePreferences('reflow')
+        });
+        await expect(pendingInvariant).resolves.toEqual({
+            changed: false,
+            saved: false,
+            reason: 'not_classic'
+        });
+        expect(mod.state.root).toEqual([{ type: 'source', key: 'source-a' }]);
+    });
+
+    it('fails closed when Classic is only an unverified in-memory default', async () => {
+        mod._setProjectId('notebook-a');
+        mod.state.root = [{ type: 'source', key: 'source-a' }];
+        mod.state.ungrouped = [];
+        mod.sourcesByKey.set('source-a', {
+            key: 'source-a',
+            enabled: true,
+            title: 'Source A',
+            normalizedTitle: 'source a',
+            fingerprint: 'source a||article',
+            identityType: 'fingerprint'
+        });
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'LOAD_PREFERENCES') {
+                cb?.({ success: false, errorCode: 'runtime_failure' });
+            }
+        });
+
+        await expect(mod._enforceClassicPlacementInvariantForTest({
+            trigger: 'normal_load',
+            expectedProjectId: 'notebook-a',
+            instanceToken: mod._getActiveManagerInstanceTokenForTest()
+        })).resolves.toEqual({
+            changed: false,
+            saved: false,
+            reason: 'preferences_unverified'
+        });
+        expect(mod.state.root).toEqual([{ type: 'source', key: 'source-a' }]);
+        expect(mod.state.ungrouped).toEqual([]);
+    });
+
+    it('sweeps each notebook independently and repeated finalization is idempotent', async () => {
+        const seedPositionedSource = (sourceKey) => {
+            mod.state.root = [{ type: 'source', key: sourceKey }];
+            mod.state.ungrouped = [];
+            mod.sourcesByKey.clear();
+            mod.sourcesByKey.set(sourceKey, {
+                key: sourceKey,
+                enabled: true,
+                title: sourceKey,
+                normalizedTitle: sourceKey,
+                fingerprint: `${sourceKey}||article`,
+                identityType: 'fingerprint'
+            });
+        };
+        mod._setProjectId('notebook-a');
+        seedPositionedSource('source-a');
+        global.chrome.runtime.sendMessage.mockClear();
+
+        const token = mod._getActiveManagerInstanceTokenForTest();
+        await expect(mod._enforceClassicPlacementInvariantForTest({
+            trigger: 'normal_load',
+            expectedProjectId: 'notebook-a',
+            instanceToken: token
+        })).resolves.toEqual({ changed: true, saved: true });
+        await expect(mod._enforceClassicPlacementInvariantForTest({
+            trigger: 'normal_load',
+            expectedProjectId: 'notebook-a',
+            instanceToken: token
+        })).resolves.toEqual({ changed: false, saved: false });
+
+        mod._setProjectId('notebook-b');
+        seedPositionedSource('source-b');
+        await expect(mod._enforceClassicPlacementInvariantForTest({
+            trigger: 'normal_load',
+            expectedProjectId: 'notebook-b',
+            instanceToken: token
+        })).resolves.toEqual({ changed: true, saved: true });
+
+        const saveMessages = global.chrome.runtime.sendMessage.mock.calls
+            .map(([message]) => message)
+            .filter((message) => message.type === 'SAVE_STATE');
+        expect(saveMessages).toHaveLength(2);
+        expect(saveMessages.map((message) => message.key)).toEqual([
+            'sourcesPlusState_notebook-a',
+            'sourcesPlusState_notebook-b'
+        ]);
+        expect(mod.state.root).toEqual([]);
+        expect(mod.state.ungrouped).toEqual(['source-b']);
+    });
+
+    it('keeps state byte-for-byte unchanged when the pre-sweep checkpoint fails', async () => {
+        mod._setProjectId('notebook-a');
+        mod.state.root = [{ type: 'source', key: 'source-a' }];
+        mod.state.ungrouped = [];
+        mod.sourcesByKey.set('source-a', {
+            key: 'source-a',
+            enabled: true,
+            title: 'Source A',
+            normalizedTitle: 'source a',
+            fingerprint: 'source a||article',
+            identityType: 'fingerprint'
+        });
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'LOAD_PREFERENCES') {
+                cb?.({ success: true, preferences: createCompletePreferences() });
+                return;
+            }
+            if (message?.type === 'APPEND_STATE_HISTORY') {
+                cb?.({ success: false, errorCode: 'history_write_failed' });
+            }
+        });
+        const beforeSnapshot = JSON.stringify(mod.buildPersistableState());
+
+        await expect(mod._enforceClassicPlacementInvariantForTest({
+            trigger: 'normal_load',
+            expectedProjectId: 'notebook-a',
+            instanceToken: mod._getActiveManagerInstanceTokenForTest()
+        })).resolves.toEqual({
+            changed: false,
+            saved: false,
+            reason: 'checkpoint_failed'
+        });
+
+        expect(JSON.stringify(mod.buildPersistableState())).toBe(beforeSnapshot);
+        expect(global.chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+            expect.objectContaining({ type: 'SAVE_STATE' }),
+            expect.any(Function)
+        );
+    });
+
+    it('keeps failed critical-save recovery and clears it after a later successful sweep', async () => {
+        let rejectSave = true;
+        const seedPositionedSource = (sourceKey) => {
+            mod.state.root = [{ type: 'source', key: sourceKey }];
+            mod.state.ungrouped = [];
+            mod.sourcesByKey.clear();
+            mod.sourcesByKey.set(sourceKey, {
+                key: sourceKey,
+                enabled: true,
+                title: sourceKey,
+                normalizedTitle: sourceKey,
+                fingerprint: `${sourceKey}||article`,
+                identityType: 'fingerprint'
+            });
+        };
+        mod._setProjectId('notebook-a');
+        seedPositionedSource('source-a');
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'LOAD_PREFERENCES') {
+                cb?.({ success: true, preferences: createCompletePreferences() });
+                return;
+            }
+            if (message?.type === 'APPEND_STATE_HISTORY') {
+                cb?.({ success: true, history: [message.entry] });
+                return;
+            }
+            if (message?.type === 'SAVE_STATE') {
+                cb?.(rejectSave
+                    ? { success: false, errorCode: 'runtime_failure' }
+                    : { success: true, saveRevision: 1, savedAt: '2026-07-26T00:00:00.000Z' });
+            }
+        });
+
+        await expect(mod._enforceClassicPlacementInvariantForTest({
+            trigger: 'normal_load',
+            expectedProjectId: 'notebook-a',
+            instanceToken: mod._getActiveManagerInstanceTokenForTest()
+        })).resolves.toEqual({
+            changed: true,
+            saved: false,
+            reason: 'runtime_failure'
+        });
+        expect(JSON.parse(global.sessionStorage.getItem('sourcesPlusRecovery_notebook-a'))).toMatchObject({
+            failed: true,
+            reason: 'runtime_failure'
+        });
+
+        rejectSave = false;
+        seedPositionedSource('source-b');
+        await expect(mod._enforceClassicPlacementInvariantForTest({
+            trigger: 'normal_load',
+            expectedProjectId: 'notebook-a',
+            instanceToken: mod._getActiveManagerInstanceTokenForTest()
+        })).resolves.toEqual({ changed: true, saved: true });
+        expect(global.sessionStorage.getItem('sourcesPlusRecovery_notebook-a')).toBeNull();
+    });
+
+    it('uses a complete successful preference SAVE as proof after the initial LOAD failed', async () => {
+        mod._setProjectId('notebook-a');
+        mod.state.root = [{ type: 'source', key: 'source-a' }];
+        mod.state.ungrouped = [];
+        mod.sourcesByKey.set('source-a', {
+            key: 'source-a',
+            enabled: true,
+            title: 'Source A',
+            normalizedTitle: 'source a',
+            fingerprint: 'source a||article',
+            identityType: 'fingerprint'
+        });
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'LOAD_PREFERENCES') {
+                cb?.({ success: false, errorCode: 'runtime_failure' });
+                return;
+            }
+            if (message?.type === 'SAVE_PREFERENCES') {
+                cb?.({ success: true, preferences: createCompletePreferences('classic') });
+                return;
+            }
+            if (message?.type === 'APPEND_STATE_HISTORY') {
+                cb?.({ success: true, history: [message.entry] });
+                return;
+            }
+            if (message?.type === 'SAVE_STATE') {
+                cb?.({ success: true, saveRevision: 1, savedAt: '2026-07-26T00:00:00.000Z' });
+            }
+        });
+
+        await mod._ensureDeveloperPreferencesLoadedForTest();
+        await expect(mod._applyDragModeChangeForTest('classic')).resolves.toBe('classic');
+
+        expect(mod.state.root).toEqual([]);
+        expect(mod.state.ungrouped).toEqual(['source-a']);
+        expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(
+            expect.objectContaining({ type: 'SAVE_STATE', critical: true }),
+            expect.any(Function)
+        );
+    });
+
+    it('abandons a deferred-apply continuation after SPA navigation changes notebook', async () => {
+        mod._setProjectId('notebook-a');
+        mod.state.root = [{ type: 'source', key: 'source-a' }];
+        mod.state.ungrouped = [];
+        mod.sourcesByKey.set('source-a', {
+            key: 'source-a',
+            enabled: true,
+            title: 'Source A',
+            normalizedTitle: 'source a',
+            fingerprint: 'source a||article',
+            identityType: 'fingerprint'
+        });
+        mod._setAwaitingInitialStateLoadForTest(true);
+        global.chrome.runtime.sendMessage.mockClear();
+        const beforeSnapshot = JSON.stringify(mod.buildPersistableState());
+        const pendingInvariant = mod._enforceClassicPlacementInvariantForTest({
+            trigger: 'normal_load',
+            expectedProjectId: 'notebook-a',
+            instanceToken: mod._getActiveManagerInstanceTokenForTest()
+        });
+        await flushAsyncMessageResponse();
+
+        mod._setProjectId('notebook-b');
+        mod._setAwaitingInitialStateLoadForTest(false);
+        mod._resolvePendingInitialStateApplyWaitersForTest();
+
+        await expect(pendingInvariant).resolves.toEqual({
+            changed: false,
+            saved: false,
+            reason: 'stale_instance'
+        });
+        expect(JSON.stringify(mod.buildPersistableState())).toBe(beforeSnapshot);
+        expect(global.chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+            expect.objectContaining({ type: 'SAVE_STATE' }),
+            expect.any(Function)
+        );
+    });
+
+    it('does not sweep a replaced state reference after the checkpoint resolves', async () => {
+        let settleCheckpoint;
+        mod._setProjectId('notebook-a');
+        const originalState = mod.state;
+        originalState.root = [{ type: 'source', key: 'source-a' }];
+        originalState.ungrouped = [];
+        mod.sourcesByKey.set('source-a', {
+            key: 'source-a',
+            enabled: true,
+            title: 'Source A',
+            normalizedTitle: 'source a',
+            fingerprint: 'source a||article',
+            identityType: 'fingerprint'
+        });
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'LOAD_PREFERENCES') {
+                cb?.({ success: true, preferences: createCompletePreferences() });
+                return;
+            }
+            if (message?.type === 'APPEND_STATE_HISTORY') {
+                settleCheckpoint = cb;
+            }
+        });
+        const pendingInvariant = mod._enforceClassicPlacementInvariantForTest({
+            trigger: 'normal_load',
+            expectedProjectId: 'notebook-a',
+            instanceToken: mod._getActiveManagerInstanceTokenForTest()
+        });
+        await flushUntil(() => Boolean(settleCheckpoint));
+        const replacementState = {
+            root: [{ type: 'source', key: 'source-b' }],
+            ungrouped: [],
+            filterQuery: '',
+            isBatchMode: false,
+            tagOrder: [],
+            activeTagId: null,
+            activeQuickViewKind: null
+        };
+        mod._replaceStateReferenceForTest(replacementState);
+        settleCheckpoint({ success: true, history: [] });
+
+        await expect(pendingInvariant).resolves.toEqual({
+            changed: false,
+            saved: false,
+            reason: 'stale_instance'
+        });
+        expect(originalState.root).toEqual([{ type: 'source', key: 'source-a' }]);
+        expect(replacementState.root).toEqual([{ type: 'source', key: 'source-b' }]);
+        expect(global.chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+            expect.objectContaining({ type: 'SAVE_STATE' }),
+            expect.any(Function)
+        );
     });
 });

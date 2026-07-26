@@ -77,6 +77,7 @@
         let visibleQuickViewKinds = [...QUICK_VIEW_BUTTON_KINDS];
         let appearancePreferences = { hoverSpotlightEnabled: true };
         let dragMode = 'classic';
+        let preferencesLoadStatus = 'idle';
         let developerLogs = [];
         let nextLogSequence = 1;
 
@@ -226,13 +227,25 @@
         }
 
         async function loadDeveloperPreferences() {
-            const response = await sendRuntimeMessage({ type: 'LOAD_PREFERENCES' });
-            if (response?.success) {
+            preferencesLoadStatus = 'loading';
+            try {
+                const response = await sendRuntimeMessage({ type: 'LOAD_PREFERENCES' });
+                if (!response?.success || !response.preferences || typeof response.preferences !== 'object') {
+                    preferencesLoadStatus = 'failed';
+                    return developerModeEnabled;
+                }
                 applyLoadedPreferences(response.preferences);
                 applyLoadedPreferenceUsageState(response.usageState);
+                preferencesLoadStatus = 'loaded';
                 if (developerModeEnabled) {
-                    await loadDeveloperLogs();
+                    try {
+                        await loadDeveloperLogs();
+                    } catch (error) {
+                        // Preference verification remains valid when only optional log hydration fails.
+                    }
                 }
+            } catch (error) {
+                preferencesLoadStatus = 'failed';
             }
             return developerModeEnabled;
         }
@@ -256,6 +269,36 @@
             };
         }
 
+        function hasCompleteNormalizedPreferences(preferences) {
+            if (!preferences || typeof preferences !== 'object' || Array.isArray(preferences)) {
+                return false;
+            }
+            const hasAllFields = [
+                'developerModeEnabled',
+                'welcomeOnboardingSeenVersion',
+                'whatsNewSeenVersion',
+                'historyRetentionLimit',
+                'languageOverride',
+                'dragMode',
+                'commandShortcuts',
+                'visibleQuickViewKinds',
+                'appearance'
+            ].every((key) => Object.prototype.hasOwnProperty.call(preferences, key));
+            if (!hasAllFields) return false;
+
+            return (
+                typeof preferences.developerModeEnabled === 'boolean'
+                && preferences.welcomeOnboardingSeenVersion === normalizePreferenceVersion(preferences.welcomeOnboardingSeenVersion)
+                && preferences.whatsNewSeenVersion === normalizeWhatsNewSeenVersion(preferences.whatsNewSeenVersion)
+                && preferences.historyRetentionLimit === normalizeHistoryRetentionLimit(preferences.historyRetentionLimit)
+                && preferences.languageOverride === normalizeLanguageOverride(preferences.languageOverride)
+                && preferences.dragMode === normalizeDragMode(preferences.dragMode)
+                && JSON.stringify(preferences.commandShortcuts) === JSON.stringify(normalizeCommandShortcuts(preferences.commandShortcuts))
+                && JSON.stringify(preferences.visibleQuickViewKinds) === JSON.stringify(normalizeVisibleQuickViewKinds(preferences.visibleQuickViewKinds))
+                && JSON.stringify(preferences.appearance) === JSON.stringify(normalizeAppearancePreferences(preferences.appearance))
+            );
+        }
+
         async function savePreferences(nextPreferences = {}) {
             const response = await sendRuntimeMessage({
                 type: 'SAVE_PREFERENCES',
@@ -266,6 +309,9 @@
             }
             if (response?.success && response.preferences) {
                 applyLoadedPreferences(response.preferences);
+                if (hasCompleteNormalizedPreferences(response.preferences)) {
+                    preferencesLoadStatus = 'loaded';
+                }
             }
             if (response?.success && response.usageState) {
                 applyLoadedPreferenceUsageState(response.usageState);
@@ -452,6 +498,10 @@
             return dragMode;
         }
 
+        function getPreferencesLoadStatus() {
+            return preferencesLoadStatus;
+        }
+
         async function loadDeveloperLogs() {
             const key = storageContract.getDeveloperLogKey(getNotebookId());
             if (!key) {
@@ -592,6 +642,7 @@
             setHoverSpotlightEnabled,
             getDragMode,
             setDragMode,
+            getPreferencesLoadStatus,
             loadDeveloperPreferences,
             loadDeveloperLogs,
             getDeveloperLogs,

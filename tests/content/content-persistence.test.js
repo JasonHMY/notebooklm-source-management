@@ -863,6 +863,36 @@ describe('saveState', () => {
         });
     });
 
+    it('preserves a failed Classic sweep recovery with the storage-plan failure reason', async () => {
+        const projectId = seedPersistedState();
+        global.chrome.runtime.sendMessage.mockImplementationOnce((message, cb) => {
+            cb({ success: false, errorCode: 'runtime_failure' });
+        });
+
+        const result = await mod.saveState({
+            immediate: true,
+            critical: true,
+            recordUndo: false,
+            reason: 'classic_mode_root_sweep'
+        });
+
+        expect(result).toMatchObject({
+            ok: false,
+            reason: 'runtime_failure'
+        });
+        const recoveryPayload = JSON.parse(global.sessionStorage.getItem(
+            `sourcesPlusRecovery_${projectId}`
+        ));
+        expect(recoveryPayload).toMatchObject({
+            snapshot: expectedPersistableState,
+            failed: true,
+            reason: 'runtime_failure'
+        });
+        expect(global.sessionStorage.removeItem).not.toHaveBeenCalledWith(
+            `sourcesPlusRecovery_${projectId}`
+        );
+    });
+
     it('keeps recovery and marks stale when background rejects a critical save', async () => {
         const projectId = seedPersistedState();
         global.chrome.runtime.sendMessage.mockImplementationOnce((message, cb) => {

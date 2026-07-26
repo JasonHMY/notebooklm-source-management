@@ -389,6 +389,72 @@ describe('content developer logger', () => {
     });
 
     describe('dragMode preference', () => {
+        it('tracks preference load status and fails closed when LOAD_PREFERENCES is rejected', async () => {
+            let settleLoad;
+            const sendMessage = jest.fn((message, cb) => {
+                if (message?.type === 'LOAD_PREFERENCES') {
+                    settleLoad = cb;
+                }
+            });
+            const logger = createContentDeveloperLogger({
+                chrome: { runtime: { sendMessage, lastError: null } },
+                getProjectId: () => 'project-dev'
+            });
+
+            expect(logger.getPreferencesLoadStatus()).toBe('idle');
+            const loadPromise = logger.loadDeveloperPreferences();
+            expect(logger.getPreferencesLoadStatus()).toBe('loading');
+
+            settleLoad({ success: false, errorCode: 'runtime_failure' });
+            await loadPromise;
+
+            expect(logger.getPreferencesLoadStatus()).toBe('failed');
+            expect(logger.getDragMode()).toBe('classic');
+        });
+
+        it('only recovers a failed preference load after SAVE_PREFERENCES returns a complete normalized response', async () => {
+            let saveCount = 0;
+            const completePreferences = {
+                developerModeEnabled: false,
+                welcomeOnboardingSeenVersion: 0,
+                whatsNewSeenVersion: '',
+                historyRetentionLimit: 20,
+                languageOverride: 'auto',
+                dragMode: 'classic',
+                commandShortcuts: {},
+                visibleQuickViewKinds: ['all', 'ungrouped', 'disabled', 'tag', 'recent', 'issues'],
+                appearance: { hoverSpotlightEnabled: true }
+            };
+            const sendMessage = jest.fn((message, cb) => {
+                if (message?.type === 'LOAD_PREFERENCES') {
+                    cb?.({ success: false, errorCode: 'runtime_failure' });
+                    return;
+                }
+                if (message?.type === 'SAVE_PREFERENCES') {
+                    saveCount += 1;
+                    cb?.({
+                        success: true,
+                        preferences: saveCount === 1
+                            ? { dragMode: 'classic' }
+                            : completePreferences
+                    });
+                }
+            });
+            const logger = createContentDeveloperLogger({
+                chrome: { runtime: { sendMessage, lastError: null } },
+                getProjectId: () => 'project-dev'
+            });
+
+            await logger.loadDeveloperPreferences();
+            expect(logger.getPreferencesLoadStatus()).toBe('failed');
+
+            await logger.setDragMode('classic');
+            expect(logger.getPreferencesLoadStatus()).toBe('failed');
+
+            await logger.setDragMode('classic');
+            expect(logger.getPreferencesLoadStatus()).toBe('loaded');
+        });
+
         it('defaults dragMode to classic before preferences are loaded', () => {
             const { chromeApi } = createRuntimeMock();
             const logger = createContentDeveloperLogger({
