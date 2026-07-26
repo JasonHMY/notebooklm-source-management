@@ -694,6 +694,47 @@ function getSnapshotSaveRevision(snapshot) {
     return Number.isFinite(revision) && revision > 0 ? revision : 0;
 }
 
+function getSnapshotSavedAtTimestamp(snapshot) {
+    const timestamp = Date.parse(
+        typeof snapshot?._savedAt === 'string' ? snapshot._savedAt : ''
+    );
+    return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function compareRawStateAuthority(primaryState, backupState) {
+    const hasPrimary = primaryState != null;
+    const hasBackup = backupState != null;
+    if (!hasPrimary && !hasBackup) return 0;
+    if (hasPrimary && !hasBackup) return 1;
+    if (!hasPrimary && hasBackup) return -1;
+
+    const primaryRevision = getSnapshotSaveRevision(primaryState);
+    const backupRevision = getSnapshotSaveRevision(backupState);
+    if (primaryRevision !== backupRevision) {
+        return primaryRevision > backupRevision ? 1 : -1;
+    }
+
+    const primarySavedAt = getSnapshotSavedAtTimestamp(primaryState);
+    const backupSavedAt = getSnapshotSavedAtTimestamp(backupState);
+    if (primarySavedAt !== backupSavedAt) {
+        return primarySavedAt > backupSavedAt ? 1 : -1;
+    }
+
+    return 0;
+}
+
+function pickAuthoritativeRawState(primaryState, backupState) {
+    const authorityComparison = compareRawStateAuthority(primaryState, backupState);
+    if (authorityComparison < 0) return backupState;
+    if (authorityComparison > 0) return primaryState;
+
+    const backupCompatibility = storageContract.getStateSchemaCompatibility(backupState);
+    if (backupCompatibility === 'future' || backupCompatibility === 'invalid') {
+        return backupState;
+    }
+    return primaryState ?? backupState ?? null;
+}
+
 function cloneSerializableData(value) {
     if (value == null) return value;
     if (typeof globalThis.structuredClone === 'function') {
@@ -928,12 +969,13 @@ function prepareStateStoragePayloadForQuota(payloadInfo, historyKey, extraBytes 
 }
 
 function pickPreferredStoredState(primaryState, backupState) {
-    if (
-        hasRestorableStateSnapshot(primaryState) &&
-        hasRestorableStateSnapshot(backupState) &&
-        getSnapshotSaveRevision(backupState) > getSnapshotSaveRevision(primaryState)
-    ) {
+    const authorityComparison = compareRawStateAuthority(primaryState, backupState);
+    if (authorityComparison < 0) {
         return backupState;
+    }
+
+    if (authorityComparison > 0) {
+        return primaryState;
     }
 
     if (hasRestorableStateSnapshot(primaryState)) {
@@ -966,7 +1008,7 @@ function writeStateWithRevisionGuard(request, sendResponse) {
             return;
         }
 
-        const currentState = pickPreferredStoredState(
+        const currentState = pickAuthoritativeRawState(
             existingData && typeof existingData === 'object' ? existingData[key] : null,
             existingData && typeof existingData === 'object' ? existingData[backupKey] : null
         );
@@ -1186,7 +1228,8 @@ function enqueueStateWrite(request, sendResponse) {
 
 function loadStateNow(request, sendResponse) {
     const backupKey = storageContract.getStateBackupKey(request.key);
-    chrome.storage.local.get([request.key, backupKey], (data) => {
+    const historyKey = storageContract.getStateHistoryKey(request.key);
+    chrome.storage.local.get([request.key, backupKey, historyKey], (data) => {
         if (chrome.runtime.lastError) {
             console.error('GeminiNotebook-Source-Management background load error:', chrome.runtime.lastError);
             sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
@@ -1195,8 +1238,17 @@ function loadStateNow(request, sendResponse) {
 
         const primaryState = data && typeof data === 'object' ? data[request.key] : null;
         const backupState = data && typeof data === 'object' ? data[backupKey] : null;
+        const history = data && typeof data === 'object' && Array.isArray(data[historyKey])
+            ? data[historyKey]
+            : [];
         const storedData = pickPreferredStoredState(primaryState, backupState);
-        sendResponse({ success: true, data: storedData ?? null });
+        sendResponse({
+            success: true,
+            data: storedData ?? null,
+            primaryState: primaryState ?? null,
+            backupState: backupState ?? null,
+            history
+        });
     });
 }
 

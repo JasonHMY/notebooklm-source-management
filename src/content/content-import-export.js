@@ -427,6 +427,18 @@
         }
 
         async function applyImportConfig(text) {
+            const startingProjectId = String(runtime.projectId || '');
+            const startingInstanceToken = runtime.activeManagerInstanceToken;
+            const isStartingContextCurrent = () => (
+                String(runtime.projectId || '') === startingProjectId
+                && runtime.activeManagerInstanceToken === startingInstanceToken
+            );
+            const createStaleContextResult = (preview) => ({
+                ...preview,
+                ok: false,
+                reason: 'deferred',
+                staleContext: true
+            });
             const preview = previewImportConfig(text);
             if (!preview.ok) {
                 developerLog('warn', 'import_export', 'config_import_apply_failed', {
@@ -443,6 +455,9 @@
             if (typeof appendStateHistorySnapshot === 'function') {
                 await appendStateHistorySnapshot(beforeImportSnapshot, 'before_import');
             }
+            if (!isStartingContextCurrent()) {
+                return createStaleContextResult(preview);
+            }
             writeImportBackupSnapshot();
             if (importedState.customHeight != null) {
                 runtime.customHeight = importedState.customHeight;
@@ -454,6 +469,9 @@
                 ? restoreInitialLoadedState(importedState)
                 : { deferred: false };
             if (restoreResult.deferred) {
+                if (!isStartingContextCurrent()) {
+                    return createStaleContextResult(preview);
+                }
                 const rolledBack = rollbackImportSnapshot(beforeImportSnapshot);
                 render();
                 showToast(getMessage('ui_settings_import_deferred'), { variant: 'info' });
@@ -479,6 +497,9 @@
             } catch (error) {
                 saveResult = { ok: false, reason: 'runtime_exception' };
             }
+            if (!isStartingContextCurrent()) {
+                return createStaleContextResult(preview);
+            }
             if (saveResult && saveResult.ok === false) {
                 const saveReason = saveResult.reason || 'save_failed';
                 const rolledBack = rollbackImportSnapshot(beforeImportSnapshot);
@@ -497,7 +518,11 @@
             showToast(getMessage('ui_settings_imported_toast'), {
                 variant: 'success',
                 actionLabel: getMessage('ui_settings_restore_import_backup'),
-                onAction: restoreImportBackupSnapshotFromUi
+                onAction: () => (
+                    isStartingContextCurrent()
+                        ? restoreImportBackupSnapshotFromUi()
+                        : false
+                )
             });
             developerLog('info', 'import_export', 'config_import_applied', {
                 totalSources: preview.totalSources,

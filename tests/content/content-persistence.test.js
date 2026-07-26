@@ -492,6 +492,24 @@ describe('saveState', () => {
         global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
             if (message?.type === 'SAVE_STATE') {
                 pendingRuntimeCallbacks.push({ message, cb });
+                return;
+            }
+            if (message?.type === 'LOAD_STATE') {
+                cb({
+                    success: true,
+                    primaryState: {
+                        schemaVersion: 6,
+                        _saveRevision: 8,
+                        root: [{ type: 'source', key: 'future-source' }],
+                        groupsById: {},
+                        ungrouped: [],
+                        sourceStateById: {
+                            'future-source': { enabled: true }
+                        }
+                    },
+                    backupState: null,
+                    history: []
+                });
             }
         });
 
@@ -508,20 +526,6 @@ describe('saveState', () => {
         const queuedSave = mod.saveState({ immediate: true });
         expect(pendingRuntimeCallbacks).toHaveLength(1);
 
-        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
-            cb({
-                sourcesPlusState_test_project_id: {
-                    schemaVersion: 6,
-                    _saveRevision: 8,
-                    root: [{ type: 'source', key: 'future-source' }],
-                    groupsById: {},
-                    ungrouped: [],
-                    sourceStateById: {
-                        'future-source': { enabled: true }
-                    }
-                }
-            });
-        });
         const loadCallback = jest.fn();
         mod.loadState(loadCallback);
         expect(loadCallback).toHaveBeenCalledWith(null);
@@ -560,26 +564,45 @@ describe('saveState', () => {
         global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
             if (message?.type === 'SAVE_STATE') {
                 pendingSaveCallback = cb;
+                return;
+            }
+            if (message?.type === 'LOAD_STATE') {
+                const isSupportedProject = message.key === 'sourcesPlusState_supported-project';
+                cb({
+                    success: true,
+                    primaryState: isSupportedProject
+                        ? {
+                            schemaVersion: 5,
+                            _saveRevision: 3,
+                            root: [],
+                            groupsById: {},
+                            ungrouped: ['supported-source'],
+                            sourceStateById: {
+                                'supported-source': { enabled: true }
+                            },
+                            tagsById: {},
+                            tagOrder: [],
+                            sourceTagsById: {}
+                        }
+                        : {
+                            schemaVersion: 6,
+                            _saveRevision: 8,
+                            root: [{ type: 'source', key: 'future-source' }],
+                            groupsById: {},
+                            ungrouped: [],
+                            sourceStateById: {
+                                'future-source': { enabled: true }
+                            }
+                        },
+                    backupState: null,
+                    history: []
+                });
             }
         });
 
         const inFlightSave = mod.saveState({ immediate: true, critical: true });
         expect(typeof pendingSaveCallback).toBe('function');
 
-        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
-            cb({
-                sourcesPlusState_test_project_id: {
-                    schemaVersion: 6,
-                    _saveRevision: 8,
-                    root: [{ type: 'source', key: 'future-source' }],
-                    groupsById: {},
-                    ungrouped: [],
-                    sourceStateById: {
-                        'future-source': { enabled: true }
-                    }
-                }
-            });
-        });
         mod.loadState(jest.fn());
         expect(mod.getSaveStatus()).toMatchObject({
             state: 'failed',
@@ -603,23 +626,6 @@ describe('saveState', () => {
         );
 
         mod._setProjectId('supported-project');
-        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
-            cb({
-                'sourcesPlusState_supported-project': {
-                    schemaVersion: 5,
-                    _saveRevision: 3,
-                    root: [],
-                    groupsById: {},
-                    ungrouped: ['supported-source'],
-                    sourceStateById: {
-                        'supported-source': { enabled: true }
-                    },
-                    tagsById: {},
-                    tagOrder: [],
-                    sourceTagsById: {}
-                }
-            });
-        });
         mod.loadState(jest.fn());
         await Promise.resolve();
 
@@ -962,6 +968,90 @@ describe('saveState', () => {
         await pendingSave;
     });
 
+    it('does not clear an equivalent import_pending recovery before background confirmation', async () => {
+        seedPersistedState();
+        const beforeImport = {
+            ...expectedPersistableState,
+            root: [{ type: 'group', id: 'before-equivalent-pending-import' }]
+        };
+        let settleRuntime;
+        global.chrome.runtime.sendMessage.mockImplementationOnce((message, cb) => {
+            settleRuntime = cb;
+        });
+
+        const pendingSave = mod.saveState({
+            immediate: true,
+            critical: true,
+            recoveryFallbackSnapshot: beforeImport,
+            allowLocalFallback: false
+        });
+
+        expect(mod.detectRecoverySnapshotAvailability(beforeImport)).toBe(true);
+        expect(mod.readRecoverySnapshot()).toMatchObject({
+            snapshot: beforeImport,
+            reason: 'import_pending',
+            failed: false
+        });
+
+        settleRuntime({ success: true, saveRevision: 1, savedAt: '2026-04-22T00:00:01.000Z' });
+        await pendingSave;
+    });
+
+    it.each([
+        ['explicit reject', { success: false, errorCode: 'storage_quota_exceeded' }, 'import_rollback_required'],
+        ['ambiguous acknowledgement', undefined, 'import_ack_unknown']
+    ])('does not let lifecycle persistence replace or persist a pending import after %s', async (
+        label,
+        importResponse,
+        expectedRecoveryReason
+    ) => {
+        seedPersistedState();
+        const beforeImport = {
+            ...expectedPersistableState,
+            root: [{ type: 'group', id: `before-${label.replace(/\s+/g, '-')}` }]
+        };
+        const saveCallbacks = [];
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type !== 'SAVE_STATE') return;
+            saveCallbacks.push({ message, cb });
+        });
+
+        const pendingImport = mod.saveState({
+            immediate: true,
+            critical: true,
+            recoveryFallbackSnapshot: beforeImport,
+            allowLocalFallback: false
+        });
+        global.document.visibilityState = 'hidden';
+        const lifecycleSave = mod.handlePageLifecyclePersistence({ type: 'visibilitychange' });
+
+        expect(saveCallbacks).toHaveLength(1);
+        expect(mod.readRecoverySnapshot()).toMatchObject({
+            snapshot: beforeImport,
+            reason: 'import_pending',
+            failed: false
+        });
+
+        saveCallbacks[0].cb(importResponse);
+        await pendingImport;
+        await Promise.resolve();
+        if (saveCallbacks[1]) {
+            saveCallbacks[1].cb({
+                success: true,
+                saveRevision: 2,
+                savedAt: '2026-04-22T00:00:02.000Z'
+            });
+        }
+        await lifecycleSave;
+
+        expect(saveCallbacks).toHaveLength(1);
+        expect(mod.readRecoverySnapshot()).toMatchObject({
+            snapshot: beforeImport,
+            reason: expectedRecoveryReason,
+            failed: true
+        });
+    });
+
     it('retains import_pending recovery when the manager is destroyed before acknowledgement', () => {
         const projectId = seedPersistedState();
         const beforeImport = {
@@ -1160,7 +1250,7 @@ describe('saveState', () => {
         });
     });
 
-    it('binds an in-flight success to notebook A recovery, revision, and status after switching to B', async () => {
+    it('keeps notebook A import recovery pending when success arrives after switching to B', async () => {
         const projectA = 'notebook-a';
         mod._setProjectId(projectA);
         seedPersistedState();
@@ -1196,7 +1286,11 @@ describe('saveState', () => {
         callbacks[0].cb({ success: true, saveRevision: 7, savedAt: '2026-04-22T00:11:00.000Z' });
         await pendingA;
 
-        expect(global.sessionStorage.getItem(recoveryKeyA)).toBeNull();
+        expect(JSON.parse(global.sessionStorage.getItem(recoveryKeyA))).toMatchObject({
+            snapshot: beforeImport,
+            reason: 'import_pending',
+            failed: false
+        });
         expect(global.sessionStorage.getItem(recoveryKeyB)).not.toBeNull();
         expect(mod.getSaveStatus()).toMatchObject({
             state: 'idle',
@@ -1888,7 +1982,7 @@ describe('saveState', () => {
         expect(global.chrome.storage.local.set).not.toHaveBeenCalled();
     });
 
-    it('preserves failed import acknowledgement recovery after a successful hidden lifecycle save', async () => {
+    it('skips a hidden lifecycle snapshot that differs from failed import acknowledgement recovery', async () => {
         const projectId = seedPersistedState();
         const recoveryKey = `sourcesPlusRecovery_${projectId}`;
         const existingRecovery = {
@@ -1905,23 +1999,21 @@ describe('saveState', () => {
         global.sessionStorage.setItem(recoveryKey, JSON.stringify(existingRecovery));
         global.sessionStorage.setItem.mockClear();
         global.sessionStorage.removeItem.mockClear();
-        let settleLifecycle;
-        global.chrome.runtime.sendMessage.mockImplementationOnce((message, cb) => {
-            settleLifecycle = cb;
-        });
-
         global.document.visibilityState = 'hidden';
         const lifecycleSave = mod.handlePageLifecyclePersistence({ type: 'visibilitychange' });
 
         expect(mod.readRecoverySnapshot()).toEqual(existingRecovery);
-        settleLifecycle({
-            success: true,
-            saveRevision: 5,
-            savedAt: '2026-04-22T00:21:00.000Z'
+        await expect(lifecycleSave).resolves.toMatchObject({
+            ok: false,
+            reason: 'import_recovery_owned',
+            skipped: true
         });
-        await lifecycleSave;
 
         expect(mod.readRecoverySnapshot()).toEqual(existingRecovery);
+        expect(global.chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+            expect.objectContaining({ type: 'SAVE_STATE' }),
+            expect.any(Function)
+        );
         expect(global.sessionStorage.setItem).not.toHaveBeenCalledWith(
             recoveryKey,
             expect.any(String)
@@ -1929,7 +2021,7 @@ describe('saveState', () => {
         expect(global.sessionStorage.removeItem).not.toHaveBeenCalledWith(recoveryKey);
     });
 
-    it('preserves failed import rollback recovery after a failed pagehide lifecycle save', async () => {
+    it('skips a pagehide snapshot that differs from failed import rollback recovery', async () => {
         const projectId = seedPersistedState();
         const recoveryKey = `sourcesPlusRecovery_${projectId}`;
         const existingRecovery = {
@@ -1946,21 +2038,20 @@ describe('saveState', () => {
         global.sessionStorage.setItem(recoveryKey, JSON.stringify(existingRecovery));
         global.sessionStorage.setItem.mockClear();
         global.sessionStorage.removeItem.mockClear();
-        let settleLifecycle;
-        global.chrome.runtime.sendMessage.mockImplementationOnce((message, cb) => {
-            settleLifecycle = cb;
-        });
-
         const lifecycleSave = mod.handlePageLifecyclePersistence({ type: 'pagehide' });
 
         expect(mod.readRecoverySnapshot()).toEqual(existingRecovery);
-        settleLifecycle({ success: false, errorCode: 'runtime_failure' });
         await expect(lifecycleSave).resolves.toMatchObject({
             ok: false,
-            reason: 'runtime_failure'
+            reason: 'import_recovery_owned',
+            skipped: true
         });
 
         expect(mod.readRecoverySnapshot()).toEqual(existingRecovery);
+        expect(global.chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+            expect.objectContaining({ type: 'SAVE_STATE' }),
+            expect.any(Function)
+        );
         expect(global.sessionStorage.setItem).not.toHaveBeenCalledWith(
             recoveryKey,
             expect.any(String)
@@ -2759,6 +2850,164 @@ describe('loadState', () => {
         expect(callback).toHaveBeenCalledWith(null);
     });
 
+    it('fails closed on a newer empty v6 primary before an older non-empty v5 backup in direct-local fallback', () => {
+        const callback = jest.fn();
+        const futurePrimary = {
+            schemaVersion: 6,
+            _saveRevision: 12,
+            _savedAt: '2026-07-26T01:00:00.000Z',
+            root: [],
+            groupsById: {},
+            ungrouped: [],
+            sourceStateById: {},
+            futureLayoutMetadata: { placementModel: 'v6' }
+        };
+        const supportedBackup = {
+            schemaVersion: 5,
+            _saveRevision: 11,
+            _savedAt: '2026-07-26T00:59:00.000Z',
+            root: [{ type: 'source', key: 'older-source' }],
+            groupsById: {},
+            ungrouped: [],
+            sourceStateById: {
+                'older-source': { enabled: true, title: 'Older source' }
+            },
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {}
+        };
+        mod._setProjectId('future-local-project');
+        global.chrome.runtime.sendMessage = undefined;
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => cb({
+            'sourcesPlusState_future-local-project': futurePrimary,
+            'sourcesPlusState_future-local-project__backup': supportedBackup
+        }));
+
+        mod.loadState(callback);
+
+        expect(callback).toHaveBeenCalledWith(null);
+        expect(mod.getSaveStatus()).toMatchObject({
+            state: 'failed',
+            lastError: 'unsupported_schema'
+        });
+    });
+
+    it('fails closed when a future backup is equally authoritative as the supported primary', () => {
+        const callback = jest.fn();
+        const supportedPrimary = {
+            schemaVersion: 5,
+            _saveRevision: 9,
+            _savedAt: '2026-07-26T01:00:00.000Z',
+            root: [],
+            groupsById: {},
+            ungrouped: [],
+            sourceStateById: {}
+        };
+        const futureBackup = {
+            schemaVersion: 6,
+            _saveRevision: 9,
+            _savedAt: '2026-07-26T01:00:00.000Z',
+            root: [],
+            groupsById: {},
+            ungrouped: [],
+            sourceStateById: {},
+            futureLayoutMetadata: { placementModel: 'v6' }
+        };
+        mod._setProjectId('future-backup-project');
+        global.chrome.runtime.sendMessage = undefined;
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => cb({
+            'sourcesPlusState_future-backup-project': supportedPrimary,
+            'sourcesPlusState_future-backup-project__backup': futureBackup
+        }));
+
+        mod.loadState(callback);
+
+        expect(callback).toHaveBeenCalledWith(null);
+        expect(mod.getSaveStatus()).toMatchObject({
+            state: 'failed',
+            lastError: 'unsupported_schema'
+        });
+    });
+
+    it('routes teardown flush followed by immediate reload through background LOAD_STATE FIFO', async () => {
+        const projectId = 'fifo-reload-project';
+        const callback = jest.fn();
+        const runtimeMessages = [];
+        let settleSave;
+        let settleLoad;
+        mod._setProjectId(projectId);
+        mod.state.ungrouped = ['fresh-source'];
+        mod.sourcesByKey.set('fresh-source', {
+            key: 'fresh-source',
+            enabled: true,
+            title: 'Fresh source',
+            normalizedTitle: 'fresh source',
+            stableToken: '',
+            fingerprint: 'fresh-source||article',
+            identityType: 'fingerprint'
+        });
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            runtimeMessages.push(message);
+            if (message?.type === 'SAVE_STATE') {
+                settleSave = cb;
+            } else if (message?.type === 'LOAD_STATE') {
+                settleLoad = cb;
+            }
+        });
+        global.chrome.storage.local.get.mockImplementation((keys, cb) => cb({
+            [`sourcesPlusState_${projectId}`]: {
+                schemaVersion: 5,
+                root: [],
+                groupsById: {},
+                ungrouped: ['stale-source'],
+                sourceStateById: {
+                    'stale-source': { enabled: true, title: 'Stale source' }
+                }
+            }
+        }));
+
+        mod.saveState();
+        const flushResult = mod.flushPendingStateSave();
+        mod.loadState(callback);
+
+        expect(runtimeMessages.map((message) => message.type)).toEqual([
+            'SAVE_STATE',
+            'LOAD_STATE'
+        ]);
+        expect(global.chrome.storage.local.get).not.toHaveBeenCalled();
+        expect(callback).not.toHaveBeenCalled();
+
+        settleSave({
+            success: true,
+            saveRevision: 1,
+            savedAt: '2026-07-26T01:00:00.000Z'
+        });
+        await flushResult;
+        settleLoad({
+            success: true,
+            primaryState: {
+                schemaVersion: 5,
+                _saveRevision: 1,
+                root: [],
+                groupsById: {},
+                ungrouped: ['fresh-source'],
+                sourceStateById: {
+                    'fresh-source': { enabled: true, title: 'Fresh source' }
+                },
+                tagsById: {},
+                tagOrder: [],
+                sourceTagsById: {}
+            },
+            backupState: null,
+            history: []
+        });
+
+        expect(callback).toHaveBeenCalledWith(expect.objectContaining({
+            schemaVersion: 5,
+            ungrouped: ['fresh-source']
+        }));
+    });
+
     it('keeps a first-save path open when the notebook has no stored state yet', () => {
         const projectId = 'first-save-project';
         const callback = jest.fn();
@@ -2793,7 +3042,7 @@ describe('loadState', () => {
         );
     });
 
-    it('reads state directly from local storage before falling back to runtime messaging', () => {
+    it('loads state through background messaging while retaining raw backup and history candidates', () => {
         const callback = jest.fn();
         const storedState = {
             schemaVersion: 5,
@@ -2827,7 +3076,13 @@ describe('loadState', () => {
             ],
             expect.any(Function)
         );
-        expect(global.chrome.runtime.sendMessage).not.toHaveBeenCalled();
+        expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(
+            {
+                type: 'LOAD_STATE',
+                key: 'sourcesPlusState_test-project'
+            },
+            expect.any(Function)
+        );
         expect(callback).toHaveBeenCalledWith(storedState);
     });
 
@@ -3138,7 +3393,7 @@ describe('loadState', () => {
         );
     });
 
-    it('falls back to null when runtime messaging fails', () => {
+    it('falls back to null when runtime messaging and local storage both fail', async () => {
         const callback = jest.fn();
         mod._setProjectId('test-project');
 
@@ -3152,8 +3407,9 @@ describe('loadState', () => {
 
         mod.loadState(callback);
 
-        expect(callback).toHaveBeenCalledWith(null);
         global.chrome.runtime.lastError = null;
+        await Promise.resolve();
+        expect(callback).toHaveBeenCalledWith(null);
     });
 
     it('treats structured background failures as null state', () => {

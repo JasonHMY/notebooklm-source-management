@@ -64,7 +64,7 @@ Unauthorized notebook senders return:
 { "success": false, "errorCode": "unauthorized_sender" }
 ```
 
-## State save response
+## State save/load responses
 
 `SAVE_STATE` writes are serialized per storage key in the background worker and guarded by save revision metadata. A same-notebook `LOAD_STATE` waits for an already pending `SAVE_STATE` on that key before issuing its storage read, so it returns the persisted revision after the save settles. Loads for different notebook keys remain independent and can proceed in parallel.
 
@@ -84,6 +84,27 @@ Successful saves return:
 }
 ```
 
+Successful loads return the compatibility `data` projection plus both untouched
+raw candidates and the same-notebook history read after that FIFO wait:
+
+```json
+{
+  "success": true,
+  "data": {},
+  "primaryState": {},
+  "backupState": {},
+  "history": []
+}
+```
+
+`data` remains for older content callers. Current content code must classify
+`primaryState` and `backupState` before migration or current-schema shape repair;
+`null` represents a missing candidate. Normal production reads send
+`LOAD_STATE` first and therefore cannot overtake a pending same-key `SAVE_STATE`.
+A direct `chrome.storage.local.get` is a read-only fallback only when runtime
+messaging is absent, throws, or reports `runtime.lastError`; an explicit
+background rejection is not bypassed.
+
 Rejected saves use one of the shared error codes:
 
 ```text
@@ -96,7 +117,7 @@ unauthorized_sender
 
 Content scripts must not bypass explicit background rejection with a direct primary-state `chrome.storage.local.set`. A direct local fallback is considered only when runtime messaging is unavailable and `allowLocalFallback !== false`; lifecycle and import critical saves set `allowLocalFallback: false`. The fallback must reject a nonzero `_saveRevision` equal to stored state when the persistable snapshots differ, returning `equal_revision_conflict` without writing; an equivalent equal-revision retry remains idempotent.
 
-`visibilitychange:hidden` and `pagehide` enqueue critical `SAVE_STATE` requests through this same per-key FIFO. If a normal save is already in flight, the lifecycle request waits behind it and uses the revision acknowledged by that earlier save as its `baseRevision`. The lifecycle path writes only the session recovery snapshot before dispatch and never performs a second direct primary write. If the recovery slot already contains a failed `import_ack_unknown` or `import_rollback_required` snapshot, lifecycle dispatch continues but must not replace or clear that higher-priority import recovery on either success or failure.
+`visibilitychange:hidden` and `pagehide` enqueue critical `SAVE_STATE` requests through this same per-key FIFO. If a normal save is already in flight, the lifecycle request waits behind it and uses the revision acknowledged by that earlier save as its `baseRevision`. The lifecycle path writes only the session recovery snapshot before dispatch and never performs a second direct primary write. `import_pending`, `import_ack_unknown`, and `import_rollback_required` own their recovery slot: lifecycle cannot replace or clear them, and it skips its captured snapshot while any import-owned recovery remains. This prevents a rejected or ambiguous imported runtime snapshot from being persisted later by teardown.
 
 ## Content messages
 

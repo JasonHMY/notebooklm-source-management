@@ -246,6 +246,25 @@ const setupGlobalMocks = () => {
                     cb({ success: true, history: [] });
                     return;
                 }
+                if (message?.type === 'LOAD_STATE' && typeof cb === 'function') {
+                    const key = String(message.key || '');
+                    const backupKey = key ? `${key}__backup` : '';
+                    const historyKey = key.startsWith('sourcesPlusState_')
+                        ? `sourcesPlusHistory_${key.slice('sourcesPlusState_'.length)}`
+                        : '';
+                    global.chrome.storage.local.get([key, backupKey, historyKey], (data) => {
+                        const primaryState = data?.[key] ?? null;
+                        const backupState = data?.[backupKey] ?? null;
+                        cb({
+                            success: true,
+                            data: primaryState ?? backupState ?? null,
+                            primaryState,
+                            backupState,
+                            history: Array.isArray(data?.[historyKey]) ? data[historyKey] : []
+                        });
+                    });
+                    return;
+                }
                 if (message?.type === 'LOAD_PREFERENCES' && typeof cb === 'function') {
                     cb({
                         success: true,

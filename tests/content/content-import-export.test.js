@@ -14,6 +14,8 @@ function createRuntime(overrides = {}) {
         shadowRoot: null,
         customHeight: null,
         sourceViewDisplayKind: '',
+        projectId: 'notebook-a',
+        activeManagerInstanceToken: 1,
         ...overrides
     };
 }
@@ -337,7 +339,7 @@ describe('content import/export helper', () => {
                 expect.objectContaining({
                     variant: 'success',
                     actionLabel: 'ui_settings_restore_import_backup',
-                    onAction: deps.restoreImportBackupSnapshotFromUi
+                    onAction: expect.any(Function)
                 })
             );
             expect(deps.runtime.customHeight).toBe(320);
@@ -496,6 +498,84 @@ describe('content import/export helper', () => {
                 'ui_settings_imported_toast',
                 expect.anything()
             );
+        });
+
+        it('does not show notebook A import success after navigation to notebook B', async () => {
+            let settleSave;
+            const runtime = createRuntime({
+                projectId: 'notebook-a',
+                activeManagerInstanceToken: 11
+            });
+            const deps = createDeps({
+                runtime,
+                saveState: jest.fn(() => new Promise((resolve) => {
+                    settleSave = resolve;
+                }))
+            });
+            const { applyImportConfig } = createContentImportExport(deps);
+
+            const pendingImport = applyImportConfig(JSON.stringify({
+                schemaVersion: 5,
+                groupsById: {},
+                sourceStateById: {}
+            }));
+            for (let index = 0; index < 5 && typeof settleSave !== 'function'; index += 1) {
+                await Promise.resolve();
+            }
+            const renderCountBeforeNavigation = deps.render.mock.calls.length;
+            runtime.projectId = 'notebook-b';
+            runtime.activeManagerInstanceToken = 12;
+            settleSave({ ok: true });
+
+            const result = await pendingImport;
+
+            expect(result).toMatchObject({
+                ok: false,
+                reason: 'deferred',
+                staleContext: true
+            });
+            expect(deps.render).toHaveBeenCalledTimes(renderCountBeforeNavigation);
+            expect(deps.rollbackImportSnapshot).not.toHaveBeenCalled();
+            expect(deps.showToast).not.toHaveBeenCalled();
+        });
+
+        it('does not roll notebook B back when notebook A import fails after navigation', async () => {
+            let settleSave;
+            const runtime = createRuntime({
+                projectId: 'notebook-a',
+                activeManagerInstanceToken: 21
+            });
+            const deps = createDeps({
+                runtime,
+                saveState: jest.fn(() => new Promise((resolve) => {
+                    settleSave = resolve;
+                }))
+            });
+            const { applyImportConfig } = createContentImportExport(deps);
+
+            const pendingImport = applyImportConfig(JSON.stringify({
+                schemaVersion: 5,
+                groupsById: {},
+                sourceStateById: {}
+            }));
+            for (let index = 0; index < 5 && typeof settleSave !== 'function'; index += 1) {
+                await Promise.resolve();
+            }
+            const renderCountBeforeNavigation = deps.render.mock.calls.length;
+            runtime.projectId = 'notebook-b';
+            runtime.activeManagerInstanceToken = 22;
+            settleSave({ ok: false, reason: 'runtime_message_error' });
+
+            const result = await pendingImport;
+
+            expect(result).toMatchObject({
+                ok: false,
+                reason: 'deferred',
+                staleContext: true
+            });
+            expect(deps.rollbackImportSnapshot).not.toHaveBeenCalled();
+            expect(deps.render).toHaveBeenCalledTimes(renderCountBeforeNavigation);
+            expect(deps.showToast).not.toHaveBeenCalled();
         });
     });
 });

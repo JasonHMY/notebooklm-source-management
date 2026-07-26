@@ -475,7 +475,8 @@ describe('background.js message listener', () => {
         expect(pendingGets).toHaveLength(2);
         expect(pendingGets[1].keys).toEqual([
             'sourcesPlusState_123',
-            'sourcesPlusState_123__backup'
+            'sourcesPlusState_123__backup',
+            'sourcesPlusHistory_123'
         ]);
         pendingGets[1].cb({
             sourcesPlusState_123: pendingSets[0].payload.sourcesPlusState_123
@@ -515,16 +516,16 @@ describe('background.js message listener', () => {
         await Promise.resolve();
 
         expect(global.chrome.storage.local.get).toHaveBeenCalledWith(
-            ['sourcesPlusState_123', 'sourcesPlusState_123__backup'],
+            ['sourcesPlusState_123', 'sourcesPlusState_123__backup', 'sourcesPlusHistory_123'],
             expect.any(Function)
         );
         loadStorageCallback({
             sourcesPlusState_123: { _saveRevision: 4, groups: ['persisted-after-failure'] }
         });
-        expect(loadResponse).toHaveBeenCalledWith({
+        expect(loadResponse).toHaveBeenCalledWith(expect.objectContaining({
             success: true,
             data: { _saveRevision: 4, groups: ['persisted-after-failure'] }
-        });
+        }));
     });
 
     it('loads a different notebook state immediately while another notebook save is pending', () => {
@@ -553,15 +554,16 @@ describe('background.js message listener', () => {
         expect(pendingGets).toHaveLength(2);
         expect(pendingGets[1].keys).toEqual([
             'sourcesPlusState_456',
-            'sourcesPlusState_456__backup'
+            'sourcesPlusState_456__backup',
+            'sourcesPlusHistory_456'
         ]);
         pendingGets[1].cb({
             sourcesPlusState_456: { _saveRevision: 7, groups: ['other'] }
         });
-        expect(loadResponse).toHaveBeenCalledWith({
+        expect(loadResponse).toHaveBeenCalledWith(expect.objectContaining({
             success: true,
             data: { _saveRevision: 7, groups: ['other'] }
-        });
+        }));
     });
 
     it('serializes APPEND_STATE_HISTORY behind a pending SAVE_STATE for the same notebook', async () => {
@@ -1623,13 +1625,13 @@ describe('background.js message listener', () => {
         const result = listener(request, validSender, mockSendResponse);
 
         expect(global.chrome.storage.local.get).toHaveBeenCalledWith(
-            ['sourcesPlusState_123', 'sourcesPlusState_123__backup'],
+            ['sourcesPlusState_123', 'sourcesPlusState_123__backup', 'sourcesPlusHistory_123'],
             expect.any(Function)
         );
-        expect(mockSendResponse).toHaveBeenCalledWith({
+        expect(mockSendResponse).toHaveBeenCalledWith(expect.objectContaining({
             success: true,
             data: { loadedData: true, sourceStateById: { source_1: { enabled: true } } }
-        });
+        }));
         expect(result).toBe(true); // Should return true to keep channel open
     });
 
@@ -1661,7 +1663,7 @@ describe('background.js message listener', () => {
 
         listener(request, validSender, mockSendResponse);
 
-        expect(mockSendResponse).toHaveBeenCalledWith({
+        expect(mockSendResponse).toHaveBeenCalledWith(expect.objectContaining({
             success: true,
             data: {
                 groups: ['group1'],
@@ -1669,6 +1671,51 @@ describe('background.js message listener', () => {
                 ungrouped: [],
                 sourceStateById: { source_1: { enabled: true } }
             }
+        }));
+    });
+
+    it('preserves a newer empty v6 primary instead of downgrading to an older non-empty v5 backup', () => {
+        const request = {
+            type: 'LOAD_STATE',
+            key: 'sourcesPlusState_123'
+        };
+        const futurePrimary = {
+            schemaVersion: 6,
+            _saveRevision: 12,
+            _savedAt: '2026-07-26T01:00:00.000Z',
+            root: [],
+            groupsById: {},
+            ungrouped: [],
+            sourceStateById: {},
+            futureLayoutMetadata: { placementModel: 'v6' }
+        };
+        const supportedBackup = {
+            schemaVersion: 5,
+            _saveRevision: 11,
+            _savedAt: '2026-07-26T00:59:00.000Z',
+            root: [{ type: 'source', key: 'older-source' }],
+            groupsById: {},
+            ungrouped: [],
+            sourceStateById: {
+                'older-source': { enabled: true }
+            }
+        };
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({
+                sourcesPlusState_123: futurePrimary,
+                sourcesPlusState_123__backup: supportedBackup,
+                sourcesPlusHistory_123: []
+            });
+        });
+
+        listener(request, validSender, mockSendResponse);
+
+        expect(mockSendResponse).toHaveBeenCalledWith({
+            success: true,
+            data: futurePrimary,
+            primaryState: futurePrimary,
+            backupState: supportedBackup,
+            history: []
         });
     });
 
@@ -1687,7 +1734,7 @@ describe('background.js message listener', () => {
         const result = listener(request, validSender, mockSendResponse);
 
         expect(global.chrome.storage.local.get).toHaveBeenCalledWith(
-            ['sourcesPlusState_123', 'sourcesPlusState_123__backup'],
+            ['sourcesPlusState_123', 'sourcesPlusState_123__backup', 'sourcesPlusHistory_123'],
             expect.any(Function)
         );
         expect(console.error).toHaveBeenCalledWith(
@@ -1752,10 +1799,10 @@ describe('background.js message listener', () => {
 
         listener(request, validSender, mockSendResponse);
 
-        expect(mockSendResponse).toHaveBeenCalledWith({
+        expect(mockSendResponse).toHaveBeenCalledWith(expect.objectContaining({
             success: true,
             data: null
-        });
+        }));
     });
 
     it('loads state history entries for authorized notebook senders', () => {

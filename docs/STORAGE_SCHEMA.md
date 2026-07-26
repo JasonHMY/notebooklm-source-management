@@ -40,7 +40,19 @@ Critical import saves use the pre-import snapshot as their recovery snapshot:
 - `import_rollback_required`: the background explicitly rejected the import save, so runtime is rolled back and the pre-import snapshot remains available.
 - `import_ack_unknown`: runtime messaging threw, failed, or returned an empty/malformed acknowledgement, so commit state is ambiguous; runtime is rolled back and recovery remains available for explicit reconciliation even if primary data appears equivalent or newer.
 
-Only confirmed background success clears a critical recovery snapshot. A local fallback result is insufficient. Lifecycle and import critical saves disable local fallback entirely; local fallback is considered only when runtime messaging is unavailable and the caller has not set `allowLocalFallback: false`. A failed `import_ack_unknown` or `import_rollback_required` recovery has higher priority than a later lifecycle snapshot: `visibilitychange:hidden` / `pagehide` still dispatch their background save, but neither lifecycle success nor failure may replace or clear that existing import recovery.
+`import_pending`, `import_ack_unknown`, and `import_rollback_required` are
+import-owned recovery states. Snapshot equivalence never clears them. Only a
+confirmed background success received while the same project and manager
+instance are still current may clear an import recovery snapshot; a stale A→B
+completion leaves A's key-bound recovery for the next load to reconcile.
+
+A local fallback result is insufficient to clear critical recovery. Lifecycle
+and import critical saves disable local write fallback entirely; local fallback
+is considered only when runtime messaging is unavailable and the caller has not
+set `allowLocalFallback: false`. `visibilitychange:hidden` / `pagehide` cannot
+replace an import-owned recovery. Their captured save is skipped while any
+import-owned recovery remains, so a rejected or ambiguous imported snapshot
+cannot be persisted after rollback.
 
 ### Save ordering and lifecycle teardown
 
@@ -57,6 +69,12 @@ All primary-state saves normally enter the background `SAVE_STATE` FIFO. A lifec
 ```
 
 When a manager is disabled, destroyed, detached for panel collapse/source detail, or torn down during SPA routing, cleanup synchronously flushes the pending debounce into the save queue before synchronously removing the host and event sources. Cleanup does not wait for the background acknowledgement, so the UI disappears immediately while the captured save Promise continues settling. This ordering prevents a pending mutation from being canceled and prevents new UI interactions while that save is in flight.
+
+Normal production state reads use background `LOAD_STATE`. The worker waits for
+the same notebook's pending `SAVE_STATE`, then reads primary, backup, and history
+together and returns both raw state candidates. Direct
+`chrome.storage.local.get` is a read-only fallback only when runtime messaging is
+unavailable; it is not attempted after an explicit background rejection.
 
 The emergency local fallback compares `_saveRevision` before writing. A lower incoming revision is stale. A nonzero revision equal to storage but carrying a different persistable snapshot is rejected as `equal_revision_conflict` without changing primary or backup; an equivalent equal-revision retry remains idempotently successful.
 
@@ -197,7 +215,26 @@ Every authoritative primary/backup candidate is classified before migration, str
 No persisted candidate (`null`) is a non-blocking empty/legacy state: nothing is
 applied or migrated, and the notebook remains able to perform its first save.
 
-The primary/backup revision and snapshot-quality comparison selects the authoritative raw candidate before this compatibility check. If that candidate is future or invalid, history repair is not inspected and no migration, repair, apply, lifecycle snapshot, or normal save runs. Save-queue entries capture the active load-scope generation: they recheck it before dispatch and again before applying completion effects, so an older queued save cannot start and an already in-flight result cannot replace `unsupported_schema`, advance the local revision, clear recovery, or emit critical-save completion feedback after the block activates. The block is scoped to the current notebook and manager load instance; loading another notebook or a new manager instance invalidates older queue entries, resets only the schema-specific failed status to idle, and resumes saves without clearing unrelated save metadata. A future schema is never automatically downgraded and written back.
+Primary/backup authority is selected from raw metadata before current-schema
+shape is inspected: higher `_saveRevision` wins, then later valid `_savedAt`;
+only a metadata tie may use the existing non-empty snapshot-quality fallback.
+On an exact metadata tie, a future/invalid candidate is authoritative enough to
+fail closed instead of being hidden by a supported candidate. If the
+authoritative candidate is future or invalid, history repair is not inspected
+and no migration, repair, apply, lifecycle snapshot, or normal save runs.
+Background revision guards and the runtime-unavailable direct-local path use the
+same raw-authority rule.
+
+Save-queue entries capture the active load-scope generation: they recheck it
+before dispatch and again before applying completion effects, so an older
+queued save cannot start and an already in-flight result cannot replace
+`unsupported_schema`, advance the local revision, clear recovery, or emit
+critical-save completion feedback after the block activates. The block is
+scoped to the current notebook and manager load instance; loading another
+notebook or a new manager instance invalidates older queue entries, resets only
+the schema-specific failed status to idle, and resumes saves without clearing
+unrelated save metadata. A future schema is never automatically downgraded and
+written back.
 
 ## Backup and history
 
@@ -234,4 +271,4 @@ Exports use this exact envelope:
 
 Imports remain compatible with a bare raw-state object when none of `format`, `formatVersion`, or `data` is present. If any one of those envelope markers is present, all three must be valid: the exact format string above, integer `formatVersion: 1`, and an object `data` payload. Unknown or incomplete envelopes are rejected rather than reinterpreted as bare state. Imported state then passes the same schema gate: a missing version or version `1` is legacy, integer versions `2`–`5` are supported and normalizable, and future or invalid versions are rejected. Rejecting an imported config does not set the notebook-scoped write block because the imported payload is not authoritative stored state.
 
-Applying an import is atomic from the runtime user's perspective. Before any imported mutation, the manager clones its current persistable snapshot, records history, and writes the import backup. It then applies the imported runtime state and issues a critical background save with the cloned pre-import snapshot as recovery. A deferred apply, thrown save, explicit save failure, or ambiguous acknowledgement restores the complete pre-import runtime state, including clearing an imported inline height when the prior `customHeight` was `null`. Failure results expose only the declared import reasons (`deferred`, `rollback_failed`, `storage_quota_exceeded`, `import_ack_unknown`, or `save_failed`), and never display the import success action.
+Applying an import is atomic from the runtime user's perspective. Before any imported mutation, the manager clones its current persistable snapshot, records history, and writes the import backup. It then applies the imported runtime state and issues a critical background save with the cloned pre-import snapshot as recovery. The transaction captures its starting project id and manager instance token. A completion after A→B navigation cannot roll B back, render B, show A's success/failure UI, or clear A's recovery; it settles as a deferred stale-context result. While the starting context remains current, a deferred apply, thrown save, explicit save failure, or ambiguous acknowledgement restores the complete pre-import runtime state, including clearing an imported inline height when the prior `customHeight` was `null`. Failure results expose only the declared import reasons (`deferred`, `rollback_failed`, `storage_quota_exceeded`, `import_ack_unknown`, or `save_failed`), and never display the import success action.

@@ -74,7 +74,7 @@ GeminiNotebook-Source-Management
 │   │   ├── content-state-repair.js
 │   │   │   └── 受损分组树结构修复候选筛选、合并和 grouped-source-key 扫描 helper
 │   │   ├── content-persistence.js
-│   │   │   └── save/load/history/recovery 持久化 helper
+│   │   │   └── runtime-first LOAD_STATE、raw primary/backup 选择、save/history/import-owned recovery 持久化 helper
 │   │   ├── content-import-export.js
 │   │   │   └── 配置 JSON 导出/导入、size/depth/cycle 校验、preview diff helper
 │   │   ├── content-undo-history.js
@@ -127,7 +127,7 @@ GeminiNotebook-Source-Management
 │   │       └── 原生 Gemini Notebook DOM 覆写（manifest content_scripts[0].css 注入，scoped 在 .sources-plus-manager-active；三套 CSS 之一）
 │   ├── background/
 │   │   └── index.js
-│   │       └── service worker；storage 队列、revision guard、history、tab focus/open、偏好和日志消息
+│   │       └── service worker；storage 队列、LOAD-after-SAVE raw candidate 读取、revision guard、history、tab focus/open、偏好和日志消息
 │   ├── popup/
 │   │   ├── popup.html
 │   │   ├── index.js
@@ -488,8 +488,9 @@ manifest.json
 │   │   ├── save/load
 │   │   ├── schemaVersion 5 和 sourceStateById[sourceKey].addedAt
 │   │   ├── background FIFO、revision guard、equal-revision conflict
+│   │   ├── runtime-first LOAD_STATE 与 metadata-first raw primary/backup 兼容性选择
 │   │   ├── backup/history
-│   │   ├── lifecycle critical save 与 session recovery
+│   │   ├── lifecycle critical save、import-owned session recovery 与 A→B import completion 隔离
 │   │   ├── deferred initial load
 │   │   └── 旧状态 remap/repair
 │   ├── 先看
@@ -674,7 +675,7 @@ content runtime memory
 │   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-source-sync.test.js
 │   └── 文件: tests/content/content-source-sync.test.js, tests/content/content-source-partial-sync-guard.test.js
 ├── 持久化 / history / import-export / background storage
-│   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-persistence.test.js tests/background.test.js
+│   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-persistence.test.js tests/content/content-import-export.test.js tests/background.test.js
 │   └── 文件: tests/content/content-persistence.test.js, tests/background.test.js, tests/content/content-import-export.test.js, tests/content/content-state-apply.test.js, tests/content/content-undo-history.test.js
 ├── 原生删除 / 重命名 / 详情
 │   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-source-actions.test.js tests/content/content-source-action-menu.test.js
@@ -849,7 +850,7 @@ CI: .github/workflows/ci.yml
 │   ├── 先看: src/utils/storage-contract.js, src/content/content-persistence.js
 │   ├── 然后看: src/background/index.js, docs/STORAGE_SCHEMA.md, docs/MESSAGE_CONTRACTS.md
 │   ├── 测试: storage-contract.test.js, content-persistence.test.js, background.test.js
-│   └── 注意: 正常写入走 background；直接 storage 写只用于测试/降级路径
+│   └── 注意: 正常读写都先走 background FIFO；直接 storage 读取仅用于 runtime-unavailable 回退，直接写入仅用于允许降级的非 import/lifecycle 保存
 ├── 开发者日志没记录
 │   ├── 先看: src/content/content-developer-logger.js
 │   ├── 然后看: src/content/content-diagnostics.js, src/background/index.js, src/content/content-modals.js

@@ -34,6 +34,8 @@
 - **记录优化加固基线 (Record Optimization Hardening Baseline)**: **影响**: 对扩展使用无可感知变化。 记录路线图开始前的 lint、unit 和默认 headless smoke 通过结果及起始 commit，为后续存储、拖拽和架构任务提供可核对的执行台账；未修改 runtime、存储或拖拽行为。
 
 ### Fixed
+- **存储读取兼容性与队列一致性 (Harden Storage Load Compatibility and FIFO Consistency)**: **影响**: 刚完成保存、关闭管理器或立即重建时会等待同 notebook 后台保存完成再读取；未来版本或非法 primary/backup 不再因当前版本看起来“为空”而被旧备份掩盖并覆盖。 `LOAD_STATE` 现一次返回原始 primary、backup 与 history，按 `_saveRevision`、`_savedAt` 先确定权威候选，runtime 不可用时才走只读本地回退；未新增 storage key、权限、依赖或 host surface。
+- **导入事务与生命周期隔离 (Isolate Import Transactions from Lifecycle and Navigation)**: **影响**: 导入尚未确认、被拒绝或确认结果不明确时，页面隐藏/关闭不会再覆盖恢复点或稍后保存被拒绝的导入状态；导入期间切换 notebook 也不会在新 notebook 回滚、重绘或显示旧 notebook 提示。 `import_pending`、`import_ack_unknown`、`import_rollback_required` 由导入事务独占，并按起始 project id 与 manager instance token 约束异步完成。
 - **开发者日志精确隔离并避免并发丢失 (Scope and Serialize Developer Logs)**: **影响**: 同一笔记本连续记录、清空或立即读取开发者日志时，不再因并发读写丢失条目或读到旧结果；不同笔记本的日志操作仍可并行。 后台现按完整 `sourcesPlusDeveloperLogs_<projectId>` 精确绑定发送方笔记本，拒绝跨笔记本、共享前缀、额外后缀及裸 `/notebook/` URL，并在访问 storage 前失败关闭；每个日志 key 的 append/clear 共用 FIFO，load 等待同 key 的待处理任务，原有 500 条、512 KiB 和脱敏约束保持不变。
 - **配额裁剪保留手动恢复点 (Preserve Manual Restore Points During Quota Trimming)**: **影响**: 存储空间接近上限时，自动清理仍保留所有命名恢复点和最新自动快照；若这些受保护内容仍无法写入，扩展会明确拒绝增长写入而不会删除手动恢复点。
 - **同笔记本读取等待保存完成 (Serialize State Loads Behind Saves)**: **影响**: 刚整理并保存来源后立即重新加载时，不再偶尔读回保存前的旧状态。 同一 notebook 的 `LOAD_STATE` 现在复用既有 save FIFO，等待 pending `SAVE_STATE` settle 后才读取 primary/backup；不同 notebook 仍可并行加载，既有 sender/key 校验、revision guard 与恢复逻辑不变。

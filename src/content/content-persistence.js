@@ -312,10 +312,11 @@
             return recoveryKeyForProject(value);
         }
 
-        function isFailedImportRecovery(recovery) {
+        function isImportOwnedRecovery(recovery) {
             return Boolean(
-                recovery?.failed
+                recovery
                 && [
+                    'import_pending',
                     'import_ack_unknown',
                     'import_rollback_required'
                 ].includes(recovery.reason)
@@ -426,7 +427,7 @@
                 return false;
             }
 
-            if (recovery.reason === 'import_ack_unknown') {
+            if (isImportOwnedRecovery(recovery)) {
                 setSaveStatus({
                     state: 'recovery_available',
                     recoveryAvailable: true,
@@ -458,28 +459,42 @@
             return false;
         }
 
-        function getComparableStoredState(primaryState, backupState) {
+        function getSnapshotSavedAtTimestamp(snapshot) {
+            const timestamp = Date.parse(
+                typeof snapshot?._savedAt === 'string' ? snapshot._savedAt : ''
+            );
+            return Number.isFinite(timestamp) ? timestamp : 0;
+        }
+
+        function compareRawStateAuthority(primaryState, backupState) {
+            const hasPrimary = primaryState != null;
+            const hasBackup = backupState != null;
+            if (!hasPrimary && !hasBackup) return 0;
+            if (hasPrimary && !hasBackup) return 1;
+            if (!hasPrimary && hasBackup) return -1;
+
             const primaryRevision = getSnapshotSaveRevision(primaryState);
             const backupRevision = getSnapshotSaveRevision(backupState);
-            if (
-                hasRestorableStateSnapshot(primaryState) &&
-                hasRestorableStateSnapshot(backupState) &&
-                backupRevision > primaryRevision
-            ) {
-                return backupState;
+            if (primaryRevision !== backupRevision) {
+                return primaryRevision > backupRevision ? 1 : -1;
             }
-            return primaryState;
+
+            const primarySavedAt = getSnapshotSavedAtTimestamp(primaryState);
+            const backupSavedAt = getSnapshotSavedAtTimestamp(backupState);
+            if (primarySavedAt !== backupSavedAt) {
+                return primarySavedAt > backupSavedAt ? 1 : -1;
+            }
+
+            return 0;
         }
 
         function pickAuthoritativeRawState(primaryState, backupState) {
-            const preferredState = getComparableStoredState(primaryState, backupState);
-            if (preferredState !== primaryState) {
-                return preferredState;
-            }
-            if (hasRestorableStateSnapshot(primaryState)) {
-                return primaryState;
-            }
-            if (hasRestorableStateSnapshot(backupState)) {
+            const authorityComparison = compareRawStateAuthority(primaryState, backupState);
+            if (authorityComparison < 0) return backupState;
+            if (authorityComparison > 0) return primaryState;
+
+            const backupCompatibility = storageContract.getStateSchemaCompatibility(backupState);
+            if (backupCompatibility === 'future' || backupCompatibility === 'invalid') {
                 return backupState;
             }
             return primaryState ?? backupState ?? null;
@@ -700,11 +715,14 @@
 
         function pickPreferredStoredState(primaryState, backupState, historyEntries = []) {
             ctx.pendingStructuralStateRepair = null;
-            const preferredPrimaryState = getComparableStoredState(primaryState, backupState);
+            const authorityComparison = compareRawStateAuthority(primaryState, backupState);
             let selectedState = null;
-            if (preferredPrimaryState !== primaryState) {
-                rememberSnapshotSaveRevision(preferredPrimaryState);
-                selectedState = preferredPrimaryState;
+            if (authorityComparison < 0) {
+                rememberSnapshotSaveRevision(backupState);
+                selectedState = backupState;
+            } else if (authorityComparison > 0) {
+                rememberSnapshotSaveRevision(primaryState);
+                selectedState = primaryState;
             } else if (hasRestorableStateSnapshot(primaryState)) {
                 rememberSnapshotSaveRevision(primaryState);
                 selectedState = primaryState;
@@ -772,7 +790,7 @@
                 };
 
                 const handleExistingState = (existingData) => {
-                    const currentState = pickPreferredStoredState(
+                    const currentState = pickAuthoritativeRawState(
                         existingData && typeof existingData === 'object' ? existingData[key] : null,
                         existingData && typeof existingData === 'object' ? existingData[backupKey] : null
                     );
@@ -988,9 +1006,9 @@
             });
             const operationOptions = Object.freeze({ ...options });
             const requestedScopeGeneration = schemaWriteScopeGeneration;
-            const preserveExistingFailedImportRecovery = (
+            const preserveExistingImportRecovery = (
                 operationOptions.reason === 'page_lifecycle'
-                && isFailedImportRecovery(readRecoverySnapshot(operation.recoveryKey))
+                && isImportOwnedRecovery(readRecoverySnapshot(operation.recoveryKey))
             );
             const counts = getPersistableStateCounts(operation.saveSnapshot);
             developerLog('debug', 'persistence', 'state_save_requested', {
@@ -1002,7 +1020,7 @@
                 groupCount: counts.groupCount,
                 tagCount: counts.tagCount
             });
-            if (operationOptions.critical && !preserveExistingFailedImportRecovery) {
+            if (operationOptions.critical && !preserveExistingImportRecovery) {
                 writeRecoverySnapshot(operation.recoverySnapshot, {
                     recoveryKey: operation.recoveryKey,
                     baseRevision: getSaveRevisionForStateKey(operation.stateKey),
@@ -1038,6 +1056,16 @@
                 };
             };
             const runSave = () => {
+                if (
+                    operationOptions.reason === 'page_lifecycle'
+                    && isImportOwnedRecovery(readRecoverySnapshot(operation.recoveryKey))
+                ) {
+                    return Promise.resolve({
+                        ok: false,
+                        reason: 'import_recovery_owned',
+                        skipped: true
+                    });
+                }
                 const blockedResult = getScopeInvalidationResult('dispatch');
                 if (blockedResult) {
                     return Promise.resolve(blockedResult);
@@ -1095,8 +1123,12 @@
                             }
                             if (
                                 operationOptions.critical
-                                && !preserveExistingFailedImportRecovery
+                                && !preserveExistingImportRecovery
                                 && result.runtimeResult?.ok === true
+                                && (
+                                    !operationOptions.recoveryFallbackSnapshot
+                                    || isCurrentOperationContext()
+                                )
                             ) {
                                 clearRecoverySnapshot(operation.recoveryKey, {
                                     expectedClientSaveId: operation.clientSaveId
@@ -1149,7 +1181,7 @@
                             }
                             if (
                                 operationOptions.critical
-                                && !preserveExistingFailedImportRecovery
+                                && !preserveExistingImportRecovery
                             ) {
                                 const isAmbiguousAck = [
                                     'runtime_message_error',
@@ -1933,50 +1965,18 @@
                 callback(loadedState);
             };
 
-            const fallbackToRuntimeLoad = () => {
-                if (!chromeApi?.runtime?.sendMessage) {
-                    ctx.pendingStorageUpgrade = false;
-                    if (ctx.activeLoadStateRequestId === requestId) {
-                        ctx.activeLoadStateRequestId = null;
-                    }
-                    return callback(null);
+            const readLocalState = () => {
+                if (!isLiveManagerLoadRequest(expectedProjectId, expectedInstanceToken, requestId)) {
+                    return;
                 }
-
-                try {
-                    chromeApi.runtime.sendMessage({ type: 'LOAD_STATE', key }, (response) => {
-                        if (!isLiveManagerLoadRequest(expectedProjectId, expectedInstanceToken, requestId)) {
-                            return;
-                        }
-
-                        if (ctx.activeLoadStateRequestId === requestId) {
-                            ctx.activeLoadStateRequestId = null;
-                        }
-
-                        if (chromeApi.runtime.lastError) {
-                            console.warn('GeminiNotebook-Source-Management 未能连接后台:', chromeApi.runtime.lastError);
-                            ctx.pendingStorageUpgrade = false;
-                            return callback(null);
-                        }
-
-                        if (response && response.success === false) {
-                            console.warn('GeminiNotebook-Source-Management: LOAD_STATE rejected by background:', response.errorCode || 'unknown_error');
-                            ctx.pendingStorageUpgrade = false;
-                            return callback(null);
-                        }
-
-                        finalizeLoadedState(response && response.data);
-                    });
-                } catch (error) {
-                    console.warn('GeminiNotebook-Source-Management: Context invalidated during load. Please refresh the page.', error);
+                if (!chromeApi?.storage?.local?.get) {
                     ctx.pendingStorageUpgrade = false;
                     if (ctx.activeLoadStateRequestId === requestId) {
                         ctx.activeLoadStateRequestId = null;
                     }
                     callback(null);
+                    return;
                 }
-            };
-
-            if (chromeApi?.storage?.local?.get) {
                 try {
                     const backupKey = storageContract.getStateBackupKey(key);
                     const historyKey = storageContract.getStateHistoryKey(
@@ -1988,8 +1988,12 @@
                         }
 
                         if (chromeApi.runtime?.lastError) {
-                            console.warn('GeminiNotebook-Source-Management: Local storage load failed, falling back to runtime messaging:', chromeApi.runtime.lastError);
-                            fallbackToRuntimeLoad();
+                            console.warn('GeminiNotebook-Source-Management: Local storage fallback load failed:', chromeApi.runtime.lastError);
+                            ctx.pendingStorageUpgrade = false;
+                            if (ctx.activeLoadStateRequestId === requestId) {
+                                ctx.activeLoadStateRequestId = null;
+                            }
+                            callback(null);
                             return;
                         }
 
@@ -2000,11 +2004,62 @@
                     });
                     return;
                 } catch (error) {
-                    console.warn('GeminiNotebook-Source-Management: Local storage load threw, falling back to runtime messaging:', error);
+                    console.warn('GeminiNotebook-Source-Management: Local storage fallback load threw:', error);
+                    ctx.pendingStorageUpgrade = false;
+                    if (ctx.activeLoadStateRequestId === requestId) {
+                        ctx.activeLoadStateRequestId = null;
+                    }
+                    callback(null);
                 }
+            };
+
+            if (!chromeApi?.runtime?.sendMessage) {
+                readLocalState();
+                return;
             }
 
-            fallbackToRuntimeLoad();
+            try {
+                chromeApi.runtime.sendMessage({ type: 'LOAD_STATE', key }, (response) => {
+                    if (!isLiveManagerLoadRequest(expectedProjectId, expectedInstanceToken, requestId)) {
+                        return;
+                    }
+
+                    if (chromeApi.runtime.lastError) {
+                        console.warn('GeminiNotebook-Source-Management 未能连接后台，使用本地只读回退:', chromeApi.runtime.lastError);
+                        Promise.resolve().then(readLocalState);
+                        return;
+                    }
+
+                    if (response && response.success === false) {
+                        console.warn('GeminiNotebook-Source-Management: LOAD_STATE rejected by background:', response.errorCode || 'unknown_error');
+                        ctx.pendingStorageUpgrade = false;
+                        if (ctx.activeLoadStateRequestId === requestId) {
+                            ctx.activeLoadStateRequestId = null;
+                        }
+                        callback(null);
+                        return;
+                    }
+
+                    if (!response || typeof response !== 'object') {
+                        ctx.pendingStorageUpgrade = false;
+                        if (ctx.activeLoadStateRequestId === requestId) {
+                            ctx.activeLoadStateRequestId = null;
+                        }
+                        callback(null);
+                        return;
+                    }
+
+                    const hasRawPrimary = Object.prototype.hasOwnProperty.call(response, 'primaryState');
+                    finalizeLoadedState(
+                        hasRawPrimary ? response.primaryState : response.data,
+                        hasRawPrimary ? response.backupState : null,
+                        Array.isArray(response.history) ? response.history : []
+                    );
+                });
+            } catch (error) {
+                console.warn('GeminiNotebook-Source-Management: Context invalidated during load. Using local read fallback.', error);
+                readLocalState();
+            }
         }
 
         function getSourceElements(parent = typeof document !== 'undefined' ? document : null) {
