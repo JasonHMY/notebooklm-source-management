@@ -158,6 +158,8 @@ GeminiNotebook-Source-Management
 │   └── utils.test.js
 ├── docs/
 │   ├── PROJECT_DIRECTORY.md
+│   ├── DRAG_PERFORMANCE_BASELINE.md
+│   │   └── opt-in 100/500 行 reflow 拖拽基线；记录 Before/After 可比样本，不进入发布包
 │   ├── SECURITY_THREAT_MODEL.md
 │   ├── DEVELOPER_LOGGING.md
 │   ├── STORAGE_SCHEMA.md
@@ -714,6 +716,10 @@ content runtime memory
 │   ├── 命令: npm run test:smoke
 │   ├── 文件: tests/smoke/extension-smoke.spec.js, tests/smoke/batch-drag.smoke.spec.js
 │   └── 默认: headless，不应该弹出可见浏览器窗口
+├── 拖拽性能基准（opt-in）
+│   ├── 命令: npm run benchmark:drag
+│   ├── 文件: tests/smoke/drag-performance.smoke.spec.js, docs/DRAG_PERFORMANCE_BASELINE.md
+│   └── 默认: 仅 DRAG_BENCHMARK=1 时执行；100/500 行 × 单项/50 项选择，非默认 smoke/CI timing gate
 └── 完整发布前验证
     └── 命令: npm run test:unit && npm run test:smoke && npm run package && git diff --check
 ```

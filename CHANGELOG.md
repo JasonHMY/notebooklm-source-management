@@ -28,6 +28,7 @@
 ## [Unreleased] (未发布)
 
 ### Changed
+- **拖拽性能可选基准 (Opt-in Drag Performance Benchmark)**: **影响**: 对扩展使用无可感知变化。 新增 `npm run benchmark:drag`，仅在 `DRAG_BENCHMARK=1` 时运行真实扩展上下文中的 100/500 行、单项/50 项选择 reflow 拖拽样本；记录 prepare 与 manager-active callback 的同步 CPU、强制几何读取阶段和三类 DOM 调用计数，默认 smoke/CI 不执行该 timing 基准。基线文档保留同环境的 Before/After 表格和后续验收入口。
 - **记录存储加固完成证据 (Record Storage Hardening Completion Evidence)**: **影响**: 对扩展使用无可感知变化。 优化路线图基线报告现记录 Storage Integrity 工作流的最终已验证提交 `39bdfa04b49cd939be8d20f66adc16c4d607a66f`、lint/重点 Jest/unit/headless smoke/package 与安全/范围检查结果，以及最终复核结论；拖拽和架构工作流仍保持未执行状态。
 - **集中存储契约定义 (Centralize Storage Contract Definitions)**: **影响**: 对扩展使用无可感知变化。 新增纯共享 `storage-contract` 模块，统一 schema/import 版本、状态/历史/recovery/开发日志 key builders、精确 notebook key ownership 与 schema compatibility；content、background、manifest 与测试 loader 现使用同一契约，既有存储键、导入格式、权限和数据行为不变。
 - **产品更名为 GeminiNotebook-Source-Management (Rename Product to GeminiNotebook-Source-Management)**: **影响**: 扩展名称、启动器提示、欢迎页和三语平台文案统一使用新品牌与 Gemini Notebook 名称；npm 包名、发布 zip 及设置页导出的 JSON 文件名前缀同步改为 `gemininotebook-source-management`。 现有 `notebooklm.google.com` 入口、Chrome Web Store / GitHub 链接、`notebooklm-source-management-config` 备份格式、存储键和 `NSM_*` 运行时标识保持不变，已有数据与旧备份无需迁移。
