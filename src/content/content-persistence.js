@@ -187,6 +187,7 @@
         let futureSchemaWriteBlocked = false;
         let schemaWriteScopeProjectId = '';
         let schemaWriteScopeInstanceToken = null;
+        let schemaWriteScopeGeneration = 0;
 
         const DEFAULT_SAVE_STATUS = {
             state: 'idle',
@@ -749,9 +750,6 @@
                             const storageMetadata = getStorageMetadataFromResponse(response);
                             if (response.errorCode === 'stale_revision') {
                                 const currentRevision = Number(response.currentRevision) || 0;
-                                if (currentRevision > ctx.lastKnownSaveRevision) {
-                                    ctx.lastKnownSaveRevision = currentRevision;
-                                }
                                 resolve({
                                     ok: false,
                                     reason: 'stale_revision',
@@ -771,9 +769,6 @@
 
                         const saveRevision = Number(response?.saveRevision) || 0;
                         const storageMetadata = getStorageMetadataFromResponse(response);
-                        if (saveRevision > ctx.lastKnownSaveRevision) {
-                            ctx.lastKnownSaveRevision = saveRevision;
-                        }
                         resolve({
                             ok: true,
                             stale: Boolean(response?.stale),
@@ -884,6 +879,7 @@
         function enqueueStateSave(key, rawSnapshot, options = {}) {
             const clientSaveId = createClientSaveId();
             const snapshot = prepareRuntimeSaveSnapshot(rawSnapshot);
+            const requestedScopeGeneration = schemaWriteScopeGeneration;
             const counts = getPersistableStateCounts(snapshot);
             developerLog('debug', 'persistence', 'state_save_requested', {
                 clientSaveId,
@@ -900,7 +896,24 @@
                     clientSaveId
                 });
             }
+            const getScopeInvalidationResult = () => {
+                if (
+                    requestedScopeGeneration === schemaWriteScopeGeneration
+                    && !futureSchemaWriteBlocked
+                ) {
+                    return null;
+                }
+                return {
+                    ok: false,
+                    reason: futureSchemaWriteBlocked ? 'unsupported_schema' : 'save_scope_changed',
+                    skipped: true
+                };
+            };
             const runSave = () => {
+                const blockedResult = getScopeInvalidationResult();
+                if (blockedResult) {
+                    return Promise.resolve(blockedResult);
+                }
                 const baseRevision = Number(ctx.lastKnownSaveRevision) || 0;
                 const saveSnapshot = options.skipRuntimeMessage
                     ? preparePersistableSnapshot(snapshot)
@@ -915,6 +928,10 @@
                         clientSaveId
                     }))
                     .then((result) => {
+                        const invalidatedResult = getScopeInvalidationResult();
+                        if (invalidatedResult) {
+                            return invalidatedResult;
+                        }
                         const storageMetadata = getStorageMetadataFromResult(result);
                         const hasStorageMetadata = storageMetadata.storageQuotaBytes > 0 || storageMetadata.storageUsageBytes > 0;
                         const currentStatus = getSaveStatus();
@@ -955,12 +972,18 @@
                                 storageQuotaBytes: storageMetadata.storageQuotaBytes
                             });
                         } else {
-                            const lastStorageError = result.reason === 'storage_quota_exceeded'
-                                ? 'storage_quota_exceeded'
-                                : getSaveStatus().lastStorageError || '';
                             const staleRemoteRevision = result.reason === 'stale_revision'
                                 ? Number(result.runtimeResult?.currentRevision) || ctx.lastKnownSaveRevision
                                 : currentStatus.lastStaleRemoteRevision || 0;
+                            if (
+                                result.reason === 'stale_revision'
+                                && staleRemoteRevision > ctx.lastKnownSaveRevision
+                            ) {
+                                ctx.lastKnownSaveRevision = staleRemoteRevision;
+                            }
+                            const lastStorageError = result.reason === 'storage_quota_exceeded'
+                                ? 'storage_quota_exceeded'
+                                : getSaveStatus().lastStorageError || '';
                             const staleLocalRevision = result.reason === 'stale_revision'
                                 ? baseRevision
                                 : currentStatus.lastStaleLocalRevision || 0;
@@ -1707,9 +1730,20 @@
                 schemaWriteScopeProjectId !== expectedProjectId
                 || schemaWriteScopeInstanceToken !== expectedInstanceToken
             ) {
+                schemaWriteScopeGeneration += 1;
                 futureSchemaWriteBlocked = false;
                 schemaWriteScopeProjectId = expectedProjectId;
                 schemaWriteScopeInstanceToken = expectedInstanceToken;
+                const currentSaveStatus = getSaveStatus();
+                if (
+                    currentSaveStatus.state === 'failed'
+                    && currentSaveStatus.lastError === 'unsupported_schema'
+                ) {
+                    setSaveStatus({
+                        state: 'idle',
+                        lastError: ''
+                    });
+                }
             }
             const requestId = ctx.nextLoadStateRequestId++;
             ctx.activeLoadStateRequestId = requestId;
@@ -1727,6 +1761,7 @@
                 const authoritativeRawState = pickAuthoritativeRawState(primaryState, backupState);
                 const authoritativeCompatibility = getStorageSchemaCompatibility(authoritativeRawState);
                 if (authoritativeCompatibility === 'future' || authoritativeCompatibility === 'invalid') {
+                    schemaWriteScopeGeneration += 1;
                     futureSchemaWriteBlocked = true;
                     ctx.pendingStorageUpgrade = false;
                     ctx.pendingStructuralStateRepair = null;

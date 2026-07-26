@@ -486,6 +486,161 @@ describe('saveState', () => {
         await secondSave;
     });
 
+    it('does not dispatch a queued save after unsupported schema activates', async () => {
+        seedPersistedState();
+        const pendingRuntimeCallbacks = [];
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'SAVE_STATE') {
+                pendingRuntimeCallbacks.push({ message, cb });
+            }
+        });
+
+        const firstSave = mod.saveState({ immediate: true });
+        mod.state.ungrouped.push('queued-source');
+        mod.sourcesByKey.set('queued-source', {
+            enabled: true,
+            title: 'Queued',
+            normalizedTitle: 'queued',
+            stableToken: '',
+            fingerprint: 'queued||article',
+            identityType: 'fingerprint'
+        });
+        const queuedSave = mod.saveState({ immediate: true });
+        expect(pendingRuntimeCallbacks).toHaveLength(1);
+
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({
+                sourcesPlusState_test_project_id: {
+                    schemaVersion: 6,
+                    _saveRevision: 8,
+                    root: [{ type: 'source', key: 'future-source' }],
+                    groupsById: {},
+                    ungrouped: [],
+                    sourceStateById: {
+                        'future-source': { enabled: true }
+                    }
+                }
+            });
+        });
+        const loadCallback = jest.fn();
+        mod.loadState(loadCallback);
+        expect(loadCallback).toHaveBeenCalledWith(null);
+
+        pendingRuntimeCallbacks[0].cb({
+            success: true,
+            saveRevision: 1,
+            savedAt: '2026-04-22T00:00:01.000Z'
+        });
+        await firstSave;
+        await Promise.resolve();
+        if (pendingRuntimeCallbacks[1]) {
+            pendingRuntimeCallbacks[1].cb({
+                success: true,
+                saveRevision: 2,
+                savedAt: '2026-04-22T00:00:02.000Z'
+            });
+        }
+        const queuedResult = await queuedSave;
+
+        expect(pendingRuntimeCallbacks).toHaveLength(1);
+        expect(queuedResult).toMatchObject({
+            ok: false,
+            reason: 'unsupported_schema',
+            skipped: true
+        });
+        expect(mod.getSaveStatus()).toMatchObject({
+            state: 'failed',
+            lastError: 'unsupported_schema'
+        });
+    });
+
+    it('ignores an in-flight save result after unsupported schema activates', async () => {
+        const projectId = seedPersistedState();
+        let pendingSaveCallback = null;
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'SAVE_STATE') {
+                pendingSaveCallback = cb;
+            }
+        });
+
+        const inFlightSave = mod.saveState({ immediate: true, critical: true });
+        expect(typeof pendingSaveCallback).toBe('function');
+
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({
+                sourcesPlusState_test_project_id: {
+                    schemaVersion: 6,
+                    _saveRevision: 8,
+                    root: [{ type: 'source', key: 'future-source' }],
+                    groupsById: {},
+                    ungrouped: [],
+                    sourceStateById: {
+                        'future-source': { enabled: true }
+                    }
+                }
+            });
+        });
+        mod.loadState(jest.fn());
+        expect(mod.getSaveStatus()).toMatchObject({
+            state: 'failed',
+            lastError: 'unsupported_schema'
+        });
+
+        pendingSaveCallback({
+            success: true,
+            saveRevision: 9,
+            savedAt: '2026-04-22T00:00:09.000Z'
+        });
+        await inFlightSave;
+
+        expect(mod.getSaveStatus()).toMatchObject({
+            state: 'failed',
+            lastError: 'unsupported_schema',
+            lastSaveRevision: 0
+        });
+        expect(global.sessionStorage.removeItem).not.toHaveBeenCalledWith(
+            `sourcesPlusRecovery_${projectId}`
+        );
+
+        mod._setProjectId('supported-project');
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({
+                'sourcesPlusState_supported-project': {
+                    schemaVersion: 5,
+                    _saveRevision: 3,
+                    root: [],
+                    groupsById: {},
+                    ungrouped: ['supported-source'],
+                    sourceStateById: {
+                        'supported-source': { enabled: true }
+                    },
+                    tagsById: {},
+                    tagOrder: [],
+                    sourceTagsById: {}
+                }
+            });
+        });
+        mod.loadState(jest.fn());
+        await Promise.resolve();
+
+        global.chrome.runtime.sendMessage.mockClear();
+        const nextScopeSave = mod.saveState({ immediate: true });
+        await Promise.resolve();
+        const nextScopeMessage = global.chrome.runtime.sendMessage.mock.calls
+            .map(([message]) => message)
+            .find((message) => message?.type === 'SAVE_STATE');
+        expect(nextScopeMessage).toMatchObject({
+            key: 'sourcesPlusState_supported-project',
+            baseRevision: 3
+        });
+        pendingSaveCallback({
+            success: true,
+            saveRevision: 4,
+            savedAt: '2026-04-22T00:00:10.000Z'
+        });
+        await nextScopeSave;
+    });
+
     it('deep clones queued snapshots before async storage callbacks can mutate runtime state', () => {
         seedPersistedState();
         let capturedData = null;
@@ -2317,6 +2472,12 @@ describe('loadState', () => {
         };
 
         mod._setProjectId('future-project');
+        mod.setSaveStatus({
+            state: 'saved',
+            lastError: '',
+            lastSaveRevision: 7,
+            storageUsageBytes: 4096
+        });
         global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
             cb({
                 'sourcesPlusState_future-project': futureState,
@@ -2325,6 +2486,12 @@ describe('loadState', () => {
         });
         mod.loadState(futureCallback);
         expect(futureCallback).toHaveBeenCalledWith(null);
+        expect(mod.getSaveStatus()).toMatchObject({
+            state: 'failed',
+            lastError: 'unsupported_schema',
+            lastSaveRevision: 7,
+            storageUsageBytes: 4096
+        });
 
         mod._setProjectId('supported-project');
         global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
@@ -2339,6 +2506,12 @@ describe('loadState', () => {
             schemaVersion: 5,
             ungrouped: ['supported-source']
         }));
+        expect(mod.getSaveStatus()).toMatchObject({
+            state: 'idle',
+            lastError: '',
+            lastSaveRevision: 7,
+            storageUsageBytes: 4096
+        });
         global.chrome.runtime.sendMessage.mockClear();
         mod.saveState({ immediate: true });
         expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(

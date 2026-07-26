@@ -33,7 +33,7 @@
 - **记录优化加固基线 (Record Optimization Hardening Baseline)**: **影响**: 对扩展使用无可感知变化。 记录路线图开始前的 lint、unit 和默认 headless smoke 通过结果及起始 commit，为后续存储、拖拽和架构任务提供可核对的执行台账；未修改 runtime、存储或拖拽行为。
 
 ### Fixed
-- **不支持的存储与导入版本只读保护 (Reject Unsupported Storage and Import Versions)**: **影响**: 当本地状态来自更新版本或带有无效 schema 时，扩展不再把它当旧数据降级覆盖；未知或不完整的导入 envelope 也会直接拒绝。 权威 primary/backup 状态在迁移、历史修复和应用前先校验版本，失败时以 `unsupported_schema` 阻断当前笔记本加载实例的普通及生命周期写入；切换笔记本或新建 manager 实例后解除该阻断，旧版 bare-state 导入与 schema v1–v5 迁移保持兼容。
+- **不支持的存储与导入版本只读保护 (Reject Unsupported Storage and Import Versions)**: **影响**: 当本地状态来自更新版本或带有无效 schema 时，扩展不再把它当旧数据降级覆盖；未知或不完整的导入 envelope 也会直接拒绝。 权威 primary/backup 状态在迁移、历史修复和应用前先校验版本，失败时以 `unsupported_schema` 阻断当前笔记本加载实例的普通及生命周期写入；保存队列在任务开始与结果回收时复核 load scope，旧 scope 的排队任务不再发送、已在途结果也不能覆盖只读错误或推进 revision/recovery 状态。切换笔记本或新建 manager 实例后只清除该 schema 专属错误并恢复保存，旧版 bare-state 导入与 schema v1–v5 迁移保持兼容。
 
 ## [2026-06-16] [26.6.16]
 
