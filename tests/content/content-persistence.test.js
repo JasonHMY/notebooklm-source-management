@@ -758,7 +758,7 @@ describe('saveState', () => {
     });
 
     it('keeps the explicit skipRuntimeMessage path available for local test fallback writes', async () => {
-        seedPersistedState();
+        const projectId = seedPersistedState();
 
         const result = await mod.saveState({ immediate: true, critical: true, skipRuntimeMessage: true });
 
@@ -774,6 +774,10 @@ describe('saveState', () => {
                 })
             }),
             expect.any(Function)
+        );
+        expect(global.sessionStorage.getItem(`sourcesPlusRecovery_${projectId}`)).not.toBeNull();
+        expect(global.sessionStorage.removeItem).not.toHaveBeenCalledWith(
+            `sourcesPlusRecovery_${projectId}`
         );
     });
 
@@ -843,6 +847,377 @@ describe('saveState', () => {
         mod._hideActiveToastForTest(false);
     });
 
+    it('keeps the pre-import snapshot as recovery when an import critical save fails', async () => {
+        const projectId = seedPersistedState();
+        const beforeImport = {
+            ...expectedPersistableState,
+            root: [{ type: 'group', id: 'before-import' }],
+            groupsById: {
+                'before-import': { id: 'before-import', title: 'Before', children: [] }
+            },
+            customHeight: null
+        };
+        global.chrome.runtime.sendMessage.mockImplementationOnce((message, cb) => {
+            cb({ success: false, errorCode: 'storage_quota_exceeded' });
+        });
+
+        const result = await mod.saveState({
+            immediate: true,
+            critical: true,
+            recoveryFallbackSnapshot: beforeImport,
+            allowLocalFallback: false
+        });
+
+        expect(result).toMatchObject({
+            ok: false,
+            reason: 'storage_quota_exceeded'
+        });
+        expect(mod.readRecoverySnapshot()).toMatchObject({
+            snapshot: beforeImport,
+            reason: 'import_rollback_required',
+            failed: true
+        });
+        expect(global.sessionStorage.removeItem).not.toHaveBeenCalledWith(
+            `sourcesPlusRecovery_${projectId}`
+        );
+    });
+
+    it('writes pre-import recovery at enqueue before an import save settles', async () => {
+        seedPersistedState();
+        const beforeImport = {
+            ...expectedPersistableState,
+            root: [{ type: 'group', id: 'before-pending-import' }],
+            groupsById: {
+                'before-pending-import': { id: 'before-pending-import', title: 'Before', children: [] }
+            }
+        };
+        let settleRuntime;
+        global.chrome.runtime.sendMessage.mockImplementationOnce((message, cb) => {
+            settleRuntime = cb;
+        });
+
+        const pendingSave = mod.saveState({
+            immediate: true,
+            critical: true,
+            recoveryFallbackSnapshot: beforeImport,
+            allowLocalFallback: false
+        });
+
+        expect(mod.readRecoverySnapshot()).toMatchObject({
+            snapshot: beforeImport,
+            reason: 'import_pending',
+            failed: false
+        });
+
+        settleRuntime({ success: true, saveRevision: 1, savedAt: '2026-04-22T00:00:01.000Z' });
+        await pendingSave;
+    });
+
+    it('retains import_pending recovery when the manager is destroyed before acknowledgement', () => {
+        const projectId = seedPersistedState();
+        const beforeImport = {
+            ...expectedPersistableState,
+            root: [{ type: 'group', id: 'before-destroyed-import' }]
+        };
+        global.chrome.runtime.sendMessage.mockImplementationOnce(() => {});
+
+        mod.saveState({
+            immediate: true,
+            critical: true,
+            recoveryFallbackSnapshot: beforeImport,
+            allowLocalFallback: false
+        });
+        mod._destroyContentInstanceForTest();
+
+        expect(JSON.parse(
+            global.sessionStorage.getItem(`sourcesPlusRecovery_${projectId}`)
+        )).toMatchObject({
+            snapshot: beforeImport,
+            reason: 'import_pending',
+            failed: false
+        });
+    });
+
+    it('preserves an existing recovery snapshot when import application is deferred before saving', async () => {
+        const projectId = seedPersistedState();
+        const recoveryKey = `sourcesPlusRecovery_${projectId}`;
+        const existingRecovery = {
+            snapshot: expectedPersistableState,
+            baseRevision: 2,
+            createdAt: '2026-04-22T00:30:00.000Z',
+            reason: 'page_lifecycle',
+            clientSaveId: 'existing-recovery',
+            failed: false
+        };
+        global.sessionStorage.setItem(recoveryKey, JSON.stringify(existingRecovery));
+
+        const result = await mod.applyImportConfig(JSON.stringify({
+            schemaVersion: 5,
+            root: [{ type: 'source', key: 'deferred-source' }],
+            groupsById: {},
+            ungrouped: [],
+            sourceStateById: {
+                'deferred-source': {
+                    enabled: true,
+                    title: 'Deferred source'
+                }
+            },
+            customHeight: null,
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {}
+        }));
+
+        expect(result).toMatchObject({
+            ok: false,
+            reason: 'deferred',
+            rolledBack: true
+        });
+        expect(JSON.parse(global.sessionStorage.getItem(recoveryKey))).toEqual(existingRecovery);
+        expect(global.chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+            expect.objectContaining({ type: 'SAVE_STATE' }),
+            expect.any(Function)
+        );
+    });
+
+    it('writes queued import recovery immediately while an older save is still in flight', async () => {
+        seedPersistedState();
+        const callbacks = [];
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            callbacks.push(cb);
+        });
+        const olderSave = mod.saveState({ immediate: true, critical: true });
+        const beforeImport = {
+            ...expectedPersistableState,
+            root: [{ type: 'group', id: 'before-queued-import' }],
+            groupsById: {
+                'before-queued-import': { id: 'before-queued-import', title: 'Before', children: [] }
+            }
+        };
+
+        const queuedImport = mod.saveState({
+            immediate: true,
+            critical: true,
+            recoveryFallbackSnapshot: beforeImport,
+            allowLocalFallback: false
+        });
+
+        expect(callbacks).toHaveLength(1);
+        expect(mod.readRecoverySnapshot()).toMatchObject({
+            snapshot: beforeImport,
+            reason: 'import_pending',
+            failed: false
+        });
+
+        callbacks[0]({ success: true, saveRevision: 1, savedAt: '2026-04-22T00:00:01.000Z' });
+        await olderSave;
+        expect(mod.readRecoverySnapshot()).toMatchObject({
+            snapshot: beforeImport,
+            reason: 'import_pending',
+            failed: false
+        });
+        await Promise.resolve();
+        expect(callbacks).toHaveLength(2);
+        callbacks[1]({ success: true, saveRevision: 2, savedAt: '2026-04-22T00:00:02.000Z' });
+        await queuedImport;
+    });
+
+    it('does not let an older critical failure overwrite queued import recovery', async () => {
+        seedPersistedState();
+        const callbacks = [];
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            callbacks.push(cb);
+        });
+        const olderSave = mod.saveState({ immediate: true, critical: true });
+        const beforeImport = {
+            ...expectedPersistableState,
+            root: [{ type: 'group', id: 'before-queued-import-failure' }]
+        };
+        const queuedImport = mod.saveState({
+            immediate: true,
+            critical: true,
+            recoveryFallbackSnapshot: beforeImport,
+            allowLocalFallback: false
+        });
+
+        callbacks[0]({ success: false, errorCode: 'runtime_failure' });
+        await olderSave;
+        expect(mod.readRecoverySnapshot()).toMatchObject({
+            snapshot: beforeImport,
+            reason: 'import_pending',
+            failed: false
+        });
+
+        await Promise.resolve();
+        callbacks[1]({ success: true, saveRevision: 1, savedAt: '2026-04-22T00:00:02.000Z' });
+        await queuedImport;
+    });
+
+    it('does not clear import recovery when runtime is unavailable even if local storage could save', async () => {
+        seedPersistedState();
+        const beforeImport = {
+            ...expectedPersistableState,
+            root: [{ type: 'group', id: 'before-runtime-unavailable' }]
+        };
+        global.chrome.runtime.sendMessage = undefined;
+
+        const result = await mod.saveState({
+            immediate: true,
+            critical: true,
+            recoveryFallbackSnapshot: beforeImport,
+            allowLocalFallback: false
+        });
+
+        expect(result).toMatchObject({
+            ok: false,
+            reason: 'runtime_unavailable'
+        });
+        expect(global.chrome.storage.local.set).not.toHaveBeenCalled();
+        expect(mod.readRecoverySnapshot()).toMatchObject({
+            snapshot: beforeImport,
+            reason: 'import_rollback_required',
+            failed: true
+        });
+    });
+
+    it.each([
+        ['undefined', undefined],
+        ['missing success', { saveRevision: 9 }]
+    ])('settles a malformed %s runtime acknowledgement as empty_response', async (label, response) => {
+        seedPersistedState();
+        const beforeImport = {
+            ...expectedPersistableState,
+            root: [{ type: 'group', id: 'before-ambiguous-ack' }]
+        };
+        global.chrome.runtime.sendMessage.mockImplementationOnce((message, cb) => {
+            cb(response);
+        });
+
+        const result = await mod.saveState({
+            immediate: true,
+            critical: true,
+            recoveryFallbackSnapshot: beforeImport,
+            allowLocalFallback: false
+        });
+
+        expect(result).toMatchObject({
+            ok: false,
+            reason: 'empty_response'
+        });
+        expect(mod.readRecoverySnapshot()).toMatchObject({
+            snapshot: beforeImport,
+            reason: 'import_ack_unknown',
+            failed: true
+        });
+    });
+
+    it('binds an in-flight success to notebook A recovery, revision, and status after switching to B', async () => {
+        const projectA = 'notebook-a';
+        mod._setProjectId(projectA);
+        seedPersistedState();
+        mod._setProjectId(projectA);
+        const callbacks = [];
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            callbacks.push({ message, cb });
+        });
+        const beforeImport = {
+            ...expectedPersistableState,
+            root: [{ type: 'group', id: 'before-a-import' }]
+        };
+        const pendingA = mod.saveState({
+            immediate: true,
+            critical: true,
+            recoveryFallbackSnapshot: beforeImport,
+            allowLocalFallback: false
+        });
+        const recoveryKeyA = `sourcesPlusRecovery_${projectA}`;
+
+        mod._setProjectId('notebook-b');
+        const recoveryKeyB = 'sourcesPlusRecovery_notebook-b';
+        global.sessionStorage.setItem(recoveryKeyB, JSON.stringify({
+            snapshot: { schemaVersion: 5, root: [], groupsById: {}, ungrouped: [], sourceStateById: {} },
+            baseRevision: 0,
+            createdAt: '2026-04-22T00:10:00.000Z',
+            reason: 'save_pending',
+            clientSaveId: 'notebook-b:pending',
+            failed: false
+        }));
+        mod.setSaveStatus({ state: 'idle', clientSaveId: 'notebook-b:pending' });
+
+        callbacks[0].cb({ success: true, saveRevision: 7, savedAt: '2026-04-22T00:11:00.000Z' });
+        await pendingA;
+
+        expect(global.sessionStorage.getItem(recoveryKeyA)).toBeNull();
+        expect(global.sessionStorage.getItem(recoveryKeyB)).not.toBeNull();
+        expect(mod.getSaveStatus()).toMatchObject({
+            state: 'idle',
+            clientSaveId: 'notebook-b:pending'
+        });
+
+        const pendingB = mod.saveState({ immediate: true });
+        expect(callbacks[1].message).toMatchObject({
+            key: 'sourcesPlusState_notebook-b',
+            baseRevision: 0
+        });
+        callbacks[1].cb({ success: true, saveRevision: 1, savedAt: '2026-04-22T00:12:00.000Z' });
+        await pendingB;
+
+        mod._setProjectId(projectA);
+        const nextA = mod.saveState({ immediate: true });
+        expect(callbacks[2].message).toMatchObject({
+            key: `sourcesPlusState_${projectA}`,
+            baseRevision: 7
+        });
+        callbacks[2].cb({ success: true, saveRevision: 8, savedAt: '2026-04-22T00:13:00.000Z' });
+        await nextA;
+    });
+
+    it('binds an in-flight failure to notebook A without overwriting notebook B recovery or status', async () => {
+        seedPersistedState();
+        mod._setProjectId('notebook-a');
+        let settleA;
+        global.chrome.runtime.sendMessage.mockImplementationOnce((message, cb) => {
+            settleA = cb;
+        });
+        const beforeImport = {
+            ...expectedPersistableState,
+            root: [{ type: 'group', id: 'before-a-failure' }]
+        };
+        const pendingA = mod.saveState({
+            immediate: true,
+            critical: true,
+            recoveryFallbackSnapshot: beforeImport,
+            allowLocalFallback: false
+        });
+
+        mod._setProjectId('notebook-b');
+        const recoveryKeyB = 'sourcesPlusRecovery_notebook-b';
+        const recoveryB = {
+            snapshot: { schemaVersion: 5, root: [], groupsById: {}, ungrouped: [], sourceStateById: {} },
+            baseRevision: 3,
+            createdAt: '2026-04-22T00:20:00.000Z',
+            reason: 'save_pending',
+            clientSaveId: 'notebook-b:pending',
+            failed: false
+        };
+        global.sessionStorage.setItem(recoveryKeyB, JSON.stringify(recoveryB));
+        mod.setSaveStatus({ state: 'idle', clientSaveId: 'notebook-b:pending' });
+
+        settleA({ success: false, errorCode: 'stale_revision', currentRevision: 9 });
+        await pendingA;
+
+        expect(JSON.parse(global.sessionStorage.getItem('sourcesPlusRecovery_notebook-a'))).toMatchObject({
+            snapshot: beforeImport,
+            reason: 'import_rollback_required',
+            failed: true
+        });
+        expect(JSON.parse(global.sessionStorage.getItem(recoveryKeyB))).toEqual(recoveryB);
+        expect(mod.getSaveStatus()).toMatchObject({
+            state: 'idle',
+            clientSaveId: 'notebook-b:pending'
+        });
+    });
+
     it('detects newer recovery snapshots and exposes recovery status', () => {
         const projectId = seedPersistedState();
         global.sessionStorage.setItem(`sourcesPlusRecovery_${projectId}`, JSON.stringify({
@@ -862,6 +1237,31 @@ describe('saveState', () => {
             recoveryAvailable: true,
             recoveryCreatedAt: '2026-04-22T00:01:00.000Z',
             lastError: 'recovery_available'
+        });
+    });
+
+    it('always offers import_ack_unknown recovery for explicit reconciliation', () => {
+        const projectId = seedPersistedState();
+        global.sessionStorage.setItem(`sourcesPlusRecovery_${projectId}`, JSON.stringify({
+            snapshot: expectedPersistableState,
+            baseRevision: 5,
+            createdAt: '2026-04-22T00:01:00.000Z',
+            reason: 'import_ack_unknown',
+            clientSaveId: 'test-import-save',
+            failed: true
+        }));
+
+        expect(mod.detectRecoverySnapshotAvailability({
+            ...expectedPersistableState,
+            _saveRevision: 99,
+            _savedAt: '2026-04-22T00:02:00.000Z'
+        })).toBe(true);
+        expect(global.sessionStorage.removeItem).not.toHaveBeenCalledWith(
+            `sourcesPlusRecovery_${projectId}`
+        );
+        expect(mod.getSaveStatus()).toMatchObject({
+            state: 'recovery_available',
+            recoveryAvailable: true
         });
     });
 

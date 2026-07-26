@@ -38,6 +38,7 @@
             appendStateHistorySnapshot,
             writeImportBackupSnapshot = () => {},
             restoreInitialLoadedState,
+            rollbackImportSnapshot = () => false,
             restoreImportBackupSnapshotFromUi = () => false,
             saveState,
             render = () => {}
@@ -74,6 +75,21 @@
         const safeNormalizeSourceView = typeof normalizeSourceViewSwitchTarget === 'function'
             ? normalizeSourceViewSwitchTarget
             : (value) => value || '';
+
+        function mapImportFailureReason({ saveReason, rolledBack }) {
+            if (!rolledBack) return 'rollback_failed';
+            if ([
+                'runtime_message_error',
+                'runtime_exception',
+                'empty_response'
+            ].includes(saveReason)) {
+                return 'import_ack_unknown';
+            }
+            if (saveReason === 'storage_quota_exceeded') {
+                return 'storage_quota_exceeded';
+            }
+            return 'save_failed';
+        }
 
         function getImportConfigLimit(value, fallback) {
             const normalized = Number(value);
@@ -418,8 +434,9 @@
             }
 
             const importedState = preview.state;
+            const beforeImportSnapshot = cloneSerializableData(buildPersistableState());
             if (typeof appendStateHistorySnapshot === 'function') {
-                await appendStateHistorySnapshot(buildPersistableState(), 'before_import');
+                await appendStateHistorySnapshot(beforeImportSnapshot, 'before_import');
             }
             writeImportBackupSnapshot();
             if (importedState.customHeight != null) {
@@ -432,24 +449,45 @@
                 ? restoreInitialLoadedState(importedState)
                 : { deferred: false };
             if (restoreResult.deferred) {
+                const rolledBack = rollbackImportSnapshot(beforeImportSnapshot);
                 render();
                 showToast(getMessage('ui_settings_import_deferred'), { variant: 'info' });
                 developerLog('info', 'import_export', 'config_import_deferred', {
                     totalSources: preview.totalSources,
-                    matchedSources: preview.matchedSources
+                    matchedSources: preview.matchedSources,
+                    rolledBack
                 });
-                return { ...preview, ok: false, reason: 'deferred' };
+                return { ...preview, ok: false, reason: 'deferred', rolledBack };
             }
 
             render();
-            const saveResult = typeof saveState === 'function'
-                ? await saveState({ immediate: true, critical: true })
-                : { ok: true };
+            let saveResult;
+            try {
+                saveResult = typeof saveState === 'function'
+                    ? await saveState({
+                        immediate: true,
+                        critical: true,
+                        recoveryFallbackSnapshot: beforeImportSnapshot,
+                        allowLocalFallback: false
+                    })
+                    : { ok: true };
+            } catch (error) {
+                saveResult = { ok: false, reason: 'runtime_exception' };
+            }
             if (saveResult && saveResult.ok === false) {
-                developerLog('warn', 'import_export', 'config_import_apply_failed', {
-                    reason: saveResult.reason || 'save_failed'
+                const saveReason = saveResult.reason || 'save_failed';
+                const rolledBack = rollbackImportSnapshot(beforeImportSnapshot);
+                const reason = mapImportFailureReason({
+                    saveReason,
+                    rolledBack
                 });
-                return { ...preview, ok: false, reason: saveResult.reason || 'save_failed' };
+                render();
+                developerLog('warn', 'import_export', 'config_import_apply_failed', {
+                    reason,
+                    saveReason,
+                    rolledBack
+                });
+                return { ...preview, ok: false, reason, rolledBack };
             }
             showToast(getMessage('ui_settings_imported_toast'), {
                 variant: 'success',

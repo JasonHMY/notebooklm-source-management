@@ -1062,6 +1062,7 @@ test.describe.serial('extension smoke', () => {
 
             await previewImportText(JSON.stringify({
                 format: 'notebooklm-source-management-config',
+                formatVersion: 1,
                 data: {
                     schemaVersion: 3,
                     groups: ['cycle-a'],
@@ -1094,6 +1095,7 @@ test.describe.serial('extension smoke', () => {
 
             await previewImportText(JSON.stringify({
                 format: 'notebooklm-source-management-config',
+                formatVersion: 1,
                 data: {
                     schemaVersion: 3,
                     groups: ['imported-smoke-group'],

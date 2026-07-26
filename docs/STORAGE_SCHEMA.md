@@ -26,6 +26,16 @@ chrome.storage.local
 
 Separately from `chrome.storage.local`, page-lifecycle recovery writes a per-tab fallback snapshot to `sessionStorage` under `sourcesPlusRecovery_<projectId>`, holding `{ snapshot, baseRevision, createdAt, reason, clientSaveId, failed }`. It is a last-resort fallback (e.g. a critical save under quota pressure) so a tab can recover unsaved organization after a lifecycle interruption — normal primary writes still go through background `SAVE_STATE`.
 
+Every queued save captures an immutable notebook-bound context: project id, primary state key, recovery key, manager instance token, client save id, save snapshot, and recovery snapshot. Revision memory is tracked per primary state key. Async completion may update only that key's revision/recovery records, and may update visible save status only while the same project and manager instance are still current. A response is a confirmed background acknowledgement only when it contains boolean `success: true`; an empty or malformed response is `empty_response` and cannot clear recovery.
+
+Critical import saves use the pre-import snapshot as their recovery snapshot:
+
+- `import_pending`: written synchronously when the save is enqueued, before it waits behind older saves or dispatches a background request.
+- `import_rollback_required`: the background explicitly rejected the import save, so runtime is rolled back and the pre-import snapshot remains available.
+- `import_ack_unknown`: runtime messaging threw, failed, or returned an empty/malformed acknowledgement, so commit state is ambiguous; runtime is rolled back and recovery remains available for explicit reconciliation even if primary data appears equivalent or newer.
+
+Only confirmed background success clears a critical recovery snapshot. A local fallback result is insufficient, and import critical saves disable local fallback entirely.
+
 ## Global preferences schema
 
 `sourcesPlusPreferences` is not included in notebook import/export JSON.
@@ -195,3 +205,5 @@ Exports use this exact envelope:
 ```
 
 Imports remain compatible with a bare raw-state object when none of `format`, `formatVersion`, or `data` is present. If any one of those envelope markers is present, all three must be valid: the exact format string above, integer `formatVersion: 1`, and an object `data` payload. Unknown or incomplete envelopes are rejected rather than reinterpreted as bare state. Imported state then passes the same schema gate: a missing version is legacy, integer versions `1`–`5` are normalizable, and future or invalid versions are rejected. Rejecting an imported config does not set the notebook-scoped write block because the imported payload is not authoritative stored state.
+
+Applying an import is atomic from the runtime user's perspective. Before any imported mutation, the manager clones its current persistable snapshot, records history, and writes the import backup. It then applies the imported runtime state and issues a critical background save with the cloned pre-import snapshot as recovery. A deferred apply, thrown save, explicit save failure, or ambiguous acknowledgement restores the complete pre-import runtime state, including clearing an imported inline height when the prior `customHeight` was `null`. Failure results expose only the declared import reasons (`deferred`, `rollback_failed`, `storage_quota_exceeded`, `import_ack_unknown`, or `save_failed`), and never display the import success action.

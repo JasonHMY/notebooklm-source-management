@@ -147,10 +147,12 @@
                 state.activeTagId = null;
             }
 
-            if (normalizedState.customHeight != null) {
-                runtime.customHeight = normalizedState.customHeight;
-                const container = shadowRoot?.querySelector?.('.sp-container');
-                if (container) container.style.height = `${normalizedState.customHeight}px`;
+            runtime.customHeight = normalizedState.customHeight ?? null;
+            const container = shadowRoot?.querySelector?.('.sp-container');
+            if (container) {
+                container.style.height = runtime.customHeight == null
+                    ? ''
+                    : `${runtime.customHeight}px`;
             }
 
             refreshParentMap();

@@ -3538,6 +3538,11 @@
         }
     }
 
+    function rollbackImportSnapshot(snapshot) {
+        pendingInitialLoadedState = null;
+        return applyPersistableSnapshotToRuntime(snapshot);
+    }
+
     const importExportModule = createContentImportExport({
         runtime: runtimeContext,
         limits: {
@@ -3563,6 +3568,7 @@
         appendStateHistorySnapshot: (...args) => appendStateHistorySnapshot(...args),
         writeImportBackupSnapshot: (...args) => writeImportBackupSnapshot(...args),
         restoreInitialLoadedState: (...args) => restoreInitialLoadedState(...args),
+        rollbackImportSnapshot,
         restoreImportBackupSnapshotFromUi: (...args) => restoreImportBackupSnapshotFromUi(...args),
         saveState: (...args) => saveState(...args),
         render: (...args) => render(...args)

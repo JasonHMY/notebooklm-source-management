@@ -28,6 +28,7 @@ function createDeps(overrides = {}) {
         applyPersistableSnapshotToRuntime: jest.fn(() => true),
         appendStateHistorySnapshot: jest.fn(async () => true),
         restoreInitialLoadedState: jest.fn(() => ({ deferred: false })),
+        rollbackImportSnapshot: jest.fn(() => true),
         saveState: jest.fn(async () => ({ ok: true })),
         render: jest.fn(),
         showToast: jest.fn(),
@@ -321,7 +322,16 @@ describe('content import/export helper', () => {
             expect(deps.writeImportBackupSnapshot).toHaveBeenCalledTimes(1);
             expect(deps.restoreInitialLoadedState).toHaveBeenCalledTimes(1);
             expect(deps.render).toHaveBeenCalledTimes(1);
-            expect(deps.saveState).toHaveBeenCalledWith({ immediate: true, critical: true });
+            expect(deps.saveState).toHaveBeenCalledWith({
+                immediate: true,
+                critical: true,
+                recoveryFallbackSnapshot: {
+                    sourceStateById: {},
+                    groupsById: {},
+                    tagsById: {}
+                },
+                allowLocalFallback: false
+            });
             expect(deps.showToast).toHaveBeenCalledWith(
                 'ui_settings_imported_toast',
                 expect.objectContaining({
@@ -343,25 +353,148 @@ describe('content import/export helper', () => {
 
             expect(result.ok).toBe(false);
             expect(result.reason).toBe('deferred');
+            expect(result.rolledBack).toBe(true);
+            expect(deps.rollbackImportSnapshot).toHaveBeenCalledWith({
+                sourceStateById: {},
+                groupsById: {},
+                tagsById: {}
+            });
             expect(deps.saveState).not.toHaveBeenCalled();
             expect(deps.showToast).toHaveBeenCalledWith('ui_settings_import_deferred', { variant: 'info' });
         });
 
-        it('reports save failure when saveState rejects the save', async () => {
+        it('restores the pre-import runtime when the critical save fails', async () => {
+            const before = {
+                schemaVersion: 5,
+                root: [],
+                groupsById: {},
+                ungrouped: [],
+                sourceStateById: {},
+                customHeight: null
+            };
             const deps = createDeps({
-                saveState: jest.fn(async () => ({ ok: false, reason: 'quota_exceeded' }))
+                buildPersistableState: jest.fn(() => before),
+                saveState: jest.fn(async () => ({
+                    ok: false,
+                    reason: 'storage_quota_exceeded'
+                }))
             });
             const { applyImportConfig } = createContentImportExport(deps);
 
-            const result = await applyImportConfig(JSON.stringify({ groupsById: {}, sourceStateById: {} }));
+            const result = await applyImportConfig(JSON.stringify({
+                schemaVersion: 5,
+                root: [{ type: 'group', id: 'after' }],
+                groupsById: {
+                    after: { id: 'after', children: [] }
+                },
+                ungrouped: [],
+                sourceStateById: {}
+            }));
 
-            expect(result.ok).toBe(false);
-            expect(result.reason).toBe('quota_exceeded');
+            expect(result).toMatchObject({
+                ok: false,
+                reason: 'storage_quota_exceeded',
+                rolledBack: true
+            });
+            expect(deps.rollbackImportSnapshot).toHaveBeenCalledWith(before);
+            expect(deps.saveState).toHaveBeenCalledWith(expect.objectContaining({
+                recoveryFallbackSnapshot: before,
+                allowLocalFallback: false
+            }));
             expect(deps.developerLog).toHaveBeenCalledWith(
                 'warn',
                 'import_export',
                 'config_import_apply_failed',
-                expect.objectContaining({ reason: 'quota_exceeded' })
+                expect.objectContaining({ reason: 'storage_quota_exceeded' })
+            );
+            expect(deps.showToast).not.toHaveBeenCalledWith(
+                'ui_settings_imported_toast',
+                expect.anything()
+            );
+        });
+
+        it('rolls back and reports an ambiguous acknowledgement when the critical save throws', async () => {
+            const before = {
+                schemaVersion: 5,
+                root: [],
+                groupsById: {},
+                ungrouped: [],
+                sourceStateById: {},
+                customHeight: null
+            };
+            const deps = createDeps({
+                buildPersistableState: jest.fn(() => before),
+                saveState: jest.fn(async () => {
+                    throw new Error('context invalidated');
+                })
+            });
+            const { applyImportConfig } = createContentImportExport(deps);
+
+            const result = await applyImportConfig(JSON.stringify({
+                schemaVersion: 5,
+                groupsById: {},
+                sourceStateById: {}
+            }));
+
+            expect(result).toMatchObject({
+                ok: false,
+                reason: 'import_ack_unknown',
+                rolledBack: true
+            });
+            expect(deps.rollbackImportSnapshot).toHaveBeenCalledWith(before);
+            expect(deps.showToast).not.toHaveBeenCalledWith(
+                'ui_settings_imported_toast',
+                expect.anything()
+            );
+        });
+
+        it.each([
+            ['stale_revision', 'save_failed'],
+            ['runtime_unavailable', 'save_failed'],
+            ['runtime_failure', 'save_failed'],
+            ['runtime_message_error', 'import_ack_unknown'],
+            ['runtime_exception', 'import_ack_unknown'],
+            ['empty_response', 'import_ack_unknown']
+        ])('maps %s to the declared import failure reason %s', async (saveReason, expectedReason) => {
+            const deps = createDeps({
+                saveState: jest.fn(async () => ({ ok: false, reason: saveReason }))
+            });
+            const { applyImportConfig } = createContentImportExport(deps);
+
+            const result = await applyImportConfig(JSON.stringify({
+                schemaVersion: 5,
+                groupsById: {},
+                sourceStateById: {}
+            }));
+
+            expect(result).toMatchObject({
+                ok: false,
+                reason: expectedReason,
+                rolledBack: true
+            });
+        });
+
+        it('returns rollback_failed and never shows success when runtime rollback fails', async () => {
+            const deps = createDeps({
+                rollbackImportSnapshot: jest.fn(() => false),
+                saveState: jest.fn(async () => ({ ok: false, reason: 'storage_quota_exceeded' }))
+            });
+            const { applyImportConfig } = createContentImportExport(deps);
+
+            const result = await applyImportConfig(JSON.stringify({
+                schemaVersion: 5,
+                groupsById: {},
+                sourceStateById: {}
+            }));
+
+            expect(result).toMatchObject({
+                ok: false,
+                reason: 'rollback_failed',
+                rolledBack: false
+            });
+            expect(deps.showToast).not.toHaveBeenCalledWith(
+                'ui_settings_imported_toast',
+                expect.anything()
             );
         });
     });

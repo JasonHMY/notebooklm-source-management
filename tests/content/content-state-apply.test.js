@@ -197,6 +197,25 @@ describe('content state apply helper', () => {
         expect(container.style.height).toBe('420px');
     });
 
+    it('clears an imported inline height when the restored snapshot customHeight is null', () => {
+        const container = { style: { height: '640px' } };
+        const shadowRoot = { querySelector: jest.fn((selector) => (selector === '.sp-container' ? container : null)) };
+        const runtime = createRuntime({ shadowRoot, customHeight: 640 });
+        const deps = createDeps();
+        const { applyPersistableSnapshotToRuntime } = createContentStateApply({ runtime, ...deps });
+
+        applyPersistableSnapshotToRuntime({
+            groups: [],
+            ungrouped: [],
+            tagOrder: [],
+            customHeight: null,
+            sourceStateById: {}
+        });
+
+        expect(runtime.customHeight).toBeNull();
+        expect(container.style.height).toBe('');
+    });
+
     it('invokes buildParentMap once and syncSourceToPage for each tracked source', () => {
         const runtime = createRuntime({
             sourcesByKey: new Map([['a', { key: 'a' }], ['b', { key: 'b' }]])

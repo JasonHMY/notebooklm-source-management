@@ -184,6 +184,7 @@
         ensureStorageState();
         let saveQueueTail = null;
         let nextClientSaveId = 1;
+        const saveRevisionByStateKey = new Map();
         let futureSchemaWriteBlocked = false;
         let schemaWriteScopeProjectId = '';
         let schemaWriteScopeInstanceToken = null;
@@ -234,21 +235,47 @@
             return storage && typeof storage.getItem === 'function' ? storage : null;
         }
 
-        function rememberSnapshotSaveRevision(snapshot) {
-            const revision = getSnapshotSaveRevision(snapshot);
-            if (revision > ctx.lastKnownSaveRevision) {
-                ctx.lastKnownSaveRevision = revision;
-            }
-            return ctx.lastKnownSaveRevision;
+        function getStateKey(projectId = ctx.projectId) {
+            return projectId ? `sourcesPlusState_${projectId}` : '';
         }
 
-        function preparePersistableSnapshot(rawSnapshot) {
+        function getProjectIdFromStateKey(stateKey) {
+            const value = String(stateKey || '');
+            return value.startsWith('sourcesPlusState_')
+                ? value.slice('sourcesPlusState_'.length)
+                : '';
+        }
+
+        function getSaveRevisionForStateKey(stateKey = getStateKey()) {
+            if (!stateKey) return 0;
+            return Number(saveRevisionByStateKey.get(stateKey)) || 0;
+        }
+
+        function setSaveRevisionForStateKey(stateKey, revision) {
+            if (!stateKey) return 0;
+            const nextRevision = Math.max(
+                getSaveRevisionForStateKey(stateKey),
+                Number(revision) || 0
+            );
+            saveRevisionByStateKey.set(stateKey, nextRevision);
+            if (stateKey === getStateKey()) {
+                ctx.lastKnownSaveRevision = nextRevision;
+            }
+            return nextRevision;
+        }
+
+        function rememberSnapshotSaveRevision(snapshot, stateKey = getStateKey()) {
+            const revision = getSnapshotSaveRevision(snapshot);
+            return setSaveRevisionForStateKey(stateKey, revision);
+        }
+
+        function preparePersistableSnapshot(rawSnapshot, stateKey = getStateKey()) {
             const snapshot = cloneSerializableData(rawSnapshot || {});
             const nextRevision = Math.max(
-                Number(ctx.lastKnownSaveRevision) || 0,
+                getSaveRevisionForStateKey(stateKey),
                 getSnapshotSaveRevision(snapshot)
             ) + 1;
-            ctx.lastKnownSaveRevision = nextRevision;
+            setSaveRevisionForStateKey(stateKey, nextRevision);
             snapshot._saveRevision = nextRevision;
             snapshot._savedAt = new Date().toISOString();
             return snapshot;
@@ -261,8 +288,8 @@
             return snapshot;
         }
 
-        function createClientSaveId() {
-            const prefix = String(ctx.projectId || 'project');
+        function createClientSaveId(projectId = ctx.projectId) {
+            const prefix = String(projectId || 'project');
             const value = `${prefix}:${Date.now()}:${nextClientSaveId}`;
             nextClientSaveId += 1;
             return value;
@@ -272,26 +299,47 @@
             return projectId ? `sourcesPlusRecovery_${projectId}` : '';
         }
 
+        function resolveRecoveryKey(projectIdOrRecoveryKey = ctx.projectId) {
+            const value = String(projectIdOrRecoveryKey || '');
+            if (value.startsWith('sourcesPlusRecovery_')) return value;
+            return getRecoveryKey(value);
+        }
+
         function writeRecoverySnapshot(rawSnapshot, options = {}) {
             const storage = getSessionStorage();
-            const key = getRecoveryKey();
+            const key = resolveRecoveryKey(options.recoveryKey || ctx.projectId);
             if (!storage || !key || !rawSnapshot) return false;
+            if (options.expectedClientSaveId) {
+                const currentRecovery = readRecoverySnapshot(key);
+                if (
+                    currentRecovery?.clientSaveId
+                    && currentRecovery.clientSaveId !== options.expectedClientSaveId
+                ) {
+                    return false;
+                }
+            }
 
             const payload = {
                 snapshot: cloneSerializableData(rawSnapshot),
-                baseRevision: Number(ctx.lastKnownSaveRevision) || 0,
+                baseRevision: options.baseRevision == null
+                    ? getSaveRevisionForStateKey()
+                    : (Number(options.baseRevision) || 0),
                 createdAt: new Date().toISOString(),
                 reason: typeof options.reason === 'string' ? options.reason : 'critical_save',
-                clientSaveId: typeof options.clientSaveId === 'string' ? options.clientSaveId : createClientSaveId(),
+                clientSaveId: typeof options.clientSaveId === 'string'
+                    ? options.clientSaveId
+                    : createClientSaveId(),
                 failed: Boolean(options.failed)
             };
 
             try {
                 storage.setItem(key, JSON.stringify(payload));
-                setSaveStatus({
-                    recoveryAvailable: true,
-                    recoveryCreatedAt: payload.createdAt
-                });
+                if (key === getRecoveryKey()) {
+                    setSaveStatus({
+                        recoveryAvailable: true,
+                        recoveryCreatedAt: payload.createdAt
+                    });
+                }
                 developerLog('info', 'persistence', 'recovery_snapshot_written', {
                     reason: payload.reason,
                     baseRevision: payload.baseRevision,
@@ -305,9 +353,9 @@
             }
         }
 
-        function readRecoverySnapshot(projectId = ctx.projectId) {
+        function readRecoverySnapshot(projectIdOrRecoveryKey = ctx.projectId) {
             const storage = getSessionStorage();
-            const key = getRecoveryKey(projectId);
+            const key = resolveRecoveryKey(projectIdOrRecoveryKey);
             if (!storage || !key) return null;
 
             try {
@@ -322,17 +370,28 @@
             }
         }
 
-        function clearRecoverySnapshot(projectId = ctx.projectId) {
+        function clearRecoverySnapshot(projectIdOrRecoveryKey = ctx.projectId, options = {}) {
             const storage = getSessionStorage();
-            const key = getRecoveryKey(projectId);
+            const key = resolveRecoveryKey(projectIdOrRecoveryKey);
             if (!storage || !key) return false;
 
             try {
+                if (options.expectedClientSaveId) {
+                    const currentRecovery = readRecoverySnapshot(key);
+                    if (
+                        currentRecovery?.clientSaveId
+                        && currentRecovery.clientSaveId !== options.expectedClientSaveId
+                    ) {
+                        return false;
+                    }
+                }
                 storage.removeItem(key);
-                setSaveStatus({
-                    recoveryAvailable: false,
-                    recoveryCreatedAt: ''
-                });
+                if (key === getRecoveryKey()) {
+                    setSaveStatus({
+                        recoveryAvailable: false,
+                        recoveryCreatedAt: ''
+                    });
+                }
                 return true;
             } catch (error) {
                 console.warn('GeminiNotebook-Source-Management: Recovery snapshot clear failed:', error);
@@ -348,6 +407,16 @@
                     recoveryCreatedAt: ''
                 });
                 return false;
+            }
+
+            if (recovery.reason === 'import_ack_unknown') {
+                setSaveStatus({
+                    state: 'recovery_available',
+                    recoveryAvailable: true,
+                    recoveryCreatedAt: recovery.createdAt || '',
+                    lastError: 'recovery_available'
+                });
+                return true;
             }
 
             if (loadedState && arePersistableSnapshotsEquivalent(recovery.snapshot, loadedState)) {
@@ -745,9 +814,14 @@
                             return;
                         }
 
-                        if (response && response.success === false) {
+                        if (!response || typeof response.success !== 'boolean') {
+                            resolve({ ok: false, reason: 'empty_response' });
+                            return;
+                        }
+
+                        const storageMetadata = getStorageMetadataFromResponse(response);
+                        if (response.success === false) {
                             console.warn('GeminiNotebook-Source-Management: SAVE_STATE rejected by background:', response.errorCode || 'unknown_error');
-                            const storageMetadata = getStorageMetadataFromResponse(response);
                             if (response.errorCode === 'stale_revision') {
                                 const currentRevision = Number(response.currentRevision) || 0;
                                 resolve({
@@ -761,21 +835,20 @@
                             }
                             resolve({
                                 ok: false,
-                                reason: response.errorCode || 'runtime_failure',
+                                reason: response.errorCode || response.reason || 'runtime_failure',
                                 ...storageMetadata
                             });
                             return;
                         }
 
-                        const saveRevision = Number(response?.saveRevision) || 0;
-                        const storageMetadata = getStorageMetadataFromResponse(response);
                         resolve({
                             ok: true,
-                            stale: Boolean(response?.stale),
-                            saveRevision,
-                            savedAt: response?.savedAt || '',
+                            stale: Boolean(response.stale),
+                            saveRevision: Number(response.saveRevision) || 0,
+                            savedAt: response.savedAt || '',
                             ...storageMetadata
                         });
+                        return;
                     });
                 } catch (error) {
                     console.warn('GeminiNotebook-Source-Management: Context invalidated. Please refresh the page.', error);
@@ -817,7 +890,21 @@
                     };
                 }
 
-                const localData = data && data._saveRevision ? data : preparePersistableSnapshot(data);
+                if (options.allowLocalFallback === false) {
+                    return {
+                        ok: false,
+                        reason: runtimeResult.reason || 'runtime_unavailable',
+                        localResult: {
+                            skipped: true,
+                            reason: runtimeResult.reason || 'runtime_unavailable'
+                        },
+                        runtimeResult
+                    };
+                }
+
+                const localData = data && data._saveRevision
+                    ? data
+                    : preparePersistableSnapshot(data, options.stateKey);
                 const localResult = await writeStateToLocalStorage(key, localData);
                 if (localResult.stale) {
                     return {
@@ -839,7 +926,9 @@
                 };
             }
 
-            const localData = data && data._saveRevision ? data : preparePersistableSnapshot(data);
+            const localData = data && data._saveRevision
+                ? data
+                : preparePersistableSnapshot(data, options.stateKey);
             const localResult = await writeStateToLocalStorage(key, localData);
             if (localResult.stale) {
                 return {
@@ -877,29 +966,59 @@
         }
 
         function enqueueStateSave(key, rawSnapshot, options = {}) {
-            const clientSaveId = createClientSaveId();
-            const snapshot = prepareRuntimeSaveSnapshot(rawSnapshot);
+            const projectId = getProjectIdFromStateKey(key) || String(ctx.projectId || '');
+            const clientSaveId = createClientSaveId(projectId);
+            const saveSnapshot = prepareRuntimeSaveSnapshot(rawSnapshot);
+            const recoverySnapshot = prepareRuntimeSaveSnapshot(
+                options.recoveryFallbackSnapshot || saveSnapshot
+            );
+            const operation = Object.freeze({
+                projectId,
+                stateKey: key,
+                recoveryKey: getRecoveryKey(projectId),
+                instanceToken: ctx.activeManagerInstanceToken,
+                clientSaveId,
+                saveSnapshot,
+                recoverySnapshot
+            });
+            const operationOptions = Object.freeze({ ...options });
             const requestedScopeGeneration = schemaWriteScopeGeneration;
-            const counts = getPersistableStateCounts(snapshot);
+            const counts = getPersistableStateCounts(operation.saveSnapshot);
             developerLog('debug', 'persistence', 'state_save_requested', {
                 clientSaveId,
-                critical: Boolean(options.critical),
-                immediate: Boolean(options.immediate),
-                reason: options.reason || '',
+                critical: Boolean(operationOptions.critical),
+                immediate: Boolean(operationOptions.immediate),
+                reason: operationOptions.reason || '',
                 sourceCount: counts.sourceCount,
                 groupCount: counts.groupCount,
                 tagCount: counts.tagCount
             });
-            if (options.critical) {
-                writeRecoverySnapshot(snapshot, {
-                    reason: options.reason || 'critical_save',
-                    clientSaveId
+            if (operationOptions.critical) {
+                writeRecoverySnapshot(operation.recoverySnapshot, {
+                    recoveryKey: operation.recoveryKey,
+                    baseRevision: getSaveRevisionForStateKey(operation.stateKey),
+                    reason: operationOptions.recoveryFallbackSnapshot
+                        ? 'import_pending'
+                        : (operationOptions.reason || 'critical_save'),
+                    clientSaveId: operation.clientSaveId,
+                    failed: false
                 });
             }
-            const getScopeInvalidationResult = () => {
+            const isCurrentOperationContext = () => (
+                ctx.projectId === operation.projectId
+                && ctx.activeManagerInstanceToken === operation.instanceToken
+            );
+            const getScopeInvalidationResult = (phase) => {
                 if (
                     requestedScopeGeneration === schemaWriteScopeGeneration
                     && !futureSchemaWriteBlocked
+                ) {
+                    return null;
+                }
+                if (
+                    phase === 'completion'
+                    && !futureSchemaWriteBlocked
+                    && !isCurrentOperationContext()
                 ) {
                     return null;
                 }
@@ -910,25 +1029,28 @@
                 };
             };
             const runSave = () => {
-                const blockedResult = getScopeInvalidationResult();
+                const blockedResult = getScopeInvalidationResult('dispatch');
                 if (blockedResult) {
                     return Promise.resolve(blockedResult);
                 }
-                const baseRevision = Number(ctx.lastKnownSaveRevision) || 0;
-                const saveSnapshot = options.skipRuntimeMessage
-                    ? preparePersistableSnapshot(snapshot)
-                    : snapshot;
-                setSaveStatus({
-                    state: 'saving',
-                    lastError: '',
-                    clientSaveId
-                });
-                return sendStateToStorage(key, saveSnapshot, Object.assign({}, options, {
+                const baseRevision = getSaveRevisionForStateKey(operation.stateKey);
+                const dispatchedSnapshot = operationOptions.skipRuntimeMessage
+                    ? preparePersistableSnapshot(operation.saveSnapshot, operation.stateKey)
+                    : operation.saveSnapshot;
+                if (isCurrentOperationContext()) {
+                    setSaveStatus({
+                        state: 'saving',
+                        lastError: '',
+                        clientSaveId: operation.clientSaveId
+                    });
+                }
+                return sendStateToStorage(operation.stateKey, dispatchedSnapshot, Object.assign({}, operationOptions, {
                         baseRevision,
-                        clientSaveId
+                        clientSaveId: operation.clientSaveId,
+                        stateKey: operation.stateKey
                     }))
                     .then((result) => {
-                        const invalidatedResult = getScopeInvalidationResult();
+                        const invalidatedResult = getScopeInvalidationResult('completion');
                         if (invalidatedResult) {
                             return invalidatedResult;
                         }
@@ -938,34 +1060,42 @@
                         if (result.ok) {
                             const saveRevision = result.runtimeResult?.saveRevision
                                 || getSnapshotSaveRevision(result.localData)
-                                || getSnapshotSaveRevision(saveSnapshot)
-                                || ctx.lastKnownSaveRevision;
-                            const savedAt = result.runtimeResult?.savedAt || result.localData?._savedAt || saveSnapshot._savedAt || new Date().toISOString();
-                            if (saveRevision > ctx.lastKnownSaveRevision) {
-                                ctx.lastKnownSaveRevision = saveRevision;
+                                || getSnapshotSaveRevision(dispatchedSnapshot)
+                                || getSaveRevisionForStateKey(operation.stateKey);
+                            const savedAt = result.runtimeResult?.savedAt
+                                || result.localData?._savedAt
+                                || dispatchedSnapshot._savedAt
+                                || new Date().toISOString();
+                            setSaveRevisionForStateKey(operation.stateKey, saveRevision);
+                            if (isCurrentOperationContext()) {
+                                setSaveStatus({
+                                    state: 'saved',
+                                    lastSavedAt: savedAt,
+                                    lastSaveRevision: saveRevision,
+                                    currentRevision: saveRevision,
+                                    lastError: '',
+                                    clientSaveId: operation.clientSaveId,
+                                    storageUsageBytes: hasStorageMetadata ? storageMetadata.storageUsageBytes : currentStatus.storageUsageBytes,
+                                    storageQuotaBytes: hasStorageMetadata ? storageMetadata.storageQuotaBytes : currentStatus.storageQuotaBytes,
+                                    storageUsageRatio: hasStorageMetadata ? storageMetadata.storageUsageRatio : currentStatus.storageUsageRatio,
+                                    storageWarning: hasStorageMetadata ? storageMetadata.storageWarning : currentStatus.storageWarning,
+                                    lastStorageError: '',
+                                    historyEntryCount: hasStorageMetadata ? storageMetadata.historyEntryCount : currentStatus.historyEntryCount,
+                                    lastStaleLocalRevision: 0,
+                                    lastStaleRemoteRevision: 0,
+                                    lastStaleDetectedAt: ''
+                                });
                             }
-                            setSaveStatus({
-                                state: 'saved',
-                                lastSavedAt: savedAt,
-                                lastSaveRevision: saveRevision,
-                                currentRevision: saveRevision,
-                                lastError: '',
-                                clientSaveId,
-                                storageUsageBytes: hasStorageMetadata ? storageMetadata.storageUsageBytes : currentStatus.storageUsageBytes,
-                                storageQuotaBytes: hasStorageMetadata ? storageMetadata.storageQuotaBytes : currentStatus.storageQuotaBytes,
-                                storageUsageRatio: hasStorageMetadata ? storageMetadata.storageUsageRatio : currentStatus.storageUsageRatio,
-                                storageWarning: hasStorageMetadata ? storageMetadata.storageWarning : currentStatus.storageWarning,
-                                lastStorageError: '',
-                                historyEntryCount: hasStorageMetadata ? storageMetadata.historyEntryCount : currentStatus.historyEntryCount,
-                                lastStaleLocalRevision: 0,
-                                lastStaleRemoteRevision: 0,
-                                lastStaleDetectedAt: ''
-                            });
-                            if (options.critical) {
-                                clearRecoverySnapshot();
+                            if (
+                                operationOptions.critical
+                                && result.runtimeResult?.ok === true
+                            ) {
+                                clearRecoverySnapshot(operation.recoveryKey, {
+                                    expectedClientSaveId: operation.clientSaveId
+                                });
                             }
                             developerLog('info', 'persistence', 'state_save_succeeded', {
-                                clientSaveId,
+                                clientSaveId: operation.clientSaveId,
                                 saveRevision,
                                 storageWarning: Boolean(storageMetadata.storageWarning),
                                 storageUsageBytes: storageMetadata.storageUsageBytes,
@@ -973,47 +1103,63 @@
                             });
                         } else {
                             const staleRemoteRevision = result.reason === 'stale_revision'
-                                ? Number(result.runtimeResult?.currentRevision) || ctx.lastKnownSaveRevision
+                                ? Number(result.runtimeResult?.currentRevision)
+                                    || getSaveRevisionForStateKey(operation.stateKey)
                                 : currentStatus.lastStaleRemoteRevision || 0;
                             if (
                                 result.reason === 'stale_revision'
-                                && staleRemoteRevision > ctx.lastKnownSaveRevision
+                                && staleRemoteRevision > getSaveRevisionForStateKey(operation.stateKey)
                             ) {
-                                ctx.lastKnownSaveRevision = staleRemoteRevision;
+                                setSaveRevisionForStateKey(operation.stateKey, staleRemoteRevision);
                             }
                             const lastStorageError = result.reason === 'storage_quota_exceeded'
                                 ? 'storage_quota_exceeded'
-                                : getSaveStatus().lastStorageError || '';
+                                : currentStatus.lastStorageError || '';
                             const staleLocalRevision = result.reason === 'stale_revision'
                                 ? baseRevision
                                 : currentStatus.lastStaleLocalRevision || 0;
                             const staleDetectedAt = result.reason === 'stale_revision'
                                 ? new Date().toISOString()
                                 : currentStatus.lastStaleDetectedAt || '';
-                            setSaveStatus({
-                                state: result.reason === 'stale_revision' ? 'stale' : 'failed',
-                                lastError: result.reason || 'save_failed',
-                                currentRevision: result.runtimeResult?.currentRevision || ctx.lastKnownSaveRevision,
-                                clientSaveId,
-                                storageUsageBytes: hasStorageMetadata ? storageMetadata.storageUsageBytes : currentStatus.storageUsageBytes,
-                                storageQuotaBytes: hasStorageMetadata ? storageMetadata.storageQuotaBytes : currentStatus.storageQuotaBytes,
-                                storageUsageRatio: hasStorageMetadata ? storageMetadata.storageUsageRatio : currentStatus.storageUsageRatio,
-                                storageWarning: hasStorageMetadata ? storageMetadata.storageWarning : currentStatus.storageWarning,
-                                lastStorageError,
-                                historyEntryCount: hasStorageMetadata ? storageMetadata.historyEntryCount : currentStatus.historyEntryCount,
-                                lastStaleLocalRevision: staleLocalRevision,
-                                lastStaleRemoteRevision: staleRemoteRevision,
-                                lastStaleDetectedAt: staleDetectedAt
-                            });
-                            if (options.critical) {
-                                writeRecoverySnapshot(saveSnapshot, {
-                                    reason: result.reason || 'save_failed',
-                                    clientSaveId,
+                            if (isCurrentOperationContext()) {
+                                setSaveStatus({
+                                    state: result.reason === 'stale_revision' ? 'stale' : 'failed',
+                                    lastError: result.reason || 'save_failed',
+                                    currentRevision: result.runtimeResult?.currentRevision
+                                        || getSaveRevisionForStateKey(operation.stateKey),
+                                    clientSaveId: operation.clientSaveId,
+                                    storageUsageBytes: hasStorageMetadata ? storageMetadata.storageUsageBytes : currentStatus.storageUsageBytes,
+                                    storageQuotaBytes: hasStorageMetadata ? storageMetadata.storageQuotaBytes : currentStatus.storageQuotaBytes,
+                                    storageUsageRatio: hasStorageMetadata ? storageMetadata.storageUsageRatio : currentStatus.storageUsageRatio,
+                                    storageWarning: hasStorageMetadata ? storageMetadata.storageWarning : currentStatus.storageWarning,
+                                    lastStorageError,
+                                    historyEntryCount: hasStorageMetadata ? storageMetadata.historyEntryCount : currentStatus.historyEntryCount,
+                                    lastStaleLocalRevision: staleLocalRevision,
+                                    lastStaleRemoteRevision: staleRemoteRevision,
+                                    lastStaleDetectedAt: staleDetectedAt
+                                });
+                            }
+                            if (operationOptions.critical) {
+                                const isAmbiguousAck = [
+                                    'runtime_message_error',
+                                    'empty_response',
+                                    'runtime_exception'
+                                ].includes(result.reason);
+                                writeRecoverySnapshot(operation.recoverySnapshot, {
+                                    recoveryKey: operation.recoveryKey,
+                                    baseRevision,
+                                    reason: isAmbiguousAck && operationOptions.recoveryFallbackSnapshot
+                                        ? 'import_ack_unknown'
+                                        : operationOptions.recoveryFallbackSnapshot
+                                            ? 'import_rollback_required'
+                                            : (result.reason || 'save_failed'),
+                                    clientSaveId: operation.clientSaveId,
+                                    expectedClientSaveId: operation.clientSaveId,
                                     failed: true
                                 });
                             }
                             developerLog('warn', 'persistence', 'state_save_failed', {
-                                clientSaveId,
+                                clientSaveId: operation.clientSaveId,
                                 reason: result.reason || 'save_failed',
                                 staleLocalRevision,
                                 staleRemoteRevision,
@@ -1022,7 +1168,7 @@
                                 storageQuotaBytes: storageMetadata.storageQuotaBytes
                             });
                         }
-                        if (options.critical) {
+                        if (operationOptions.critical && isCurrentOperationContext()) {
                             notifyCriticalSaveFailure(result);
                         }
                         return result;
