@@ -115,10 +115,16 @@ describe('storage contract', () => {
         const duplicateDefinitionPattern = new RegExp([
             '(?:const|let|var) (?:STORAGE_SCHEMA_VERSION|IMPORT_EXPORT_FORMAT|IMPORT_EXPORT_FORMAT_VERSION|STATE_KEY_PREFIX|STATE_HISTORY_KEY_PREFIX|RECOVERY_KEY_PREFIX|DEVELOPER_LOG_KEY_PREFIX)',
             'function (?:getStateKey|getStateBackupKey|getStateHistoryKey|getStateKeyFromHistoryKey|getRecoveryKey|getDeveloperLogKey|isNotebookScopedKeyForProject|getStateSchemaCompatibility)',
-            '(?:const|let|var) (?:getStateKey|getStateBackupKey|getStateHistoryKey|getStateKeyFromHistoryKey|getRecoveryKey|getDeveloperLogKey|isNotebookScopedKeyForProject|getStateSchemaCompatibility) ='
+            '(?:const|let|var) (?:getStateKey|getStateBackupKey|getStateHistoryKey|getStateKeyFromHistoryKey|getRecoveryKey|getDeveloperLogKey|isNotebookScopedKeyForProject|getStateSchemaCompatibility) =',
+            '[\'"`]sourcesPlus(?:State|History|Recovery|DeveloperLogs)_',
+            '[\'"`]notebooklm-source-management-config[\'"`]',
+            '\\$\\{[^}]+\\}__backup',
+            '\\+\\s*[\'"]__backup[\'"]'
         ].join('|'));
         const matches = files.flatMap((file) => {
-            const source = fs.readFileSync(file, 'utf8');
+            const source = fs.readFileSync(file, 'utf8')
+                .replace(/\/\*[\s\S]*?\*\//g, '')
+                .replace(/^\s*\/\/.*$/gm, '');
             return duplicateDefinitionPattern.test(source)
                 ? [path.relative(REPO_ROOT, file)]
                 : [];

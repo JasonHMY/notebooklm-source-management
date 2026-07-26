@@ -749,7 +749,7 @@
             }
 
             return new Promise((resolve) => {
-                const backupKey = `${key}__backup`;
+                const backupKey = storageContract.getStateBackupKey(key);
                 const writePayload = () => {
                     const payload = { [key]: data };
                     if (hasRestorableStateSnapshot(data)) {
