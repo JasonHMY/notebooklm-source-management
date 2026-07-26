@@ -48,7 +48,7 @@ GeminiNotebook-Source-Management
 │   │   ├── content-native-checkbox-sync.js
 │   │   │   └── 原生 checkbox 状态读取、切换判定、detached 行解析 helper
 │   │   ├── content-tree-interactions.js
-│   │   │   └── 分组树、checkbox、批量模式与拖拽 read → plan → write；维护类型化 geometry snapshot、滚动 delta patch、auto-scroll 静止指针刷新/落下前同步 flush、ResizeObserver/render 失效和 fail-closed 重建
+│   │   │   └── 分组树、checkbox、批量模式与拖拽 read → plan → write；维护同步 native dropEffect、类型化 geometry snapshot、滚动 delta patch、auto-scroll 静止指针刷新/落下前同步 flush、ResizeObserver/render 失效和 fail-closed 重建
 │   │   ├── content-render.js
 │   │   │   └── Shadow DOM manager 渲染、列表行、批量条、菜单层
 │   │   ├── content-modals.js
@@ -374,6 +374,7 @@ manifest.json
 │   │   ├── 批量模式多源拖拽与边缘自动滚动
 │   │   ├── 两种拖拽模式（偏好 dragMode，无新模块）：经典（默认，蓝色插入线 .drag-over-top/bottom + 散源落底部桶）/ 避让 Beta（按真实混合 box model/折叠位移形成空槽、折叠 + 让位 + 根层级定位、取消时精确恢复）；自定义 ghost = source-item 行克隆（单源单层 + 多源最多 3 层堆叠 + 右上角数字 badge）
 │   │   ├── 避让 dragover 每帧只读一次 geometry snapshot 后纯计算并集中写入；纯滚动按 root/嵌套 children 精确 delta 修补，auto-scroll 无新 dragover 时仍按静止指针合并刷新，drop 前同步消费 dirty geometry，尺寸/render/混合失效时 fail closed 重建
+│   │   ├── native dropEffect 只在原始 dragover 事件内由 clean snapshot 同步解析；dirty/missing snapshot 保守 move，未知 payload 为 none，异步 drag frame 不保留 DataTransfer
 │   │   ├── reflow transform 使用 source/group 类型化 map；仅可视区 + 一个真实行高 overscan 动画，离屏位移静态应用并在结束/下次 preflight 清理
 │   │   ├── 批量选择、加入文件夹、添加/移除标签
 │   │   ├── 移到未分组

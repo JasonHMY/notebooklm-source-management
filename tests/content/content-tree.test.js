@@ -3046,10 +3046,15 @@ describe('handleDragOver invalid-drop feedback', () => {
             ]
         });
         ctx.runtime.activeDragContext = { kind: 'source-single', keys: ['A'] };
+        ctx.tree.readDragGeometry({
+            rootElement: ctx.sourcesListEl,
+            session: null
+        });
         const dataTransfer = { dropEffect: 'move' };
         ctx.tree.handleDragOver({
             target: { closest: () => null },
             // pointer in A's upper half → before-source A → slotKey='A' (the dragged key) → invalid
+            clientX: 50,
             clientY: 105,
             preventDefault: jest.fn(),
             dataTransfer
@@ -3070,17 +3075,24 @@ describe('handleDragOver invalid-drop feedback', () => {
             ]
         });
         ctx.runtime.activeDragContext = { kind: 'source-single', keys: ['X'] };
+        ctx.tree.readDragGeometry({
+            rootElement: ctx.sourcesListEl,
+            session: null
+        });
+        expect(ctx.runtime.dragGeometryDirty).toBe(false);
+        const dataTransfer = { dropEffect: 'none' };
         ctx.tree.handleDragOver({
             target: { closest: () => null },
             clientX: 100,
             clientY: 110, // on g1 header → into-group
             preventDefault: jest.fn(),
-            dataTransfer: { dropEffect: 'move' }
+            dataTransfer
         });
         const g1 = ctx.elementMap.get('group:g1');
         expect(g1.classList.has('drag-into')).toBe(true);
         const childrenEl = g1.querySelector('.group-children');
         expect(childrenEl.classList.has('sp-drag-guide')).toBe(false);
+        expect(dataTransfer.dropEffect).toBe('move');
     });
 
     it('classic mode: a within-folder slot gets the blue line (drag-over-top), not the reflow guide', () => {
@@ -3101,17 +3113,98 @@ describe('handleDragOver invalid-drop feedback', () => {
             ]
         });
         ctx.runtime.activeDragContext = { kind: 'source-single', keys: ['X'] };
+        ctx.tree.readDragGeometry({
+            rootElement: ctx.sourcesListEl,
+            session: null
+        });
+        expect(ctx.runtime.dragGeometryDirty).toBe(false);
+        const dataTransfer = { dropEffect: 'none' };
         ctx.tree.handleDragOver({
             target: { closest: () => null },
             clientX: 100,
             clientY: 145, // upper half of c1 (mid 160) → before-source c1
             preventDefault: jest.fn(),
-            dataTransfer: { dropEffect: 'move' }
+            dataTransfer
         });
         const c1 = ctx.elementMap.get('source:c1');
         expect(c1.classList.has('drag-over-top')).toBe(true);
         const childrenEl = ctx.elementMap.get('group:g1').querySelector('.group-children');
         expect(childrenEl.classList.has('sp-drag-guide')).toBe(false);
+        expect(dataTransfer.dropEffect).toBe('move');
+    });
+
+    it('classic mode: synchronously allows a source root slot after normalizing it to the ungrouped bin', () => {
+        const ctx = setupCtx({
+            state: {
+                isBatchMode: false,
+                root: [{ type: 'source', key: 'A' }, { type: 'group', id: 'g1' }],
+                ungrouped: []
+            },
+            pendingBatchKeys: new Set(),
+            groups: { g1: { id: 'g1', children: [] } },
+            dragMode: 'classic',
+            items: [
+                { kind: 'source', key: 'A', top: 100, height: 40 },
+                { kind: 'group', id: 'g1', top: 160, headerHeight: 30, childrenStart: 190, childrenEnd: 190 }
+            ]
+        });
+        ctx.runtime.activeDragContext = { kind: 'source-single', keys: ['A'] };
+        ctx.tree.readDragGeometry({
+            rootElement: ctx.sourcesListEl,
+            session: null
+        });
+        expect(ctx.runtime.dragGeometryDirty).toBe(false);
+        const dataTransfer = { dropEffect: 'none' };
+
+        ctx.tree.handleDragOver({
+            target: { closest: () => null },
+            clientX: 50,
+            clientY: 105,
+            preventDefault: jest.fn(),
+            dataTransfer
+        });
+
+        expect(ctx.elementMap.get('source:A').classList.has('drag-invalid')).toBe(false);
+        expect(dataTransfer.dropEffect).toBe('move');
+    });
+
+    it('classic mode: synchronously preserves a valid root group reorder', () => {
+        const ctx = setupCtx({
+            state: {
+                isBatchMode: false,
+                root: [{ type: 'group', id: 'g1' }, { type: 'group', id: 'g2' }],
+                ungrouped: []
+            },
+            pendingBatchKeys: new Set(),
+            groups: {
+                g1: { id: 'g1', children: [] },
+                g2: { id: 'g2', children: [] }
+            },
+            dragMode: 'classic',
+            items: [
+                { kind: 'group', id: 'g1', top: 100, headerHeight: 30, childrenStart: 130, childrenEnd: 130 },
+                { kind: 'group', id: 'g2', top: 200, headerHeight: 30, childrenStart: 230, childrenEnd: 230 }
+            ]
+        });
+        ctx.runtime.activeDragContext = { kind: 'group', draggedGroupId: 'g2' };
+        ctx.tree.readDragGeometry({
+            rootElement: ctx.sourcesListEl,
+            session: null
+        });
+        expect(ctx.runtime.dragGeometryDirty).toBe(false);
+        const dataTransfer = { dropEffect: 'none' };
+
+        ctx.tree.handleDragOver({
+            target: { closest: () => null },
+            clientX: 50,
+            clientY: 150,
+            preventDefault: jest.fn(),
+            dataTransfer
+        });
+
+        expect(ctx.elementMap.get('group:g1').classList.has('drag-invalid')).toBe(false);
+        expect(ctx.elementMap.get('group:g2').classList.has('drag-invalid')).toBe(false);
+        expect(dataTransfer.dropEffect).toBe('move');
     });
 
     it('reflow mode: the same within-folder slot does not get the classic blue line', () => {
@@ -3163,10 +3256,15 @@ describe('handleDragOver invalid-drop feedback', () => {
             ]
         });
         ctx.runtime.activeDragContext = { kind: 'group', draggedGroupId: 'g1' };
+        ctx.tree.readDragGeometry({
+            rootElement: ctx.sourcesListEl,
+            session: null
+        });
         const dataTransfer = { dropEffect: 'move' };
         ctx.tree.handleDragOver({
             target: { closest: () => null },
             // pointer in g2's header → into-group g2 → invalid (g2 is descendant of g1).
+            clientX: 100,
             clientY: 145,
             preventDefault: jest.fn(),
             dataTransfer
@@ -3192,10 +3290,16 @@ describe('handleDragOver invalid-drop feedback', () => {
         });
         // Drag the root folder g2 over the positioned root source A's row.
         ctx.runtime.activeDragContext = { kind: 'group', draggedGroupId: 'g2' };
+        ctx.tree.readDragGeometry({
+            rootElement: ctx.sourcesListEl,
+            session: null
+        });
+        expect(ctx.runtime.dragGeometryDirty).toBe(false);
         const dataTransfer = { dropEffect: 'move' };
         ctx.tree.handleDragOver({
             target: { closest: () => null },
             // upper half of A (140..180, mid 160) → before-source A against state.root (isRootList).
+            clientX: 50,
             clientY: 145,
             preventDefault: jest.fn(),
             dataTransfer
@@ -3218,10 +3322,15 @@ describe('handleDragOver invalid-drop feedback', () => {
             ]
         });
         ctx.runtime.activeDragContext = { kind: 'source-multi', keys: ['A', 'B', 'C'] };
+        ctx.tree.readDragGeometry({
+            rootElement: ctx.sourcesListEl,
+            session: null
+        });
         const dataTransfer = { dropEffect: 'move' };
         ctx.tree.handleDragOver({
             target: { closest: () => null },
             // pointer in B's upper half → before-source B → slotKey='B' (in dragged set) → invalid
+            clientX: 50,
             clientY: 145,
             preventDefault: jest.fn(),
             dataTransfer
@@ -3245,9 +3354,15 @@ describe('handleDragOver invalid-drop feedback', () => {
             ]
         });
         ctx.runtime.activeDragContext = { kind: 'source-multi', keys: ['A', 'B'] };
+        ctx.tree.readDragGeometry({
+            rootElement: ctx.sourcesListEl,
+            session: null
+        });
+        expect(ctx.runtime.dragGeometryDirty).toBe(false);
         const dataTransfer = { dropEffect: 'move' };
         ctx.tree.handleDragOver({
             target: { closest: () => null },
+            clientX: 50,
             clientY: 150,
             preventDefault: jest.fn(),
             dataTransfer
@@ -3276,6 +3391,7 @@ describe('handleDragOver invalid-drop feedback', () => {
         ctx.tree.handleDragOver({
             target: { closest: () => null },
             // pointer in B's upper half → before-source B → slotKey='B' (not the dragged 'A') → valid.
+            clientX: 50,
             clientY: 145,
             preventDefault: jest.fn(),
             dataTransfer
@@ -3582,7 +3698,7 @@ describe('handleDragOver rAF coalescing', () => {
             currentIntent: null,
             shiftedItems: new Map()
         };
-        return { runtime, tree, sourcesListEl, elementMap, state };
+        return { runtime, tree, sourcesListEl, shadowRoot, elementMap, state };
     }
 
     function makeDragOverEvent(clientY) {
@@ -3592,6 +3708,35 @@ describe('handleDragOver rAF coalescing', () => {
             clientY,
             preventDefault: jest.fn(),
             dataTransfer: { dropEffect: 'move' }
+        };
+    }
+
+    function primeCleanSnapshot(ctx) {
+        const snapshot = ctx.tree.readDragGeometry({
+            rootElement: ctx.sourcesListEl,
+            session: ctx.runtime.dragReflowSession || null
+        });
+        expect(snapshot).toBeTruthy();
+        expect(ctx.runtime.dragGeometryDirty).toBe(false);
+        return snapshot;
+    }
+
+    function createTrackedDataTransfer(initialValue, { throwOnSet = false } = {}) {
+        let currentValue = initialValue;
+        const setter = jest.fn((nextValue) => {
+            if (throwOnSet) throw new Error('dropEffect setter unavailable');
+            currentValue = nextValue;
+        });
+        const dataTransfer = {};
+        Object.defineProperty(dataTransfer, 'dropEffect', {
+            configurable: true,
+            get: () => currentValue,
+            set: setter
+        });
+        return {
+            dataTransfer,
+            setter,
+            get value() { return currentValue; }
         };
     }
 
@@ -3645,6 +3790,228 @@ describe('handleDragOver rAF coalescing', () => {
         events.forEach((event) => {
             expect(event.preventDefault).toHaveBeenCalledTimes(1);
         });
+    });
+
+    it('sets none then move synchronously for coalesced events and never rewrites after the frame', () => {
+        const ctx = setupCtx({
+            dragReflow: null,
+            items: [
+                { kind: 'source', key: 'A', top: 100, height: 40 },
+                { kind: 'source', key: 'B', top: 140, height: 40 }
+            ]
+        });
+        primeCleanSnapshot(ctx);
+        const tracked = createTrackedDataTransfer('move');
+        const rootRectSpy = jest.spyOn(ctx.sourcesListEl, 'getBoundingClientRect');
+        const rootQuerySpy = jest.spyOn(ctx.sourcesListEl, 'querySelectorAll');
+        const sourceRectSpies = ['A', 'B'].map((key) => (
+            jest.spyOn(ctx.elementMap.get(`source:${key}`), 'getBoundingClientRect')
+        ));
+        const readCountBefore = ctx.runtime.dragGeometryReadCount;
+
+        ctx.tree.handleDragOver({
+            clientX: 50,
+            clientY: 105,
+            preventDefault: jest.fn(),
+            dataTransfer: tracked.dataTransfer
+        });
+        expect(tracked.setter).toHaveBeenLastCalledWith('none');
+        ctx.tree.handleDragOver({
+            clientX: 50,
+            clientY: 145,
+            preventDefault: jest.fn(),
+            dataTransfer: tracked.dataTransfer
+        });
+
+        expect(tracked.setter.mock.calls).toEqual([['none'], ['move']]);
+        expect(tracked.value).toBe('move');
+        expect(pendingRafCallbacks.filter(Boolean)).toHaveLength(1);
+        expect(Number(ctx.runtime.dragGeometryReadCount) || 0).toBe(readCountBefore);
+        expect(rootRectSpy).not.toHaveBeenCalled();
+        expect(rootQuerySpy).not.toHaveBeenCalled();
+        sourceRectSpies.forEach((spy) => expect(spy).not.toHaveBeenCalled());
+
+        flushRaf();
+        expect(tracked.setter.mock.calls).toEqual([['none'], ['move']]);
+    });
+
+    it.each([
+        ['missing', null],
+        ['render dirty', 'render_rows_replaced'],
+        ['scroll dirty', 'scroll_position_changed'],
+        ['hover dirty', 'hover_expand_started']
+    ])('uses conservative move for %s geometry without a synchronous DOM read', (_label, reason) => {
+        const ctx = setupCtx({
+            dragReflow: null,
+            items: [
+                { kind: 'source', key: 'A', top: 100, height: 40 },
+                { kind: 'source', key: 'B', top: 140, height: 40 }
+            ]
+        });
+        if (reason) {
+            primeCleanSnapshot(ctx);
+            ctx.tree.invalidateDragGeometry(reason, { schedule: false });
+        }
+        const tracked = createTrackedDataTransfer('none');
+        const rootRectSpy = jest.spyOn(ctx.sourcesListEl, 'getBoundingClientRect');
+        const rootQuerySpy = jest.spyOn(ctx.sourcesListEl, 'querySelectorAll');
+        const readCountBefore = Number(ctx.runtime.dragGeometryReadCount) || 0;
+
+        ctx.tree.handleDragOver({
+            clientX: 50,
+            clientY: 105,
+            preventDefault: jest.fn(),
+            dataTransfer: tracked.dataTransfer
+        });
+
+        expect(tracked.setter).toHaveBeenCalledTimes(1);
+        expect(tracked.setter).toHaveBeenCalledWith('move');
+        expect(tracked.value).toBe('move');
+        expect(Number(ctx.runtime.dragGeometryReadCount) || 0).toBe(readCountBefore);
+        expect(rootRectSpy).not.toHaveBeenCalled();
+        expect(rootQuerySpy).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        ['non-current snapshot identity', (ctx, snapshot) => ({ ...snapshot })],
+        ['old DOM generation', (ctx, snapshot) => {
+            ctx.tree.invalidateDragGeometry('render_rows_replaced', { schedule: false });
+            return snapshot;
+        }],
+        ['old drag session', (ctx, snapshot) => {
+            ctx.runtime.dragReflowSession = { ...ctx.runtime.dragReflowSession };
+            return snapshot;
+        }]
+    ])('uses conservative move for a clean-looking snapshot with %s and performs no DOM read', (_label, makeStaleSnapshot) => {
+        const ctx = setupCtx({
+            dragReflow: null,
+            items: [
+                { kind: 'source', key: 'A', top: 100, height: 40 },
+                { kind: 'source', key: 'B', top: 140, height: 40 }
+            ]
+        });
+        const snapshot = primeCleanSnapshot(ctx);
+        const staleSnapshot = makeStaleSnapshot(ctx, snapshot);
+        const rootRectSpy = jest.spyOn(ctx.sourcesListEl, 'getBoundingClientRect');
+        const rootQuerySpy = jest.spyOn(ctx.sourcesListEl, 'querySelectorAll');
+        const sourceRectSpies = ['A', 'B'].map((key) => (
+            jest.spyOn(ctx.elementMap.get(`source:${key}`), 'getBoundingClientRect')
+        ));
+        const readCountBefore = Number(ctx.runtime.dragGeometryReadCount) || 0;
+
+        const dropEffect = ctx.tree.resolveSynchronousDropEffect({
+            clientX: 50,
+            clientY: 105,
+            geometrySnapshot: staleSnapshot,
+            geometryDirty: false,
+            state: ctx.state,
+            groupsById: new Map(),
+            activeDragContext: ctx.runtime.activeDragContext,
+            parentMap: new Map(),
+            prevIntent: null
+        });
+
+        expect(dropEffect).toBe('move');
+        expect(Number(ctx.runtime.dragGeometryReadCount) || 0).toBe(readCountBefore);
+        expect(rootRectSpy).not.toHaveBeenCalled();
+        expect(rootQuerySpy).not.toHaveBeenCalled();
+        sourceRectSpies.forEach((spy) => expect(spy).not.toHaveBeenCalled());
+    });
+
+    it('catches a throwing dropEffect setter without blocking preventDefault or scheduling', () => {
+        const ctx = setupCtx({
+            dragReflow: null,
+            items: [
+                { kind: 'source', key: 'A', top: 100, height: 40 },
+                { kind: 'source', key: 'B', top: 140, height: 40 }
+            ]
+        });
+        primeCleanSnapshot(ctx);
+        const tracked = createTrackedDataTransfer('move', { throwOnSet: true });
+        const preventDefault = jest.fn();
+
+        expect(() => ctx.tree.handleDragOver({
+            clientX: 50,
+            clientY: 105,
+            preventDefault,
+            dataTransfer: tracked.dataTransfer
+        })).not.toThrow();
+
+        expect(preventDefault).toHaveBeenCalledTimes(1);
+        expect(tracked.setter).toHaveBeenCalledTimes(1);
+        expect(pendingRafCallbacks.filter(Boolean)).toHaveLength(1);
+        flushRaf();
+        expect(tracked.setter).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not retain the original DataTransfer after dragover returns', () => {
+        const ctx = setupCtx({
+            dragReflow: null,
+            items: [
+                { kind: 'source', key: 'A', top: 100, height: 40 },
+                { kind: 'source', key: 'B', top: 140, height: 40 }
+            ]
+        });
+        primeCleanSnapshot(ctx);
+        let armed = false;
+        const originalDataTransfer = new Proxy({ dropEffect: 'move' }, {
+            get(target, property, receiver) {
+                if (armed) throw new Error(`retained DataTransfer read: ${String(property)}`);
+                return Reflect.get(target, property, receiver);
+            },
+            set(target, property, value, receiver) {
+                if (armed) throw new Error(`retained DataTransfer write: ${String(property)}`);
+                return Reflect.set(target, property, value, receiver);
+            }
+        });
+
+        ctx.tree.handleDragOver({
+            clientX: 50,
+            clientY: 145,
+            preventDefault: jest.fn(),
+            dataTransfer: originalDataTransfer
+        });
+        armed = true;
+
+        expect(() => flushRaf()).not.toThrow();
+        expect(() => ctx.tree.handleDrop({
+            clientX: 50,
+            clientY: 145,
+            preventDefault: jest.fn(),
+            dataTransfer: { getData: jest.fn(() => '') }
+        })).not.toThrow();
+        expect(() => ctx.tree.handleDragEnd({
+            target: { closest: () => null }
+        })).not.toThrow();
+    });
+
+    it.each([
+        null,
+        { kind: 'source-single', keys: [] },
+        { kind: 'source-multi', keys: ['A'] },
+        { kind: 'group', draggedGroupId: '' },
+        { kind: 'external-payload' }
+    ])('rejects an unsupported drag context synchronously: %p', (activeDragContext) => {
+        const ctx = setupCtx({
+            dragReflow: null,
+            items: [
+                { kind: 'source', key: 'A', top: 100, height: 40 },
+                { kind: 'source', key: 'B', top: 140, height: 40 }
+            ]
+        });
+        ctx.runtime.activeDragContext = activeDragContext;
+        const tracked = createTrackedDataTransfer('move');
+
+        ctx.tree.handleDragOver({
+            clientX: 50,
+            clientY: 145,
+            preventDefault: jest.fn(),
+            dataTransfer: tracked.dataTransfer
+        });
+
+        expect(tracked.setter).toHaveBeenCalledTimes(1);
+        expect(tracked.setter).toHaveBeenCalledWith('none');
+        expect(tracked.value).toBe('none');
     });
 
     it('uses the latest snapshot when the frame flushes (not the first event)', () => {
@@ -7734,6 +8101,7 @@ describe('single-frame drag geometry snapshot budgets', () => {
         expect(tree.computeDropIntentRaw).toBeInstanceOf(Function);
         expect(tree.planDragFrame).toBeInstanceOf(Function);
         expect(tree.applyDragFramePlan).toBeInstanceOf(Function);
+        expect(tree.resolveSynchronousDropEffect).toBeInstanceOf(Function);
         expect(tree.invalidateDragGeometry).toBeInstanceOf(Function);
         expect(tree.flushDragFrameNow).toBeInstanceOf(Function);
     });
@@ -8342,7 +8710,10 @@ describe('single-frame drag geometry snapshot budgets', () => {
         });
 
         expect(session.currentIntent).toBeNull();
-        expect(failedTransfer.dropEffect).toBe('none');
+        // Native feedback was set conservatively while geometry was dirty.
+        // The failed async refresh must not rewrite DataTransfer outside the
+        // original dragover event, while the internal intent still fails closed.
+        expect(failedTransfer.dropEffect).toBe('move');
         expect(fixture.group.classList.has('drag-into')).toBe(false);
         expect(session.shiftedSourceItems).toEqual(new Map());
         expect(fixture.source.style.transform).toBe('');
@@ -8711,7 +9082,9 @@ describe('single-frame drag geometry snapshot budgets', () => {
         expect(plan.shifts._shiftDeltaPlan.animatedKeys.sources).toEqual(new Set());
         tree.applyDragFramePlan(plan);
         expect(session.currentIntent).toBeNull();
-        expect(dataTransfer.dropEffect).toBe('none');
+        // Frame application updates internal feedback only. Native dropEffect
+        // is owned by the synchronous handleDragOver event path.
+        expect(dataTransfer.dropEffect).toBe('move');
     });
 
     it('invalidates only for actual scoped scroll changes and current ResizeObserver reports', () => {

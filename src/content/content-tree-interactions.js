@@ -2789,7 +2789,11 @@
             _clearPreflightDragActive();
         }
 
-        function computeIsInvalidDrop({ intent, dragContext }) {
+        function computeIsInvalidDrop({
+            intent,
+            dragContext,
+            groupsById = getGroupsById()
+        }) {
             if (!intent || typeof intent !== 'object' || !dragContext) return false;
 
             if (dragContext.kind === 'source-single') {
@@ -2830,7 +2834,6 @@
                     return false;
                 }
                 if (targetGroup.id === draggedGroupId) return true;
-                const groupsById = getGroupsById();
                 const draggedGroup = groupsById.get(draggedGroupId);
                 if (!draggedGroup) return false;
                 return isDescendant(targetGroup, draggedGroup, groupsById);
@@ -3124,8 +3127,7 @@
             groupsById,
             parentMap,
             dragContext,
-            previousIntent,
-            dataTransfer
+            previousIntent
         }) {
             const intent = computeDropIntent({
                 clientX: pointer && pointer.clientX,
@@ -3233,9 +3235,98 @@
                     session: runtime.dragReflowSession
                 }),
                 feedback,
-                geometrySnapshot,
-                dataTransfer
+                geometrySnapshot
             };
+        }
+
+        function isSupportedDragContext(dragContext) {
+            if (!dragContext || typeof dragContext !== 'object') return false;
+            if (dragContext.kind === 'source-single') {
+                return Boolean(
+                    Array.isArray(dragContext.keys)
+                    && dragContext.keys.length === 1
+                    && typeof dragContext.keys[0] === 'string'
+                    && dragContext.keys[0]
+                );
+            }
+            if (dragContext.kind === 'source-multi') {
+                if (!Array.isArray(dragContext.keys) || dragContext.keys.length < 2) {
+                    return false;
+                }
+                const validKeys = dragContext.keys.filter((key) => (
+                    typeof key === 'string' && key
+                ));
+                return (
+                    validKeys.length === dragContext.keys.length
+                    && new Set(validKeys).size === validKeys.length
+                );
+            }
+            if (dragContext.kind === 'group') {
+                return Boolean(
+                    typeof dragContext.draggedGroupId === 'string'
+                    && dragContext.draggedGroupId
+                );
+            }
+            return false;
+        }
+
+        function resolveSynchronousDropEffect({
+            clientX,
+            clientY,
+            geometrySnapshot,
+            geometryDirty,
+            state,
+            groupsById,
+            activeDragContext,
+            parentMap,
+            prevIntent
+        } = {}) {
+            if (
+                !isSupportedDragContext(activeDragContext)
+                || !Number.isFinite(clientX)
+                || !Number.isFinite(clientY)
+            ) {
+                return 'none';
+            }
+            const hasUsableSnapshot = Boolean(
+                geometryDirty === false
+                && geometrySnapshot
+                && geometrySnapshot === runtime.dragGeometrySnapshot
+                && geometrySnapshot.rootElement
+                && geometrySnapshot.rootRect
+                && geometrySnapshot.domGeneration === dragGeometryDomGeneration
+                && geometrySnapshot.session === (runtime.dragReflowSession || null)
+            );
+            if (!hasUsableSnapshot) return 'move';
+
+            try {
+                const intent = computeDropIntent({
+                    clientX,
+                    clientY,
+                    rootElement: geometrySnapshot.rootElement,
+                    state,
+                    groupsById,
+                    parentMap,
+                    activeDragContext,
+                    prevIntent,
+                    geometrySnapshot
+                });
+                return (
+                    intent
+                    && !computeIsInvalidDrop({
+                        intent,
+                        dragContext: activeDragContext,
+                        groupsById
+                    })
+                )
+                    ? 'move'
+                    : 'none';
+            } catch (_) {
+                // A clean cached snapshot should be pure to consume. If its
+                // shape is unexpectedly unusable, keep native feedback
+                // conservative; handleDrop performs the fail-closed fresh read.
+                return 'move';
+            }
         }
 
         function patchGeometryEntryVisual(entry, deltaY, { inherited = false } = {}) {
@@ -3480,10 +3571,6 @@
                 guideElement: feedback.guideElement || null
             };
 
-            if (plan.dataTransfer) {
-                try { plan.dataTransfer.dropEffect = plan.dropEffect; } catch (_) {}
-            }
-
             let transformPatchComplete = true;
             if (
                 session
@@ -3631,18 +3718,32 @@
                 : 'synchronous_flush';
             return _processDragOver({
                 clientX: args.clientX,
-                clientY: args.clientY,
-                dataTransfer: args.dataTransfer
+                clientY: args.clientY
             });
         }
         function handleDragOver(e) {
             e.preventDefault();
+            const dropEffect = resolveSynchronousDropEffect({
+                clientX: e.clientX,
+                clientY: e.clientY,
+                geometrySnapshot: runtime.dragGeometrySnapshot,
+                geometryDirty: runtime.dragGeometryDirty,
+                state: getState(),
+                groupsById: getGroupsById(),
+                activeDragContext: runtime.activeDragContext,
+                parentMap: getParentMap(),
+                prevIntent: runtime.dragReflowSession
+                    ? runtime.dragReflowSession.currentIntent
+                    : null
+            });
+            if (e.dataTransfer) {
+                try { e.dataTransfer.dropEffect = dropEffect; } catch (_) {}
+            }
             // Snapshot only the fields we read downstream. The DragEvent itself
             // is not safe to retain past the current event tick.
             _lastDragOverArgs = {
                 clientX: e.clientX,
-                clientY: e.clientY,
-                dataTransfer: e.dataTransfer
+                clientY: e.clientY
             };
             _scheduleDragOverArgs({ ..._lastDragOverArgs });
         }
@@ -3678,8 +3779,7 @@
                             pointerAncestorSet: new Set(),
                             autoScrollVelocity: 0
                         },
-                        geometrySnapshot: priorSnapshot,
-                        dataTransfer: args && args.dataTransfer
+                        geometrySnapshot: priorSnapshot
                     };
                     applyDragFramePlan(invalidPlan);
                     return invalidPlan;
@@ -3701,9 +3801,6 @@
                     cancelAllHoverTimers();
                     _setUngroupDropzoneVisible(false);
                     if (autoScrollController) autoScrollController.stop();
-                    if (args && args.dataTransfer) {
-                        try { args.dataTransfer.dropEffect = 'none'; } catch (_) {}
-                    }
                 }
                 return null;
             }
@@ -3719,8 +3816,7 @@
                 dragContext: runtime.activeDragContext,
                 previousIntent: runtime.dragReflowSession
                     ? runtime.dragReflowSession.currentIntent
-                    : null,
-                dataTransfer: args && args.dataTransfer
+                    : null
             });
             applyDragFramePlan(plan);
             return plan;
@@ -5054,6 +5150,7 @@
             computeDropIntentRaw,
             planDragFrame,
             applyDragFramePlan,
+            resolveSynchronousDropEffect,
             invalidateDragGeometry,
             flushDragFrameNow,
             teardownDragInteractions,
