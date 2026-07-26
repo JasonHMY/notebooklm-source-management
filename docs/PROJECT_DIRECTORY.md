@@ -160,8 +160,18 @@ GeminiNotebook-Source-Management
 │   ├── STORAGE_SCHEMA.md
 │   ├── MESSAGE_CONTRACTS.md
 │   ├── RELEASE_CHECKLIST.md
-│   └── superpowers/specs/
-│       └── 历史设计规格；不是 runtime，也不进入发布包
+│   └── superpowers/
+│       ├── specs/
+│       │   └── 历史设计规格；不是 runtime，也不进入发布包
+│       └── plans/
+│           ├── 2026-07-26-optimization-hardening-roadmap.md
+│           │   └── 数据完整性、拖拽正确性/性能、架构/无障碍三条工作流的总顺序、依赖、验收和回滚门
+│           ├── 2026-07-26-storage-integrity-hardening.md
+│           │   └── 导入原子性、版本兼容、save/load 队列、恢复点、日志隔离与 storage contract 计划
+│           ├── 2026-07-26-drag-correctness-and-performance.md
+│           │   └── Classic 跨 notebook、reflow box model、过滤落点、auto-scroll 和 100/500 行热路径计划
+│           └── 2026-07-26-architecture-deepening-and-accessibility.md
+│               └── Tree Placement/Search/Preferences Module 与键盘精准排序计划；均不是 runtime，也不进入发布包
 ├── _locales/
 │   ├── en/messages.json
 │   ├── es/messages.json
@@ -941,6 +951,15 @@ CI: .github/workflows/ci.yml
 │   └── popup/content/background 消息、sender 校验、key 前缀和错误码
 ├── docs/RELEASE_CHECKLIST.md
 │   └── 发布检查清单
+├── docs/superpowers/plans/
+│   ├── 2026-07-26-optimization-hardening-roadmap.md
+│   │   └── 当前优化工作的总优先级、跨计划 Interface、交付顺序、集成验收和回滚边界
+│   ├── 2026-07-26-storage-integrity-hardening.md
+│   │   └── 本地存储、导入、生命周期、history、quota 和 developer-log 数据完整性实施计划
+│   ├── 2026-07-26-drag-correctness-and-performance.md
+│   │   └── Classic/Reflow 拖拽正确性、真实布局测试与大列表测量实施计划
+│   └── 2026-07-26-architecture-deepening-and-accessibility.md
+│       └── 深 Module、consumer 迁移、统一搜索语义和键盘排序实施计划
 ├── marketing/
 │   └── 宣传资料工作区；记录社媒账号矩阵、内容日历、平台打法、素材清单和 X 本地发布工具，不属于扩展 runtime
 ├── CHANGELOG.md

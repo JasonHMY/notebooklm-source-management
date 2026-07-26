@@ -29,6 +29,7 @@
 
 ### Changed
 - **产品更名为 GeminiNotebook-Source-Management (Rename Product to GeminiNotebook-Source-Management)**: **影响**: 扩展名称、启动器提示、欢迎页和三语平台文案统一使用新品牌与 Gemini Notebook 名称；npm 包名、发布 zip 及设置页导出的 JSON 文件名前缀同步改为 `gemininotebook-source-management`。 现有 `notebooklm.google.com` 入口、Chrome Web Store / GitHub 链接、`notebooklm-source-management-config` 备份格式、存储键和 `NSM_*` 运行时标识保持不变，已有数据与旧备份无需迁移。
+- **新增优化加固实施路线图 (Add Optimization Hardening Implementation Roadmap)**: **影响**: 对扩展使用无可感知变化。 新增一份总路线图和三份专项计划，按数据完整性、拖拽正确性与性能、架构与无障碍的顺序，把已确认问题落实到具体 Interface、文件、失败测试、验证命令、提交和回滚门；本次仅新增计划文档，未修改 runtime、存储、权限或拖拽行为。
 
 ## [2026-06-16] [26.6.16]
 
