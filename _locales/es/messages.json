@@ -1,18 +1,18 @@
 {
     "extName": {
-        "message": "Gestión de fuentes de NotebookLM"
+        "message": "GeminiNotebook-Source-Management"
     },
     "extShortName": {
-        "message": "Gestión de fuentes de NLM"
+        "message": "GeminiNotebook"
     },
     "actionTitle": {
-        "message": "Abrir el lanzador de Gestión de fuentes de NotebookLM"
+        "message": "Abrir el lanzador de GeminiNotebook-Source-Management"
     },
     "extDesc": {
-        "message": "Carpetas y ordenación mediante arrastrar y soltar para el panel de fuentes de NotebookLM."
+        "message": "Carpetas y ordenación mediante arrastrar y soltar para el panel de fuentes de Gemini Notebook."
     },
     "popup_launcher_note": {
-        "message": "Funciona dentro del panel de fuentes de NotebookLM. El icono de la barra de herramientas es solo un lanzador."
+        "message": "Funciona dentro del panel de fuentes de Gemini Notebook. El icono de la barra de herramientas es solo un lanzador."
     },
     "popup_badge_ready": {
         "message": "Listo"
@@ -54,49 +54,49 @@
         "message": "Cambiado a la vista de etiquetas."
     },
     "popup_source_view_switch_failed": {
-        "message": "No se encontró el selector de vista de fuentes de NotebookLM. Expande primero el panel de fuentes."
+        "message": "No se encontró el selector de vista de fuentes de Gemini Notebook. Expande primero el panel de fuentes."
     },
     "popup_title_ready": {
         "message": "El gestor de fuentes está listo en este cuaderno"
     },
     "popup_body_ready": {
-        "message": "Usa el botón de abajo para desplazarte al gestor y resaltarlo dentro de NotebookLM."
+        "message": "Usa el botón de abajo para desplazarte al gestor y resaltarlo dentro de Gemini Notebook."
     },
     "popup_title_notebook_home": {
         "message": "Abre un cuaderno para usar esta extensión"
     },
     "popup_body_notebook_home": {
-        "message": "Estás en NotebookLM, pero todavía no dentro de un cuaderno específico. Abre un cuaderno y luego vuelve a usar este lanzador."
+        "message": "Estás en Gemini Notebook, pero todavía no dentro de un cuaderno específico. Abre un cuaderno y luego vuelve a usar este lanzador."
     },
     "popup_title_notebook_home_new_tab": {
-        "message": "Abrir NotebookLM en una pestaña nueva"
+        "message": "Abrir Gemini Notebook en una pestaña nueva"
     },
     "popup_body_notebook_home_new_tab": {
-        "message": "Ya estás en la página de inicio de NotebookLM. Este lanzador abrirá una nueva pestaña de NotebookLM para que el clic tenga un resultado claro."
+        "message": "Ya estás en la página de inicio de Gemini Notebook. Este lanzador abrirá una nueva pestaña de Gemini Notebook para que el clic tenga un resultado claro."
     },
     "popup_title_switch_notebook": {
-        "message": "Cambiar al cuaderno abierto de NotebookLM"
+        "message": "Cambiar al cuaderno abierto de Gemini Notebook"
     },
     "popup_body_switch_notebook": {
-        "message": "Ya hay un cuaderno de NotebookLM abierto en otra pestaña. Usa el botón de abajo para ir allí primero."
+        "message": "Ya hay un cuaderno de Gemini Notebook abierto en otra pestaña. Usa el botón de abajo para ir allí primero."
     },
     "popup_title_external_page": {
-        "message": "Ve a NotebookLM para usar el gestor de fuentes"
+        "message": "Ve a Gemini Notebook para usar el gestor de fuentes"
     },
     "popup_body_external_page": {
-        "message": "Esta extensión no abre una aplicación separada en la barra de herramientas. Su gestor aparece dentro de un cuaderno abierto de NotebookLM."
+        "message": "Esta extensión no abre una aplicación separada en la barra de herramientas. Su gestor aparece dentro de un cuaderno abierto de Gemini Notebook."
     },
     "popup_title_refresh_needed": {
         "message": "Este cuaderno está abierto, pero el gestor no está adjunto"
     },
     "popup_body_refresh_needed": {
-        "message": "Actualiza este cuaderno y vuelve a abrir el lanzador. Si sigue fallando, es posible que la estructura de la página de NotebookLM haya cambiado."
+        "message": "Actualiza este cuaderno y vuelve a abrir el lanzador. Si sigue fallando, es posible que la estructura de la página de Gemini Notebook haya cambiado."
     },
     "popup_title_disabled": {
         "message": "El gestor de fuentes está desactivado"
     },
     "popup_body_disabled": {
-        "message": "Activa el complemento para volver a adjuntar el gestor de fuentes de NotebookLM en esta página."
+        "message": "Activa el complemento para volver a adjuntar el gestor de fuentes de Gemini Notebook en esta página."
     },
     "popup_cta_open_manager": {
         "message": "Abrir gestor de fuentes"
@@ -105,19 +105,19 @@
         "message": "Activar complemento"
     },
     "popup_cta_go_to_notebooklm": {
-        "message": "Ir a NotebookLM"
+        "message": "Ir a Gemini Notebook"
     },
     "popup_cta_go_to_open_notebook": {
         "message": "Ir al cuaderno abierto"
     },
     "popup_cta_open_notebooklm_new_tab": {
-        "message": "Abrir NotebookLM en una pestaña nueva"
+        "message": "Abrir Gemini Notebook en una pestaña nueva"
     },
     "popup_cta_refresh_notebook": {
         "message": "Actualizar este cuaderno"
     },
     "popup_reason_source_panel_missing": {
-        "message": "No se pudo encontrar el panel de fuentes de NotebookLM en esta página."
+        "message": "No se pudo encontrar el panel de fuentes de Gemini Notebook en esta página."
     },
     "popup_reason_panel_header_missing": {
         "message": "Se encontró el panel de fuentes, pero no se pudo adjuntar el gestor a su encabezado."
@@ -126,16 +126,16 @@
         "message": "El gestor todavía se está cargando en esta página."
     },
     "popup_reason_manager_unreachable": {
-        "message": "NotebookLM está abierto, pero no se pudo acceder al gestor en esta pestaña."
+        "message": "Gemini Notebook está abierto, pero no se pudo acceder al gestor en esta pestaña."
     },
     "popup_reason_tab_message_failed": {
         "message": "La pestaña del gestor respondió con un fallo de mensajería inesperado."
     },
     "popup_reason_tabs_query_failed": {
-        "message": "Chrome no pudo leer las pestañas actuales de NotebookLM en este momento."
+        "message": "Chrome no pudo leer las pestañas actuales de Gemini Notebook en este momento."
     },
     "popup_reason_notebook_missing": {
-        "message": "Abre la página de un cuaderno de NotebookLM para acceder al gestor de fuentes."
+        "message": "Abre la página de un cuaderno de Gemini Notebook para acceder al gestor de fuentes."
     },
     "popup_reason_extension_disabled": {
         "message": "El gestor de fuentes está desactivado desde la ventana emergente de la extensión."
@@ -570,10 +570,10 @@
         "message": "No se pudieron abrir los comentarios de Chrome Web Store"
     },
     "ui_welcome_title": {
-        "message": "Te damos la bienvenida a NotebookLM Source Management"
+        "message": "Te damos la bienvenida a GeminiNotebook-Source-Management"
     },
     "ui_welcome_subtitle": {
-        "message": "Organiza, busca y respalda tus fuentes con más facilidad dentro de NotebookLM."
+        "message": "Organiza, busca y respalda tus fuentes con más facilidad dentro de Gemini Notebook."
     },
     "ui_welcome_feature_organize_title": {
         "message": "Organiza fuentes"
@@ -815,16 +815,16 @@
         "message": "Historial de fallos nativos"
     },
     "ui_native_label_view_active": {
-        "message": "La vista de etiquetas de NotebookLM está activa. Los grupos nativos de fuentes permanecen visibles."
+        "message": "La vista de etiquetas de Gemini Notebook está activa. Los grupos nativos de fuentes permanecen visibles."
     },
     "ui_import_native_labels": {
-        "message": "Importar grupos de NotebookLM"
+        "message": "Importar grupos de Gemini Notebook"
     },
     "ui_import_native_labels_preview_title": {
         "message": "Vista previa de importación"
     },
     "ui_import_native_labels_preview_summary": {
-        "message": "Importar $1 grupo(s) de NotebookLM con $2 fuente(s).",
+        "message": "Importar $1 grupo(s) de Gemini Notebook con $2 fuente(s).",
         "placeholders": {
             "1": { "content": "$1" },
             "2": { "content": "$2" }
@@ -852,20 +852,20 @@
         "message": "No hay títulos de fuentes disponibles para mostrar."
     },
     "ui_import_native_labels_preview_empty": {
-        "message": "No hay grupos de NotebookLM disponibles para importar. Expande primero los grupos de NotebookLM para que las filas de fuentes sean visibles."
+        "message": "No hay grupos de Gemini Notebook disponibles para importar. Expande primero los grupos de Gemini Notebook para que las filas de fuentes sean visibles."
     },
     "ui_import_native_labels_apply": {
         "message": "Importar"
     },
     "ui_import_native_labels_confirm": {
-        "message": "¿Importar $1 grupo(s) de NotebookLM con $2 fuente(s) como carpetas del plugin?",
+        "message": "¿Importar $1 grupo(s) de Gemini Notebook con $2 fuente(s) como carpetas del plugin?",
         "placeholders": {
             "1": { "content": "$1" },
             "2": { "content": "$2" }
         }
     },
     "ui_import_native_labels_applied": {
-        "message": "Se importaron $1 grupo(s) de NotebookLM con $2 fuente(s)",
+        "message": "Se importaron $1 grupo(s) de Gemini Notebook con $2 fuente(s)",
         "placeholders": {
             "1": { "content": "$1" },
             "2": { "content": "$2" }
@@ -879,7 +879,7 @@
         }
     },
     "ui_import_native_labels_unavailable": {
-        "message": "No hay grupos de NotebookLM disponibles para importar. Expande primero los grupos de NotebookLM para que las fuentes sean visibles."
+        "message": "No hay grupos de Gemini Notebook disponibles para importar. Expande primero los grupos de Gemini Notebook para que las fuentes sean visibles."
     },
     "ui_undo_action": {
         "message": "Deshacer"
@@ -1214,7 +1214,7 @@
         "message": "No se pudo renombrar la fuente ahora mismo"
     },
     "ui_rename_source_failed": {
-        "message": "No se pudo abrir el cambio de nombre de esta fuente. Actualiza NotebookLM e inténtalo de nuevo."
+        "message": "No se pudo abrir el cambio de nombre de esta fuente. Actualiza Gemini Notebook e inténtalo de nuevo."
     },
     "ui_delete_source": {
         "message": "Eliminar fuente"
@@ -1226,13 +1226,13 @@
         "message": "No se pudo eliminar la fuente ahora mismo"
     },
     "ui_delete_source_failed": {
-        "message": "No se pudo iniciar la eliminación de esta fuente. Actualiza NotebookLM e inténtalo de nuevo."
+        "message": "No se pudo iniciar la eliminación de esta fuente. Actualiza Gemini Notebook e inténtalo de nuevo."
     },
     "ui_source_details_unavailable": {
         "message": "Los detalles de la fuente no están disponibles ahora mismo"
     },
     "ui_source_details_failed": {
-        "message": "No se pudieron abrir los detalles de la fuente. Actualiza NotebookLM e inténtalo de nuevo."
+        "message": "No se pudieron abrir los detalles de la fuente. Actualiza Gemini Notebook e inténtalo de nuevo."
     },
     "ui_retry": {
         "message": "Reintentar"
@@ -1241,19 +1241,19 @@
         "message": "Esta fuente aún no está disponible."
     },
     "ui_native_action_menu_button_missing": {
-        "message": "No se encontró el botón de menú de fuente de NotebookLM."
+        "message": "No se encontró el botón de menú de fuente de Gemini Notebook."
     },
     "ui_native_action_menu_item_missing": {
-        "message": "No se encontró la opción de menú correspondiente de NotebookLM."
+        "message": "No se encontró la opción de menú correspondiente de Gemini Notebook."
     },
     "ui_native_action_confirm_dialog_missing": {
-        "message": "No se encontró el diálogo de confirmación de NotebookLM."
+        "message": "No se encontró el diálogo de confirmación de Gemini Notebook."
     },
     "ui_native_action_confirm_button_missing": {
-        "message": "No se encontró el botón de confirmación de NotebookLM."
+        "message": "No se encontró el botón de confirmación de Gemini Notebook."
     },
     "ui_native_action_failed": {
-        "message": "Es posible que haya cambiado la estructura de la página de NotebookLM."
+        "message": "Es posible que haya cambiado la estructura de la página de Gemini Notebook."
     },
     "ui_move_to_folder": {
         "message": "Mover a carpeta"
@@ -1294,7 +1294,7 @@
         "message": "Error de inicialización. No se pudo localizar el encabezado del panel de fuentes."
     },
     "ui_crash_missing_panel": {
-        "message": "No se pudo encontrar el panel de fuentes de NotebookLM. Es posible que Google haya actualizado la estructura de la página."
+        "message": "No se pudo encontrar el panel de fuentes de Gemini Notebook. Es posible que Google haya actualizado la estructura de la página."
     },
     "ui_crash_init_error": {
         "message": "Error de inicialización. Consulta la consola para ver los detalles."

@@ -28,7 +28,7 @@
         if (typeof cloneSerializableData !== 'function'
             || typeof buildPersistableState !== 'function'
             || typeof applyPersistableSnapshotToRuntime !== 'function') {
-            throw new Error('NotebookLM Source Management: createContentUndoHistory requires cloneSerializableData, buildPersistableState and applyPersistableSnapshotToRuntime.');
+            throw new Error('GeminiNotebook-Source-Management: createContentUndoHistory requires cloneSerializableData, buildPersistableState and applyPersistableSnapshotToRuntime.');
         }
 
         let undoStack = [];
@@ -48,7 +48,7 @@
             try {
                 return cloneSerializableData(buildPersistableState());
             } catch (error) {
-                console.warn('NotebookLM Source Management: Could not capture undo snapshot.', error);
+                console.warn('GeminiNotebook-Source-Management: Could not capture undo snapshot.', error);
                 return null;
             }
         }

@@ -677,6 +677,22 @@ describe('modal option motion', () => {
         expect(showToast).toHaveBeenCalledWith('ui_settings_import_file_invalid', { variant: 'error' });
     });
 
+    it('uses the canonical product slug for downloaded settings exports', () => {
+        global.window.Blob = class FakeBlob {};
+        global.window.URL = {
+            createObjectURL: jest.fn(() => 'blob:settings-export'),
+            revokeObjectURL: jest.fn()
+        };
+        const { modals } = createModalMotionTestRuntime();
+
+        expect(modals.downloadSettingsExportText('{"data":{}}')).toBe(true);
+
+        const anchor = global.document.createElement.mock.results.at(-1).value;
+        expect(anchor.download).toMatch(
+            /^gemininotebook-source-management-config-\d{4}-\d{2}-\d{2}\.json$/
+        );
+    });
+
     it('focuses tag edit inputs with selector-unsafe ids without throwing', () => {
         const unsafeTagId = 'bad"] id';
         const state = { tagOrder: [unsafeTagId] };

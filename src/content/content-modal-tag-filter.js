@@ -26,7 +26,7 @@
         } = deps;
 
         if (typeof el !== 'function' || typeof getMessage !== 'function' || typeof getShadowRoot !== 'function') {
-            throw new Error('NotebookLM Source Management: createContentModalTagFilter requires el, getMessage and getShadowRoot.');
+            throw new Error('GeminiNotebook-Source-Management: createContentModalTagFilter requires el, getMessage and getShadowRoot.');
         }
 
         function closeTagFilterModal(options = {}) {

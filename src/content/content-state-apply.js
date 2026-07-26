@@ -26,12 +26,12 @@
         const runtime = deps.runtime || deps;
 
         if (!runtime) {
-            throw new Error('NotebookLM Source Management: createContentStateApply requires a runtime context.');
+            throw new Error('GeminiNotebook-Source-Management: createContentStateApply requires a runtime context.');
         }
         if (typeof cloneSerializableData !== 'function'
             || typeof normalizeLoadedState !== 'function'
             || typeof hasPersistableManagerState !== 'function') {
-            throw new Error('NotebookLM Source Management: createContentStateApply requires cloneSerializableData, normalizeLoadedState and hasPersistableManagerState.');
+            throw new Error('GeminiNotebook-Source-Management: createContentStateApply requires cloneSerializableData, normalizeLoadedState and hasPersistableManagerState.');
         }
 
         const normalizeText = typeof normalizeSourceText === 'function'

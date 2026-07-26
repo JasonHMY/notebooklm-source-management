@@ -754,7 +754,7 @@
             const date = new Date();
             const dateText = Number.isFinite(date.getTime()) ? date.toISOString().slice(0, 10) : 'export';
             const suffix = kind === 'developer-logs' ? 'developer-logs' : 'config';
-            return `notebooklm-source-management-${suffix}-${dateText}.json`;
+            return `gemininotebook-source-management-${suffix}-${dateText}.json`;
         }
 
         function downloadSettingsExportText(text, kind = 'config') {

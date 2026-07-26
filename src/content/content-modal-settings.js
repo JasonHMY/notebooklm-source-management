@@ -88,7 +88,7 @@
         } = deps;
 
         if (typeof el !== 'function' || typeof getMessage !== 'function' || typeof getShadowRoot !== 'function') {
-            throw new Error('NotebookLM Source Management: createContentModalSettings requires el, getMessage and getShadowRoot.');
+            throw new Error('GeminiNotebook-Source-Management: createContentModalSettings requires el, getMessage and getShadowRoot.');
         }
 
         function closeSettingsModal(options = {}) {
@@ -784,7 +784,7 @@
                         });
                     })
                     .catch((error) => {
-                        console.warn('NotebookLM Source Management: Import failed.', error);
+                        console.warn('GeminiNotebook-Source-Management: Import failed.', error);
                         renderSettingsModal({
                             importText: importTextInner,
                             preview: previewImportConfig(importTextInner)

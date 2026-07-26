@@ -5,10 +5,10 @@
 ## 0. 项目总览
 
 ```text
-NotebookLM Source Management
+GeminiNotebook-Source-Management
 ├── 类型: Manifest V3 Chrome extension
 ├── 运行页面: https://notebooklm.google.com/*
-├── 主功能: 在 NotebookLM 来源面板内注入 Shadow DOM manager
+├── 主功能: 在 Gemini Notebook 来源面板内注入 Shadow DOM manager
 ├── 数据层: chrome.storage.local + sessionStorage recovery
 ├── 后端: 无后端、无数据库、无认证服务
 ├── 主入口
@@ -102,7 +102,7 @@ NotebookLM Source Management
 │   │   ├── content-view-state.js
 │   │   │   └── 搜索、过滤、隔离视图、effective enabled 状态
 │   │   ├── content-panel-dom.js
-│   │   │   └── NotebookLM panel 查找、挂载、生命周期、颜色/布局读取
+│   │   │   └── Gemini Notebook panel 查找、挂载、生命周期、颜色/布局读取
 │   │   ├── content-developer-logger.js
 │   │   │   └── 开发者模式偏好、脱敏日志、导出、清空
 │   │   ├── content-runtime-state.js
@@ -124,7 +124,7 @@ NotebookLM Source Management
 │   │   ├── content-template.js
 │   │   │   └── manager shell 模板
 │   │   └── styles.css
-│   │       └── 原生 NotebookLM DOM 覆写（manifest content_scripts[0].css 注入，scoped 在 .sources-plus-manager-active；三套 CSS 之一）
+│   │       └── 原生 Gemini Notebook DOM 覆写（manifest content_scripts[0].css 注入，scoped 在 .sources-plus-manager-active；三套 CSS 之一）
 │   ├── background/
 │   │   └── index.js
 │   │       └── service worker；storage 队列、revision guard、history、tab focus/open、偏好和日志消息
@@ -288,7 +288,7 @@ manifest.json
 │   ├── 负责
 │   │   ├── 防重复实例
 │   │   ├── Shadow DOM manager 挂载
-│   │   ├── NotebookLM SPA route change
+│   │   ├── Gemini Notebook SPA route change
 │   │   ├── panel reattach
 │   │   └── teardown/reinitialize
 │   ├── 先看
@@ -310,7 +310,7 @@ manifest.json
 │       └── tests/smoke/extension-smoke.spec.js
 ├── 来源扫描 / 来源描述符
 │   ├── 负责
-│   │   ├── 从 NotebookLM DOM 提取来源标题、key、stable token、fingerprint
+│   │   ├── 从 Gemini Notebook DOM 提取来源标题、key、stable token、fingerprint
 │   │   ├── 提取安全 icon URL
 │   │   ├── 识别导入中 loading 行
 │   │   └── 识别失败 failed 行
@@ -404,9 +404,9 @@ manifest.json
 ├── 原生来源操作
 │   ├── 负责
 │   │   ├── 插件三点菜单定位和 submenu
-│   │   ├── 打开 NotebookLM 来源详情
-│   │   ├── 触发 NotebookLM 原生命名修改
-│   │   ├── 触发 NotebookLM 原生删除确认
+│   │   ├── 打开 Gemini Notebook 来源详情
+│   │   ├── 触发 Gemini Notebook 原生命名修改
+│   │   ├── 触发 Gemini Notebook 原生删除确认
 │   │   ├── 失败来源删除入口
 │   │   └── 删除确认弹窗歧义防护
 │   ├── 先看
@@ -425,7 +425,7 @@ manifest.json
 │   │   ├── source remap preview
 │   │   ├── 设置页命令面板入口和 command palette modal；复用现有搜索、视图、设置、标签和批量操作入口，并允许用户为每个命令自定义快捷键；重复触发可收起搜索、退出快速视图或关闭对应 modal
 │   │   ├── 仅在检测到来源匹配问题时独立突出显示 Source Repair，否则收进帮助/排查区域
-│   │   ├── 原生 NotebookLM 标签导入 preview
+│   │   ├── 原生 Gemini Notebook 标签导入 preview
 │   │   └── 密码入口控制的开发者功能 UI；已开启 Developer Mode 时免密码显示
 │   ├── 先看
 │   │   ├── src/content/content-modals.js
@@ -514,7 +514,7 @@ manifest.json
 ├── Popup launcher
 │   ├── 负责
 │   │   ├── 检测当前 tab
-│   │   ├── 打开/聚焦 NotebookLM
+│   │   ├── 打开/聚焦 Gemini Notebook
 │   │   ├── 聚焦页面内 manager
 │   │   ├── 启用/禁用扩展
 │   │   └── 切换来源视图
@@ -603,7 +603,7 @@ sessionStorage
 
 content runtime memory
 ├── sourceViewKind / sourceViewInfo / sourceViewDisplayKind
-│   ├── 用途: 当前 NotebookLM 来源视图识别结果、插件显示视图和持久化恢复目标
+│   ├── 用途: 当前 Gemini Notebook 来源视图识别结果、插件显示视图和持久化恢复目标
 │   └── 排障: src/content/content-source-sync.js, src/content/index.js
 ├── pendingInitialLoadedState
 │   ├── 用途: 初始 load 延迟恢复时暂存已加载状态
@@ -717,7 +717,7 @@ PLAYWRIGHT_HEADLESS=false npm run test:smoke
 
 release zip
 ├── 生成脚本: scripts/package.js
-├── 输出路径: release/notebooklm-source-management-<version>.zip
+├── 输出路径: release/gemininotebook-source-management-<version>.zip
 ├── 说明: release/ 是生成目录，清理后可以不存在；发布前重新运行 npm run package
 ├── 允许包含
 │   ├── manifest.json
@@ -754,7 +754,7 @@ CI: .github/workflows/ci.yml
 ├── package-lock.json
 ├── README version badge
 ├── CHANGELOG.md
-└── release/notebooklm-source-management-<version>.zip
+└── release/gemininotebook-source-management-<version>.zip
 ```
 
 ## 7. Agent 快速定位树
@@ -765,7 +765,7 @@ CI: .github/workflows/ci.yml
 │   ├── 先看: src/content/index.js
 │   ├── 然后看: src/content/content-panel-dom.js
 │   ├── 测试: content-lifecycle.test.js, smoke
-│   └── 注意: NotebookLM 是 SPA，优先查 teardown/reinitialize/panel lifecycle
+│   └── 注意: Gemini Notebook 是 SPA，优先查 teardown/reinitialize/panel lifecycle
 ├── 来源列表数量不对
 │   ├── 先看: src/content/content-source-sync.js
 │   ├── 然后看: src/content/content-state-reconcile.js
@@ -874,9 +874,9 @@ CI: .github/workflows/ci.yml
 
 ```text
 维护约束
-├── NotebookLM DOM
+├── Gemini Notebook DOM
 │   ├── 不可信输入: title, label, icon URL, attributes, row identity
-│   ├── 不要硬编码 NotebookLM 生成 class
+│   ├── 不要硬编码 Gemini Notebook 生成 class
 │   └── 优先使用 aria、role、data 属性、稳定文本信号和相对结构
 ├── DOM 安全
 │   ├── 不要对用户内容使用 innerHTML
@@ -884,7 +884,7 @@ CI: .github/workflows/ci.yml
 │   └── 渲染字符串应走 el() 的 text node 路径
 ├── icon URL
 │   ├── 风险: 浏览器侧请求泄漏隐私，不是 SSRF
-│   ├── 允许: NotebookLM/Google-owned 静态内容域、当前扩展 URL、NotebookLM blob、小体积 raster data URL
+│   ├── 允许: Gemini Notebook/Google-owned 静态内容域、当前扩展 URL、Gemini Notebook blob、小体积 raster data URL
 │   └── 其他: 回退 glyph icon
 ├── 原生 destructive action
 │   ├── 删除/重命名前必须重新解析 fresh row
@@ -924,7 +924,7 @@ CI: .github/workflows/ci.yml
 ```text
 文档入口
 ├── AGENTS.md
-│   └── 仓库级 agent 指令；要求每次变更同步检查 CHANGELOG、docs/PROJECT_DIRECTORY.md、content helper 装配、验证矩阵、NotebookLM 原生自动化安全和开发者日志脱敏规则
+│   └── 仓库级 agent 指令；要求每次变更同步检查 CHANGELOG、docs/PROJECT_DIRECTORY.md、content helper 装配、验证矩阵、Gemini Notebook 原生自动化安全和开发者日志脱敏规则
 ├── README.md
 │   └── 用户和开发者入口说明
 ├── PRIVACY.md

@@ -96,7 +96,7 @@
 
         const createSnapshotSignatureFactory = globalThis.NSM_CREATE_CONTENT_SNAPSHOT_SIGNATURE;
         if (typeof createSnapshotSignatureFactory !== 'function') {
-            throw new Error('NotebookLM Source Management: createContentPersistence requires NSM_CREATE_CONTENT_SNAPSHOT_SIGNATURE to be loaded first.');
+            throw new Error('GeminiNotebook-Source-Management: createContentPersistence requires NSM_CREATE_CONTENT_SNAPSHOT_SIGNATURE to be loaded first.');
         }
         const {
             isStorageQuotaError,
@@ -142,7 +142,7 @@
 
         const createStateRepairFactory = globalThis.NSM_CREATE_CONTENT_STATE_REPAIR;
         if (typeof createStateRepairFactory !== 'function') {
-            throw new Error('NotebookLM Source Management: createContentPersistence requires NSM_CREATE_CONTENT_STATE_REPAIR to be loaded first.');
+            throw new Error('GeminiNotebook-Source-Management: createContentPersistence requires NSM_CREATE_CONTENT_STATE_REPAIR to be loaded first.');
         }
         const {
             collectSnapshotGroupedSourceKeys,
@@ -218,7 +218,7 @@
             try {
                 onSaveStatusChange(cloneSerializableData(ctx.saveStatus));
             } catch (error) {
-                console.warn('NotebookLM Source Management: Save status update failed:', error);
+                console.warn('GeminiNotebook-Source-Management: Save status update failed:', error);
             }
             return ctx.saveStatus;
         }
@@ -295,7 +295,7 @@
                 });
                 return payload;
             } catch (error) {
-                console.warn('NotebookLM Source Management: Recovery snapshot write failed:', error);
+                console.warn('GeminiNotebook-Source-Management: Recovery snapshot write failed:', error);
                 developerLog('error', 'persistence', 'recovery_snapshot_write_failed', { error });
                 return false;
             }
@@ -313,7 +313,7 @@
                 if (!parsed || typeof parsed !== 'object' || !parsed.snapshot) return null;
                 return parsed;
             } catch (error) {
-                console.warn('NotebookLM Source Management: Recovery snapshot read failed:', error);
+                console.warn('GeminiNotebook-Source-Management: Recovery snapshot read failed:', error);
                 return null;
             }
         }
@@ -331,7 +331,7 @@
                 });
                 return true;
             } catch (error) {
-                console.warn('NotebookLM Source Management: Recovery snapshot clear failed:', error);
+                console.warn('GeminiNotebook-Source-Management: Recovery snapshot clear failed:', error);
                 return false;
             }
         }
@@ -658,7 +658,7 @@
 
                     chromeApi.storage.local.set(payload, () => {
                         if (chromeApi.runtime?.lastError) {
-                            console.warn('NotebookLM Source Management: Local storage write failed:', chromeApi.runtime.lastError);
+                            console.warn('GeminiNotebook-Source-Management: Local storage write failed:', chromeApi.runtime.lastError);
                             resolve({
                                 ok: false,
                                 reason: isStorageQuotaError(chromeApi.runtime.lastError)
@@ -689,7 +689,7 @@
                     if (chromeApi.storage.local.get) {
                         chromeApi.storage.local.get([key, backupKey], (existingData) => {
                             if (chromeApi.runtime?.lastError) {
-                                console.warn('NotebookLM Source Management: Local storage revision check failed:', chromeApi.runtime.lastError);
+                                console.warn('GeminiNotebook-Source-Management: Local storage revision check failed:', chromeApi.runtime.lastError);
                                 resolve({ ok: false, reason: 'local_storage_revision_check_error' });
                                 return;
                             }
@@ -700,7 +700,7 @@
 
                     writePayload();
                 } catch (error) {
-                    console.warn('NotebookLM Source Management: Local storage write threw:', error);
+                    console.warn('GeminiNotebook-Source-Management: Local storage write threw:', error);
                     resolve({ ok: false, reason: 'local_storage_exception' });
                 }
             });
@@ -722,13 +722,13 @@
                         critical: Boolean(options.critical)
                     }, (response) => {
                         if (chromeApi.runtime.lastError) {
-                            console.error('NotebookLM Source Management 通信失败:', chromeApi.runtime.lastError);
+                            console.error('GeminiNotebook-Source-Management 通信失败:', chromeApi.runtime.lastError);
                             resolve({ ok: false, reason: 'runtime_message_error' });
                             return;
                         }
 
                         if (response && response.success === false) {
-                            console.warn('NotebookLM Source Management: SAVE_STATE rejected by background:', response.errorCode || 'unknown_error');
+                            console.warn('GeminiNotebook-Source-Management: SAVE_STATE rejected by background:', response.errorCode || 'unknown_error');
                             const storageMetadata = getStorageMetadataFromResponse(response);
                             if (response.errorCode === 'stale_revision') {
                                 const currentRevision = Number(response.currentRevision) || 0;
@@ -766,7 +766,7 @@
                         });
                     });
                 } catch (error) {
-                    console.warn('NotebookLM Source Management: Context invalidated. Please refresh the page.', error);
+                    console.warn('GeminiNotebook-Source-Management: Context invalidated. Please refresh the page.', error);
                     resolve({ ok: false, reason: 'runtime_exception' });
                 }
             });
@@ -1688,13 +1688,13 @@
                         }
 
                         if (chromeApi.runtime.lastError) {
-                            console.warn('NotebookLM Source Management 未能连接后台:', chromeApi.runtime.lastError);
+                            console.warn('GeminiNotebook-Source-Management 未能连接后台:', chromeApi.runtime.lastError);
                             ctx.pendingStorageUpgrade = false;
                             return callback(null);
                         }
 
                         if (response && response.success === false) {
-                            console.warn('NotebookLM Source Management: LOAD_STATE rejected by background:', response.errorCode || 'unknown_error');
+                            console.warn('GeminiNotebook-Source-Management: LOAD_STATE rejected by background:', response.errorCode || 'unknown_error');
                             ctx.pendingStorageUpgrade = false;
                             return callback(null);
                         }
@@ -1702,7 +1702,7 @@
                         finalizeLoadedState(response && response.data);
                     });
                 } catch (error) {
-                    console.warn('NotebookLM Source Management: Context invalidated during load. Please refresh the page.', error);
+                    console.warn('GeminiNotebook-Source-Management: Context invalidated during load. Please refresh the page.', error);
                     ctx.pendingStorageUpgrade = false;
                     if (ctx.activeLoadStateRequestId === requestId) {
                         ctx.activeLoadStateRequestId = null;
@@ -1721,7 +1721,7 @@
                         }
 
                         if (chromeApi.runtime?.lastError) {
-                            console.warn('NotebookLM Source Management: Local storage load failed, falling back to runtime messaging:', chromeApi.runtime.lastError);
+                            console.warn('GeminiNotebook-Source-Management: Local storage load failed, falling back to runtime messaging:', chromeApi.runtime.lastError);
                             fallbackToRuntimeLoad();
                             return;
                         }
@@ -1733,7 +1733,7 @@
                     });
                     return;
                 } catch (error) {
-                    console.warn('NotebookLM Source Management: Local storage load threw, falling back to runtime messaging:', error);
+                    console.warn('GeminiNotebook-Source-Management: Local storage load threw, falling back to runtime messaging:', error);
                 }
             }
 

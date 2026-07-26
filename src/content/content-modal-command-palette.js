@@ -34,7 +34,7 @@
         } = deps;
 
         if (typeof el !== 'function' || typeof getMessage !== 'function' || typeof getShadowRoot !== 'function') {
-            throw new Error('NotebookLM Source Management: createContentModalCommandPalette requires el, getMessage and getShadowRoot.');
+            throw new Error('GeminiNotebook-Source-Management: createContentModalCommandPalette requires el, getMessage and getShadowRoot.');
         }
 
         const resolveCommands = typeof getCommandPaletteCommands === 'function'

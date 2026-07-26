@@ -1470,7 +1470,7 @@
                 detailsMenuItem.click();
                 return createNativeActionResult(true);
             } catch (error) {
-                console.error('NotebookLM Source Management: Failed to bridge native source details action.', error);
+                console.error('GeminiNotebook-Source-Management: Failed to bridge native source details action.', error);
                 const doc = getDocument();
                 doc?.body?.click?.();
                 const directResult = triggerNativeSourceDetailsDirectWithResult(sourceKey);
@@ -1515,7 +1515,7 @@
                 onNativeSourceRenameStarted(sourceKey);
                 return createNativeActionResult(true);
             } catch (error) {
-                console.error('NotebookLM Source Management: Failed to bridge native source rename action.', error);
+                console.error('GeminiNotebook-Source-Management: Failed to bridge native source rename action.', error);
                 closeNativeOverlay();
                 return createNativeActionResult(false, 'native_action_error');
             }
@@ -1612,7 +1612,7 @@
                 try {
                     onNativeSourceDeleteAccepted(sourceKey);
                 } catch (callbackError) {
-                    console.warn('NotebookLM Source Management: Failed to apply accepted native deletion locally.', callbackError);
+                    console.warn('GeminiNotebook-Source-Management: Failed to apply accepted native deletion locally.', callbackError);
                 }
                 developerLog('info', 'native_action', 'delete_confirmed', {
                     sourceKey,
@@ -1620,7 +1620,7 @@
                 });
                 return { deleted: true };
             } catch (error) {
-                console.error('NotebookLM Source Management: Error during native source deletion.', error);
+                console.error('GeminiNotebook-Source-Management: Error during native source deletion.', error);
                 closeNativeOverlay();
                 developerLog('error', 'native_action', 'delete_failed', { sourceKey, reason: 'native_delete_error', error });
                 return { deleted: false, reason: 'native_delete_error' };
@@ -1637,7 +1637,7 @@
                     }
                 })
                 .catch((error) => {
-                    console.error('NotebookLM Source Management: Source details open request failed.', error);
+                    console.error('GeminiNotebook-Source-Management: Source details open request failed.', error);
                     showNativeActionFailureToast('details', sourceKey, 'native_action_error', openNativeSourceDetails);
                 });
 
@@ -1652,7 +1652,7 @@
                     }
                 })
                 .catch((error) => {
-                    console.error('NotebookLM Source Management: Source rename request failed.', error);
+                    console.error('GeminiNotebook-Source-Management: Source rename request failed.', error);
                     showNativeActionFailureToast('rename', sourceKey, 'native_action_error', renameNativeSourceFromAction);
                 });
 
@@ -1670,7 +1670,7 @@
                     showNativeActionFailureToast('delete', sourceKey, result?.reason || 'native_delete_error', deleteNativeSourceFromAction);
                 })
                 .catch((error) => {
-                    console.error('NotebookLM Source Management: Source delete request failed.', error);
+                    console.error('GeminiNotebook-Source-Management: Source delete request failed.', error);
                     showNativeActionFailureToast('delete', sourceKey, 'native_delete_error', deleteNativeSourceFromAction);
                 });
 

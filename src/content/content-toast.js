@@ -27,7 +27,7 @@
         const runtime = deps.runtime || deps;
 
         if (typeof normalizeToastOptions !== 'function' || typeof getToastDuration !== 'function') {
-            throw new Error('NotebookLM Source Management: createContentToast requires normalizeToastOptions and getToastDuration.');
+            throw new Error('GeminiNotebook-Source-Management: createContentToast requires normalizeToastOptions and getToastDuration.');
         }
 
         let toastTimeout = null;

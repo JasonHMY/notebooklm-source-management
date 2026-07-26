@@ -1,6 +1,6 @@
 # Promotion Workspace
 
-This folder keeps product promotion material for NotebookLM Source Management. It is not part of the Chrome extension runtime and is not included in the release zip.
+This folder keeps product promotion material for GeminiNotebook-Source-Management. It is not part of the Chrome extension runtime and is not included in the release zip.
 
 ## Folder Map
 
@@ -22,8 +22,7 @@ Use these skills for drafting and planning first. Keep account login, posting, a
 
 ## Product Positioning Seed
 
-- Product: NotebookLM Source Management.
-- Audience: NotebookLM users who manage many sources, folders, tags, or repeated research projects.
-- Core promise: make large NotebookLM source lists easier to organize, recover, and maintain.
+- Product: GeminiNotebook-Source-Management.
+- Audience: Gemini Notebook users who manage many sources, folders, tags, or repeated research projects.
+- Core promise: make large Gemini Notebook source lists easier to organize, recover, and maintain.
 - Trust angle: local Chrome extension, no backend, no external database, and privacy-focused source management.
-

@@ -26,7 +26,7 @@ Every developer log entry must be structured JSON with these fields:
 - `level`: one of `debug`, `info`, `warn`, or `error`.
 - `category`: one of `settings`, `persistence`, `source_sync`, `source_action`, `native_action`, `import_export`, `view_switch`, `lifecycle`, `ui`, or `background`.
 - `event`: stable snake_case event name. Do not include dynamic data in the event name. (The logger enforces this — it strips disallowed chars to `[A-Za-z0-9_.:-]`, truncates to 120 chars, and falls back to `unknown_event` when empty — so dynamic content is silently rewritten rather than rejected.)
-- `notebookId`: current NotebookLM notebook id, or an empty string when unavailable.
+- `notebookId`: current notebook id from Gemini Notebook, or an empty string when unavailable.
 - `details`: small sanitized object with counts, ids, reasons, revisions, booleans, and result metadata.
 
 ## Privacy Rules

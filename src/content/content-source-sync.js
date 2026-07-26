@@ -501,7 +501,7 @@
 
         const createContentNativeLabelDetectorFactory = globalThis.NSM_CREATE_CONTENT_NATIVE_LABEL_DETECTOR;
         if (typeof createContentNativeLabelDetectorFactory !== 'function') {
-            throw new Error('NotebookLM Source Management: createContentSourceSync requires NSM_CREATE_CONTENT_NATIVE_LABEL_DETECTOR to be loaded first.');
+            throw new Error('GeminiNotebook-Source-Management: createContentSourceSync requires NSM_CREATE_CONTENT_NATIVE_LABEL_DETECTOR to be loaded first.');
         }
         const {
             ACTIVE_LABEL_VIEW_CONTROL_PATTERN,
@@ -2447,7 +2447,7 @@
                         : {});
                 }
             } catch (error) {
-                console.error('NotebookLM Source Management: Error syncing state during DOM change.', error);
+                console.error('GeminiNotebook-Source-Management: Error syncing state during DOM change.', error);
             } finally {
                 endSourceViewPass();
             }
@@ -2637,7 +2637,7 @@
                     debouncedScanAndSync(needsCriticalSave ? { critical: true } : {});
                 }
             } catch (error) {
-                console.error('NotebookLM Source Management: Failed handling mutations.', error);
+                console.error('GeminiNotebook-Source-Management: Failed handling mutations.', error);
             }
         }
 

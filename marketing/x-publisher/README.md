@@ -1,6 +1,6 @@
 # X Publisher
 
-Local OAuth 2.0 helper for the NotebookLM Source Management promotion account.
+Local OAuth 2.0 helper for the GeminiNotebook-Source-Management promotion account.
 
 This folder is for marketing automation only. It is not part of the Chrome extension runtime or release package.
 
@@ -54,13 +54,13 @@ node x-auth.js me
 Dry run:
 
 ```bash
-node post.js --text "Testing local X API publishing for NotebookLM Source Management."
+node post.js --text "Testing local X API publishing for GeminiNotebook-Source-Management."
 ```
 
 Actually post:
 
 ```bash
-node post.js --text "Testing local X API publishing for NotebookLM Source Management." --yes
+node post.js --text "Testing local X API publishing for GeminiNotebook-Source-Management." --yes
 ```
 
 Post from a text file:

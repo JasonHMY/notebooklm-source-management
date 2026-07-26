@@ -39,9 +39,9 @@ Read the relevant doc BEFORE making a change. Each doc is the source of truth fo
 
 ### Three independent runtime surfaces
 
-- **Content script** (`src/content/index.js` + ~45 helper modules) — injected into `https://notebooklm.google.com/*`. Mounts a Shadow-DOM manager (`#sources-plus-root`) into NotebookLM's source panel. 90% of the code lives here.
+- **Content script** (`src/content/index.js` + ~45 helper modules) — injected into `https://notebooklm.google.com/*`. Mounts a Shadow-DOM manager (`#sources-plus-root`) into Gemini Notebook's source panel. 90% of the code lives here.
 - **Background service worker** (`src/background/index.js`) — owns `chrome.storage.local` writes via a queued + revision-guarded protocol; resolves tab focus/open requests from the popup.
-- **Toolbar popup** (`src/popup/index.js`) — launcher only. Enables/disables the manager and switches NotebookLM source view; the real UI lives in the content panel.
+- **Toolbar popup** (`src/popup/index.js`) — launcher only. Enables/disables the manager and switches Gemini Notebook source view; the real UI lives in the content panel.
 
 ### No bundler — factory + global registration pattern
 
@@ -64,8 +64,8 @@ Content scripts are loaded sequentially per `manifest.json` `content_scripts[0].
 CSS lives in **three** places by scope:
 
 - **Inside Shadow DOM** (`#sources-plus-root`): manager UI, styled via `NSM_CONTENT_STYLE_TEXT` in [src/content/content-style-text.js](src/content/content-style-text.js). Tokens like `--sp-bg-button`, `--sp-text-primary`, `--sp-shadow-*` are declared on `:host` with light + dark variants.
-- **Outside Shadow DOM** (`document.body`, `document.head`): only when Shadow DOM can't reach — native Material overlays, NotebookLM dialogs, drag ghosts. Styled via `NSM_GLOBAL_OVERLAY_STYLE_TEXT` (same file, second exported template string).
-- **Native NotebookLM DOM overrides**: [src/content/styles.css](src/content/styles.css) is injected directly by `manifest.json` `content_scripts[0].css` (NOT a Shadow-DOM/JS template). Scoped under the `.sources-plus-manager-active` class (toggled on `document.documentElement`, NOT the shadow host), it uses `!important` to (a) hide the native source-list containers inside the source panel — via `visibility:hidden`/off-screen, kept in the render tree rather than `display:none` so Angular CDK can still measure overlays — and (b) restyle native Material menus (radius/shadow/dark-mode). This must live in the page, not the Shadow DOM, to override NotebookLM's own styles — keep page-level native overrides here, not in the two JS template strings above.
+- **Outside Shadow DOM** (`document.body`, `document.head`): only when Shadow DOM can't reach — native Material overlays, Gemini Notebook dialogs, drag ghosts. Styled via `NSM_GLOBAL_OVERLAY_STYLE_TEXT` (same file, second exported template string).
+- **Native Gemini Notebook DOM overrides**: [src/content/styles.css](src/content/styles.css) is injected directly by `manifest.json` `content_scripts[0].css` (NOT a Shadow-DOM/JS template). Scoped under the `.sources-plus-manager-active` class (toggled on `document.documentElement`, NOT the shadow host), it uses `!important` to (a) hide the native source-list containers inside the source panel — via `visibility:hidden`/off-screen, kept in the render tree rather than `display:none` so Angular CDK can still measure overlays — and (b) restyle native Material menus (radius/shadow/dark-mode). This must live in the page, not the Shadow DOM, to override Gemini Notebook's own styles — keep page-level native overrides here, not in the two JS template strings above.
 - `:host` tokens DO NOT cascade to `document.body`. For UI living outside the Shadow DOM, either redeclare tokens locally OR inline resolved values + a `@media (prefers-color-scheme: dark)` override. See `.sp-drag-ghost` in content-style-text.js for the resolved-value pattern. The same applies to `@font-face` declarations — Google Symbols must be re-declared in the global block if used outside Shadow DOM.
 
 ### State shape (per-notebook)
@@ -84,7 +84,7 @@ Background SW writes are revision-guarded; stale writes from content are rejecte
 
 All Shadow-DOM UI uses the `el(...)` helper from `src/utils/index.js` — this is the XSS-protection core. ESLint's `no-restricted-syntax` blocks `innerHTML` writes anywhere in `src/`. New components use `el()` + `appendChild` + `createTextNode`.
 
-NotebookLM-derived strings (source titles, aria-labels, icon URLs, import JSON) are untrusted input — treat accordingly.
+Gemini Notebook-derived strings (source titles, aria-labels, icon URLs, import JSON) are untrusted input — treat accordingly.
 
 ### i18n
 
@@ -106,13 +106,13 @@ A 2-arg call silently coerces level/category to fallback strings and discards yo
 
 - **Unit tests** (`tests/content/<module>.test.js`) — Jest, value-in/value-out, mocked DOM via `tests/helpers/load-content-module.js`. Each content module has a focused test file.
 - **Integration tests** (`tests/content/content-tree.test.js`, `content-lifecycle.test.js`, etc.) — wire multiple modules via `tests/helpers/content-test-harness.js`.
-- **Playwright smoke** (`tests/smoke/*.spec.js`) — real extension context in a NotebookLM-style fixture; default headless. For HTML5 DnD scenarios, dispatch synthetic `DragEvent`s via `page.evaluate` — Playwright's `dragTo` does NOT trigger native DataTransfer events. See `extension-smoke.spec.js` "restores an import backup..." and `batch-drag.smoke.spec.js` for the working pattern.
+- **Playwright smoke** (`tests/smoke/*.spec.js`) — real extension context in a Gemini Notebook-style fixture; default headless. For HTML5 DnD scenarios, dispatch synthetic `DragEvent`s via `page.evaluate` — Playwright's `dragTo` does NOT trigger native DataTransfer events. See `extension-smoke.spec.js` "restores an import backup..." and `batch-drag.smoke.spec.js` for the working pattern.
 
 ## Non-obvious gotchas
 
 - **Source-list scroll container** is `#sources-list` (`overflow-y: auto` in content-style-text.js). Access via `shadowRoot.getElementById('sources-list')`.
-- **NotebookLM is a single-page app.** Switching notebooks does NOT trigger a full reload. The content script tears down and rebuilds in place; a full reload is only the last-resort fallback after repeated retries fail.
-- **Do not hardcode NotebookLM-generated CSS class names.** They are obfuscated and rotate. Use aria attributes, roles, `data-*`, text signals (`label_auto`, "Return to list view"), and relative structure.
+- **Gemini Notebook is a single-page app.** Switching notebooks does NOT trigger a full reload. The content script tears down and rebuilds in place; a full reload is only the last-resort fallback after repeated retries fail.
+- **Do not hardcode Gemini Notebook-generated CSS class names.** They are obfuscated and rotate. Use aria attributes, roles, `data-*`, text signals (`label_auto`, "Return to list view"), and relative structure.
 - **`computeDropIntent` returns** `{ targetList, insertIndex, targetGroup }`. `targetList` is one of: `state.ungrouped` (string[]), some `group.children` (object[]), or `state.groups` (string[] of group IDs at root level). The entry shape differs — code that splices into `targetList` must handle both string and object entries, and must NOT splice source keys into `state.groups`.
 - **`runtime.activeDragGhost`** is set on multi-source dragstart and torn down on dragend (RAF-deferred so the browser finishes capturing the drag image). Cleanup paths: `handleDragEnd` + `clearDragFeedback` as backstop.
 - **Manifest version, package.json version, README badge, release zip name, and CHANGELOG version section must all match** on release. AGENTS.md enumerates this gate.

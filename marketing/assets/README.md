@@ -1,6 +1,6 @@
 # Promotion Assets
 
-Track visual assets here. Do not store screenshots that contain private NotebookLM source titles, notebook content, private URLs, or account recovery data.
+Track visual assets here. Do not store screenshots that contain private Gemini Notebook source titles, notebook content, private URLs, or account recovery data.
 
 Suggested asset types:
 
@@ -9,4 +9,3 @@ Suggested asset types:
 - Xiaohongshu cover images and screenshot carousels.
 - Short demo videos.
 - Product diagrams.
-

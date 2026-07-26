@@ -258,6 +258,16 @@ describe('locale message catalogs', () => {
         }
     });
 
+    it('uses the canonical product brand in every locale', () => {
+        for (const localeId of localeIds) {
+            const messages = localeMessages[localeId];
+            expect(messages.extName.message).toBe('GeminiNotebook-Source-Management');
+            expect(messages.extShortName.message).toBe('GeminiNotebook');
+            expect(messages.actionTitle.message).toContain('GeminiNotebook-Source-Management');
+            expect(messages.ui_welcome_title.message).toContain('GeminiNotebook-Source-Management');
+        }
+    });
+
     it('retains critical fallback and popup copy keys', () => {
         for (const localeId of localeIds) {
             const messages = localeMessages[localeId];

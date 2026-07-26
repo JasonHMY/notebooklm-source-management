@@ -10,7 +10,7 @@
     const contentConfig = globalThis.NSM_CONTENT_CONFIG;
 
     if (!contentConfig || !contentConfig.DEPS) {
-        throw new Error('NotebookLM Source Management: Content config is missing.');
+        throw new Error('GeminiNotebook-Source-Management: Content config is missing.');
     }
 
     const { DEPS } = contentConfig;

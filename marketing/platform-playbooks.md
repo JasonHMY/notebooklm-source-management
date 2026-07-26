@@ -19,7 +19,7 @@ Post patterns:
 Avoid:
 
 - Overclaiming AI features that the extension does not provide.
-- Posting private NotebookLM source names or notebook content.
+- Posting private Gemini Notebook source names or notebook content.
 - High-frequency automated replies or follows.
 
 ## Xiaohongshu
@@ -29,7 +29,7 @@ Primary use:
 - Chinese tutorial notes.
 - Screenshot carousels.
 - Practical productivity workflows.
-- Search-friendly titles around NotebookLM, research, source management, tags, and folders.
+- Search-friendly titles around Gemini Notebook, research, source management, tags, and folders.
 
 Post patterns:
 
@@ -41,7 +41,7 @@ Post patterns:
 Avoid:
 
 - Direct translation of X posts.
-- Claims that sound like official NotebookLM or Google support.
+- Claims that sound like official Gemini Notebook or Google support.
 - Automation that logs in or posts without manual review.
 
 ## Reddit / Communities

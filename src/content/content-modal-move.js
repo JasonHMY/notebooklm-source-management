@@ -38,7 +38,7 @@
         } = deps;
 
         if (typeof el !== 'function' || typeof getMessage !== 'function' || typeof getShadowRoot !== 'function') {
-            throw new Error('NotebookLM Source Management: createContentModalMove requires el, getMessage and getShadowRoot.');
+            throw new Error('GeminiNotebook-Source-Management: createContentModalMove requires el, getMessage and getShadowRoot.');
         }
 
         function closeMoveToFolderModal(options = {}) {

@@ -1,11 +1,11 @@
-# NotebookLM Source Management
+# GeminiNotebook-Source-Management
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Version](https://img.shields.io/badge/version-26.6.16-green.svg)
 
-A Chrome extension that makes source management inside Google NotebookLM less awkward.
+A Chrome extension that makes source management inside Google Gemini Notebook (formerly NotebookLM) less awkward.
 
-It runs directly inside NotebookLM's source panel. The toolbar icon is only a launcher that helps you jump back to the in-page manager; it is not a separate popup app.
+It runs directly inside Gemini Notebook's source panel. The toolbar icon is only a launcher that helps you jump back to the in-page manager; it is not a separate popup app.
 
 ## What It Does
 
@@ -17,7 +17,7 @@ It runs directly inside NotebookLM's source panel. The toolbar icon is only a la
 - Automatically expand folders that contain search results, then restore the previous collapsed state when search is cleared.
 - Add color-coded tags, filter by tag, and batch add or remove tags.
 - Move sources into folders one at a time or in batches, including moving selected sources back to ungrouped.
-- Delete multiple sources at once through NotebookLM's native delete confirmation flow.
+- Delete multiple sources at once through Gemini Notebook's native delete confirmation flow.
 - Open source details, rename sources, and delete sources from a single plugin menu.
 - Undo recent plugin-side organization changes with `Command+Z` on macOS or `Ctrl+Z` on Windows/Linux.
 - Show a one-time welcome panel with a feedback shortcut the first time the in-page manager loads.
@@ -41,10 +41,10 @@ If one of your notebooks has started to fill up with PDFs, links, and uploads, t
 
 After installation:
 
-- If you are already inside a NotebookLM notebook, clicking the toolbar icon will try to bring you straight to the in-page source manager.
-- If you are not inside a notebook yet, it will open NotebookLM first so you can choose one.
+- If you already have a notebook open in Gemini Notebook, clicking the toolbar icon will try to bring you straight to the in-page source manager.
+- If you are not inside a notebook yet, it will open Gemini Notebook first so you can choose one.
 
-NotebookLM is a single-page app, so switching notebooks does not always trigger a full reload. This extension tries to tear down and rebuild itself in place. A full page refresh is only used as a fallback when the source panel cannot be reattached after repeated retries.
+Gemini Notebook is a single-page app, so switching notebooks does not always trigger a full reload. This extension tries to tear down and rebuild itself in place. A full page refresh is only used as a fallback when the source panel cannot be reattached after repeated retries.
 
 ## Automated Checks
 
@@ -59,9 +59,9 @@ Use these commands when you want to verify the repository without doing a full m
 - `npm run playwright:install` installs the Chromium browser used by Playwright smoke.
 - `npm run package` creates the Chrome Web Store zip and validates its contents.
 
-The Playwright smoke suite covers the core extension surfaces and the higher-risk NotebookLM DOM regressions, including:
+The Playwright smoke suite covers the core extension surfaces and the higher-risk Gemini Notebook DOM regressions, including:
 
-- extension popup shell startup and manager injection into a NotebookLM-style fixture
+- extension popup shell startup and manager injection into a Gemini Notebook-style fixture
 - content/background/popup message bridge paths such as `GET_MANAGER_STATUS`, `FOCUS_MANAGER`, and source-view switching
 - developer-mode log sanitization and disabled-mode behavior
 - label/list view state sync, collapsed native label import, and fallback source-view behavior
@@ -70,11 +70,11 @@ The Playwright smoke suite covers the core extension surfaces and the higher-ris
 ## Permissions
 
 - `storage`: saves folder membership, ordering, per-source enabled state, and custom panel height for each notebook.
-- `tabs`: lets the launcher find, focus, or open the correct NotebookLM tab instead of guessing.
+- `tabs`: lets the launcher find, focus, or open the correct Gemini Notebook tab instead of guessing.
 
 ## Privacy
 
-This extension does not send NotebookLM content to external servers. State stays in the browser, and this release does not include analytics, telemetry, or crash reporting.
+This extension does not send Gemini Notebook content to external servers. State stays in the browser, and this release does not include analytics, telemetry, or crash reporting.
 
 Import/export config files are generated locally in your browser. They contain this extension's saved folder order, tags, enabled state, and related per-notebook organization data.
 
@@ -85,26 +85,26 @@ See [PRIVACY.md](PRIVACY.md) for the full privacy note.
 ## Troubleshooting
 
 - **The manager disappears after you switch notebooks.** Give the page a moment to finish the in-place rebuild. If it still does not come back, refresh once and try again.
-- **Batch actions are disabled.** Make sure the source list has finished loading. Controls stay disabled while NotebookLM is still rendering placeholders.
+- **Batch actions are disabled.** Make sure the source list has finished loading. Controls stay disabled while Gemini Notebook is still rendering placeholders.
 - **The popup still says a refresh is needed, or it cannot find the source panel.** Refresh the page, then open the launcher again so the extension can rebuild its state.
-- **A source loses its saved enabled state.** The extension prefers stable DOM identifiers when it can find them. If NotebookLM does not expose one, it falls back to a normalized fingerprint based on `title + aria-label + icon`. That works most of the time, but duplicate or unnamed sources can still be matched imperfectly after a major UI change.
-- **Import preview reports unmatched sources.** The imported folders and tags can still be applied, but unmatched sources cannot inherit source-specific state until NotebookLM exposes matching source identities in the current notebook.
-- **Undo does not restore a NotebookLM-deleted source.** Undo covers plugin-side organization changes. Native NotebookLM deletion still removes the real source through NotebookLM's own confirmation flow.
+- **A source loses its saved enabled state.** The extension prefers stable DOM identifiers when it can find them. If Gemini Notebook does not expose one, it falls back to a normalized fingerprint based on `title + aria-label + icon`. That works most of the time, but duplicate or unnamed sources can still be matched imperfectly after a major UI change.
+- **Import preview reports unmatched sources.** The imported folders and tags can still be applied, but unmatched sources cannot inherit source-specific state until Gemini Notebook exposes matching source identities in the current notebook.
+- **Undo does not restore a source deleted from Gemini Notebook.** Undo covers plugin-side organization changes. Native Gemini Notebook deletion still removes the real source through Gemini Notebook's own confirmation flow.
 
 ## Development Smoke Checklist
 
 Use this checklist after changes to the content script, popup launcher, or source list rendering.
 
 1. Load the repository from `chrome://extensions` with `Developer mode` enabled.
-2. Open an existing NotebookLM notebook and confirm the in-page manager mounts under the source panel.
+2. Open an existing notebook in Gemini Notebook and confirm the in-page manager mounts under the source panel.
 3. Verify source rows still show the correct icon:
    - regular source icons render normally
    - the native more-options button icon is not reused as the source icon
    - at least one source that uses a background or mask-based icon still renders correctly
 4. Open the toolbar popup in three contexts and confirm the primary CTA is correct:
    - inside a notebook
-   - on the NotebookLM home page
-   - on a non-NotebookLM page
+   - on the Gemini Notebook home page
+   - on a page outside Gemini Notebook
 5. Switch between notebooks without closing the tab and confirm the manager reattaches.
 6. Walk through the core interactions once:
    - create a group

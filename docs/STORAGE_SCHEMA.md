@@ -20,7 +20,7 @@ chrome.storage.local
     └── Per-notebook bounded developer logs.
 ```
 
-`<projectId>` is derived from the NotebookLM notebook URL. Notebook-scoped writes normally go through the background service worker, which validates the sender and key prefix before touching storage.
+`<projectId>` is derived from the notebook URL in Gemini Notebook. Notebook-scoped writes normally go through the background service worker, which validates the sender and key prefix before touching storage.
 
 ### Recovery snapshot (sessionStorage)
 
@@ -114,9 +114,9 @@ Field notes:
 - `root` is the ordered root layer: an array of `{ type: 'group', id }` and `{ type: 'source', key }` entries (same shape as `groupsById[id].children`). Root-level folders and positioned sources interleave in display order.
 - `groupsById` is the full group map. Group `children` must be treated defensively as an array; legacy or imported data can omit it.
 - `ungrouped` is the bottom "unsorted" bin (`string[]` of source keys). A root-level source appears in EITHER `root` (positioned) XOR `ungrouped` (bin), never both. New imports default to the bin.
-- `sourceStateById` stores metadata needed to remap sources after NotebookLM DOM changes.
+- `sourceStateById` stores metadata needed to remap sources after Gemini Notebook DOM changes.
 - `sourceStateById[sourceKey].addedAt` stores when the extension first recognized a source. It is optional for legacy sources and powers the built-in Recent quick view; missing values must not be backfilled as recent during migration.
-- `nativeLabelTitle` marks sources or groups that came from NotebookLM native label import. Ordinary user folders with the same visible name must not be treated as native labels unless this field is present.
+- `nativeLabelTitle` marks sources or groups that came from Gemini Notebook native label import. Ordinary user folders with the same visible name must not be treated as native labels unless this field is present.
 - `sourceViewDisplayKind` stores the last list/label view used in this notebook. Missing or invalid values are ignored so legacy state does not force a view switch.
 - `tagsById`, `tagOrder`, and `sourceTagsById` are optional in legacy data and must be normalized on load.
 - `_saveRevision` (number) and `_savedAt` (ISO string) are internal metadata injected into every persisted snapshot on save (omitted from the example above). They drive the background revision guard, the primary/backup preference choice, and the history dedup signature.
@@ -159,7 +159,7 @@ Load paths normalize older schemas to the current runtime shape and mark `pendin
 
 ## Privacy boundary
 
-Persisted state intentionally contains source titles, folder names, tag labels, stable tokens, fingerprints, and organization metadata. Treat these as private NotebookLM organization data.
+Persisted state intentionally contains source titles, folder names, tag labels, stable tokens, fingerprints, and organization metadata. Treat these as private Gemini Notebook organization data.
 
 Diagnostics and developer logs must stay more restrictive:
 

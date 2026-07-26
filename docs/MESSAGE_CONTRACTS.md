@@ -103,7 +103,7 @@ Popup/background -> content
 
 `GET_MANAGER_STATUS` should report whether the manager is ready, the current reason when it is not ready, notebook/project context, and source view controls.
 
-`SWITCH_SOURCE_VIEW` must preserve label-view selection state before clicking NotebookLM native view controls.
+`SWITCH_SOURCE_VIEW` must preserve label-view selection state before clicking Gemini Notebook native view controls.
 
 `ENABLE_MANAGER` and `DISABLE_MANAGER` toggle the in-page manager without changing stored notebook organization data.
 

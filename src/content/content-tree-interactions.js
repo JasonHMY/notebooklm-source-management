@@ -925,7 +925,7 @@
 
         const createContentNativeCheckboxSyncFactory = globalThis.NSM_CREATE_CONTENT_NATIVE_CHECKBOX_SYNC;
         if (typeof createContentNativeCheckboxSyncFactory !== 'function') {
-            throw new Error('NotebookLM Source Management: createContentTreeInteractions requires NSM_CREATE_CONTENT_NATIVE_CHECKBOX_SYNC to be loaded first.');
+            throw new Error('GeminiNotebook-Source-Management: createContentTreeInteractions requires NSM_CREATE_CONTENT_NATIVE_CHECKBOX_SYNC to be loaded first.');
         }
         const {
             getNativeCheckboxState,
@@ -1313,7 +1313,7 @@
 
             if (target.closest('#sp-import-native-labels-btn')) {
                 Promise.resolve(applyNativeLabelImportFromUi()).catch((error) => {
-                    console.error('NotebookLM Source Management: Failed to prepare native label import preview.', error);
+                    console.error('GeminiNotebook-Source-Management: Failed to prepare native label import preview.', error);
                 });
                 return;
             }

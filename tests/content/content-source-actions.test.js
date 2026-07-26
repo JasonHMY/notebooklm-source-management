@@ -370,7 +370,7 @@ describe('executeBatchDelete', () => {
         await mod.executeBatchDelete();
 
         expect(global.console.error).toHaveBeenCalledWith(
-            'NotebookLM Source Management: Error during automated deletion step',
+            'GeminiNotebook-Source-Management: Error during automated deletion step',
             expect.any(Error)
         );
         expect(confirmButton.click).toHaveBeenCalled();

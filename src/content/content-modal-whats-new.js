@@ -30,7 +30,7 @@
         } = deps;
 
         if (typeof el !== 'function' || typeof getMessage !== 'function' || typeof getShadowRoot !== 'function') {
-            throw new Error('NotebookLM Source Management: createContentModalWhatsNew requires el, getMessage and getShadowRoot.');
+            throw new Error('GeminiNotebook-Source-Management: createContentModalWhatsNew requires el, getMessage and getShadowRoot.');
         }
 
         function closeWhatsNewModal(options = {}) {

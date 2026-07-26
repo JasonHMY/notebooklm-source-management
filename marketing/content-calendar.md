@@ -15,9 +15,9 @@ Use this calendar for lightweight planning. Keep final copy platform-specific in
 
 | Idea | Platform | Hook | Asset | Status |
 | --- | --- | --- | --- | --- |
-| Organize 50+ NotebookLM sources without losing context | Xiaohongshu, X | NotebookLM source lists get messy fast; this extension adds folders and tags. | before/after screenshots | Draft |
+| Organize 50+ Gemini Notebook sources without losing context | Xiaohongshu, X | Gemini Notebook source lists get messy fast; this extension adds folders and tags. | before/after screenshots | Draft |
 | Local recovery and version history | X | Source organization should be recoverable, not fragile. | settings/version history screenshot | Draft |
-| Folder vs tag workflow | Xiaohongshu | When to use folders, when to use tags in NotebookLM research. | annotated screenshots | Draft |
+| Folder vs tag workflow | Xiaohongshu | When to use folders, when to use tags in Gemini Notebook research. | annotated screenshots | Draft |
 | Privacy-focused extension architecture | Reddit, X | No backend, no external database, local extension storage. | simple architecture diagram | Draft |
 
 ## Review Checklist

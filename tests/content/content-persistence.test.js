@@ -1007,7 +1007,7 @@ describe('saveState', () => {
         jest.advanceTimersByTime(1500);
 
         expect(consoleWarnSpy).toHaveBeenCalledWith(
-            'NotebookLM Source Management: SAVE_STATE rejected by background:',
+            'GeminiNotebook-Source-Management: SAVE_STATE rejected by background:',
             'runtime_failure'
         );
 
@@ -1027,7 +1027,7 @@ describe('saveState', () => {
         expect(() => mod.saveState()).not.toThrow();
         jest.advanceTimersByTime(1500);
         expect(consoleWarnSpy).toHaveBeenCalledWith(
-            "NotebookLM Source Management: Context invalidated. Please refresh the page.",
+            "GeminiNotebook-Source-Management: Context invalidated. Please refresh the page.",
             expect.any(Error)
         );
 

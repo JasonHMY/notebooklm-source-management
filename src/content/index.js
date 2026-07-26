@@ -39,7 +39,7 @@
         try {
             previousContentInstance.destroy('reinitialized');
         } catch (error) {
-            console.warn('NotebookLM Source Management: Failed to tear down previous content instance.', error);
+            console.warn('GeminiNotebook-Source-Management: Failed to tear down previous content instance.', error);
         }
     }
 
@@ -107,7 +107,7 @@
         typeof createContentTreeInteractions !== 'function' ||
         typeof createContentSourceSync !== 'function'
     ) {
-        throw new Error('NotebookLM Source Management: Content helpers are missing.');
+        throw new Error('GeminiNotebook-Source-Management: Content helpers are missing.');
     }
 
     const {
@@ -1493,7 +1493,7 @@
                 return true;
             }
         } catch (error) {
-            console.warn('NotebookLM Source Management: Failed to reload after stale save.', error);
+            console.warn('GeminiNotebook-Source-Management: Failed to reload after stale save.', error);
         }
         return false;
     }
@@ -1945,7 +1945,7 @@
             observedNativeScrollArea = nextObservedArea;
         } catch (error) {
             observedNativeScrollArea = null;
-            console.error('NotebookLM Source Management: Failed to observe source panel', error);
+            console.error('GeminiNotebook-Source-Management: Failed to observe source panel', error);
         }
     }
 
@@ -2720,7 +2720,7 @@
         try {
             saveState({ immediate: true, recordUndo: false });
         } catch (error) {
-            console.warn('NotebookLM Source Management: Failed to persist source view preference.', error);
+            console.warn('GeminiNotebook-Source-Management: Failed to persist source view preference.', error);
         }
     }
 
@@ -2737,7 +2737,7 @@
             try {
                 syncManagerWithPanelLifecycle();
             } catch (error) {
-                console.warn('NotebookLM Source Management: Failed to sync after source view switch.', error);
+                console.warn('GeminiNotebook-Source-Management: Failed to sync after source view switch.', error);
             }
         }, 120);
 
@@ -2796,7 +2796,7 @@
                     }
                     render();
                 } catch (error) {
-                    console.warn('NotebookLM Source Management: Failed to refresh sources after hidden label expansion.', error);
+                    console.warn('GeminiNotebook-Source-Management: Failed to refresh sources after hidden label expansion.', error);
                 }
             }, 350);
         }
@@ -3036,7 +3036,7 @@
         });
         if (result && typeof result.then === 'function') {
             result.catch((error) => {
-                console.warn('NotebookLM Source Management: Failed to restore source view preference.', error);
+                console.warn('GeminiNotebook-Source-Management: Failed to restore source view preference.', error);
             });
         }
         return true;
@@ -3384,7 +3384,7 @@
 
         if (commandAction === 'switch-source-view') {
             Promise.resolve(switchNativeSourceView(payload.kind)).catch((error) => {
-                console.warn('NotebookLM Source Management: Source view command failed.', error);
+                console.warn('GeminiNotebook-Source-Management: Source view command failed.', error);
             });
             return true;
         }
@@ -3450,7 +3450,7 @@
         },
         onAsyncError: (error, request) => {
             if (request?.type === 'SWITCH_SOURCE_VIEW') {
-                console.warn('NotebookLM Source Management: Failed to switch source view.', error);
+                console.warn('GeminiNotebook-Source-Management: Failed to switch source view.', error);
                 viewSwitchInProgress = false;
                 return {
                     success: false,
@@ -3458,7 +3458,7 @@
                     errorMessageKey: 'popup_source_view_switch_failed'
                 };
             }
-            console.warn('NotebookLM Source Management: Content message handler failed.', error);
+            console.warn('GeminiNotebook-Source-Management: Content message handler failed.', error);
             return { success: false, reason: 'message_handler_failed' };
         }
     });
@@ -3516,7 +3516,7 @@
                     if (!firstFailureReason) {
                         firstFailureReason = 'native_delete_error';
                     }
-                    console.error('NotebookLM Source Management: Error during automated deletion step', error);
+                    console.error('GeminiNotebook-Source-Management: Error during automated deletion step', error);
                 }
             }
         } finally {
@@ -3636,7 +3636,7 @@
                     });
             })
             .catch((error) => {
-                console.warn('NotebookLM Source Management: Source repair failed:', error);
+                console.warn('GeminiNotebook-Source-Management: Source repair failed:', error);
                 showToast(getMessage('ui_source_repair_failed'), { variant: 'error' });
                 return false;
             });
@@ -3658,7 +3658,7 @@
             storage.setItem(key, JSON.stringify(payload));
             return payload;
         } catch (error) {
-            console.warn('NotebookLM Source Management: Import backup write failed:', error);
+            console.warn('GeminiNotebook-Source-Management: Import backup write failed:', error);
             return null;
         }
     }
@@ -3675,7 +3675,7 @@
             if (!parsed || typeof parsed !== 'object' || !parsed.snapshot) return null;
             return parsed;
         } catch (error) {
-            console.warn('NotebookLM Source Management: Import backup read failed:', error);
+            console.warn('GeminiNotebook-Source-Management: Import backup read failed:', error);
             return null;
         }
     }
@@ -3689,7 +3689,7 @@
             storage.removeItem(key);
             return true;
         } catch (error) {
-            console.warn('NotebookLM Source Management: Import backup clear failed:', error);
+            console.warn('GeminiNotebook-Source-Management: Import backup clear failed:', error);
             return false;
         }
     }
@@ -3719,7 +3719,7 @@
                 return true;
             })
             .catch((error) => {
-                console.warn('NotebookLM Source Management: Import backup restore save failed:', error);
+                console.warn('GeminiNotebook-Source-Management: Import backup restore save failed:', error);
                 showToast(getMessage('ui_settings_import_backup_restore_failed'), { variant: 'error' });
                 return false;
             });
@@ -3755,7 +3755,7 @@
                     });
             })
             .catch((error) => {
-                console.warn('NotebookLM Source Management: History restore failed:', error);
+                console.warn('GeminiNotebook-Source-Management: History restore failed:', error);
                 showToast(getMessage('ui_history_restore_failed'), { variant: 'error' });
                 return false;
             });
@@ -3769,7 +3769,7 @@
         try {
             syncManagerWithPanelLifecycle();
         } catch (error) {
-            console.error("NotebookLM Source Management: Error syncing panel lifecycle.", error);
+            console.error("GeminiNotebook-Source-Management: Error syncing panel lifecycle.", error);
         }
     }, 80);
 
@@ -4103,7 +4103,7 @@
         if (!newProjectId) {
             if (projectId) {
                 developerLog('info', 'lifecycle', 'route_left_notebook', { hadProject: true });
-                console.log(`NotebookLM Source Management: Route changed from notebook ${projectId} to a non-notebook page. Tearing down.`);
+                console.log(`GeminiNotebook-Source-Management: Route changed from notebook ${projectId} to a non-notebook page. Tearing down.`);
                 flushPendingStateSave();
                 activeRouteRecoveryToken += 1;
                 projectId = null;
@@ -4128,7 +4128,7 @@
                 hadPreviousProject: Boolean(projectId),
                 hasNewProject: Boolean(newProjectId)
             });
-            console.log(`NotebookLM Source Management: Route changed from ${projectId} to ${newProjectId}. Reinitializing manager.`);
+            console.log(`GeminiNotebook-Source-Management: Route changed from ${projectId} to ${newProjectId}. Reinitializing manager.`);
             flushPendingStateSave();
             activeRouteRecoveryToken += 1;
             projectId = newProjectId;
@@ -4407,7 +4407,7 @@
                 }
                 init(panel);
             }).catch(err => {
-                console.error("NotebookLM Source Management init error:", err);
+                console.error("GeminiNotebook-Source-Management init error:", err);
                 managerStatusReason = 'manager_not_ready';
                 showCrashBanner(getMessage('ui_crash_init_error'));
             });
@@ -4462,7 +4462,7 @@
         try {
             teardown();
         } catch (error) {
-            console.warn('NotebookLM Source Management: Content teardown failed.', error);
+            console.warn('GeminiNotebook-Source-Management: Content teardown failed.', error);
         }
 
         window.removeEventListener('error', handleContentErrorLog);
@@ -4477,7 +4477,7 @@
                 chrome.runtime.onMessage.removeListener(handleManagerMessage);
             }
         } catch (error) {
-            console.warn('NotebookLM Source Management: Runtime listener cleanup failed.', error);
+            console.warn('GeminiNotebook-Source-Management: Runtime listener cleanup failed.', error);
         }
 
         if (history.pushState === patchedPushState) {

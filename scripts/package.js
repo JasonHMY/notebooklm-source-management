@@ -33,7 +33,7 @@ const FORBIDDEN_ENTRY_PATTERNS = [
 
 function getReleasePaths(baseDir = DEFAULT_BASE_DIR, version = pkg.version) {
   const releaseDir = path.join(baseDir, 'release');
-  const zipName = `notebooklm-source-management-${version}.zip`;
+  const zipName = `${pkg.name}-${version}.zip`;
   return {
     releaseDir,
     zipName,

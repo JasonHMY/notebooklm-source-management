@@ -1,4 +1,4 @@
-# NotebookLM Source Management UI Guidelines
+# GeminiNotebook-Source-Management UI Guidelines
 
 ## 1. Purpose
 
@@ -22,23 +22,23 @@ Important: the CSS file currently contains some layered overrides and repeated s
 
 This extension has two separate UI surfaces:
 
-- Content panel UI inside NotebookLM.
+- Content panel UI inside Gemini Notebook.
 - Browser action popup UI used as a launcher/status page.
 
 These two surfaces are intentionally different:
 
-- The content panel is compact, utility-heavy, and embedded into NotebookLM.
+- The content panel is compact, utility-heavy, and embedded into Gemini Notebook.
 - The popup is a small, branded launcher with a single primary action.
 
 Do not mix the two styling systems casually.
 
 ### 2.2 Content panel implementation
 
-The main manager UI is implemented by the content script and injected into the NotebookLM page.
+The main manager UI is implemented by the content script and injected into the Gemini Notebook page.
 
 Implementation flow:
 
-1. `src/content/index.js` finds the NotebookLM source panel.
+1. `src/content/index.js` finds the Gemini Notebook source panel.
 2. It creates `#sources-plus-root`.
 3. It attaches an open Shadow DOM.
 4. It injects one `<style>` tag using `NSM_CONTENT_STYLE_TEXT`.
@@ -64,7 +64,7 @@ Relevant files:
 
 Important implementation characteristics:
 
-- The content panel uses Shadow DOM to isolate styles from NotebookLM.
+- The content panel uses Shadow DOM to isolate styles from Gemini Notebook.
 - DOM is built with the shared `el(...)` helper from `src/utils/index.js`.
 - UI strings should come from `chrome.i18n` via `getMessage(...)`.
 - Re-rendering is state-driven and uses fragment patching, not `innerHTML`.
@@ -72,7 +72,7 @@ Important implementation characteristics:
 
 ### 2.3 Global overlay exception
 
-Shadow DOM cannot style some NotebookLM-native Angular Material overlays, menus, or dialogs. Because of that, the extension also injects global overlay CSS into `document.head`.
+Shadow DOM cannot style some Gemini Notebook-native Angular Material overlays, menus, or dialogs. Because of that, the extension also injects global overlay CSS into `document.head`.
 
 This is handled through `NSM_GLOBAL_OVERLAY_STYLE_TEXT`.
 
@@ -98,7 +98,7 @@ Popup characteristics:
 - Fixed-width launcher/status layout
 - One primary CTA
 - Enable/disable switch for the extension runtime state
-- Source view segmented control when a NotebookLM notebook tab is active
+- Source view segmented control when a notebook tab in Gemini Notebook is active
 - Status copy driven by current tab context
 - Tokenized light and dark themes using `prefers-color-scheme`
 
@@ -241,7 +241,7 @@ The current UI consistently uses a small set of radius values.
 Canonical radius scale:
 
 - `3px`: resizer bar
-- `4px`: source icon images copied from NotebookLM or extension assets
+- `4px`: source icon images copied from Gemini Notebook or extension assets
 - `6px`: checkbox, tree border tail
 - `8px`: source rows, small utility buttons, popup segmented-control container
 - `10px`: option rows, tag inputs, tag row buttons
@@ -446,7 +446,7 @@ Rules:
 - Choosing a quick view must not clear the search query; it may clear other view-level state such as folder isolation or tag quick filter to keep the result set understandable.
 - Do not turn this rail into user-defined saved views until a separate design handles naming, persistence, and conflict behavior.
 
-The source list keeps a small bottom safe area so the final row can scroll above the resizer and NotebookLM's native add/search controls instead of being clipped in dense All view.
+The source list keeps a small bottom safe area so the final row can scroll above the resizer and Gemini Notebook's native add/search controls instead of being clipped in dense All view.
 
 ## 8. Buttons
 
@@ -819,7 +819,7 @@ Canonical style:
 - Radius `16px`
 - Frosted glass effect
 - Dark-mode adjusted background and border
-- Same system font stack as `.sp-container`; modal nodes mount outside the container and must not inherit NotebookLM page typography.
+- Same system font stack as `.sp-container`; modal nodes mount outside the container and must not inherit Gemini Notebook page typography.
 
 Motion:
 
@@ -1207,7 +1207,7 @@ This section is not mandatory for feature work, but it is worth doing over time.
 Use this map when updating UI. It lists UI / style / render / modal / toast modules only — pure state, persistence, message-routing, and logic modules live in `docs/PROJECT_DIRECTORY.md`.
 
 - `src/content/content-style-text.js`: content-panel tokens, components, motion, overlays (Shadow-DOM `NSM_CONTENT_STYLE_TEXT` + global-overlay `NSM_GLOBAL_OVERLAY_STYLE_TEXT`)
-- `src/content/styles.css`: native NotebookLM DOM overrides — injected via manifest `content_scripts[0].css`, scoped under `.sources-plus-manager-active`, uses `!important` to hide native source-list containers and restyle native Material menus (the third CSS mechanism; lives in the page, not the Shadow DOM)
+- `src/content/styles.css`: native Gemini Notebook DOM overrides — injected via manifest `content_scripts[0].css`, scoped under `.sources-plus-manager-active`, uses `!important` to hide native source-list containers and restyle native Material menus (the third CSS mechanism; lives in the page, not the Shadow DOM)
 - `src/content/content-template.js`: shell structure
 - `src/content/content-panel-dom.js`: source panel lookup, renderability, lifecycle scheduling helpers
 - `src/content/content-source-actions.js`: source action menu state, menu models, native menu bridge

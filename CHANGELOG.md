@@ -25,6 +25,11 @@
 - **短条目标题 (Short Entry)**: 标题已自解释的短条目，正文写清即可，可省略「影响」摘要。
 ```
 
+## [Unreleased] (未发布)
+
+### Changed
+- **产品更名为 GeminiNotebook-Source-Management (Rename Product to GeminiNotebook-Source-Management)**: **影响**: 扩展名称、启动器提示、欢迎页和三语平台文案统一使用新品牌与 Gemini Notebook 名称；npm 包名、发布 zip 及设置页导出的 JSON 文件名前缀同步改为 `gemininotebook-source-management`。 现有 `notebooklm.google.com` 入口、Chrome Web Store / GitHub 链接、`notebooklm-source-management-config` 备份格式、存储键和 `NSM_*` 运行时标识保持不变，已有数据与旧备份无需迁移。
+
 ## [2026-06-16] [26.6.16]
 
 ### Changed

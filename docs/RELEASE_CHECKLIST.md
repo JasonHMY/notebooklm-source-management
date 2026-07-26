@@ -9,7 +9,7 @@ Use this checklist before publishing a new Chrome Web Store build. (This is the 
 5. Run `npm run test:smoke` (headless by default; use `PLAYWRIGHT_HEADLESS=false npm run test:smoke` only for interactive debugging).
 6. Run `git diff --check`.
 7. Run `npm run package`.
-8. Confirm the zip is named `notebooklm-source-management-<version>.zip`.
+8. Confirm the zip is named `gemininotebook-source-management-<version>.zip`.
 9. Confirm the zip contains only extension runtime files:
    - `manifest.json`
    - `src/**`

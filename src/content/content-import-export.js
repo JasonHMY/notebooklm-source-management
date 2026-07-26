@@ -43,13 +43,13 @@
         } = deps;
 
         if (!runtime) {
-            throw new Error('NotebookLM Source Management: createContentImportExport requires a runtime context.');
+            throw new Error('GeminiNotebook-Source-Management: createContentImportExport requires a runtime context.');
         }
         if (typeof cloneSerializableData !== 'function'
             || typeof normalizeLoadedState !== 'function'
             || typeof hasPersistableManagerState !== 'function'
             || typeof buildPersistableState !== 'function') {
-            throw new Error('NotebookLM Source Management: createContentImportExport requires the persistence helpers.');
+            throw new Error('GeminiNotebook-Source-Management: createContentImportExport requires the persistence helpers.');
         }
 
         const {

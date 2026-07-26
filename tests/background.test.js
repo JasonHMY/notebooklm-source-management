@@ -93,7 +93,7 @@ describe('background.js message listener', () => {
         listener({ type: 'SAVE_STATE' }, invalidSender, mockSendResponse);
 
         expect(console.warn).toHaveBeenCalledWith(
-            'NotebookLM Source Management: Received message from unauthorized sender:',
+            'GeminiNotebook-Source-Management: Received message from unauthorized sender:',
             invalidSender
         );
         expect(global.chrome.storage.local.set).not.toHaveBeenCalled();
@@ -506,7 +506,7 @@ describe('background.js message listener', () => {
 
         expect(global.chrome.storage.local.set).not.toHaveBeenCalled();
         expect(console.warn).toHaveBeenCalledWith(
-            'NotebookLM Source Management: Received SAVE_STATE with invalid key:',
+            'GeminiNotebook-Source-Management: Received SAVE_STATE with invalid key:',
             'invalidKey'
         );
         expect(mockSendResponse).toHaveBeenCalledWith({
@@ -528,7 +528,7 @@ describe('background.js message listener', () => {
         const result = listener(request, validSender, mockSendResponse);
 
         expect(console.error).toHaveBeenCalledWith(
-            'NotebookLM Source Management background save error:',
+            'GeminiNotebook-Source-Management background save error:',
             global.chrome.runtime.lastError
         );
         expect(mockSendResponse).toHaveBeenCalledWith({
@@ -983,7 +983,7 @@ describe('background.js message listener', () => {
 
         expect(global.chrome.storage.local.set).toHaveBeenCalled();
         expect(console.error).toHaveBeenCalledWith(
-            'NotebookLM Source Management background save error:',
+            'GeminiNotebook-Source-Management background save error:',
             global.chrome.runtime.lastError
         );
         expect(mockSendResponse).toHaveBeenCalledWith(expect.objectContaining({
@@ -1248,7 +1248,7 @@ describe('background.js message listener', () => {
             expect.any(Function)
         );
         expect(console.error).toHaveBeenCalledWith(
-            'NotebookLM Source Management background load error:',
+            'GeminiNotebook-Source-Management background load error:',
             { message: 'Storage unavailable' }
         );
         expect(mockSendResponse).toHaveBeenCalledWith({
@@ -1268,7 +1268,7 @@ describe('background.js message listener', () => {
 
         expect(global.chrome.storage.local.get).not.toHaveBeenCalled();
         expect(console.warn).toHaveBeenCalledWith(
-            'NotebookLM Source Management: Received LOAD_STATE with invalid key:',
+            'GeminiNotebook-Source-Management: Received LOAD_STATE with invalid key:',
             'invalidKey'
         );
         expect(mockSendResponse).toHaveBeenCalledWith({

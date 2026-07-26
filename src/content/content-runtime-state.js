@@ -14,7 +14,7 @@
 
         function bindRuntimeProperty(name, getter, setter) {
             if (!name || typeof getter !== 'function') {
-                throw new Error('NotebookLM Source Management: runtime property requires a name and getter.');
+                throw new Error('GeminiNotebook-Source-Management: runtime property requires a name and getter.');
             }
 
             const descriptor = {

@@ -917,7 +917,7 @@ function writeStateWithRevisionGuard(request, sendResponse) {
     const baseRevision = getRequestBaseRevision(request);
     chrome.storage.local.get([key, backupKey, historyKey, PREFERENCES_KEY], (existingData) => {
         if (chrome.runtime.lastError) {
-            console.error('NotebookLM Source Management background save error:', chrome.runtime.lastError);
+            console.error('GeminiNotebook-Source-Management background save error:', chrome.runtime.lastError);
             sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
             return;
         }
@@ -992,7 +992,7 @@ function writeStateWithRevisionGuard(request, sendResponse) {
 
             const writePayload = (nextPayloadInfo, didRetry = false) => chrome.storage.local.set(nextPayloadInfo.payload, () => {
                 if (chrome.runtime.lastError) {
-                    console.error('NotebookLM Source Management background save error:', chrome.runtime.lastError);
+                    console.error('GeminiNotebook-Source-Management background save error:', chrome.runtime.lastError);
                     if (!didRetry && isStorageQuotaError(chrome.runtime.lastError)) {
                         const trimmedPayloadInfo = trimStateStorageHistory(nextPayloadInfo, historyKey, extraBytes);
                         if (trimmedPayloadInfo !== nextPayloadInfo && !isStorageCritical(trimmedPayloadInfo.usageInfo)) {
@@ -1204,12 +1204,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         request.type === 'CLEAR_DEVELOPER_LOGS'
     ) {
         if (!isAuthorizedNotebookSender(sender)) {
-            console.warn('NotebookLM Source Management: Received message from unauthorized sender:', sender);
+            console.warn('GeminiNotebook-Source-Management: Received message from unauthorized sender:', sender);
             sendResponse({ success: false, errorCode: ERROR_CODES.UNAUTHORIZED_SENDER });
             return;
         }
         if (!isValidDeveloperLogKey(request.key)) {
-            console.warn(`NotebookLM Source Management: Received ${request.type} with invalid key:`, request.key);
+            console.warn(`GeminiNotebook-Source-Management: Received ${request.type} with invalid key:`, request.key);
             sendResponse({ success: false, errorCode: ERROR_CODES.INVALID_STORAGE_KEY });
             return;
         }
@@ -1235,19 +1235,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     if (!isAuthorizedNotebookSender(sender)) {
-        console.warn('NotebookLM Source Management: Received message from unauthorized sender:', sender);
+        console.warn('GeminiNotebook-Source-Management: Received message from unauthorized sender:', sender);
         sendResponse({ success: false, errorCode: ERROR_CODES.UNAUTHORIZED_SENDER });
         return;
     }
 
     if (request.type === 'SAVE_STATE') {
         if (typeof request.key !== 'string' || !request.key.startsWith(STATE_KEY_PREFIX)) {
-            console.warn('NotebookLM Source Management: Received SAVE_STATE with invalid key:', request.key);
+            console.warn('GeminiNotebook-Source-Management: Received SAVE_STATE with invalid key:', request.key);
             sendResponse({ success: false, errorCode: ERROR_CODES.INVALID_STORAGE_KEY });
             return;
         }
         if (!senderOwnsNotebookKey(sender, request.key)) {
-            console.warn('NotebookLM Source Management: SAVE_STATE key does not match sender notebook:', request.key);
+            console.warn('GeminiNotebook-Source-Management: SAVE_STATE key does not match sender notebook:', request.key);
             sendResponse({ success: false, errorCode: ERROR_CODES.UNAUTHORIZED_SENDER });
             return;
         }
@@ -1258,12 +1258,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     if (request.type === 'LOAD_STATE_HISTORY' || request.type === 'APPEND_STATE_HISTORY') {
         if (typeof request.key !== 'string' || !request.key.startsWith(STATE_HISTORY_KEY_PREFIX)) {
-            console.warn(`NotebookLM Source Management: Received ${request.type} with invalid key:`, request.key);
+            console.warn(`GeminiNotebook-Source-Management: Received ${request.type} with invalid key:`, request.key);
             sendResponse({ success: false, errorCode: ERROR_CODES.INVALID_STORAGE_KEY });
             return;
         }
         if (!senderOwnsNotebookKey(sender, request.key)) {
-            console.warn(`NotebookLM Source Management: ${request.type} key does not match sender notebook:`, request.key);
+            console.warn(`GeminiNotebook-Source-Management: ${request.type} key does not match sender notebook:`, request.key);
             sendResponse({ success: false, errorCode: ERROR_CODES.UNAUTHORIZED_SENDER });
             return;
         }
@@ -1278,12 +1278,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     if (typeof request.key !== 'string' || !request.key.startsWith(STATE_KEY_PREFIX)) {
-        console.warn('NotebookLM Source Management: Received LOAD_STATE with invalid key:', request.key);
+        console.warn('GeminiNotebook-Source-Management: Received LOAD_STATE with invalid key:', request.key);
         sendResponse({ success: false, errorCode: ERROR_CODES.INVALID_STORAGE_KEY });
         return;
     }
     if (!senderOwnsNotebookKey(sender, request.key)) {
-        console.warn('NotebookLM Source Management: LOAD_STATE key does not match sender notebook:', request.key);
+        console.warn('GeminiNotebook-Source-Management: LOAD_STATE key does not match sender notebook:', request.key);
         sendResponse({ success: false, errorCode: ERROR_CODES.UNAUTHORIZED_SENDER });
         return;
     }
@@ -1291,7 +1291,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     const backupKey = getStateBackupKey(request.key);
     chrome.storage.local.get([request.key, backupKey], (data) => {
         if (chrome.runtime.lastError) {
-            console.error('NotebookLM Source Management background load error:', chrome.runtime.lastError);
+            console.error('GeminiNotebook-Source-Management background load error:', chrome.runtime.lastError);
             sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
             return;
         }

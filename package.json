@@ -1,7 +1,7 @@
 {
-  "name": "notebooklm-source-management",
+  "name": "gemininotebook-source-management",
   "version": "26.6.16",
-  "description": "Chrome extension that adds folder grouping, drag-and-drop, and batch controls to NotebookLM's source panel.\nChrome 扩展：为 NotebookLM 来源面板补充文件夹、拖拽与批量操作。",
+  "description": "Chrome extension that adds folder grouping, drag-and-drop, and batch controls to Gemini Notebook's source panel.\nChrome 扩展：为 Gemini Notebook 来源面板补充文件夹、拖拽与批量操作。",
   "main": "src/background/index.js",
   "scripts": {
     "test": "jest --testPathIgnorePatterns=/tests/smoke/",
@@ -24,6 +24,7 @@
     "url": "git+https://github.com/HMYanan/notebooklm-source-management.git"
   },
   "keywords": [
+    "Gemini Notebook",
     "NotebookLM",
     "Chrome extension",
     "source management",

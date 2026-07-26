@@ -1,18 +1,18 @@
 {
     "extName": {
-        "message": "NotebookLM Source Management"
+        "message": "GeminiNotebook-Source-Management"
     },
     "extShortName": {
-        "message": "NLM Source Management"
+        "message": "GeminiNotebook"
     },
     "actionTitle": {
-        "message": "Open the NotebookLM Source Management launcher"
+        "message": "Open the GeminiNotebook-Source-Management launcher"
     },
     "extDesc": {
-        "message": "Folder and drag-and-drop sorting for the NotebookLM sources panel."
+        "message": "Folder and drag-and-drop sorting for the Gemini Notebook sources panel."
     },
     "popup_launcher_note": {
-        "message": "Works inside NotebookLM's source panel. The toolbar icon is a launcher."
+        "message": "Works inside Gemini Notebook's source panel. The toolbar icon is a launcher."
     },
     "popup_badge_ready": {
         "message": "Ready"
@@ -54,49 +54,49 @@
         "message": "Switched to label view."
     },
     "popup_source_view_switch_failed": {
-        "message": "NotebookLM's source view switch was not found. Expand the source panel first."
+        "message": "Gemini Notebook's source view switch was not found. Expand the source panel first."
     },
     "popup_title_ready": {
         "message": "Source manager is ready in this notebook"
     },
     "popup_body_ready": {
-        "message": "Use the button below to scroll to the manager and highlight it inside NotebookLM."
+        "message": "Use the button below to scroll to the manager and highlight it inside Gemini Notebook."
     },
     "popup_title_notebook_home": {
         "message": "Open a notebook to use this extension"
     },
     "popup_body_notebook_home": {
-        "message": "You are in NotebookLM, but not inside a specific notebook yet. Open one notebook, then use this launcher again."
+        "message": "You are in Gemini Notebook, but not inside a specific notebook yet. Open one notebook, then use this launcher again."
     },
     "popup_title_notebook_home_new_tab": {
-        "message": "Open NotebookLM in a new tab"
+        "message": "Open Gemini Notebook in a new tab"
     },
     "popup_body_notebook_home_new_tab": {
-        "message": "You are already on the NotebookLM home page. This launcher will open a new NotebookLM tab so the click has a clear result."
+        "message": "You are already on the Gemini Notebook home page. This launcher will open a new Gemini Notebook tab so the click has a clear result."
     },
     "popup_title_switch_notebook": {
-        "message": "Switch to your open NotebookLM notebook"
+        "message": "Switch to your open notebook in Gemini Notebook"
     },
     "popup_body_switch_notebook": {
-        "message": "A NotebookLM notebook is already open in another tab. Use the button below to switch there first."
+        "message": "A notebook in Gemini Notebook is already open in another tab. Use the button below to switch there first."
     },
     "popup_title_external_page": {
-        "message": "Go to NotebookLM to use the source manager"
+        "message": "Go to Gemini Notebook to use the source manager"
     },
     "popup_body_external_page": {
-        "message": "This extension does not open a separate toolbar app. Its manager appears inside an open NotebookLM notebook."
+        "message": "This extension does not open a separate toolbar app. Its manager appears inside an open notebook in Gemini Notebook."
     },
     "popup_title_refresh_needed": {
         "message": "This notebook is open, but the manager is not attached"
     },
     "popup_body_refresh_needed": {
-        "message": "Refresh this notebook and reopen the launcher. If it still fails, NotebookLM's page structure may have changed."
+        "message": "Refresh this notebook and reopen the launcher. If it still fails, Gemini Notebook's page structure may have changed."
     },
     "popup_title_disabled": {
         "message": "The source manager is currently disabled"
     },
     "popup_body_disabled": {
-        "message": "Enable the plugin to attach the NotebookLM source manager again on this page."
+        "message": "Enable the plugin to attach the Gemini Notebook source manager again on this page."
     },
     "popup_cta_open_manager": {
         "message": "Open source manager"
@@ -105,19 +105,19 @@
         "message": "Enable Plugin"
     },
     "popup_cta_go_to_notebooklm": {
-        "message": "Go to NotebookLM"
+        "message": "Go to Gemini Notebook"
     },
     "popup_cta_go_to_open_notebook": {
         "message": "Go to open notebook"
     },
     "popup_cta_open_notebooklm_new_tab": {
-        "message": "Open NotebookLM in new tab"
+        "message": "Open Gemini Notebook in new tab"
     },
     "popup_cta_refresh_notebook": {
         "message": "Refresh this notebook"
     },
     "popup_reason_source_panel_missing": {
-        "message": "NotebookLM's source panel could not be found on this page."
+        "message": "Gemini Notebook's source panel could not be found on this page."
     },
     "popup_reason_panel_header_missing": {
         "message": "The source panel was found, but the manager could not be attached to its header."
@@ -126,16 +126,16 @@
         "message": "The manager is still loading on this page."
     },
     "popup_reason_manager_unreachable": {
-        "message": "NotebookLM is open, but the manager could not be reached in this tab."
+        "message": "Gemini Notebook is open, but the manager could not be reached in this tab."
     },
     "popup_reason_tab_message_failed": {
         "message": "The manager tab responded with an unexpected message failure."
     },
     "popup_reason_tabs_query_failed": {
-        "message": "Chrome could not read the current NotebookLM tabs right now."
+        "message": "Chrome could not read the current Gemini Notebook tabs right now."
     },
     "popup_reason_notebook_missing": {
-        "message": "Open a NotebookLM notebook page to access the source manager."
+        "message": "Open a notebook page in Gemini Notebook to access the source manager."
     },
     "popup_reason_extension_disabled": {
         "message": "The source manager is turned off from the extension popup."
@@ -570,10 +570,10 @@
         "message": "Could not open Chrome Web Store feedback"
     },
     "ui_welcome_title": {
-        "message": "Welcome to NotebookLM Source Management"
+        "message": "Welcome to GeminiNotebook-Source-Management"
     },
     "ui_welcome_subtitle": {
-        "message": "Organize, search, and back up your sources more easily inside NotebookLM."
+        "message": "Organize, search, and back up your sources more easily inside Gemini Notebook."
     },
     "ui_welcome_feature_organize_title": {
         "message": "Organize sources"
@@ -815,16 +815,16 @@
         "message": "Native failure history"
     },
     "ui_native_label_view_active": {
-        "message": "NotebookLM label view is active. Native source groups are kept visible."
+        "message": "Gemini Notebook label view is active. Native source groups are kept visible."
     },
     "ui_import_native_labels": {
-        "message": "Import NotebookLM groups"
+        "message": "Import Gemini Notebook groups"
     },
     "ui_import_native_labels_preview_title": {
         "message": "Import preview"
     },
     "ui_import_native_labels_preview_summary": {
-        "message": "Import $1 NotebookLM group(s) containing $2 source(s).",
+        "message": "Import $1 Gemini Notebook group(s) containing $2 source(s).",
         "placeholders": {
             "1": { "content": "$1" },
             "2": { "content": "$2" }
@@ -852,20 +852,20 @@
         "message": "No source titles are available to show."
     },
     "ui_import_native_labels_preview_empty": {
-        "message": "No NotebookLM groups are available to import. Expand the NotebookLM groups first so the source rows are visible."
+        "message": "No Gemini Notebook groups are available to import. Expand the Gemini Notebook groups first so the source rows are visible."
     },
     "ui_import_native_labels_apply": {
         "message": "Import"
     },
     "ui_import_native_labels_confirm": {
-        "message": "Import $1 NotebookLM group(s) containing $2 source(s) as plugin folders?",
+        "message": "Import $1 Gemini Notebook group(s) containing $2 source(s) as plugin folders?",
         "placeholders": {
             "1": { "content": "$1" },
             "2": { "content": "$2" }
         }
     },
     "ui_import_native_labels_applied": {
-        "message": "Imported $1 NotebookLM group(s) with $2 source(s)",
+        "message": "Imported $1 Gemini Notebook group(s) with $2 source(s)",
         "placeholders": {
             "1": { "content": "$1" },
             "2": { "content": "$2" }
@@ -879,7 +879,7 @@
         }
     },
     "ui_import_native_labels_unavailable": {
-        "message": "No NotebookLM groups are available to import. Expand the NotebookLM groups first so the source rows are visible."
+        "message": "No Gemini Notebook groups are available to import. Expand the Gemini Notebook groups first so the source rows are visible."
     },
     "ui_undo_action": {
         "message": "Undo"
@@ -1214,7 +1214,7 @@
         "message": "Source could not be renamed right now"
     },
     "ui_rename_source_failed": {
-        "message": "Could not open rename for this source. Refresh NotebookLM and try again."
+        "message": "Could not open rename for this source. Refresh Gemini Notebook and try again."
     },
     "ui_delete_source": {
         "message": "Delete source"
@@ -1226,13 +1226,13 @@
         "message": "Source could not be deleted right now"
     },
     "ui_delete_source_failed": {
-        "message": "Could not start source deletion. Refresh NotebookLM and try again."
+        "message": "Could not start source deletion. Refresh Gemini Notebook and try again."
     },
     "ui_source_details_unavailable": {
         "message": "Source details are unavailable right now"
     },
     "ui_source_details_failed": {
-        "message": "Could not open source details. Refresh NotebookLM and try again."
+        "message": "Could not open source details. Refresh Gemini Notebook and try again."
     },
     "ui_retry": {
         "message": "Retry"
@@ -1241,19 +1241,19 @@
         "message": "This source is not available yet."
     },
     "ui_native_action_menu_button_missing": {
-        "message": "NotebookLM's source menu button was not found."
+        "message": "Gemini Notebook's source menu button was not found."
     },
     "ui_native_action_menu_item_missing": {
-        "message": "NotebookLM's matching menu item was not found."
+        "message": "Gemini Notebook's matching menu item was not found."
     },
     "ui_native_action_confirm_dialog_missing": {
-        "message": "NotebookLM's confirmation dialog was not found."
+        "message": "Gemini Notebook's confirmation dialog was not found."
     },
     "ui_native_action_confirm_button_missing": {
-        "message": "NotebookLM's confirmation button was not found."
+        "message": "Gemini Notebook's confirmation button was not found."
     },
     "ui_native_action_failed": {
-        "message": "NotebookLM's page structure may have changed."
+        "message": "Gemini Notebook's page structure may have changed."
     },
     "ui_move_to_folder": {
         "message": "Move to Folder"
@@ -1294,7 +1294,7 @@
         "message": "Initialization failed. Could not locate the source panel header."
     },
     "ui_crash_missing_panel": {
-        "message": "Could not find NotebookLM's source panel. Google may have updated the page structure."
+        "message": "Could not find Gemini Notebook's source panel. Google may have updated the page structure."
     },
     "ui_crash_init_error": {
         "message": "Initialization error. Check the console for details."

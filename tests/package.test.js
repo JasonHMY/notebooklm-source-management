@@ -3,6 +3,7 @@ const os = require('os');
 const path = require('path');
 
 const {
+    getReleasePaths,
     getPackageEntries,
     assertPackageEntries,
     archiveFiles
@@ -29,6 +30,13 @@ describe('package script', () => {
 
     afterEach(() => {
         fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('uses the canonical product slug for the release zip', () => {
+        const releasePaths = getReleasePaths(tempDir, '1.2.3');
+
+        expect(releasePaths.zipName).toBe('gemininotebook-source-management-1.2.3.zip');
+        expect(releasePaths.zipPath).toBe(path.join(tempDir, 'release', releasePaths.zipName));
     });
 
     it('collects only runtime extension files', () => {

@@ -30,11 +30,11 @@ Before starting work, read the relevant project instructions, repository guidanc
   - content helper changes: run `npm run lint` plus the relevant focused Jest test and `npm run test:unit`.
   - runtime, manifest, storage, message, or automation changes: run `npm run lint`, `npm run test:unit`, `npm run test:smoke`, `npm run package`, and `git diff --check` (or `npm run verify:full`, which chains lint → unit → smoke and matches CI).
   - release/version changes: verify `manifest.json`, `package.json`, `package-lock.json`, README version badge, release zip filename, and `CHANGELOG.md` all match.
-- Treat NotebookLM native DOM automation as high-risk:
+- Treat Gemini Notebook native DOM automation as high-risk:
   - before native delete or rename, re-resolve a fresh row and verify it still matches the intended source.
   - fail closed if a native dialog has multiple plausible candidates, no clear candidate, or an obvious title/identity mismatch.
   - do not treat hidden or collapsed DOM as deletion without source-sync evidence.
-  - do not hardcode NotebookLM generated CSS classes; prefer aria, role, data attributes, stable text signals, and relative structure.
+  - do not hardcode Gemini Notebook generated CSS classes; prefer aria, role, data attributes, stable text signals, and relative structure.
 - Follow `docs/DEVELOPER_LOGGING.md` for developer-mode logs. Logs must stay structured and sanitized:
   - do not record source titles, source bodies, tag labels, group names, full private URLs, raw import/export JSON, long DOM `textContent`, or full stacks.
   - prefer counts, booleans, stable event names, reasons, result codes, source keys, and hashes.
@@ -57,6 +57,6 @@ Before starting work, read the relevant project instructions, repository guidanc
 - Keep changes small and focused unless a larger change is clearly required.
 - Do not add dependencies, permissions, or manifest host surface unless explicitly needed.
 - Do not use `innerHTML`, `eval`, or dynamic `Function` for user-controlled content.
-- Treat NotebookLM DOM, source titles, labels, icon URLs, imports, and extension storage contents as untrusted input.
+- Treat Gemini Notebook DOM, source titles, labels, icon URLs, imports, and extension storage contents as untrusted input.
 - Do not revert unrelated user changes in the working tree.
 - Match the existing formatting (recorded in `.editorconfig`): JS = 4-space indent, LF, final newline, no trailing whitespace; `manifest.json`/`package.json` = 2-space; `_locales/*` = 4-space. There is no auto-formatter (Prettier/@stylistic) wired up, so keep diffs surgical and do not mass-reformat untouched code.
