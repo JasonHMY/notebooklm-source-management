@@ -960,6 +960,9 @@ CI: .github/workflows/ci.yml
 │   │   └── Classic/Reflow 拖拽正确性、真实布局测试与大列表测量实施计划
 │   └── 2026-07-26-architecture-deepening-and-accessibility.md
 │       └── 深 Module、consumer 迁移、统一搜索语义和键盘排序实施计划
+├── docs/superpowers/reports/
+│   └── 2026-07-26-optimization-baseline.md
+│       └── 当前优化工作的无变更验证基线、roadmap 起始 SHA、后续专项 red-contract 与 drag benchmark 台账
 ├── marketing/
 │   └── 宣传资料工作区；记录社媒账号矩阵、内容日历、平台打法、素材清单和 X 本地发布工具，不属于扩展 runtime
 ├── CHANGELOG.md
