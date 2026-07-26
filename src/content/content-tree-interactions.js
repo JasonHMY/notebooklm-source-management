@@ -19,7 +19,7 @@
      *     executeBatchDelete, renderMoveToFolderModal
      *   - 拖拽配套: 一组 drag feedback / reflow helpers 在内部组装,
      *     依赖 runtime.activeDragGhost 等运行时句柄
-     * @returns {Object} 28 helpers。group 操作 (handleAddNewGroup / removeGroupFromTree /
+     * @returns {Object} tree and drag helpers。group 操作 (handleAddNewGroup / removeGroupFromTree /
      *   toggleGroupCollapse),source 操作 (syncSourceToPage / findParentGroupOfSource /
      *   removeSourceFromTree / canMoveSourceToUngrouped / moveSourceToUngrouped),
      *   batch 操作 (collectSourceKeysInTreeOrder / executeBatchMoveToUngrouped /
@@ -29,7 +29,7 @@
      *   handleDrop / handleDragEnd / clearDragFeedback / computeDropIntent /
      *   applyReflowAfterRender),以及树形位置 (getSourceTreePosition /
      *   getGroupTreePosition / isNoopTreeMove / getGroupAncestorChain /
-     *   resolveSiblingKeys)。完整 return 块见 line 3066。
+     *   resolveSiblingKeys / resolveVisibleAnchorInsertIndex)。完整 return 块见文件末尾。
      */
     function createContentTreeInteractions(deps = {}) {
         const runtime = deps.runtime || deps;
@@ -228,6 +228,67 @@
             }).filter(Boolean);
         }
 
+        const FILTERED_LAST_VISIBLE_POLICY = 'anchor-relative';
+
+        function toVisibleIdentity(entry) {
+            if (typeof entry === 'string' && entry) {
+                return { type: 'source', key: entry };
+            }
+            if (!entry || typeof entry !== 'object') return null;
+            if (entry.type === 'source' && typeof entry.key === 'string' && entry.key) {
+                return { type: 'source', key: entry.key };
+            }
+            if (entry.type === 'group' && typeof entry.id === 'string' && entry.id) {
+                return { type: 'group', id: entry.id };
+            }
+            return null;
+        }
+
+        function sameIdentity(left, right) {
+            if (!left || !right || left.type !== right.type) return false;
+            if (left.type === 'source') {
+                return typeof left.key === 'string'
+                    && typeof right.key === 'string'
+                    && left.key === right.key;
+            }
+            if (left.type === 'group') {
+                return typeof left.id === 'string'
+                    && typeof right.id === 'string'
+                    && left.id === right.id;
+            }
+            return false;
+        }
+
+        function resolveVisibleAnchorInsertIndex({
+            fullList,
+            visibleIdentities,
+            anchorIdentity,
+            edge,
+            lastVisiblePolicy
+        } = {}) {
+            if (!Array.isArray(fullList) || !Array.isArray(visibleIdentities)) return null;
+            if (fullList.length === 0) return 0;
+            if (edge !== 'before' && edge !== 'after') return null;
+            if (lastVisiblePolicy !== 'anchor-relative' && lastVisiblePolicy !== 'container-end') {
+                return null;
+            }
+            if (!visibleIdentities.some((item) => sameIdentity(item, anchorIdentity))) {
+                return null;
+            }
+            const fullIndex = fullList.findIndex((entry) => (
+                sameIdentity(toVisibleIdentity(entry), anchorIdentity)
+            ));
+            if (fullIndex < 0) return null;
+            if (
+                edge === 'after'
+                && lastVisiblePolicy === 'container-end'
+                && sameIdentity(visibleIdentities[visibleIdentities.length - 1], anchorIdentity)
+            ) {
+                return fullList.length;
+            }
+            return edge === 'after' ? fullIndex + 1 : fullIndex;
+        }
+
         const extractInlineTranslateY = dragReflow && typeof dragReflow.extractInlineTranslateY === 'function'
             ? dragReflow.extractInlineTranslateY
             : function fallbackExtractInlineTranslateY(el) {
@@ -255,7 +316,8 @@
         //      bottom bin / state.ungrouped is resolved as a separate trailing drop zone).
         //   4. Slot detection: for each non-folded child element, compare its un-shifted
         //      mid-Y against clientY; the first whose mid-Y > clientY becomes the insert slot.
-        //      All elements past clientY → insertIndex = childCount.
+        //      All visible elements past clientY → insert after the last visible anchor in
+        //      the full target list (anchor-relative filtered-slot policy).
         //
         // Un-shifted bounds means `rect.top - extractInlineTranslateY(el)`: subtract any
         // active reflow shift so the detection is stable while siblings are translateY'd.
@@ -360,11 +422,19 @@
                             if (midY > clientY) { binBeforeIndex = i; break; }
                         }
                         if (binCandidates.length === 0) {
+                            const insertIndex = resolveVisibleAnchorInsertIndex({
+                                fullList: ungrouped,
+                                visibleIdentities: [],
+                                anchorIdentity: null,
+                                edge: 'after',
+                                lastVisiblePolicy: FILTERED_LAST_VISIBLE_POLICY
+                            });
+                            if (insertIndex === null) return null;
                             return {
                                 kind: 'after-source',
                                 targetGroup: null,
                                 targetList: ungrouped,
-                                insertIndex: ungrouped.length,
+                                insertIndex,
                                 targetGroupId: null,
                                 hostGroupContainerEl: null,
                                 slotKey: null,
@@ -373,12 +443,23 @@
                         }
                         if (binBeforeIndex >= 0) {
                             const slot = binCandidates[binBeforeIndex];
-                            const ungroupedIndex = ungrouped.indexOf(slot.key);
+                            const visibleIdentities = binCandidates.map((candidate) => ({
+                                type: 'source',
+                                key: candidate.key
+                            }));
+                            const insertIndex = resolveVisibleAnchorInsertIndex({
+                                fullList: ungrouped,
+                                visibleIdentities,
+                                anchorIdentity: { type: 'source', key: slot.key },
+                                edge: 'before',
+                                lastVisiblePolicy: FILTERED_LAST_VISIBLE_POLICY
+                            });
+                            if (insertIndex === null) return null;
                             return {
                                 kind: 'before-source',
                                 targetGroup: null,
                                 targetList: ungrouped,
-                                insertIndex: ungroupedIndex >= 0 ? ungroupedIndex : 0,
+                                insertIndex,
                                 targetGroupId: null,
                                 hostGroupContainerEl: null,
                                 slotKey: slot.key,
@@ -386,12 +467,23 @@
                             };
                         }
                         const lastBin = binCandidates[binCandidates.length - 1];
-                        const lastIndex = ungrouped.indexOf(lastBin.key);
+                        const visibleIdentities = binCandidates.map((candidate) => ({
+                            type: 'source',
+                            key: candidate.key
+                        }));
+                        const insertIndex = resolveVisibleAnchorInsertIndex({
+                            fullList: ungrouped,
+                            visibleIdentities,
+                            anchorIdentity: { type: 'source', key: lastBin.key },
+                            edge: 'after',
+                            lastVisiblePolicy: FILTERED_LAST_VISIBLE_POLICY
+                        });
+                        if (insertIndex === null) return null;
                         return {
                             kind: 'after-source',
                             targetGroup: null,
                             targetList: ungrouped,
-                            insertIndex: lastIndex >= 0 ? lastIndex + 1 : ungrouped.length,
+                            insertIndex,
                             targetGroupId: null,
                             hostGroupContainerEl: null,
                             slotKey: lastBin.key,
@@ -741,6 +833,11 @@
                 if (!key) continue;
                 candidates.push({ el, key, kind: isSrc ? 'source' : 'group' });
             }
+            const visibleIdentities = candidates.map((candidate) => (
+                candidate.kind === 'source'
+                    ? { type: 'source', key: candidate.key }
+                    : { type: 'group', id: candidate.key }
+            ));
 
             // Slot match: first candidate whose VISUAL mid-Y > clientY → insert before it.
             // Uses raw rect (no shift subtraction) so when a sibling has been translateY'd
@@ -764,15 +861,23 @@
             }
 
             // Resolve insertIndex against the actual targetList (state.root / state.ungrouped / group.children).
-            // For group host: insert position in host array is the index of the slot key (or list length for after-last).
+            // For group host: resolve the visible slot anchor back into the full host array.
             // For root host: insertIndex is in state.root (positioned drop) or state.ungrouped (empty-bin trailing).
             if (host) {
                 if (candidates.length === 0) {
+                    const insertIndex = resolveVisibleAnchorInsertIndex({
+                        fullList: host,
+                        visibleIdentities,
+                        anchorIdentity: null,
+                        edge: 'after',
+                        lastVisiblePolicy: FILTERED_LAST_VISIBLE_POLICY
+                    });
+                    if (insertIndex === null) return null;
                     return {
                         kind: 'into-group',
                         targetGroup: hostGroup,
                         targetList: host,
-                        insertIndex: 0,
+                        insertIndex,
                         targetGroupId: hostGroup.id,
                         hostGroupContainerEl: hostContainerEl,
                         slotKey: null
@@ -781,19 +886,22 @@
                 if (beforeIndex >= 0) {
                     const slot = candidates[beforeIndex];
                     const slotKind = slot.kind === 'source' ? 'before-source' : 'before-group';
-                    // Find slot's index in host array (group.children).
-                    let hostIndex = -1;
-                    for (let i = 0; i < host.length; i += 1) {
-                        const entry = host[i];
-                        if (!entry) continue;
-                        if (slot.kind === 'source' && entry.type === 'source' && entry.key === slot.key) { hostIndex = i; break; }
-                        if (slot.kind === 'group' && entry.type === 'group' && entry.id === slot.key) { hostIndex = i; break; }
-                    }
+                    const anchorIdentity = slot.kind === 'source'
+                        ? { type: 'source', key: slot.key }
+                        : { type: 'group', id: slot.key };
+                    const insertIndex = resolveVisibleAnchorInsertIndex({
+                        fullList: host,
+                        visibleIdentities,
+                        anchorIdentity,
+                        edge: 'before',
+                        lastVisiblePolicy: FILTERED_LAST_VISIBLE_POLICY
+                    });
+                    if (insertIndex === null) return null;
                     return {
                         kind: slotKind,
                         targetGroup: hostGroup,
                         targetList: host,
-                        insertIndex: hostIndex >= 0 ? hostIndex : 0,
+                        insertIndex,
                         targetGroupId: hostGroup.id,
                         hostGroupContainerEl: hostContainerEl,
                         slotKey: slot.key
@@ -801,11 +909,22 @@
                 }
                 // pointer past all children → after-last
                 const last = candidates[candidates.length - 1];
+                const anchorIdentity = last.kind === 'source'
+                    ? { type: 'source', key: last.key }
+                    : { type: 'group', id: last.key };
+                const insertIndex = resolveVisibleAnchorInsertIndex({
+                    fullList: host,
+                    visibleIdentities,
+                    anchorIdentity,
+                    edge: 'after',
+                    lastVisiblePolicy: FILTERED_LAST_VISIBLE_POLICY
+                });
+                if (insertIndex === null) return null;
                 return {
                     kind: last.kind === 'group' ? 'after-group' : 'after-source',
                     targetGroup: hostGroup,
                     targetList: host,
-                    insertIndex: host.length,
+                    insertIndex,
                     targetGroupId: hostGroup.id,
                     hostGroupContainerEl: hostContainerEl,
                     slotKey: last.key
@@ -819,38 +938,46 @@
             // elsewhere (handled by the bin/empty-bin dropzone task), so this branch never
             // returns state.ungrouped.
             if (candidates.length === 0) {
+                const insertIndex = resolveVisibleAnchorInsertIndex({
+                    fullList: root,
+                    visibleIdentities,
+                    anchorIdentity: null,
+                    edge: 'after',
+                    lastVisiblePolicy: FILTERED_LAST_VISIBLE_POLICY
+                });
+                if (insertIndex === null) return null;
                 return {
                     kind: 'after-source',
                     targetGroup: null,
                     targetList: root,
                     isRootList: true,
-                    insertIndex: 0,
+                    insertIndex,
                     targetGroupId: null,
                     hostGroupContainerEl: null,
                     slotKey: null
                 };
             }
 
-            const rootSlotIndex = (key, isSource) => {
-                for (let i = 0; i < root.length; i += 1) {
-                    const entry = root[i];
-                    if (!entry) continue;
-                    if (isSource && entry.type === 'source' && entry.key === key) return i;
-                    if (!isSource && entry.type === 'group' && entry.id === key) return i;
-                }
-                return -1;
-            };
-
             if (beforeIndex >= 0) {
                 const slot = candidates[beforeIndex];
                 const slotIsSource = slot.kind === 'source';
-                const idx = rootSlotIndex(slot.key, slotIsSource);
+                const anchorIdentity = slotIsSource
+                    ? { type: 'source', key: slot.key }
+                    : { type: 'group', id: slot.key };
+                const insertIndex = resolveVisibleAnchorInsertIndex({
+                    fullList: root,
+                    visibleIdentities,
+                    anchorIdentity,
+                    edge: 'before',
+                    lastVisiblePolicy: FILTERED_LAST_VISIBLE_POLICY
+                });
+                if (insertIndex === null) return null;
                 return {
                     kind: slotIsSource ? 'before-source' : 'before-group',
                     targetGroup: null,
                     targetList: root,
                     isRootList: true,
-                    insertIndex: idx >= 0 ? idx : 0,
+                    insertIndex,
                     targetGroupId: null,
                     hostGroupContainerEl: null,
                     slotKey: slot.key
@@ -883,13 +1010,23 @@
             // After all root children.
             const lastRoot = candidates[candidates.length - 1];
             const lastIsSource = lastRoot.kind === 'source';
-            const lastIdx = rootSlotIndex(lastRoot.key, lastIsSource);
+            const anchorIdentity = lastIsSource
+                ? { type: 'source', key: lastRoot.key }
+                : { type: 'group', id: lastRoot.key };
+            const insertIndex = resolveVisibleAnchorInsertIndex({
+                fullList: root,
+                visibleIdentities,
+                anchorIdentity,
+                edge: 'after',
+                lastVisiblePolicy: FILTERED_LAST_VISIBLE_POLICY
+            });
+            if (insertIndex === null) return null;
             return {
                 kind: lastIsSource ? 'after-source' : 'after-group',
                 targetGroup: null,
                 targetList: root,
                 isRootList: true,
-                insertIndex: lastIdx >= 0 ? lastIdx + 1 : root.length,
+                insertIndex,
                 targetGroupId: null,
                 hostGroupContainerEl: null,
                 slotKey: lastRoot.key
@@ -3444,6 +3581,7 @@
             isNoopTreeMove,
             getGroupAncestorChain,
             resolveSiblingKeys,
+            resolveVisibleAnchorInsertIndex,
             computeDropIntent,
             sweepPositionedRootSourcesToBin,
             applyReflowAfterRender

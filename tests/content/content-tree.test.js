@@ -3523,6 +3523,347 @@ describe('computeDropIntent', () => {
         });
     }
 
+    describe('filtered last-visible slot characterization and contract', () => {
+        const filteredEntries = [
+            { type: 'source', key: 'A' },
+            { type: 'source', key: 'hidden-B' },
+            { type: 'source', key: 'C' },
+            { type: 'source', key: 'hidden-D' }
+        ];
+
+        function computeFilteredRootIntent({ clientY, activeDragContext }) {
+            const state = {
+                root: filteredEntries.map((entry) => ({ ...entry })),
+                // Keep the non-empty bin outside this mock's pointer region so a source
+                // drag past C characterizes the filtered root slot instead of the
+                // intentionally separate empty-bin trailing target.
+                ungrouped: ['bin-source']
+            };
+            const tree = buildTree({ state });
+            const { sourcesListEl } = makeMockShadowList({
+                items: [
+                    { kind: 'source', key: 'A', top: 100, height: 40 },
+                    { kind: 'source', key: 'C', top: 140, height: 40 }
+                ]
+            });
+            return tree.computeDropIntent({
+                clientY,
+                rootElement: sourcesListEl,
+                state,
+                groupsById: new Map(),
+                parentMap: new Map(),
+                activeDragContext
+            });
+        }
+
+        function computeFilteredGroupIntent({ clientY, activeDragContext }) {
+            const group = {
+                id: 'visible-group',
+                children: filteredEntries.map((entry) => ({ ...entry }))
+            };
+            const state = {
+                root: [{ type: 'group', id: group.id }],
+                ungrouped: []
+            };
+            const groupsById = new Map([[group.id, group]]);
+            const tree = buildTree({ state, groupsById });
+            const { sourcesListEl } = makeMockShadowList({
+                items: [{
+                    kind: 'group',
+                    id: group.id,
+                    top: 70,
+                    headerHeight: 30,
+                    childrenStart: 100,
+                    childrenEnd: 180,
+                    children: [
+                        { kind: 'source', key: 'A', top: 100, height: 40 },
+                        { kind: 'source', key: 'C', top: 140, height: 40 }
+                    ]
+                }]
+            });
+            return tree.computeDropIntent({
+                clientX: 100,
+                clientY,
+                rootElement: sourcesListEl,
+                state,
+                groupsById,
+                parentMap: new Map(),
+                activeDragContext
+            });
+        }
+
+        it('characterizes active text-search root source before/after C as underlying indices 2/3', () => {
+            const dragContext = { kind: 'source-single', keys: ['external'] };
+            const before = computeFilteredRootIntent({ clientY: 145, activeDragContext: dragContext });
+            const after = computeFilteredRootIntent({ clientY: 175, activeDragContext: dragContext });
+
+            expect(before).toMatchObject({ kind: 'before-source', slotKey: 'C', insertIndex: 2 });
+            expect(after).toMatchObject({ kind: 'after-source', slotKey: 'C', insertIndex: 3 });
+        });
+
+        it('keeps quick-view group-child before C at index 2 and aligns after C to index 3', () => {
+            const dragContext = { kind: 'source-single', keys: ['external'] };
+            const before = computeFilteredGroupIntent({ clientY: 145, activeDragContext: dragContext });
+            const after = computeFilteredGroupIntent({ clientY: 175, activeDragContext: dragContext });
+
+            expect(before).toMatchObject({ kind: 'before-source', slotKey: 'C', insertIndex: 2 });
+            expect(after).toMatchObject({ kind: 'after-source', slotKey: 'C', insertIndex: 3 });
+        });
+
+        it('characterizes filtered group reorder before/after visible C at root as underlying indices 2/3', () => {
+            const state = {
+                root: [
+                    { type: 'group', id: 'A' },
+                    { type: 'group', id: 'hidden-B' },
+                    { type: 'group', id: 'C' },
+                    { type: 'group', id: 'hidden-D' }
+                ],
+                ungrouped: []
+            };
+            const groupsById = new Map(state.root.map((entry) => [
+                entry.id,
+                { id: entry.id, children: [] }
+            ]));
+            const tree = buildTree({ state, groupsById });
+            const { sourcesListEl } = makeMockShadowList({
+                items: [
+                    { kind: 'group', id: 'A', top: 100, headerHeight: 30, childrenStart: 130, childrenEnd: 130 },
+                    { kind: 'group', id: 'C', top: 150, headerHeight: 30, childrenStart: 180, childrenEnd: 180 }
+                ]
+            });
+            const args = {
+                rootElement: sourcesListEl,
+                state,
+                groupsById,
+                parentMap: new Map(),
+                activeDragContext: { kind: 'group', draggedGroupId: 'external' }
+            };
+
+            const before = tree.computeDropIntent({ ...args, clientY: 140 });
+            const after = tree.computeDropIntent({ ...args, clientY: 185 });
+
+            expect(before).toMatchObject({ kind: 'before-group', slotKey: 'C', insertIndex: 2 });
+            expect(after).toMatchObject({ kind: 'after-group', slotKey: 'C', insertIndex: 3 });
+        });
+
+        it('characterizes multi-source filtered intent without reordering the selected keys', () => {
+            const selectedKeys = ['selected-C', 'selected-A'];
+            const activeDragContext = { kind: 'source-multi', keys: selectedKeys };
+            const intent = computeFilteredRootIntent({ clientY: 175, activeDragContext });
+
+            expect(intent).toMatchObject({ kind: 'after-source', slotKey: 'C', insertIndex: 3 });
+            expect(activeDragContext.keys).toEqual(['selected-C', 'selected-A']);
+        });
+
+        it('fails closed when the visible list is empty over a nonempty full list', () => {
+            const state = {
+                root: filteredEntries.map((entry) => ({ ...entry })),
+                ungrouped: []
+            };
+            const tree = buildTree({ state });
+            const { sourcesListEl } = makeMockShadowList({ items: [] });
+            const intent = tree.computeDropIntent({
+                clientY: 150,
+                rootElement: sourcesListEl,
+                state,
+                groupsById: new Map(),
+                parentMap: new Map(),
+                activeDragContext: { kind: 'source-single', keys: ['external'] }
+            });
+
+            expect(intent).toBeNull();
+        });
+
+        describe('anchor-relative filtered drag contract', () => {
+            it('maps before/after the last visible source to the anchor-relative full-list indices 2/3', () => {
+                const state = { root: [], ungrouped: [] };
+                const tree = buildTree({ state });
+                const visibleIdentities = [
+                    { type: 'source', key: 'A' },
+                    { type: 'source', key: 'C' }
+                ];
+
+                expect(tree.resolveVisibleAnchorInsertIndex({
+                    fullList: filteredEntries,
+                    visibleIdentities,
+                    anchorIdentity: { type: 'source', key: 'C' },
+                    edge: 'before',
+                    lastVisiblePolicy: 'anchor-relative'
+                })).toBe(2);
+                expect(tree.resolveVisibleAnchorInsertIndex({
+                    fullList: filteredEntries,
+                    visibleIdentities,
+                    anchorIdentity: { type: 'source', key: 'C' },
+                    edge: 'after',
+                    lastVisiblePolicy: 'anchor-relative'
+                })).toBe(3);
+                expect(tree.resolveVisibleAnchorInsertIndex({
+                    fullList: filteredEntries,
+                    visibleIdentities,
+                    anchorIdentity: { type: 'source', key: 'C' },
+                    edge: 'after',
+                    lastVisiblePolicy: 'container-end'
+                })).toBe(4);
+            });
+
+            it('matches visible identities by type plus key/id when source and group identifiers collide', () => {
+                const state = { root: [], ungrouped: [] };
+                const tree = buildTree({ state });
+                const fullList = [
+                    { type: 'source', key: 'shared' },
+                    { type: 'group', id: 'shared' }
+                ];
+
+                expect(tree.resolveVisibleAnchorInsertIndex({
+                    fullList,
+                    visibleIdentities: [{ type: 'group', id: 'shared' }],
+                    anchorIdentity: { type: 'group', id: 'shared' },
+                    edge: 'before',
+                    lastVisiblePolicy: 'anchor-relative'
+                })).toBe(1);
+            });
+
+            it('returns 0 for an empty full list and fails closed when a nonempty list has no visible anchor', () => {
+                const state = { root: [], ungrouped: [] };
+                const tree = buildTree({ state });
+
+                expect(tree.resolveVisibleAnchorInsertIndex({
+                    fullList: [],
+                    visibleIdentities: [],
+                    anchorIdentity: null,
+                    edge: 'after',
+                    lastVisiblePolicy: 'anchor-relative'
+                })).toBe(0);
+                expect(tree.resolveVisibleAnchorInsertIndex({
+                    fullList: filteredEntries,
+                    visibleIdentities: [],
+                    anchorIdentity: { type: 'source', key: 'C' },
+                    edge: 'after',
+                    lastVisiblePolicy: 'anchor-relative'
+                })).toBeNull();
+            });
+
+            it('aligns active text-search and quick-view source drops after C to underlying index 3', () => {
+                const rootIntent = computeFilteredRootIntent({
+                    clientY: 175,
+                    activeDragContext: { kind: 'source-single', keys: ['external'] }
+                });
+                const groupIntent = computeFilteredGroupIntent({
+                    clientY: 175,
+                    activeDragContext: { kind: 'source-single', keys: ['external'] }
+                });
+
+                expect(rootIntent).toMatchObject({ kind: 'after-source', slotKey: 'C', insertIndex: 3 });
+                expect(groupIntent).toMatchObject({ kind: 'after-source', slotKey: 'C', insertIndex: 3 });
+            });
+
+            it('aligns multi-source group-child drops after C to index 3 without changing selection order', () => {
+                const activeDragContext = {
+                    kind: 'source-multi',
+                    keys: ['selected-C', 'selected-A']
+                };
+                const intent = computeFilteredGroupIntent({ clientY: 175, activeDragContext });
+
+                expect(intent).toMatchObject({ kind: 'after-source', slotKey: 'C', insertIndex: 3 });
+                expect(activeDragContext.keys).toEqual(['selected-C', 'selected-A']);
+            });
+
+            it('aligns nested group reorder after visible C to anchor-relative index 3', () => {
+                const parent = {
+                    id: 'parent',
+                    children: [
+                        { type: 'group', id: 'A' },
+                        { type: 'group', id: 'hidden-B' },
+                        { type: 'group', id: 'C' },
+                        { type: 'group', id: 'hidden-D' }
+                    ]
+                };
+                const groupsById = new Map([
+                    [parent.id, parent],
+                    ['A', { id: 'A', children: [{ type: 'source', key: 'a-child' }] }],
+                    ['hidden-B', { id: 'hidden-B', children: [] }],
+                    ['C', { id: 'C', children: [{ type: 'source', key: 'c-child' }] }],
+                    ['hidden-D', { id: 'hidden-D', children: [] }]
+                ]);
+                const parentMap = new Map([
+                    ['A', parent.id],
+                    ['hidden-B', parent.id],
+                    ['C', parent.id],
+                    ['hidden-D', parent.id]
+                ]);
+                const state = {
+                    root: [{ type: 'group', id: parent.id }],
+                    ungrouped: []
+                };
+                const tree = buildTree({ state, groupsById, parentMap });
+                const { sourcesListEl } = makeMockShadowList({
+                    items: [{
+                        kind: 'group',
+                        id: parent.id,
+                        top: 70,
+                        headerHeight: 30,
+                        childrenStart: 100,
+                        childrenEnd: 250,
+                        children: [
+                            {
+                                kind: 'group',
+                                id: 'A',
+                                top: 100,
+                                headerHeight: 30,
+                                childrenStart: 130,
+                                childrenEnd: 150,
+                                children: [{ kind: 'source', key: 'a-child', top: 130, height: 20 }]
+                            },
+                            {
+                                kind: 'group',
+                                id: 'C',
+                                top: 160,
+                                headerHeight: 30,
+                                childrenStart: 190,
+                                childrenEnd: 230,
+                                children: [{ kind: 'source', key: 'c-child', top: 190, height: 40 }]
+                            }
+                        ]
+                    }]
+                });
+                const intent = tree.computeDropIntent({
+                    clientX: 100,
+                    clientY: 210,
+                    rootElement: sourcesListEl,
+                    state,
+                    groupsById,
+                    parentMap,
+                    activeDragContext: { kind: 'group', draggedGroupId: 'external' }
+                });
+
+                expect(intent).toMatchObject({
+                    kind: 'after-group',
+                    targetList: parent.children,
+                    slotKey: 'C',
+                    insertIndex: 3
+                });
+            });
+
+            it('fails closed when filtering leaves no visible anchor in a nonempty container', () => {
+                const state = {
+                    root: filteredEntries.map((entry) => ({ ...entry })),
+                    ungrouped: []
+                };
+                const tree = buildTree({ state });
+                const { sourcesListEl } = makeMockShadowList({ items: [] });
+
+                expect(tree.computeDropIntent({
+                    clientY: 150,
+                    rootElement: sourcesListEl,
+                    state,
+                    groupsById: new Map(),
+                    parentMap: new Map(),
+                    activeDragContext: { kind: 'source-single', keys: ['external'] }
+                })).toBeNull();
+            });
+        });
+    });
+
     it('returns a before-source intent when the pointer is in the upper half of a root source-item', () => {
         const state = { root: [{ type: 'source', key: 'A' }, { type: 'source', key: 'B' }], ungrouped: [] };
         const tree = buildTree({ state });
