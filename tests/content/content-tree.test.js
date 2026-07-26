@@ -3557,7 +3557,7 @@ describe('handleDragOver rAF coalescing', () => {
         };
     }
 
-    function setupCtx({ dragReflow, items }) {
+    function setupCtx({ dragReflow, items, dragMulti: dragMultiOverride = null }) {
         // v5: the mock renders items as direct #sources-list children → positioned root
         // sources in state.root (object entries); the bottom bin stays empty.
         const state = { isBatchMode: false, root: items.map((i) => ({ type: 'source', key: i.key })), ungrouped: [] };
@@ -3571,7 +3571,7 @@ describe('handleDragOver rAF coalescing', () => {
             getShadowRoot: () => shadowRoot,
             getParentMap: () => new Map(),
             isDescendant: globalThis.isDescendant,
-            dragMulti: createContentDragMulti({}),
+            dragMulti: dragMultiOverride || createContentDragMulti({}),
             dragReflow
         });
         runtime.activeDragContext = { kind: 'source-single', keys: [items[0].key] };
@@ -3582,7 +3582,7 @@ describe('handleDragOver rAF coalescing', () => {
             currentIntent: null,
             shiftedItems: new Map()
         };
-        return { runtime, tree, sourcesListEl, elementMap };
+        return { runtime, tree, sourcesListEl, elementMap, state };
     }
 
     function makeDragOverEvent(clientY) {
@@ -3682,6 +3682,159 @@ describe('handleDragOver rAF coalescing', () => {
         expect(globalThis.cancelAnimationFrame).toHaveBeenCalledTimes(1);
         flushRaf();
         expect(dragReflow.applyReflow).not.toHaveBeenCalled();
+    });
+
+    it('refreshes stationary-pointer intent after auto-scroll and coalesces refresh frames', () => {
+        let onDidScroll = null;
+        const autoScrollController = {
+            tick: jest.fn(),
+            stop: jest.fn()
+        };
+        const dragMulti = {
+            EDGE_PX: 60,
+            MAX_SPEED: 14,
+            computeAutoScrollVelocity: jest.fn(() => 10),
+            createAutoScrollController: jest.fn((options) => {
+                onDidScroll = options.onDidScroll;
+                return autoScrollController;
+            })
+        };
+        const ctx = setupCtx({
+            dragReflow: null,
+            dragMulti,
+            items: [
+                { kind: 'source', key: 'A', top: 100, height: 40 },
+                { kind: 'source', key: 'B', top: 140, height: 40 },
+                { kind: 'source', key: 'C', top: 180, height: 40 },
+                { kind: 'source', key: 'D', top: 220, height: 40 }
+            ]
+        });
+        ctx.runtime.activeDragContext = { kind: 'source-single', keys: ['A'] };
+        ctx.runtime.dragReflowSession = {
+            currentIntent: null,
+            draggedKeys: new Set(['A']),
+            totalDraggedHeight: 40,
+            shiftedItems: new Map(),
+            shiftedSourceItems: new Map(),
+            shiftedGroupItems: new Map()
+        };
+
+        ctx.tree.handleDragOver(makeDragOverEvent(170));
+        flushRaf();
+        expect(ctx.runtime.dragReflowSession.currentIntent.slotKey).toBe('C');
+        expect(onDidScroll).toBeInstanceOf(Function);
+
+        const shiftRows = (delta) => {
+            for (const key of ['A', 'B', 'C', 'D']) {
+                const row = ctx.elementMap.get(`source:${key}`);
+                row.rect = {
+                    ...row.rect,
+                    top: row.rect.top - delta,
+                    bottom: row.rect.bottom - delta
+                };
+            }
+        };
+        ctx.sourcesListEl.scrollTop = 20;
+        shiftRows(20);
+        onDidScroll({
+            container: ctx.sourcesListEl,
+            before: 0,
+            after: 20,
+            velocity: 10
+        });
+        ctx.sourcesListEl.scrollTop = 40;
+        shiftRows(20);
+        onDidScroll({
+            container: ctx.sourcesListEl,
+            before: 20,
+            after: 40,
+            velocity: 10
+        });
+
+        expect(pendingRafCallbacks.filter(Boolean)).toHaveLength(1);
+        flushRaf();
+        expect(ctx.runtime.dragReflowSession.currentIntent).toMatchObject({
+            kind: 'before-source',
+            slotKey: 'D'
+        });
+    });
+
+    it('flushes dirty auto-scroll geometry synchronously before drop mutation', () => {
+        let onDidScroll = null;
+        const dragMulti = {
+            EDGE_PX: 60,
+            MAX_SPEED: 14,
+            computeAutoScrollVelocity: jest.fn(() => 10),
+            createAutoScrollController: jest.fn((options) => {
+                onDidScroll = options.onDidScroll;
+                return {
+                    tick: jest.fn(),
+                    stop: jest.fn()
+                };
+            })
+        };
+        const ctx = setupCtx({
+            dragReflow: null,
+            dragMulti,
+            items: [
+                { kind: 'source', key: 'A', top: 100, height: 40 },
+                { kind: 'source', key: 'B', top: 140, height: 40 },
+                { kind: 'source', key: 'C', top: 180, height: 40 },
+                { kind: 'source', key: 'D', top: 220, height: 40 }
+            ]
+        });
+        ctx.runtime.activeDragContext = { kind: 'source-single', keys: ['A'] };
+        ctx.runtime.dragReflowSession = {
+            currentIntent: null,
+            draggedKeys: new Set(['A']),
+            totalDraggedHeight: 40,
+            shiftedItems: new Map(),
+            shiftedSourceItems: new Map(),
+            shiftedGroupItems: new Map()
+        };
+
+        ctx.tree.handleDragOver(makeDragOverEvent(170));
+        flushRaf();
+        expect(ctx.runtime.dragReflowSession.currentIntent.slotKey).toBe('C');
+
+        for (const key of ['A', 'B', 'C', 'D']) {
+            const row = ctx.elementMap.get(`source:${key}`);
+            row.rect = {
+                ...row.rect,
+                top: row.rect.top - 40,
+                bottom: row.rect.bottom - 40
+            };
+        }
+        ctx.sourcesListEl.scrollTop = 40;
+        onDidScroll({
+            container: ctx.sourcesListEl,
+            before: 0,
+            after: 40,
+            velocity: 10
+        });
+        expect(pendingRafCallbacks.filter(Boolean)).toHaveLength(1);
+
+        ctx.tree.handleDrop({
+            clientX: 50,
+            clientY: 170,
+            preventDefault: jest.fn(),
+            dataTransfer: {
+                getData: (type) => (
+                    type === 'application/source-key' ? 'A' : ''
+                )
+            }
+        });
+
+        expect(ctx.state.root).toEqual([
+            { type: 'source', key: 'B' },
+            { type: 'source', key: 'C' },
+            { type: 'source', key: 'A' },
+            { type: 'source', key: 'D' }
+        ]);
+        expect(globalThis.cancelAnimationFrame).toHaveBeenCalled();
+        const stateAfterDrop = JSON.parse(JSON.stringify(ctx.state));
+        flushRaf();
+        expect(ctx.state).toEqual(stateAfterDrop);
     });
 });
 
@@ -7582,6 +7735,7 @@ describe('single-frame drag geometry snapshot budgets', () => {
         expect(tree.planDragFrame).toBeInstanceOf(Function);
         expect(tree.applyDragFramePlan).toBeInstanceOf(Function);
         expect(tree.invalidateDragGeometry).toBeInstanceOf(Function);
+        expect(tree.flushDragFrameNow).toBeInstanceOf(Function);
     });
 
     it.each([100, 500])('reads %i rows with one query batch and one rect read per element', (rowCount) => {
@@ -7697,6 +7851,81 @@ describe('single-frame drag geometry snapshot budgets', () => {
         });
         expect(runtime.dragGeometryDirty).toBe(false);
     });
+
+    it.each(['callback-first', 'native-first'])(
+        'records an auto-scroll delta once when %s notification wins the race',
+        (notificationOrder) => {
+            const fixture = createGeometryFixture(2);
+            const runtime = {};
+            let onDidScroll = null;
+            const dragMulti = {
+                createAutoScrollController: jest.fn((options) => {
+                    onDidScroll = options.onDidScroll;
+                    return {
+                        tick: jest.fn(),
+                        stop: jest.fn()
+                    };
+                })
+            };
+            const tree = buildTree({
+                fixture,
+                runtime,
+                extraDeps: { dragMulti }
+            });
+            tree.handleDragStart({
+                target: {
+                    closest: (selector) => (
+                        selector === '.source-item' ? fixture.sources[0] : null
+                    )
+                },
+                dataTransfer: {
+                    setData: jest.fn(),
+                    effectAllowed: ''
+                }
+            });
+            fixture.resetWritePhase();
+            const snapshot = tree.readDragGeometry({
+                rootElement: fixture.root,
+                session: null
+            });
+            const beforeTop = snapshot.sourceEntries.get('source-0').visualRect.top;
+            const geometryQueryCount = fixture.root.querySelectorAll.mock.calls.length;
+            const scrollListener = fixture.listeners.get('scroll');
+            const notifyAutoScroll = () => onDidScroll({
+                container: fixture.root,
+                before: 0,
+                after: 40,
+                velocity: 10
+            });
+            const notifyNativeScroll = () => scrollListener({ target: fixture.root });
+
+            fixture.root.scrollTop = 40;
+            if (notificationOrder === 'callback-first') {
+                notifyAutoScroll();
+                notifyNativeScroll();
+            } else {
+                notifyNativeScroll();
+                notifyAutoScroll();
+            }
+            fixture.resetWritePhase();
+            const patched = tree.readDragGeometry({
+                rootElement: fixture.root,
+                session: null
+            });
+
+            expect(patched).toBe(snapshot);
+            expect(patched.sourceEntries.get('source-0').visualRect.top).toBe(
+                beforeTop - 40
+            );
+            expect(fixture.root.querySelectorAll).toHaveBeenCalledTimes(
+                geometryQueryCount
+            );
+            fixture.sources.forEach((source) => {
+                expect(source.getBoundingClientRect).toHaveBeenCalledTimes(1);
+            });
+            expect(runtime.dragGeometryDirty).toBe(false);
+        }
+    );
 
     it('combines a root viewport translation with the pending root scroll delta', () => {
         const fixture = createGeometryFixture(1);

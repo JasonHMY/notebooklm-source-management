@@ -688,6 +688,28 @@ describe('content-drag-multi factory', () => {
             expect(container.scrollBy).toHaveBeenCalledWith({ top: 10, behavior: 'auto' });
         });
 
+        it('reports each successful scroll with the applied position and velocity', () => {
+            const container = makeContainer();
+            const raf = makeRaf();
+            const onDidScroll = jest.fn();
+            const helper = createContentDragMulti({ requestAnimationFrame: raf.requestAnimationFrame, cancelAnimationFrame: raf.cancelAnimationFrame });
+            const controller = helper.createAutoScrollController({
+                getContainer: () => container,
+                onDidScroll
+            });
+
+            controller.tick(10);
+            raf.flush();
+
+            expect(onDidScroll).toHaveBeenCalledTimes(1);
+            expect(onDidScroll).toHaveBeenCalledWith({
+                container,
+                before: 0,
+                after: 10,
+                velocity: 10
+            });
+        });
+
         it('does not stack multiple loops when tick is called repeatedly', () => {
             const container = makeContainer();
             const raf = makeRaf();
@@ -734,12 +756,36 @@ describe('content-drag-multi factory', () => {
         it('stops at the bottom scroll boundary', () => {
             const container = makeContainer({ scrollTop: 600, scrollHeight: 1000, clientHeight: 400 });
             const raf = makeRaf();
+            const onDidScroll = jest.fn();
             const helper = createContentDragMulti({ requestAnimationFrame: raf.requestAnimationFrame, cancelAnimationFrame: raf.cancelAnimationFrame });
-            const controller = helper.createAutoScrollController({ getContainer: () => container });
+            const controller = helper.createAutoScrollController({
+                getContainer: () => container,
+                onDidScroll
+            });
 
             controller.tick(14);
             raf.flush();
             expect(container.scrollTop).toBe(600);
+            expect(onDidScroll).not.toHaveBeenCalled();
+            expect(raf.pending()).toBe(0);
+        });
+
+        it('does not report or continue scrolling after stop()', () => {
+            const container = makeContainer();
+            const raf = makeRaf();
+            const onDidScroll = jest.fn();
+            const helper = createContentDragMulti({ requestAnimationFrame: raf.requestAnimationFrame, cancelAnimationFrame: raf.cancelAnimationFrame });
+            const controller = helper.createAutoScrollController({
+                getContainer: () => container,
+                onDidScroll
+            });
+
+            controller.tick(14);
+            controller.stop();
+            raf.flush();
+
+            expect(onDidScroll).not.toHaveBeenCalled();
+            expect(container.scrollBy).not.toHaveBeenCalled();
             expect(raf.pending()).toBe(0);
         });
     });

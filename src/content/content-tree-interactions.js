@@ -938,7 +938,10 @@
                 dragGeometryDomGeneration += 1;
             }
             const canRecordScroll = Boolean(
-                normalizedReason === 'scroll_position_changed'
+                (
+                    normalizedReason === 'scroll_position_changed'
+                    || normalizedReason === 'auto_scroll'
+                )
                 && scrollTarget
                 && Number.isFinite(scrollDeltaLeft)
                 && Number.isFinite(scrollDeltaTop)
@@ -1465,6 +1468,70 @@
             }
         }
 
+        function handleAutoScrollDidScroll({
+            container,
+            before,
+            after
+        } = {}) {
+            if (
+                !runtime.activeDragContext
+                || !container
+                || !Number.isFinite(before)
+                || !Number.isFinite(after)
+                || before === after
+            ) {
+                return;
+            }
+            const lifecycle = dragGeometryLifecycle;
+            const isScopedContainer = Boolean(
+                lifecycle
+                && lifecycle.rootElement
+                && (
+                    container === lifecycle.rootElement
+                    || (
+                        typeof lifecycle.rootElement.contains === 'function'
+                        && lifecycle.rootElement.contains(container)
+                    )
+                )
+            );
+            if (
+                !isScopedContainer
+                || !(lifecycle.scrollPositions instanceof WeakMap)
+            ) {
+                invalidateDragGeometry('auto_scroll');
+                return;
+            }
+
+            const previous = lifecycle.scrollPositions.get(container);
+            const next = readScrollPosition(container);
+            if (
+                previous
+                && previous.top === next.top
+                && previous.left === next.left
+            ) {
+                // A synchronous native scroll event already advanced the
+                // lifecycle baseline and invalidated this exact movement.
+                return;
+            }
+            lifecycle.scrollPositions.set(container, next);
+            if (
+                previous
+                && previous.top === before
+                && previous.left === next.left
+                && next.top === after
+            ) {
+                invalidateDragGeometry('auto_scroll', {
+                    scrollTarget: container,
+                    scrollDeltaLeft: 0,
+                    scrollDeltaTop: after - before
+                });
+                return;
+            }
+            // An unknown/mixed movement cannot be patched safely. Mark dirty
+            // through the same seam and let the next frame rebuild geometry.
+            invalidateDragGeometry('auto_scroll');
+        }
+
         function readResizeBorderBox(entry) {
             if (!entry || !entry.borderBoxSize) return null;
             const borderBox = Array.isArray(entry.borderBoxSize)
@@ -1606,7 +1673,8 @@
                 getContainer: () => {
                     const root = getShadowRoot();
                     return root && typeof root.getElementById === 'function' ? root.getElementById('sources-list') : null;
-                }
+                },
+                onDidScroll: handleAutoScrollDidScroll
             })
             : null;
 
@@ -3501,12 +3569,15 @@
         let _pendingDragOverArgs = null;
         let _pendingDragOverRafId = null;
         let _lastDragOverArgs = null;
-        function _cancelPendingDragOver() {
+        function _cancelScheduledDragOverRaf() {
             if (_pendingDragOverRafId != null
                 && typeof globalThis.cancelAnimationFrame === 'function') {
                 try { globalThis.cancelAnimationFrame(_pendingDragOverRafId); } catch (_) { /* ignore */ }
             }
             _pendingDragOverRafId = null;
+        }
+        function _cancelPendingDragOver() {
+            _cancelScheduledDragOverRaf();
             _pendingDragOverArgs = null;
             _lastDragOverArgs = null;
         }
@@ -3541,15 +3612,28 @@
         // computation synchronously now so handleDrop reads the up-to-date
         // currentIntent / reflow.
         function _flushPendingDragOver() {
-            if (_pendingDragOverArgs == null) return;
-            if (_pendingDragOverRafId != null
-                && typeof globalThis.cancelAnimationFrame === 'function') {
-                try { globalThis.cancelAnimationFrame(_pendingDragOverRafId); } catch (_) { /* ignore */ }
-            }
-            const args = _pendingDragOverArgs;
-            _pendingDragOverRafId = null;
+            if (_pendingDragOverArgs == null) return null;
+            return flushDragFrameNow({
+                pointer: _pendingDragOverArgs,
+                reason: 'pending_dragover'
+            });
+        }
+        function flushDragFrameNow({
+            pointer = null,
+            reason = 'synchronous_flush'
+        } = {}) {
+            const args = pointer || _pendingDragOverArgs || _lastDragOverArgs;
+            if (!args || !runtime.activeDragContext) return null;
+            _cancelScheduledDragOverRaf();
             _pendingDragOverArgs = null;
-            _processDragOver(args);
+            runtime.dragFrameLastFlushReason = typeof reason === 'string'
+                ? reason
+                : 'synchronous_flush';
+            return _processDragOver({
+                clientX: args.clientX,
+                clientY: args.clientY,
+                dataTransfer: args.dataTransfer
+            });
         }
         function handleDragOver(e) {
             e.preventDefault();
@@ -3580,7 +3664,7 @@
             if (!geometrySnapshot) {
                 const priorSnapshot = runtime.dragGeometrySnapshot;
                 if (priorSnapshot) {
-                    applyDragFramePlan({
+                    const invalidPlan = {
                         intent: null,
                         isInvalid: true,
                         dropEffect: 'none',
@@ -3596,7 +3680,9 @@
                         },
                         geometrySnapshot: priorSnapshot,
                         dataTransfer: args && args.dataTransfer
-                    });
+                    };
+                    applyDragFramePlan(invalidPlan);
+                    return invalidPlan;
                 } else {
                     clearAppliedDragFeedback();
                     if (runtime.dragReflowSession) {
@@ -3619,7 +3705,7 @@
                         try { args.dataTransfer.dropEffect = 'none'; } catch (_) {}
                     }
                 }
-                return;
+                return null;
             }
             const plan = planDragFrame({
                 pointer: {
@@ -3637,6 +3723,7 @@
                 dataTransfer: args && args.dataTransfer
             });
             applyDragFramePlan(plan);
+            return plan;
         }
 
         // Transient "drop to ungroup" hint shown in the bottom slot opened by reflow
@@ -4192,6 +4279,12 @@
             // Flush any dragover RAF still in flight so handleDrop reads the
             // up-to-date intent + reflow rather than a one-frame-stale snapshot.
             _flushPendingDragOver();
+            if (runtime.dragGeometryDirty === true && _lastDragOverArgs) {
+                flushDragFrameNow({
+                    pointer: _lastDragOverArgs,
+                    reason: 'drop_after_geometry_invalidation'
+                });
+            }
             let reflowClearedForMutation = false;
             const clearReflowBeforeMutation = () => {
                 if (reflowClearedForMutation) return;
@@ -4962,6 +5055,7 @@
             planDragFrame,
             applyDragFramePlan,
             invalidateDragGeometry,
+            flushDragFrameNow,
             teardownDragInteractions,
             restoreTransientHoverExpandedGroups,
             sweepPositionedRootSourcesToBin,

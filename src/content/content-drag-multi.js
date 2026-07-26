@@ -319,8 +319,11 @@
             return { moved: 0, skipped: keys.length };
         }
 
-        function createAutoScrollController({ getContainer }) {
+        function createAutoScrollController({ getContainer, onDidScroll }) {
             const resolveContainer = typeof getContainer === 'function' ? getContainer : () => null;
+            const notifyDidScroll = typeof onDidScroll === 'function'
+                ? onDidScroll
+                : null;
             const state = { rafId: null, velocity: 0 };
 
             function step() {
@@ -331,12 +334,23 @@
                     return;
                 }
                 const before = typeof container.scrollTop === 'number' ? container.scrollTop : 0;
-                container.scrollBy({ top: state.velocity, behavior: 'auto' });
+                const velocity = state.velocity;
+                container.scrollBy({ top: velocity, behavior: 'auto' });
                 const after = typeof container.scrollTop === 'number' ? container.scrollTop : before;
 
                 if (after === before) {
                     state.velocity = 0;
                     return;
+                }
+                if (notifyDidScroll) {
+                    try {
+                        notifyDidScroll({
+                            container,
+                            before,
+                            after,
+                            velocity
+                        });
+                    } catch (_) { /* tree invalidation is best-effort */ }
                 }
                 if (state.velocity !== 0 && requestAnimationFrameFn) {
                     state.rafId = requestAnimationFrameFn(step);
