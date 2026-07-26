@@ -78,6 +78,9 @@
         let appearancePreferences = { hoverSpotlightEnabled: true };
         let dragMode = 'classic';
         let preferencesLoadStatus = 'idle';
+        let nextPreferenceOperationId = 1;
+        let latestAppliedPreferenceOperationId = 0;
+        let latestPreferenceLoadOperationId = 0;
         let developerLogs = [];
         let nextLogSequence = 1;
 
@@ -227,16 +230,33 @@
         }
 
         async function loadDeveloperPreferences() {
+            const operationId = nextPreferenceOperationId++;
+            const statusBeforeLoad = preferencesLoadStatus;
+            latestPreferenceLoadOperationId = operationId;
             preferencesLoadStatus = 'loading';
             try {
                 const response = await sendRuntimeMessage({ type: 'LOAD_PREFERENCES' });
+                if (operationId < latestAppliedPreferenceOperationId) {
+                    if (
+                        latestPreferenceLoadOperationId === operationId
+                        && preferencesLoadStatus === 'loading'
+                    ) {
+                        preferencesLoadStatus = statusBeforeLoad === 'loaded' ? 'loaded' : 'failed';
+                    }
+                    return developerModeEnabled;
+                }
                 if (!response?.success || !response.preferences || typeof response.preferences !== 'object') {
-                    preferencesLoadStatus = 'failed';
+                    if (latestPreferenceLoadOperationId === operationId) {
+                        preferencesLoadStatus = 'failed';
+                    }
                     return developerModeEnabled;
                 }
                 applyLoadedPreferences(response.preferences);
                 applyLoadedPreferenceUsageState(response.usageState);
-                preferencesLoadStatus = 'loaded';
+                latestAppliedPreferenceOperationId = operationId;
+                if (latestPreferenceLoadOperationId === operationId) {
+                    preferencesLoadStatus = 'loaded';
+                }
                 if (developerModeEnabled) {
                     try {
                         await loadDeveloperLogs();
@@ -245,7 +265,12 @@
                     }
                 }
             } catch (error) {
-                preferencesLoadStatus = 'failed';
+                if (
+                    operationId >= latestAppliedPreferenceOperationId
+                    && latestPreferenceLoadOperationId === operationId
+                ) {
+                    preferencesLoadStatus = 'failed';
+                }
             }
             return developerModeEnabled;
         }
@@ -300,6 +325,7 @@
         }
 
         async function savePreferences(nextPreferences = {}) {
+            const operationId = nextPreferenceOperationId++;
             const response = await sendRuntimeMessage({
                 type: 'SAVE_PREFERENCES',
                 preferences: nextPreferences
@@ -307,15 +333,22 @@
             if (!response || response.success === false) {
                 throw new Error(response?.errorCode || 'runtime_failure');
             }
-            if (response?.success && response.preferences) {
+            if (response.success !== true || operationId < latestAppliedPreferenceOperationId) {
+                return response;
+            }
+
+            // Only an explicitly successful SAVE supersedes older preference requests.
+            // A partial response blocks those stale loads but does not verify the full schema.
+            latestAppliedPreferenceOperationId = operationId;
+            if (response.preferences) {
                 applyLoadedPreferences(response.preferences);
                 if (hasCompleteNormalizedPreferences(response.preferences)) {
                     preferencesLoadStatus = 'loaded';
                 }
             }
-            if (response?.success && response.usageState) {
+            if (response.usageState) {
                 applyLoadedPreferenceUsageState(response.usageState);
-            } else if (response?.success) {
+            } else {
                 preferenceUsageState = {
                     hasExistingPluginData: true,
                     hasStoredPreferences: true

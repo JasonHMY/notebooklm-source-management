@@ -1819,6 +1819,14 @@
         );
     }
 
+    function isDragModeChangeInvariantSatisfied(result, requestedMode) {
+        if (getDragMode() !== requestedMode) return false;
+        if (result?.changed === true && result?.saved === true) return true;
+        if (result?.changed !== false || result?.saved !== false) return false;
+        if (requestedMode === 'reflow') return result.reason === 'not_classic';
+        return !result.reason;
+    }
+
     async function finalizePanelReattachPersistence({
         expectedProjectId = projectId,
         instanceToken = activeManagerInstanceToken,
@@ -1872,9 +1880,10 @@
     // back when possible and always rejects so settings cannot report success.
     async function applyDragModeChange(mode) {
         const previousMode = getDragMode();
+        const requestedMode = mode === 'reflow' ? 'reflow' : 'classic';
         const expectedProjectId = projectId;
         const instanceToken = activeManagerInstanceToken;
-        const result = await setDragMode(mode);
+        const persistedMode = await setDragMode(requestedMode);
         let invariantResult;
         try {
             invariantResult = await enforceClassicPlacementInvariant({
@@ -1889,19 +1898,26 @@
                 reason: 'invariant_failed'
             };
         }
-        if (isClassicPlacementInvariantSatisfied(invariantResult)) {
-            return result;
+        if (
+            persistedMode === requestedMode
+            && isDragModeChangeInvariantSatisfied(invariantResult, requestedMode)
+        ) {
+            return requestedMode;
         }
 
+        const modeMismatch = persistedMode !== requestedMode || getDragMode() !== requestedMode;
+        const invariantOtherwiseSatisfied = isClassicPlacementInvariantSatisfied(invariantResult);
         let rollbackFailed = false;
-        if (result === 'classic' && previousMode !== result) {
+        if (requestedMode === 'classic' && previousMode !== requestedMode) {
             try {
                 await setDragMode(previousMode);
             } catch (error) {
                 rollbackFailed = true;
             }
         }
-        const reason = invariantResult?.reason || 'invariant_failed';
+        const reason = modeMismatch && invariantOtherwiseSatisfied
+            ? 'mode_mismatch'
+            : invariantResult?.reason || 'invariant_failed';
         const error = new Error(reason);
         error.code = reason;
         error.invariantResult = invariantResult;

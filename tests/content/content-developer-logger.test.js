@@ -56,6 +56,20 @@ function createRuntimeMock(options = {}) {
     };
 }
 
+function createCompletePreferences(dragMode = 'classic') {
+    return {
+        developerModeEnabled: false,
+        welcomeOnboardingSeenVersion: 0,
+        whatsNewSeenVersion: '',
+        historyRetentionLimit: 20,
+        languageOverride: 'auto',
+        dragMode,
+        commandShortcuts: {},
+        visibleQuickViewKinds: ['all', 'ungrouped', 'disabled', 'tag', 'recent', 'issues'],
+        appearance: { hoverSpotlightEnabled: true }
+    };
+}
+
 describe('content developer logger', () => {
     it('does not write developer logs while developer mode is disabled', () => {
         const { chromeApi, sendMessage } = createRuntimeMock();
@@ -410,6 +424,93 @@ describe('content developer logger', () => {
 
             expect(logger.getPreferencesLoadStatus()).toBe('failed');
             expect(logger.getDragMode()).toBe('classic');
+        });
+
+        it('ignores an older preference LOAD after a newer complete SAVE succeeds', async () => {
+            let settleLoad;
+            const sendMessage = jest.fn((message, cb) => {
+                if (message?.type === 'LOAD_PREFERENCES') {
+                    settleLoad = cb;
+                    return;
+                }
+                if (message?.type === 'SAVE_PREFERENCES') {
+                    cb?.({
+                        success: true,
+                        preferences: createCompletePreferences('classic')
+                    });
+                }
+            });
+            const logger = createContentDeveloperLogger({
+                chrome: { runtime: { sendMessage, lastError: null } },
+                getProjectId: () => 'project-dev'
+            });
+
+            const pendingLoad = logger.loadDeveloperPreferences();
+            await logger.setDragMode('classic');
+            settleLoad({
+                success: true,
+                preferences: createCompletePreferences('reflow')
+            });
+            await pendingLoad;
+
+            expect(logger.getDragMode()).toBe('classic');
+            expect(logger.getPreferencesLoadStatus()).toBe('loaded');
+        });
+
+        it('lets a partial successful SAVE supersede an older LOAD without marking preferences loaded', async () => {
+            let settleLoad;
+            const sendMessage = jest.fn((message, cb) => {
+                if (message?.type === 'LOAD_PREFERENCES') {
+                    settleLoad = cb;
+                    return;
+                }
+                if (message?.type === 'SAVE_PREFERENCES') {
+                    cb?.({ success: true });
+                }
+            });
+            const logger = createContentDeveloperLogger({
+                chrome: { runtime: { sendMessage, lastError: null } },
+                getProjectId: () => 'project-dev'
+            });
+
+            const pendingLoad = logger.loadDeveloperPreferences();
+            await logger.setDragMode('reflow');
+            settleLoad({
+                success: true,
+                preferences: createCompletePreferences('classic')
+            });
+            await pendingLoad;
+
+            expect(logger.getDragMode()).toBe('reflow');
+            expect(logger.getPreferencesLoadStatus()).toBe('failed');
+        });
+
+        it('does not let a failed SAVE discard an older valid preference LOAD', async () => {
+            let settleLoad;
+            const sendMessage = jest.fn((message, cb) => {
+                if (message?.type === 'LOAD_PREFERENCES') {
+                    settleLoad = cb;
+                    return;
+                }
+                if (message?.type === 'SAVE_PREFERENCES') {
+                    cb?.({ success: false, errorCode: 'runtime_failure' });
+                }
+            });
+            const logger = createContentDeveloperLogger({
+                chrome: { runtime: { sendMessage, lastError: null } },
+                getProjectId: () => 'project-dev'
+            });
+
+            const pendingLoad = logger.loadDeveloperPreferences();
+            await expect(logger.setDragMode('classic')).rejects.toThrow('runtime_failure');
+            settleLoad({
+                success: true,
+                preferences: createCompletePreferences('reflow')
+            });
+            await pendingLoad;
+
+            expect(logger.getDragMode()).toBe('reflow');
+            expect(logger.getPreferencesLoadStatus()).toBe('loaded');
         });
 
         it('only recovers a failed preference load after SAVE_PREFERENCES returns a complete normalized response', async () => {

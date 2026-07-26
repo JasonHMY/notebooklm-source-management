@@ -3635,6 +3635,38 @@ describe('manager launcher messaging', () => {
         );
     });
 
+    it('does not let an older preference LOAD overwrite a completed Classic SAVE', async () => {
+        let settlePreferenceLoad;
+        mod._setProjectId('notebook-a');
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'LOAD_PREFERENCES') {
+                settlePreferenceLoad = cb;
+                return;
+            }
+            if (message?.type === 'SAVE_PREFERENCES') {
+                cb?.({
+                    success: true,
+                    preferences: createCompletePreferences('classic')
+                });
+            }
+        });
+
+        const pendingLoad = mod._ensureDeveloperPreferencesLoadedForTest();
+        await flushUntil(() => Boolean(settlePreferenceLoad));
+        const pendingChange = mod._applyDragModeChangeForTest('classic');
+        await flushUntil(() => global.chrome.runtime.sendMessage.mock.calls
+            .some(([message]) => message?.type === 'SAVE_PREFERENCES'));
+
+        settlePreferenceLoad({
+            success: true,
+            preferences: createCompletePreferences('reflow')
+        });
+
+        await expect(pendingChange).resolves.toBe('classic');
+        await pendingLoad;
+        expect(mod._getDragModeForTest()).toBe('classic');
+    });
+
     it('rejects a Classic mode change and restores reflow when the invariant checkpoint fails', async () => {
         mod._setProjectId('notebook-a');
         seedPositionedSource(mod);
