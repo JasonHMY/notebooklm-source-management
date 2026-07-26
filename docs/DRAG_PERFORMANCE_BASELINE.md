@@ -2,13 +2,16 @@
 
 ## Environment
 
-The measurements below were recorded on 2026-07-26 in the local macOS Chromium test environment:
+The Before measurements below were recorded on 2026-07-26 and the final Drag
+gate After measurements on 2026-07-27 in the same local macOS Chromium test
+environment:
 
 - Chrome/user agent: `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/149.0.0.0 Safari/537.36`
 - OS/platform: macOS / `MacIntel` (Node platform: `darwin`)
 - CPU model: `Apple M3 Max`; logical processors: `14`
 - Samples per case: 5 warm-up and 20 measured drag-start prepare sessions; 10 warm-up and 50 measured manager-active callbacks.
 - Before commit: `10edf37517d24824eda0fd9c3615133c3def63af`.
+- Final Drag gate commit: `e701c2e6f31c27973f668c67c983227a3286bbc9`.
 
 ## Method
 
@@ -31,10 +34,10 @@ The isolated-world rAF wrapper assigns a monotonic logical ID to every callback.
 
 | Rows | Selection | Prepare p50 / p95 (ms) | Prepare forced-layout phases max | Callback p50 / p95 (ms) | getBoundingClientRect | querySelector | querySelectorAll |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 100 | 1 | 1.7 / 1.9 | 3 | 0.5 / 0.7 | 357 | 20 | 21 |
-| 100 | 50 | 10.7 / 13.3 | 3 | 0.6 / 1.3 | 637 | 0 | 21 |
-| 500 | 1 | 2.7 / 3.3 | 3 | 0.3 / 0.5 | 757 | 20 | 21 |
-| 500 | 50 | 12.1 / 13.0 | 3 | 0.9 / 2.1 | 1,037 | 0 | 21 |
+| 100 | 1 | 1.8 / 2.0 | 3 | 0.5 / 0.8 | 357 | 20 | 21 |
+| 100 | 50 | 10.5 / 11.2 | 3 | 0.7 / 1.2 | 637 | 0 | 21 |
+| 500 | 1 | 2.6 / 2.9 | 3 | 0.4 / 1.2 | 757 | 20 | 21 |
+| 500 | 50 | 12.2 / 12.9 | 3 | 1.0 / 2.0 | 1,037 | 0 | 21 |
 
 ## Acceptance Comparison
 
@@ -42,18 +45,18 @@ All acceptance gates passed:
 
 | Gate | Limit | Result |
 | --- | ---: | ---: |
-| 500 rows / 50 selected prepare p95 | ≤ 18.59 ms | 13.0 ms |
-| 500 rows / 1 selected callback p95 | ≤ 2.64 ms | 0.5 ms |
-| 500 rows / 50 selected callback p95 | ≤ 5.83 ms | 2.1 ms |
+| 500 rows / 50 selected prepare p95 | ≤ 18.59 ms | 12.9 ms |
+| 500 rows / 1 selected callback p95 | ≤ 2.64 ms | 1.2 ms |
+| 500 rows / 50 selected callback p95 | ≤ 5.83 ms | 2.0 ms |
 | Prepare forced-layout phases | ≤ 3 | 3 |
 | 100 rows / 1 selected combined geometry/query calls | < 1,872 | 398 |
 | 100 rows / 50 selected combined geometry/query calls | < 1,490 | 658 |
 | 500 rows / 1 selected combined geometry/query calls | < 1,906 | 798 |
 | 500 rows / 50 selected combined geometry/query calls | < 1,890 | 1,058 |
 
-At 500 rows, callback p95 fell from 2.4 ms to 0.5 ms for a single source and
-from 5.3 ms to 2.1 ms for 50 selected sources. The 50-selection prepare p95
-fell from 16.9 ms to 13.0 ms. Combined geometry/query calls fell by 58.1% for
+At 500 rows, callback p95 fell from 2.4 ms to 1.2 ms for a single source and
+from 5.3 ms to 2.0 ms for 50 selected sources. The 50-selection prepare p95
+fell from 16.9 ms to 12.9 ms. Combined geometry/query calls fell by 58.1% for
 the single-source case and 44.0% for the 50-source case.
 
 The implementation now batches each drag frame into one geometry snapshot,
