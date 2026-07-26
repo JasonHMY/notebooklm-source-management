@@ -88,7 +88,9 @@ invalid_storage_key
 unauthorized_sender
 ```
 
-Content scripts must not bypass explicit background rejection with a direct primary-state `chrome.storage.local.set`. Direct local writes are reserved for explicit test/fallback paths where runtime messaging is unavailable or deliberately skipped.
+Content scripts must not bypass explicit background rejection with a direct primary-state `chrome.storage.local.set`. A direct local fallback is considered only when runtime messaging is unavailable and `allowLocalFallback !== false`; lifecycle and import critical saves set `allowLocalFallback: false`. The fallback must reject a nonzero `_saveRevision` equal to stored state when the persistable snapshots differ, returning `equal_revision_conflict` without writing; an equivalent equal-revision retry remains idempotent.
+
+`visibilitychange:hidden` and `pagehide` enqueue critical `SAVE_STATE` requests through this same per-key FIFO. If a normal save is already in flight, the lifecycle request waits behind it and uses the revision acknowledged by that earlier save as its `baseRevision`. The lifecycle path writes only the session recovery snapshot before dispatch and never performs a second direct primary write.
 
 ## Content messages
 
@@ -106,6 +108,18 @@ Popup/background -> content
 `SWITCH_SOURCE_VIEW` must preserve label-view selection state before clicking Gemini Notebook native view controls.
 
 `ENABLE_MANAGER` and `DISABLE_MANAGER` toggle the in-page manager without changing stored notebook organization data.
+
+`DISABLE_MANAGER` synchronously flushes any pending debounced state into the background save queue, then synchronously removes the manager host and interaction sources. It responds immediately without waiting for the save callback:
+
+```json
+{
+  "success": true,
+  "disabled": true,
+  "saveStarted": true
+}
+```
+
+Destroy, route teardown, panel collapse, and source-detail suspension use the same flush-before-cleanup ordering. Panel collapse and source-detail suspension additionally preserve the in-memory reattach snapshot.
 
 ## Developer log messages
 

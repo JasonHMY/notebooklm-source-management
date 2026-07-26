@@ -24,7 +24,7 @@ chrome.storage.local
 
 ### Recovery snapshot (sessionStorage)
 
-Separately from `chrome.storage.local`, page-lifecycle recovery writes a per-tab fallback snapshot to `sessionStorage` under `sourcesPlusRecovery_<projectId>`, holding `{ snapshot, baseRevision, createdAt, reason, clientSaveId, failed }`. It is a last-resort fallback (e.g. a critical save under quota pressure) so a tab can recover unsaved organization after a lifecycle interruption — normal primary writes still go through background `SAVE_STATE`.
+Separately from `chrome.storage.local`, critical saves write a per-tab recovery snapshot to `sessionStorage` under `sourcesPlusRecovery_<projectId>`, holding `{ snapshot, baseRevision, createdAt, reason, clientSaveId, failed }`. It is a last-resort fallback (e.g. a lifecycle save interrupted by runtime unavailability or quota pressure) so a tab can recover unsaved organization after an interruption. `visibilitychange:hidden` and `pagehide` enqueue a critical `SAVE_STATE` through the same background per-key FIFO as normal saves; they never directly overwrite the primary or backup key.
 
 Every queued save captures an immutable notebook-bound context: project id, primary state key, recovery key, manager instance token, client save id, save snapshot, and recovery snapshot. Revision memory is tracked per primary state key. Async completion may update only that key's revision/recovery records, and may update visible save status only while the same project and manager instance are still current. A response is a confirmed background acknowledgement only when it contains boolean `success: true`; an empty or malformed response is `empty_response` and cannot clear recovery.
 
@@ -34,7 +34,25 @@ Critical import saves use the pre-import snapshot as their recovery snapshot:
 - `import_rollback_required`: the background explicitly rejected the import save, so runtime is rolled back and the pre-import snapshot remains available.
 - `import_ack_unknown`: runtime messaging threw, failed, or returned an empty/malformed acknowledgement, so commit state is ambiguous; runtime is rolled back and recovery remains available for explicit reconciliation even if primary data appears equivalent or newer.
 
-Only confirmed background success clears a critical recovery snapshot. A local fallback result is insufficient, and import critical saves disable local fallback entirely.
+Only confirmed background success clears a critical recovery snapshot. A local fallback result is insufficient. Lifecycle and import critical saves disable local fallback entirely; local fallback is considered only when runtime messaging is unavailable and the caller has not set `allowLocalFallback: false`.
+
+### Save ordering and lifecycle teardown
+
+All primary-state saves normally enter the background `SAVE_STATE` FIFO. A lifecycle save uses:
+
+```json
+{
+  "immediate": true,
+  "critical": true,
+  "recordUndo": false,
+  "reason": "page_lifecycle",
+  "allowLocalFallback": false
+}
+```
+
+When a manager is disabled, destroyed, detached for panel collapse/source detail, or torn down during SPA routing, cleanup synchronously flushes the pending debounce into the save queue before synchronously removing the host and event sources. Cleanup does not wait for the background acknowledgement, so the UI disappears immediately while the captured save Promise continues settling. This ordering prevents a pending mutation from being canceled and prevents new UI interactions while that save is in flight.
+
+The emergency local fallback compares `_saveRevision` before writing. A lower incoming revision is stale. A nonzero revision equal to storage but carrying a different persistable snapshot is rejected as `equal_revision_conflict` without changing primary or backup; an equivalent equal-revision retry remains idempotently successful.
 
 ## Global preferences schema
 
@@ -177,7 +195,7 @@ The primary/backup revision and snapshot-quality comparison selects the authorit
 - Background save logic chooses the preferred stored state from primary/backup by revision metadata and content quality.
 - `sourcesPlusHistory_<projectId>` is bounded by `sourcesPlusPreferences.historyRetentionLimit` and used for version history and repair recovery.
 - History entries can include `label?: string` and `manual?: boolean` for named restore points. Automatic trimming preserves manual restore points before older automatic snapshots; if manual entries alone exceed the selected limit, the oldest manual entries are trimmed.
-- Page lifecycle recovery can write a session/local fallback snapshot, but normal primary writes should go through background `SAVE_STATE`.
+- Page lifecycle saves write session recovery first and then enter background `SAVE_STATE`; they do not use direct local primary fallback.
 - Quota guard: when projected `chrome.storage.local` usage is over the critical ratio (`STORAGE_CRITICAL_RATIO`, 0.95), `SAVE_STATE` first trims history, then rejects writes that would **grow** the stored snapshot (`storage_quota_exceeded`). Writes that shrink or keep the snapshot size (e.g. deleting a source to free space) are allowed through even while critical, so quota exhaustion is never a hard lock the user cannot escape.
 
 ## Privacy boundary

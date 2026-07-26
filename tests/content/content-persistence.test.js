@@ -757,28 +757,77 @@ describe('saveState', () => {
         expect(global.chrome.storage.local.set).not.toHaveBeenCalled();
     });
 
-    it('keeps the explicit skipRuntimeMessage path available for local test fallback writes', async () => {
-        const projectId = seedPersistedState();
+    it('does not let skipRuntimeMessage bypass the background save FIFO', async () => {
+        seedPersistedState();
 
         const result = await mod.saveState({ immediate: true, critical: true, skipRuntimeMessage: true });
 
         expect(result.ok).toBe(true);
-        expect(global.chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
-            expect.objectContaining({ type: 'SAVE_STATE' }),
-            expect.any(Function)
-        );
-        expect(global.chrome.storage.local.set).toHaveBeenCalledWith(
+        expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(
             expect.objectContaining({
-                sourcesPlusState_test_project_id: expect.objectContaining({
-                    root: [{ type: 'group', id: 'group1' }, { type: 'group', id: 'group2' }]
-                })
+                type: 'SAVE_STATE',
+                key: 'sourcesPlusState_test_project_id'
             }),
             expect.any(Function)
         );
-        expect(global.sessionStorage.getItem(`sourcesPlusRecovery_${projectId}`)).not.toBeNull();
-        expect(global.sessionStorage.removeItem).not.toHaveBeenCalledWith(
-            `sourcesPlusRecovery_${projectId}`
-        );
+        expect(global.chrome.storage.local.set).not.toHaveBeenCalled();
+    });
+
+    it('rejects a different local fallback snapshot at the same nonzero revision', async () => {
+        seedPersistedState();
+        global.chrome.runtime.sendMessage = undefined;
+        const storedState = {
+            ...expectedPersistableState,
+            root: [{ type: 'group', id: 'stored-only' }],
+            groupsById: {
+                'stored-only': {
+                    id: 'stored-only',
+                    title: 'Stored',
+                    children: []
+                }
+            },
+            _saveRevision: 1,
+            _savedAt: '2026-04-22T00:00:00.000Z'
+        };
+        global.chrome.storage.local.get.mockImplementation((keys, cb) => {
+            cb({
+                sourcesPlusState_test_project_id: storedState,
+                sourcesPlusState_test_project_id__backup: storedState
+            });
+        });
+
+        const result = await mod.saveState({ immediate: true });
+
+        expect(result).toMatchObject({
+            ok: false,
+            reason: 'equal_revision_conflict',
+            localResult: {
+                ok: false,
+                reason: 'equal_revision_conflict'
+            }
+        });
+        expect(global.chrome.storage.local.set).not.toHaveBeenCalled();
+    });
+
+    it('keeps an identical equal-revision local fallback retry idempotently successful', async () => {
+        seedPersistedState();
+        global.chrome.runtime.sendMessage = undefined;
+        const storedState = {
+            ...expectedPersistableState,
+            _saveRevision: 1,
+            _savedAt: '2026-04-22T00:00:00.000Z'
+        };
+        global.chrome.storage.local.get.mockImplementation((keys, cb) => {
+            cb({
+                sourcesPlusState_test_project_id: storedState,
+                sourcesPlusState_test_project_id__backup: storedState
+            });
+        });
+
+        const result = await mod.saveState({ immediate: true });
+
+        expect(result.ok).toBe(true);
+        expect(global.chrome.storage.local.set).toHaveBeenCalledTimes(1);
     });
 
     it('writes a recovery snapshot before critical saves and clears it after success', async () => {
@@ -1817,21 +1866,30 @@ describe('saveState', () => {
         expect(global.chrome.runtime.sendMessage).toHaveBeenCalledTimes(1);
     });
 
-    it('writes the latest state through the save queue when the page becomes hidden', async () => {
+    it.each([
+        ['visibilitychange:hidden', { type: 'visibilitychange' }],
+        ['pagehide', { type: 'pagehide' }]
+    ])('writes the latest state through background SAVE_STATE on %s', async (label, event) => {
         const projectId = seedPersistedState();
 
         global.document.visibilityState = 'hidden';
-        await mod.handlePageLifecyclePersistence({ type: 'visibilitychange' });
+        const result = await mod.handlePageLifecyclePersistence(event);
 
-        const payload = global.chrome.storage.local.set.mock.calls[0][0];
-        expect(payload[`sourcesPlusState_${projectId}`]).toMatchObject(expectedPersistableState);
-        expect(payload[`sourcesPlusState_${projectId}`]._saveRevision).toBe(1);
-        expect(typeof payload[`sourcesPlusState_${projectId}`]._savedAt).toBe('string');
-        expect(payload[`sourcesPlusState_${projectId}__backup`]).toEqual(payload[`sourcesPlusState_${projectId}`]);
+        expect(result.ok).toBe(true);
+        expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(
+            expect.objectContaining({
+                type: 'SAVE_STATE',
+                key: `sourcesPlusState_${projectId}`,
+                data: expect.objectContaining(expectedPersistableState),
+                critical: true
+            }),
+            expect.any(Function)
+        );
+        expect(global.chrome.storage.local.set).not.toHaveBeenCalled();
     });
 
-    it('queues lifecycle local saves behind pending runtime saves and assigns a fresh revision', async () => {
-        const projectId = seedPersistedState();
+    it('queues lifecycle background saves behind an in-flight normal save', async () => {
+        seedPersistedState();
         const pendingRuntimeCallbacks = [];
         global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
             pendingRuntimeCallbacks.push({ message, cb });
@@ -1851,6 +1909,7 @@ describe('saveState', () => {
         global.document.visibilityState = 'hidden';
         const lifecycleSave = mod.handlePageLifecyclePersistence({ type: 'visibilitychange' });
 
+        expect(pendingRuntimeCallbacks).toHaveLength(1);
         expect(global.chrome.storage.local.set).not.toHaveBeenCalled();
         pendingRuntimeCallbacks[0].cb({
             success: true,
@@ -1858,15 +1917,54 @@ describe('saveState', () => {
             savedAt: '2026-04-22T00:00:01.000Z'
         });
         await runtimeSave;
+        await Promise.resolve();
+
+        expect(pendingRuntimeCallbacks).toHaveLength(2);
+        expect(pendingRuntimeCallbacks[1].message).toMatchObject({
+            type: 'SAVE_STATE',
+            key: 'sourcesPlusState_test_project_id',
+            baseRevision: 5,
+            critical: true,
+            data: {
+                ungrouped: expect.arrayContaining(['source4']),
+                sourceStateById: {
+                    source4: expect.objectContaining({ title: 'Source 4' }),
+                    source1: expect.any(Object),
+                    source2: expect.any(Object),
+                    source3: expect.any(Object)
+                }
+            }
+        });
+        pendingRuntimeCallbacks[1].cb({
+            success: true,
+            saveRevision: 6,
+            savedAt: '2026-04-22T00:00:02.000Z'
+        });
         await lifecycleSave;
 
-        const payload = global.chrome.storage.local.set.mock.calls[0][0];
-        const savedState = payload[`sourcesPlusState_${projectId}`];
-        expect(savedState._saveRevision).toBe(6);
-        expect(savedState.ungrouped).toContain('source4');
-        expect(savedState.sourceStateById.source4).toMatchObject({
-            title: 'Source 4'
+        expect(global.chrome.storage.local.set).not.toHaveBeenCalled();
+    });
+
+    it('keeps lifecycle recovery without a direct primary write when runtime is unavailable', async () => {
+        const projectId = seedPersistedState();
+        global.document.visibilityState = 'hidden';
+        global.chrome.runtime.sendMessage = undefined;
+
+        const result = await mod.handlePageLifecyclePersistence({ type: 'visibilitychange' });
+
+        expect(result).toMatchObject({
+            ok: false,
+            reason: 'runtime_unavailable'
         });
+        expect(global.chrome.storage.local.set).not.toHaveBeenCalled();
+        expect(mod.readRecoverySnapshot()).toMatchObject({
+            snapshot: expectedPersistableState,
+            reason: 'runtime_unavailable',
+            failed: true
+        });
+        expect(global.sessionStorage.removeItem).not.toHaveBeenCalledWith(
+            `sourcesPlusRecovery_${projectId}`
+        );
     });
 
     it('writes the best preserved snapshot when the page hides during a loading refresh window', async () => {
@@ -1891,11 +1989,16 @@ describe('saveState', () => {
         global.document.visibilityState = 'hidden';
         await mod.handlePageLifecyclePersistence({ type: 'visibilitychange' });
 
-        const payload = global.chrome.storage.local.set.mock.calls[0][0];
-        expect(payload[`sourcesPlusState_${projectId}`]).toMatchObject(expectedPersistableState);
-        expect(payload[`sourcesPlusState_${projectId}`]._saveRevision).toBe(1);
-        expect(typeof payload[`sourcesPlusState_${projectId}`]._savedAt).toBe('string');
-        expect(payload[`sourcesPlusState_${projectId}__backup`]).toEqual(payload[`sourcesPlusState_${projectId}`]);
+        expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(
+            expect.objectContaining({
+                type: 'SAVE_STATE',
+                key: `sourcesPlusState_${projectId}`,
+                data: expect.objectContaining(expectedPersistableState),
+                critical: true
+            }),
+            expect.any(Function)
+        );
+        expect(global.chrome.storage.local.set).not.toHaveBeenCalled();
     });
 
     it('lifts a v3 snapshot to v5 root entries and drops the legacy groups field', () => {

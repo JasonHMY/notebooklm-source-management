@@ -2028,8 +2028,16 @@
 
     function disableManagerRuntime() {
         isExtensionEnabled = false;
-        teardown();
+        const savePromise = beginManagerCleanup({
+            reason: 'extension_disabled'
+        });
         managerStatusReason = projectId ? 'extension_disabled' : 'not_on_notebook_page';
+        Promise.resolve(savePromise).catch(() => undefined);
+        return {
+            success: true,
+            disabled: true,
+            saveStarted: true
+        };
     }
 
     function enableManagerRuntime() {
@@ -3435,10 +3443,7 @@
             GET_MANAGER_STATUS: () => getManagerStatus(),
             FOCUS_MANAGER: () => focusManagerPanel(),
             SWITCH_SOURCE_VIEW: (request) => switchNativeSourceView(request.viewKind),
-            DISABLE_MANAGER: () => {
-                disableManagerRuntime();
-                return { success: true, disabled: true };
-            },
+            DISABLE_MANAGER: () => disableManagerRuntime(),
             ENABLE_MANAGER: () => {
                 enableManagerRuntime();
                 return {
@@ -3857,6 +3862,7 @@
     }
 
     function cleanupManagerResources() {
+        bindPanelLifecycleHooks(null);
         clearScheduledPanelLifecycleSync();
         clearNativeRenameWatcher();
         invalidateManagerInstance();
@@ -3897,33 +3903,48 @@
         resetManagerRuntimeState();
     }
 
-    function detachManagerForPanelCollapse() {
-        flushPendingStateSave();
-        pendingPanelReattachState = capturePendingPanelReattachState();
+    function beginManagerCleanup({
+        preserveReattach = false,
+        reason = 'teardown'
+    } = {}) {
+        const savePromise = Promise.resolve(flushPendingStateSave());
+        if (preserveReattach) {
+            pendingPanelReattachState = capturePendingPanelReattachState();
+        }
         cleanupManagerResources();
+        developerLog('debug', 'lifecycle', 'manager_cleanup_started', {
+            reason: String(reason || 'teardown'),
+            preserveReattach: Boolean(preserveReattach)
+        });
+        return savePromise;
+    }
+
+    function detachManagerForPanelCollapse() {
+        return beginManagerCleanup({
+            preserveReattach: true,
+            reason: 'panel_collapsed'
+        });
     }
 
     function suspendManagerForSourceDetailView() {
-        flushPendingStateSave();
-        pendingPanelReattachState = capturePendingPanelReattachState();
-        cleanupManagerResources();
+        const savePromise = beginManagerCleanup({
+            preserveReattach: true,
+            reason: 'source_detail_view'
+        });
         sourceDetailViewRequested = true;
         managerStatusReason = 'source_detail_view';
+        return savePromise;
     }
 
-    function teardown() {
+    function teardown(reason = 'teardown') {
         developerLog('info', 'lifecycle', 'manager_teardown', {
             hadShadowRoot: Boolean(shadowRoot),
             hadSourcePanel: Boolean(attachedSourcePanel)
         });
-        bindPanelLifecycleHooks(null);
-        if (routeRecoveryTimeout) {
-            clearTimeout(routeRecoveryTimeout);
-            routeRecoveryTimeout = null;
-        }
-        cleanupManagerResources();
+        const savePromise = beginManagerCleanup({ reason });
         sourceViewDisplayKind = SOURCE_VIEW_LIST;
         pendingPanelReattachState = null;
+        return savePromise;
     }
 
     function completeInitialStateLoad() {
@@ -4110,10 +4131,9 @@
             if (projectId) {
                 developerLog('info', 'lifecycle', 'route_left_notebook', { hadProject: true });
                 console.log(`GeminiNotebook-Source-Management: Route changed from notebook ${projectId} to a non-notebook page. Tearing down.`);
-                flushPendingStateSave();
                 activeRouteRecoveryToken += 1;
                 projectId = null;
-                teardown();
+                teardown('route_leave');
                 managerStatusReason = 'not_on_notebook_page';
             }
             return;
@@ -4123,7 +4143,7 @@
             if (newProjectId !== projectId) {
                 activeRouteRecoveryToken += 1;
                 projectId = newProjectId;
-                teardown();
+                teardown('disabled_route_switch');
             }
             managerStatusReason = 'extension_disabled';
             return;
@@ -4135,11 +4155,10 @@
                 hasNewProject: Boolean(newProjectId)
             });
             console.log(`GeminiNotebook-Source-Management: Route changed from ${projectId} to ${newProjectId}. Reinitializing manager.`);
-            flushPendingStateSave();
             activeRouteRecoveryToken += 1;
             projectId = newProjectId;
             managerStatusReason = 'manager_not_ready';
-            teardown();
+            teardown('route_switch');
             recoverManagerForRoute(newProjectId, 0, activeRouteRecoveryToken);
         }
     }
@@ -4177,7 +4196,7 @@
         }
 
         if (extensionHost || shadowRoot || scrollObserver) {
-            cleanupManagerResources();
+            beginManagerCleanup({ reason: 'manager_reinitialize' });
             removeStaleManagerRoots();
         }
 
@@ -4466,7 +4485,7 @@
         contentInstance.destroyed = true;
 
         try {
-            teardown();
+            teardown('destroy');
         } catch (error) {
             console.warn('GeminiNotebook-Source-Management: Content teardown failed.', error);
         }
@@ -4637,6 +4656,8 @@
             handleAddNewGroup,
             handleManagerMessage,
             handlePageLifecyclePersistence,
+            beginManagerCleanup,
+            disableManagerRuntime,
             handleRouteChanged,
             hasPersistedSourceRefs,
             restorePersistedSnapshotWithoutDom,

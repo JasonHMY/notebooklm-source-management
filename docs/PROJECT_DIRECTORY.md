@@ -300,7 +300,8 @@ manifest.json
 │   │   ├── Shadow DOM manager 挂载
 │   │   ├── Gemini Notebook SPA route change
 │   │   ├── panel reattach
-│   │   └── teardown/reinitialize
+│   │   ├── teardown/reinitialize
+│   │   └── cleanup 前同步 flush debounce save，再立即移除 UI/事件源
 │   ├── 先看
 │   │   ├── src/content/index.js
 │   │   ├── src/content/content-runtime-state.js
@@ -481,10 +482,10 @@ manifest.json
 │   ├── 负责
 │   │   ├── buildPersistableState
 │   │   ├── save/load
-│   │   ├── schemaVersion 4 和 sourceStateById[sourceKey].addedAt
-│   │   ├── revision guard
+│   │   ├── schemaVersion 5 和 sourceStateById[sourceKey].addedAt
+│   │   ├── background FIFO、revision guard、equal-revision conflict
 │   │   ├── backup/history
-│   │   ├── session recovery
+│   │   ├── lifecycle critical save 与 session recovery
 │   │   ├── deferred initial load
 │   │   └── 旧状态 remap/repair
 │   ├── 先看
@@ -579,7 +580,7 @@ chrome.storage.local
 ├── sourcesPlusState_<projectId>
 │   ├── 用途: 每个 notebook 的主状态
 │   ├── 内容: root(根层级有序异构数组 group/source), ungrouped(底部未分组桶), groupsById, sourceStateById, tagsById, sourceTagsById, tagOrder
-│   ├── 写入: content -> background SAVE_STATE
+│   ├── 写入: content -> background SAVE_STATE（normal/lifecycle 共用 per-key FIFO）
 │   └── 排障: src/content/content-persistence.js, src/background/index.js
 ├── sourcesPlusState_<projectId>__backup
 │   ├── 用途: 主状态备份，load 时择优恢复
@@ -608,7 +609,8 @@ chrome.storage.local
 
 sessionStorage
 └── recovery snapshot
-    ├── 用途: 页面生命周期 / critical save 前临时恢复快照
+    ├── 用途: lifecycle / import 等 critical save 入队时的临时恢复快照
+    ├── 失败: background 未确认时保留并标记 reason/failed；不直写 primary
     └── 排障: src/content/content-persistence.js
 
 content runtime memory
@@ -775,7 +777,7 @@ CI: .github/workflows/ci.yml
 │   ├── 先看: src/content/index.js
 │   ├── 然后看: src/content/content-panel-dom.js
 │   ├── 测试: content-lifecycle.test.js, smoke
-│   └── 注意: Gemini Notebook 是 SPA，优先查 teardown/reinitialize/panel lifecycle
+│   └── 注意: Gemini Notebook 是 SPA，优先查 beginManagerCleanup 的 flush → cleanup 时序、teardown/reinitialize/panel lifecycle
 ├── 来源列表数量不对
 │   ├── 先看: src/content/content-source-sync.js
 │   ├── 然后看: src/content/content-state-reconcile.js

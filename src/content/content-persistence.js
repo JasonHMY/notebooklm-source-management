@@ -769,6 +769,20 @@
                         return;
                     }
 
+                    const incomingRevision = getSnapshotSaveRevision(data);
+                    const storedRevision = getSnapshotSaveRevision(currentState);
+                    if (
+                        incomingRevision > 0 &&
+                        incomingRevision === storedRevision &&
+                        !arePersistableSnapshotsEquivalent(data, currentState)
+                    ) {
+                        resolve({
+                            ok: false,
+                            reason: 'equal_revision_conflict'
+                        });
+                        return;
+                    }
+
                     writePayload();
                 };
 
@@ -858,70 +872,45 @@
         }
 
         async function sendStateToStorage(key, data, options = {}) {
-            const { skipRuntimeMessage = false } = options;
-            if (!skipRuntimeMessage) {
-                const runtimeResult = await sendStateToRuntimeStorage(key, data, options);
-                if (runtimeResult.ok) {
-                    return { ok: true, localResult: { skipped: true }, runtimeResult };
-                }
-                if (runtimeResult.stale || runtimeResult.reason === 'stale_revision') {
-                    return {
-                        ok: false,
-                        reason: 'stale_revision',
-                        localResult: { skipped: true, reason: 'stale_revision' },
-                        runtimeResult
-                    };
-                }
-                if (runtimeResult.reason === 'storage_quota_exceeded') {
-                    return {
-                        ok: false,
-                        reason: 'storage_quota_exceeded',
-                        localResult: { skipped: true, reason: 'storage_quota_exceeded' },
-                        runtimeResult
-                    };
-                }
-                if (runtimeResult.reason !== 'runtime_unavailable') {
-                    const reason = runtimeResult.reason || 'save_failed';
-                    return {
-                        ok: false,
-                        reason,
-                        localResult: { skipped: true, reason },
-                        runtimeResult
-                    };
-                }
-
-                if (options.allowLocalFallback === false) {
-                    return {
-                        ok: false,
-                        reason: runtimeResult.reason || 'runtime_unavailable',
-                        localResult: {
-                            skipped: true,
-                            reason: runtimeResult.reason || 'runtime_unavailable'
-                        },
-                        runtimeResult
-                    };
-                }
-
-                const localData = data && data._saveRevision
-                    ? data
-                    : preparePersistableSnapshot(data, options.stateKey);
-                const localResult = await writeStateToLocalStorage(key, localData);
-                if (localResult.stale) {
-                    return {
-                        ok: false,
-                        reason: 'stale_revision',
-                        localResult,
-                        runtimeResult
-                    };
-                }
-                if (localResult.ok) {
-                    return { ok: true, localResult, runtimeResult, localData };
-                }
-
+            const { allowLocalFallback = true } = options;
+            const runtimeResult = await sendStateToRuntimeStorage(key, data, options);
+            if (runtimeResult.ok) {
+                return { ok: true, localResult: { skipped: true }, runtimeResult };
+            }
+            if (runtimeResult.stale || runtimeResult.reason === 'stale_revision') {
                 return {
                     ok: false,
-                    reason: runtimeResult.reason || localResult.reason || 'save_failed',
-                    localResult,
+                    reason: 'stale_revision',
+                    localResult: { skipped: true, reason: 'stale_revision' },
+                    runtimeResult
+                };
+            }
+            if (runtimeResult.reason === 'storage_quota_exceeded') {
+                return {
+                    ok: false,
+                    reason: 'storage_quota_exceeded',
+                    localResult: { skipped: true, reason: 'storage_quota_exceeded' },
+                    runtimeResult
+                };
+            }
+            if (runtimeResult.reason !== 'runtime_unavailable') {
+                const reason = runtimeResult.reason || 'save_failed';
+                return {
+                    ok: false,
+                    reason,
+                    localResult: { skipped: true, reason },
+                    runtimeResult
+                };
+            }
+
+            if (!allowLocalFallback) {
+                return {
+                    ok: false,
+                    reason: 'runtime_unavailable',
+                    localResult: {
+                        skipped: true,
+                        reason: 'runtime_unavailable'
+                    },
                     runtimeResult
                 };
             }
@@ -935,23 +924,26 @@
                     ok: false,
                     reason: 'stale_revision',
                     localResult,
-                    runtimeResult: { skipped: true, reason: 'runtime_skipped' }
+                    runtimeResult
+                };
+            }
+            if (localResult.reason === 'equal_revision_conflict') {
+                return {
+                    ok: false,
+                    reason: 'equal_revision_conflict',
+                    localResult,
+                    runtimeResult
                 };
             }
             if (localResult.ok) {
-                return {
-                    ok: true,
-                    localResult,
-                    localData,
-                    runtimeResult: { skipped: true, reason: 'runtime_skipped' }
-                };
+                return { ok: true, localResult, runtimeResult, localData };
             }
 
             return {
                 ok: false,
-                reason: localResult.reason || 'save_failed',
+                reason: runtimeResult.reason || localResult.reason || 'save_failed',
                 localResult,
-                runtimeResult: { skipped: true, reason: 'runtime_skipped' }
+                runtimeResult
             };
         }
 
@@ -1034,9 +1026,7 @@
                     return Promise.resolve(blockedResult);
                 }
                 const baseRevision = getSaveRevisionForStateKey(operation.stateKey);
-                const dispatchedSnapshot = operationOptions.skipRuntimeMessage
-                    ? preparePersistableSnapshot(operation.saveSnapshot, operation.stateKey)
-                    : operation.saveSnapshot;
+                const dispatchedSnapshot = operation.saveSnapshot;
                 if (isCurrentOperationContext()) {
                     setSaveStatus({
                         state: 'saving',
@@ -1206,13 +1196,13 @@
             return enqueueStateSave(key, snapshot, options);
         }
 
-        function saveLifecycleSnapshotToLocalStorage(key, rawSnapshot) {
-            writeRecoverySnapshot(rawSnapshot, { reason: 'page_lifecycle' });
+        function saveLifecycleSnapshot(key, rawSnapshot) {
             return prepareAndQueueStateSave(key, rawSnapshot, {
-                skipRuntimeMessage: true,
+                immediate: true,
                 critical: true,
                 reason: 'page_lifecycle',
-                recordUndo: false
+                recordUndo: false,
+                allowLocalFallback: false
             });
         }
 
@@ -1377,7 +1367,7 @@
             }
 
             const key = `sourcesPlusState_${ctx.projectId}`;
-            return saveLifecycleSnapshotToLocalStorage(key, persistableState);
+            return saveLifecycleSnapshot(key, persistableState);
         }
 
         // state.root is heterogeneous: { type:'group', id } | { type:'source', key }.

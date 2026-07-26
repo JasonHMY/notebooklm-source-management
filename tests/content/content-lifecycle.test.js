@@ -2155,16 +2155,18 @@ describe('manager launcher messaging', () => {
         expect(mod._resolveKeyboardResizeHeightForTest(300, 'Enter', 150)).toBeNull();
     });
 
-    it('tears down the manager when DISABLE_MANAGER is received', () => {
+    it('flushes a pending save before DISABLE_MANAGER removes the host and responds immediately', () => {
+        const events = [];
         const mockHost = {
             isConnected: true,
-            remove: jest.fn()
+            remove: jest.fn(() => events.push('host_removed'))
         };
         const mockShadowRoot = {
             host: mockHost,
             querySelector: jest.fn(() => null)
         };
         const sendResponse = jest.fn();
+        let settleSave;
 
         mod._setProjectId('test-project');
         mod._setManagerRuntimeForTest({
@@ -2172,20 +2174,85 @@ describe('manager launcher messaging', () => {
             shadowRoot: mockShadowRoot
         });
         mod._setExtensionEnabledForTest(true);
+        mod.state.ungrouped = ['source-1'];
+        mod.sourcesByKey.set('source-1', {
+            key: 'source-1',
+            title: 'Source 1',
+            enabled: true
+        });
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'SAVE_STATE') {
+                events.push('save_dispatched');
+                settleSave = cb;
+            }
+        });
+        mod.saveState();
 
         mod.handleManagerMessage({ type: 'DISABLE_MANAGER' }, {}, sendResponse);
 
+        expect(events).toEqual(['save_dispatched', 'host_removed']);
+        expect(typeof settleSave).toBe('function');
         expect(mockHost.remove).toHaveBeenCalledTimes(1);
         expect(global.document.documentElement.classList.remove).toHaveBeenCalledWith('sources-plus-manager-active');
         expect(mod._getExtensionEnabledForTest()).toBe(false);
         expect(sendResponse).toHaveBeenCalledWith({
             success: true,
-            disabled: true
+            disabled: true,
+            saveStarted: true
         });
+        expect(global.chrome.runtime.sendMessage).toHaveBeenCalledTimes(1);
+
+        mod._handleInteractionForTest({
+            target: {
+                checked: false,
+                dataset: { sourceKey: 'source-1' },
+                classList: {
+                    contains: jest.fn((className) => className === 'sp-checkbox')
+                },
+                closest: jest.fn(() => null)
+            }
+        });
+
+        expect(global.chrome.runtime.sendMessage).toHaveBeenCalledTimes(1);
         expect(mod.getManagerStatus()).toEqual({
             ready: false,
             reason: 'extension_disabled'
         });
+    });
+
+    it('flushes a pending save before test destroy removes the host', () => {
+        const events = [];
+        const mockHost = {
+            isConnected: true,
+            remove: jest.fn(() => events.push('host_removed'))
+        };
+        const mockShadowRoot = {
+            host: mockHost,
+            querySelector: jest.fn(() => null)
+        };
+
+        mod._setProjectId('test-project');
+        mod._setManagerRuntimeForTest({
+            extensionHost: mockHost,
+            shadowRoot: mockShadowRoot
+        });
+        mod.state.ungrouped = ['source-1'];
+        mod.sourcesByKey.set('source-1', {
+            key: 'source-1',
+            title: 'Source 1',
+            enabled: true
+        });
+        global.chrome.runtime.sendMessage.mockImplementation((message) => {
+            if (message?.type === 'SAVE_STATE') {
+                events.push('save_dispatched');
+            }
+        });
+        mod.saveState();
+
+        mod._destroyContentInstanceForTest();
+
+        expect(events).toEqual(['save_dispatched', 'host_removed']);
+        expect(global.chrome.runtime.sendMessage).toHaveBeenCalledTimes(1);
     });
 
     it('reenables the manager runtime when ENABLE_MANAGER is received', () => {
