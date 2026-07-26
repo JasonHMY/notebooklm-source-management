@@ -90,7 +90,7 @@ unauthorized_sender
 
 Content scripts must not bypass explicit background rejection with a direct primary-state `chrome.storage.local.set`. A direct local fallback is considered only when runtime messaging is unavailable and `allowLocalFallback !== false`; lifecycle and import critical saves set `allowLocalFallback: false`. The fallback must reject a nonzero `_saveRevision` equal to stored state when the persistable snapshots differ, returning `equal_revision_conflict` without writing; an equivalent equal-revision retry remains idempotent.
 
-`visibilitychange:hidden` and `pagehide` enqueue critical `SAVE_STATE` requests through this same per-key FIFO. If a normal save is already in flight, the lifecycle request waits behind it and uses the revision acknowledged by that earlier save as its `baseRevision`. The lifecycle path writes only the session recovery snapshot before dispatch and never performs a second direct primary write.
+`visibilitychange:hidden` and `pagehide` enqueue critical `SAVE_STATE` requests through this same per-key FIFO. If a normal save is already in flight, the lifecycle request waits behind it and uses the revision acknowledged by that earlier save as its `baseRevision`. The lifecycle path writes only the session recovery snapshot before dispatch and never performs a second direct primary write. If the recovery slot already contains a failed `import_ack_unknown` or `import_rollback_required` snapshot, lifecycle dispatch continues but must not replace or clear that higher-priority import recovery on either success or failure.
 
 ## Content messages
 

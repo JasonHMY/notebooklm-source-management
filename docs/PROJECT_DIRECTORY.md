@@ -611,6 +611,7 @@ sessionStorage
 └── recovery snapshot
     ├── 用途: lifecycle / import 等 critical save 入队时的临时恢复快照
     ├── 失败: background 未确认时保留并标记 reason/failed；不直写 primary
+    ├── 优先级: failed import_ack_unknown / import_rollback_required 不被后续 lifecycle 覆盖或清除
     └── 排障: src/content/content-persistence.js
 
 content runtime memory

@@ -34,7 +34,7 @@ Critical import saves use the pre-import snapshot as their recovery snapshot:
 - `import_rollback_required`: the background explicitly rejected the import save, so runtime is rolled back and the pre-import snapshot remains available.
 - `import_ack_unknown`: runtime messaging threw, failed, or returned an empty/malformed acknowledgement, so commit state is ambiguous; runtime is rolled back and recovery remains available for explicit reconciliation even if primary data appears equivalent or newer.
 
-Only confirmed background success clears a critical recovery snapshot. A local fallback result is insufficient. Lifecycle and import critical saves disable local fallback entirely; local fallback is considered only when runtime messaging is unavailable and the caller has not set `allowLocalFallback: false`.
+Only confirmed background success clears a critical recovery snapshot. A local fallback result is insufficient. Lifecycle and import critical saves disable local fallback entirely; local fallback is considered only when runtime messaging is unavailable and the caller has not set `allowLocalFallback: false`. A failed `import_ack_unknown` or `import_rollback_required` recovery has higher priority than a later lifecycle snapshot: `visibilitychange:hidden` / `pagehide` still dispatch their background save, but neither lifecycle success nor failure may replace or clear that existing import recovery.
 
 ### Save ordering and lifecycle teardown
 

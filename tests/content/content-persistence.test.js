@@ -1888,6 +1888,87 @@ describe('saveState', () => {
         expect(global.chrome.storage.local.set).not.toHaveBeenCalled();
     });
 
+    it('preserves failed import acknowledgement recovery after a successful hidden lifecycle save', async () => {
+        const projectId = seedPersistedState();
+        const recoveryKey = `sourcesPlusRecovery_${projectId}`;
+        const existingRecovery = {
+            snapshot: {
+                ...expectedPersistableState,
+                root: [{ type: 'group', id: 'before-ambiguous-import' }]
+            },
+            baseRevision: 4,
+            createdAt: '2026-04-22T00:20:00.000Z',
+            reason: 'import_ack_unknown',
+            clientSaveId: 'test_project_id:ambiguous-import',
+            failed: true
+        };
+        global.sessionStorage.setItem(recoveryKey, JSON.stringify(existingRecovery));
+        global.sessionStorage.setItem.mockClear();
+        global.sessionStorage.removeItem.mockClear();
+        let settleLifecycle;
+        global.chrome.runtime.sendMessage.mockImplementationOnce((message, cb) => {
+            settleLifecycle = cb;
+        });
+
+        global.document.visibilityState = 'hidden';
+        const lifecycleSave = mod.handlePageLifecyclePersistence({ type: 'visibilitychange' });
+
+        expect(mod.readRecoverySnapshot()).toEqual(existingRecovery);
+        settleLifecycle({
+            success: true,
+            saveRevision: 5,
+            savedAt: '2026-04-22T00:21:00.000Z'
+        });
+        await lifecycleSave;
+
+        expect(mod.readRecoverySnapshot()).toEqual(existingRecovery);
+        expect(global.sessionStorage.setItem).not.toHaveBeenCalledWith(
+            recoveryKey,
+            expect.any(String)
+        );
+        expect(global.sessionStorage.removeItem).not.toHaveBeenCalledWith(recoveryKey);
+    });
+
+    it('preserves failed import rollback recovery after a failed pagehide lifecycle save', async () => {
+        const projectId = seedPersistedState();
+        const recoveryKey = `sourcesPlusRecovery_${projectId}`;
+        const existingRecovery = {
+            snapshot: {
+                ...expectedPersistableState,
+                root: [{ type: 'group', id: 'before-rollback-import' }]
+            },
+            baseRevision: 6,
+            createdAt: '2026-04-22T00:30:00.000Z',
+            reason: 'import_rollback_required',
+            clientSaveId: 'test_project_id:rollback-import',
+            failed: true
+        };
+        global.sessionStorage.setItem(recoveryKey, JSON.stringify(existingRecovery));
+        global.sessionStorage.setItem.mockClear();
+        global.sessionStorage.removeItem.mockClear();
+        let settleLifecycle;
+        global.chrome.runtime.sendMessage.mockImplementationOnce((message, cb) => {
+            settleLifecycle = cb;
+        });
+
+        const lifecycleSave = mod.handlePageLifecyclePersistence({ type: 'pagehide' });
+
+        expect(mod.readRecoverySnapshot()).toEqual(existingRecovery);
+        settleLifecycle({ success: false, errorCode: 'runtime_failure' });
+        await expect(lifecycleSave).resolves.toMatchObject({
+            ok: false,
+            reason: 'runtime_failure'
+        });
+
+        expect(mod.readRecoverySnapshot()).toEqual(existingRecovery);
+        expect(global.sessionStorage.setItem).not.toHaveBeenCalledWith(
+            recoveryKey,
+            expect.any(String)
+        );
+        expect(global.sessionStorage.removeItem).not.toHaveBeenCalledWith(recoveryKey);
+        mod._hideActiveToastForTest(false);
+    });
+
     it('queues lifecycle background saves behind an in-flight normal save', async () => {
         seedPersistedState();
         const pendingRuntimeCallbacks = [];

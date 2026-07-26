@@ -35,7 +35,7 @@
 ### Fixed
 - **不支持的存储与导入版本只读保护 (Reject Unsupported Storage and Import Versions)**: **影响**: 当本地状态来自更新版本或带有无效 schema 时，扩展不再把它当旧数据降级覆盖；未知或不完整的导入 envelope 也会直接拒绝。 权威 primary/backup 状态在迁移、历史修复和应用前先校验版本，失败时以 `unsupported_schema` 阻断当前笔记本加载实例的普通及生命周期写入；保存队列在任务开始与结果回收时复核 load scope，旧 scope 的排队任务不再发送、已在途结果也不能覆盖只读错误或推进 revision/recovery 状态。切换笔记本或新建 manager 实例后只清除该 schema 专属错误并恢复保存，旧版 bare-state 导入与 schema v1–v5 迁移保持兼容。
 - **配置导入失败原子回滚 (Atomic Rollback for Failed Config Imports)**: **影响**: 配置导入在后台保存失败、抛错、延迟应用或收不到明确确认时，不再把未持久化的导入结果留在当前界面；分组、来源状态、标签、顺序与自定义高度会恢复到导入前。 导入请求从入队起保存 notebook 绑定的导入前 recovery，禁止本地 fallback，只有后台明确返回 `success: true` 才清除；空或格式不完整的响应标记为 `import_ack_unknown` 并保留显式恢复入口。保存 revision、recovery 与状态回调同时按 notebook key 和 manager instance 隔离，旧笔记本的异步结果不会覆盖新笔记本状态。
-- **生命周期与关闭前保存不再丢失 (Preserve Saves Across Lifecycle Teardown)**: **影响**: 页面隐藏、关闭来源管理器、切换笔记本或进入来源详情时，尚在 debounce 中的整理结果会先进入后台保存队列，再立即关闭界面，不再因 cleanup 取消而丢失；后台暂时不可用时保留恢复快照且不覆盖主存储。 `visibilitychange:hidden` / `pagehide` 与普通保存共用 per-key FIFO，生命周期保存禁止 local primary fallback；本地应急路径同时拒绝同 revision 不同内容的覆盖，重复的相同快照仍保持幂等。
+- **生命周期与关闭前保存不再丢失 (Preserve Saves Across Lifecycle Teardown)**: **影响**: 页面隐藏、关闭来源管理器、切换笔记本或进入来源详情时，尚在 debounce 中的整理结果会先进入后台保存队列，再立即关闭界面，不再因 cleanup 取消而丢失；后台暂时不可用时保留恢复快照且不覆盖主存储。 `visibilitychange:hidden` / `pagehide` 与普通保存共用 per-key FIFO，生命周期保存禁止 local primary fallback；本地应急路径同时拒绝同 revision 不同内容的覆盖，重复的相同快照仍保持幂等。已有的失败导入确认或回滚 recovery 优先级更高，后续 lifecycle 成功或失败均不会覆盖或清除该快照。
 
 ## [2026-06-16] [26.6.16]
 

@@ -305,6 +305,16 @@
             return getRecoveryKey(value);
         }
 
+        function isFailedImportRecovery(recovery) {
+            return Boolean(
+                recovery?.failed
+                && [
+                    'import_ack_unknown',
+                    'import_rollback_required'
+                ].includes(recovery.reason)
+            );
+        }
+
         function writeRecoverySnapshot(rawSnapshot, options = {}) {
             const storage = getSessionStorage();
             const key = resolveRecoveryKey(options.recoveryKey || ctx.projectId);
@@ -975,6 +985,10 @@
             });
             const operationOptions = Object.freeze({ ...options });
             const requestedScopeGeneration = schemaWriteScopeGeneration;
+            const preserveExistingFailedImportRecovery = (
+                operationOptions.reason === 'page_lifecycle'
+                && isFailedImportRecovery(readRecoverySnapshot(operation.recoveryKey))
+            );
             const counts = getPersistableStateCounts(operation.saveSnapshot);
             developerLog('debug', 'persistence', 'state_save_requested', {
                 clientSaveId,
@@ -985,7 +999,7 @@
                 groupCount: counts.groupCount,
                 tagCount: counts.tagCount
             });
-            if (operationOptions.critical) {
+            if (operationOptions.critical && !preserveExistingFailedImportRecovery) {
                 writeRecoverySnapshot(operation.recoverySnapshot, {
                     recoveryKey: operation.recoveryKey,
                     baseRevision: getSaveRevisionForStateKey(operation.stateKey),
@@ -1078,6 +1092,7 @@
                             }
                             if (
                                 operationOptions.critical
+                                && !preserveExistingFailedImportRecovery
                                 && result.runtimeResult?.ok === true
                             ) {
                                 clearRecoverySnapshot(operation.recoveryKey, {
@@ -1129,7 +1144,10 @@
                                     lastStaleDetectedAt: staleDetectedAt
                                 });
                             }
-                            if (operationOptions.critical) {
+                            if (
+                                operationOptions.critical
+                                && !preserveExistingFailedImportRecovery
+                            ) {
                                 const isAmbiguousAck = [
                                     'runtime_message_error',
                                     'empty_response',
