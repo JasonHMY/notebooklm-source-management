@@ -346,8 +346,9 @@
                             announceSettingsResult(enabled ? 'ui_settings_drag_mode_enabled' : 'ui_settings_drag_mode_disabled', 'success');
                         })
                         .catch(() => {
-                            dragToggle.checked = !enabled;
-                            if (dragToggle.attrs) dragToggle.attrs.checked = !enabled;
+                            const actualEnabled = getDragMode() === 'reflow';
+                            dragToggle.checked = actualEnabled;
+                            if (dragToggle.attrs) dragToggle.attrs.checked = actualEnabled;
                             announceSettingsResult('ui_settings_drag_mode_failed', 'error');
                         });
                 });

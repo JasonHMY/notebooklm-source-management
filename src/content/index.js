@@ -1756,12 +1756,26 @@
                 reason: 'stale_instance'
             };
         }
-        if (
-            !treeInteractionsModule
-            || typeof treeInteractionsModule.sweepPositionedRootSourcesToBin !== 'function'
-            || !treeInteractionsModule.sweepPositionedRootSourcesToBin(boundState)
-        ) {
-            return { changed: false, saved: false };
+        let sweptPositionedSources = false;
+        try {
+            sweptPositionedSources = Boolean(
+                treeInteractionsModule
+                && typeof treeInteractionsModule.sweepPositionedRootSourcesToBin === 'function'
+                && treeInteractionsModule.sweepPositionedRootSourcesToBin(boundState)
+            );
+        } catch (error) {
+            return {
+                changed: false,
+                saved: false,
+                reason: 'sweep_failed'
+            };
+        }
+        if (!sweptPositionedSources) {
+            return {
+                changed: false,
+                saved: false,
+                reason: 'sweep_failed'
+            };
         }
 
         buildParentMap();
@@ -1794,16 +1808,106 @@
         return { changed: true, saved: true };
     }
 
-    // Persist the preference first, then enforce the same Classic placement invariant
-    // used by every load/finalize path.
-    async function applyDragModeChange(mode) {
-        const result = await setDragMode(mode);
-        await enforceClassicPlacementInvariant({
-            trigger: 'mode_change',
-            expectedProjectId: projectId,
-            instanceToken: activeManagerInstanceToken
+    function isClassicPlacementInvariantSatisfied(result) {
+        return Boolean(
+            (result?.changed === true && result?.saved === true)
+            || (
+                result?.changed === false
+                && result?.saved === false
+                && (!result.reason || result.reason === 'not_classic')
+            )
+        );
+    }
+
+    async function finalizePanelReattachPersistence({
+        expectedProjectId = projectId,
+        instanceToken = activeManagerInstanceToken,
+        _beforeAdditionalSaveForTest = null
+    } = {}) {
+        const invariantResult = await enforceClassicPlacementInvariant({
+            trigger: 'panel_reattach',
+            expectedProjectId,
+            instanceToken
         });
-        return result;
+        if (invariantResult.saved || !isClassicPlacementInvariantSatisfied(invariantResult)) {
+            return invariantResult;
+        }
+        if (typeof _beforeAdditionalSaveForTest === 'function') {
+            _beforeAdditionalSaveForTest();
+        }
+        if (!isClassicPlacementInstanceLive(expectedProjectId, instanceToken)) {
+            return {
+                changed: false,
+                saved: false,
+                reason: 'stale_instance'
+            };
+        }
+
+        let saveResult = null;
+        try {
+            saveResult = await saveState({
+                immediate: true,
+                critical: true,
+                recordUndo: false,
+                reason: 'panel_reattach'
+            });
+        } catch (error) {
+            // Normalize thrown persistence failures to the same result contract.
+        }
+        if (saveResult?.ok !== true) {
+            return {
+                changed: false,
+                saved: false,
+                reason: saveResult?.reason || 'save_failed'
+            };
+        }
+        return Object.assign(
+            { changed: false, saved: true },
+            invariantResult.reason ? { reason: invariantResult.reason } : {}
+        );
+    }
+
+    // Persist the preference first, then enforce the same Classic placement invariant
+    // used by every load/finalize path. A failed Classic migration rolls the preference
+    // back when possible and always rejects so settings cannot report success.
+    async function applyDragModeChange(mode) {
+        const previousMode = getDragMode();
+        const expectedProjectId = projectId;
+        const instanceToken = activeManagerInstanceToken;
+        const result = await setDragMode(mode);
+        let invariantResult;
+        try {
+            invariantResult = await enforceClassicPlacementInvariant({
+                trigger: 'mode_change',
+                expectedProjectId,
+                instanceToken
+            });
+        } catch (error) {
+            invariantResult = {
+                changed: false,
+                saved: false,
+                reason: 'invariant_failed'
+            };
+        }
+        if (isClassicPlacementInvariantSatisfied(invariantResult)) {
+            return result;
+        }
+
+        let rollbackFailed = false;
+        if (result === 'classic' && previousMode !== result) {
+            try {
+                await setDragMode(previousMode);
+            } catch (error) {
+                rollbackFailed = true;
+            }
+        }
+        const reason = invariantResult?.reason || 'invariant_failed';
+        const error = new Error(reason);
+        error.code = reason;
+        error.invariantResult = invariantResult;
+        error.rollbackFailed = rollbackFailed;
+        error.dragMode = getDragMode();
+        throw error;
     }
 
     function applyLanguageOverrideFromPreferences() {
@@ -3678,6 +3782,7 @@
 
     function rollbackImportSnapshot(snapshot) {
         pendingInitialLoadedState = null;
+        resolvePendingInitialStateApplyWaiters();
         return applyPersistableSnapshotToRuntime(snapshot);
     }
 
@@ -4522,10 +4627,8 @@
                 applyLoadedStateToManager(reattachState);
                 completeInitialStateLoad();
                 restorePersistedSourceViewDisplayKind(reattachState);
-                saveState({ immediate: true, critical: true, recordUndo: false });
                 resetUndoHistoryBaseline();
-                enforceClassicPlacementInvariant({
-                    trigger: 'panel_reattach',
+                finalizePanelReattachPersistence({
                     expectedProjectId: managerProjectId,
                     instanceToken: managerInstanceToken
                 }).catch(() => {});
@@ -4944,10 +5047,17 @@
             _getPendingInitialLoadedState: () => pendingInitialLoadedState,
             _getActiveManagerInstanceTokenForTest: () => activeManagerInstanceToken,
             _enforceClassicPlacementInvariantForTest: enforceClassicPlacementInvariant,
+            _finalizePanelReattachPersistenceForTest: finalizePanelReattachPersistence,
             _ensureDeveloperPreferencesLoadedForTest: ensureDeveloperPreferencesLoaded,
             _applyDragModeChangeForTest: applyDragModeChange,
+            _getDragModeForTest: getDragMode,
+            _rollbackImportSnapshotForTest: rollbackImportSnapshot,
+            _setClassicSweepForTest: (fn) => {
+                treeInteractionsModule.sweepPositionedRootSourcesToBin = fn;
+            },
             _replaceStateReferenceForTest: (nextState) => { state = nextState; },
             _resolvePendingInitialStateApplyWaitersForTest: resolvePendingInitialStateApplyWaiters,
+            _getPendingInitialStateApplyWaiterCountForTest: () => pendingInitialStateApplyWaiters.length,
             _getAwaitingInitialStateLoadForTest: () => isAwaitingInitialStateLoad,
             _getPendingPanelReattachStateForTest: () => pendingPanelReattachState,
             _getAttachedSourcePanelForTest: () => attachedSourcePanel,

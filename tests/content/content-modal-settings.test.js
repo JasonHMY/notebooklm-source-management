@@ -394,6 +394,24 @@ describe('content modal settings', () => {
             expect(toggle.checked).toBe(false);
             expect(showToast).toHaveBeenCalledWith('ui_settings_drag_mode_failed', expect.objectContaining({ variant: 'error' }));
         });
+
+        it('reflects the actual mode when a failed Classic migration cannot restore reflow', async () => {
+            let actualMode = 'reflow';
+            const setDragMode = jest.fn(() => {
+                actualMode = 'classic';
+                return Promise.reject(new Error('checkpoint_failed'));
+            });
+            const deps = createDeps({ setDragMode, getDragMode: () => actualMode });
+            const helper = createContentModalSettings(deps);
+            helper.renderSettingsModal();
+            const toggle = deps.getShadowRoot().querySelector('.sp-settings-drag-mode-toggle');
+
+            toggle.listeners.change.forEach((handler) => handler({ target: { checked: false } }));
+            await Promise.resolve();
+            await Promise.resolve();
+
+            expect(toggle.checked).toBe(false);
+        });
     });
 
     describe('settings toast visibility (frosted modal)', () => {

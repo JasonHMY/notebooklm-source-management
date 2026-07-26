@@ -69,6 +69,19 @@ describe('manager launcher messaging', () => {
         };
     }
 
+    function seedPositionedSource(targetMod, sourceKey = 'source-a') {
+        targetMod.state.root = [{ type: 'source', key: sourceKey }];
+        targetMod.state.ungrouped = [];
+        targetMod.sourcesByKey.set(sourceKey, {
+            key: sourceKey,
+            enabled: true,
+            title: sourceKey,
+            normalizedTitle: sourceKey,
+            fingerprint: `${sourceKey}||article`,
+            identityType: 'fingerprint'
+        });
+    }
+
     function createOnboardingShadowRoot() {
         const appendedNodes = [];
         const shadowRoot = {
@@ -2598,7 +2611,7 @@ describe('manager launcher messaging', () => {
         );
     });
 
-    it('reopens from the in-memory panel snapshot before falling back to storage', () => {
+    it('reopens from the in-memory panel snapshot before falling back to storage', async () => {
         const { panel, header, content } = createMockPanel({ visible: true, contentVisible: true });
         const sourceRow = createMockSourceRow({ title: 'Pinned Source', stableToken: 'doc-1', checked: true });
         const detachHost = {
@@ -2653,7 +2666,15 @@ describe('manager launcher messaging', () => {
             mod.DEPS.row.includes(selector) ? [sourceRow.row] : []
         ));
         global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
-            if (typeof cb === 'function') cb({});
+            if (message?.type === 'LOAD_PREFERENCES') {
+                cb?.({ success: true, preferences: createCompletePreferences('classic') });
+                return;
+            }
+            if (message?.type === 'SAVE_STATE') {
+                cb?.({ success: true, saveRevision: 1, savedAt: '2026-07-26T00:00:00.000Z' });
+                return;
+            }
+            cb?.({});
         });
         global.document.createElement = jest.fn((tag) => {
             if (tag === 'div' && firstDiv) {
@@ -2685,6 +2706,8 @@ describe('manager launcher messaging', () => {
         });
 
         mod.syncManagerWithPanelLifecycle();
+        await flushUntil(() => global.chrome.runtime.sendMessage.mock.calls
+            .some(([message]) => message?.type === 'SAVE_STATE'));
 
         const runtimeMessages = global.chrome.runtime.sendMessage.mock.calls.map(([message]) => message);
         const restoredKey = Array.from(mod.sourcesByKey.keys())[0];
@@ -2788,7 +2811,7 @@ describe('manager launcher messaging', () => {
         }));
     });
 
-    it('restores the pending snapshot after returning from a source-detail view without reloading storage', () => {
+    it('restores the pending snapshot after returning from a source-detail view without reloading storage', async () => {
         const { panel: listPanel, content: listContent } = createMockPanel({ visible: true, contentVisible: true });
         const { panel: detailPanel } = createMockPanel({ visible: true, contentVisible: true });
         const sourceRow = createMockSourceRow({ title: 'Pinned Source', stableToken: 'doc-1', checked: true });
@@ -2857,7 +2880,15 @@ describe('manager launcher messaging', () => {
         ));
         global.chrome.runtime.sendMessage.mockClear();
         global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
-            if (typeof cb === 'function') cb({});
+            if (message?.type === 'LOAD_PREFERENCES') {
+                cb?.({ success: true, preferences: createCompletePreferences('classic') });
+                return;
+            }
+            if (message?.type === 'SAVE_STATE') {
+                cb?.({ success: true, saveRevision: 1, savedAt: '2026-07-26T00:00:00.000Z' });
+                return;
+            }
+            cb?.({});
         });
         global.document.createElement = jest.fn((tag) => {
             if (tag === 'div' && firstDiv) {
@@ -2889,6 +2920,8 @@ describe('manager launcher messaging', () => {
         });
 
         mod.syncManagerWithPanelLifecycle();
+        await flushUntil(() => global.chrome.runtime.sendMessage.mock.calls
+            .some(([message]) => message?.type === 'SAVE_STATE'));
 
         const runtimeMessages = global.chrome.runtime.sendMessage.mock.calls.map(([message]) => message);
         const restoredKey = Array.from(mod.sourcesByKey.keys())[0];
@@ -2958,7 +2991,7 @@ describe('manager launcher messaging', () => {
         expect(global.chrome.runtime.sendMessage).not.toHaveBeenCalled();
     });
 
-    it('restores from the pending snapshot after returning from a zero-row source-detail view', () => {
+    it('restores from the pending snapshot after returning from a zero-row source-detail view', async () => {
         const { panel: listPanel, content: listContent } = createMockPanel({ visible: true, contentVisible: true });
         const { panel: detailPanel } = createMockPanel({ visible: true, contentVisible: true });
         const sourceRow = createMockSourceRow({ title: 'Pinned Source', stableToken: 'doc-1', checked: true });
@@ -3016,7 +3049,15 @@ describe('manager launcher messaging', () => {
         ));
         global.chrome.runtime.sendMessage.mockClear();
         global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
-            if (typeof cb === 'function') cb({});
+            if (message?.type === 'LOAD_PREFERENCES') {
+                cb?.({ success: true, preferences: createCompletePreferences('classic') });
+                return;
+            }
+            if (message?.type === 'SAVE_STATE') {
+                cb?.({ success: true, saveRevision: 1, savedAt: '2026-07-26T00:00:00.000Z' });
+                return;
+            }
+            cb?.({});
         });
         global.document.createElement = jest.fn((tag) => {
             if (tag === 'div' && firstDiv) {
@@ -3048,6 +3089,8 @@ describe('manager launcher messaging', () => {
         });
 
         mod.syncManagerWithPanelLifecycle();
+        await flushUntil(() => global.chrome.runtime.sendMessage.mock.calls
+            .some(([message]) => message?.type === 'SAVE_STATE'));
 
         const runtimeMessages = global.chrome.runtime.sendMessage.mock.calls.map(([message]) => message);
         const restoredKey = Array.from(mod.sourcesByKey.keys())[0];
@@ -3590,6 +3633,439 @@ describe('manager launcher messaging', () => {
             expect.objectContaining({ type: 'SAVE_STATE', critical: true }),
             expect.any(Function)
         );
+    });
+
+    it('rejects a Classic mode change and restores reflow when the invariant checkpoint fails', async () => {
+        mod._setProjectId('notebook-a');
+        seedPositionedSource(mod);
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'LOAD_PREFERENCES') {
+                cb?.({ success: true, preferences: createCompletePreferences('reflow') });
+                return;
+            }
+            if (message?.type === 'SAVE_PREFERENCES') {
+                cb?.({
+                    success: true,
+                    preferences: createCompletePreferences(message.preferences?.dragMode)
+                });
+                return;
+            }
+            if (message?.type === 'APPEND_STATE_HISTORY') {
+                cb?.({ success: false, errorCode: 'history_write_failed' });
+            }
+        });
+
+        await mod._ensureDeveloperPreferencesLoadedForTest();
+
+        await expect(mod._applyDragModeChangeForTest('classic'))
+            .rejects.toThrow('checkpoint_failed');
+        expect(mod._getDragModeForTest()).toBe('reflow');
+        expect(global.chrome.runtime.sendMessage.mock.calls
+            .map(([message]) => message)
+            .filter((message) => message.type === 'SAVE_PREFERENCES'))
+            .toHaveLength(2);
+    });
+
+    it('rejects a Classic mode change when preferences remain unverified', async () => {
+        mod._setProjectId('notebook-a');
+        seedPositionedSource(mod);
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'SAVE_PREFERENCES') {
+                cb?.({ success: true });
+                return;
+            }
+            if (message?.type === 'LOAD_PREFERENCES') {
+                cb?.({ success: false, errorCode: 'runtime_failure' });
+            }
+        });
+
+        await expect(mod._applyDragModeChangeForTest('classic'))
+            .rejects.toThrow('preferences_unverified');
+    });
+
+    it('rejects a Classic mode change bound to a notebook that becomes stale during preference save', async () => {
+        let settleClassicPreferenceSave;
+        let preferenceSaveCount = 0;
+        mod._setProjectId('notebook-a');
+        seedPositionedSource(mod);
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'LOAD_PREFERENCES') {
+                cb?.({ success: true, preferences: createCompletePreferences('reflow') });
+                return;
+            }
+            if (message?.type === 'SAVE_PREFERENCES') {
+                preferenceSaveCount += 1;
+                if (preferenceSaveCount === 1) {
+                    settleClassicPreferenceSave = cb;
+                } else {
+                    cb?.({ success: true, preferences: createCompletePreferences('reflow') });
+                }
+            }
+        });
+        await mod._ensureDeveloperPreferencesLoadedForTest();
+
+        const pendingChange = mod._applyDragModeChangeForTest('classic');
+        await flushUntil(() => Boolean(settleClassicPreferenceSave));
+        mod._setProjectId('notebook-b');
+        settleClassicPreferenceSave({
+            success: true,
+            preferences: createCompletePreferences('classic')
+        });
+
+        await expect(pendingChange).rejects.toThrow('stale_instance');
+        expect(mod._getDragModeForTest()).toBe('reflow');
+    });
+
+    it('rejects and rolls back a Classic mode change when the sweep fails', async () => {
+        mod._setProjectId('notebook-a');
+        seedPositionedSource(mod);
+        mod._setClassicSweepForTest(() => false);
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'LOAD_PREFERENCES') {
+                cb?.({ success: true, preferences: createCompletePreferences('reflow') });
+                return;
+            }
+            if (message?.type === 'SAVE_PREFERENCES') {
+                cb?.({
+                    success: true,
+                    preferences: createCompletePreferences(message.preferences?.dragMode)
+                });
+                return;
+            }
+            if (message?.type === 'APPEND_STATE_HISTORY') {
+                cb?.({ success: true, history: [message.entry] });
+            }
+        });
+        await mod._ensureDeveloperPreferencesLoadedForTest();
+
+        await expect(mod._applyDragModeChangeForTest('classic'))
+            .rejects.toThrow('sweep_failed');
+        expect(mod._getDragModeForTest()).toBe('reflow');
+        expect(global.chrome.runtime.sendMessage.mock.calls
+            .map(([message]) => message)
+            .filter((message) => message.type === 'SAVE_STATE'))
+            .toHaveLength(0);
+    });
+
+    it('rejects and rolls back a Classic mode change when the migration save fails', async () => {
+        mod._setProjectId('notebook-a');
+        seedPositionedSource(mod);
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'LOAD_PREFERENCES') {
+                cb?.({ success: true, preferences: createCompletePreferences('reflow') });
+                return;
+            }
+            if (message?.type === 'SAVE_PREFERENCES') {
+                cb?.({
+                    success: true,
+                    preferences: createCompletePreferences(message.preferences?.dragMode)
+                });
+                return;
+            }
+            if (message?.type === 'APPEND_STATE_HISTORY') {
+                cb?.({ success: true, history: [message.entry] });
+                return;
+            }
+            if (message?.type === 'SAVE_STATE') {
+                cb?.({ success: false, errorCode: 'runtime_failure' });
+            }
+        });
+        await mod._ensureDeveloperPreferencesLoadedForTest();
+
+        await expect(mod._applyDragModeChangeForTest('classic'))
+            .rejects.toThrow('runtime_failure');
+        expect(mod._getDragModeForTest()).toBe('reflow');
+    });
+
+    it('reports rollback failure and keeps the actual Classic mode after invariant rejection', async () => {
+        let preferenceSaveCount = 0;
+        mod._setProjectId('notebook-a');
+        seedPositionedSource(mod);
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'LOAD_PREFERENCES') {
+                cb?.({ success: true, preferences: createCompletePreferences('reflow') });
+                return;
+            }
+            if (message?.type === 'SAVE_PREFERENCES') {
+                preferenceSaveCount += 1;
+                cb?.(preferenceSaveCount === 1
+                    ? {
+                        success: true,
+                        preferences: createCompletePreferences('classic')
+                    }
+                    : { success: false, errorCode: 'runtime_failure' });
+                return;
+            }
+            if (message?.type === 'APPEND_STATE_HISTORY') {
+                cb?.({ success: false, errorCode: 'history_write_failed' });
+            }
+        });
+        await mod._ensureDeveloperPreferencesLoadedForTest();
+
+        let failure;
+        try {
+            await mod._applyDragModeChangeForTest('classic');
+        } catch (error) {
+            failure = error;
+        }
+
+        expect(failure).toMatchObject({
+            code: 'checkpoint_failed',
+            rollbackFailed: true,
+            dragMode: 'classic'
+        });
+        expect(mod._getDragModeForTest()).toBe('classic');
+    });
+
+    it.each([
+        ['classic', 'reflow', []],
+        ['reflow', 'classic', [{ type: 'source', key: 'source-a' }]]
+    ])('keeps %s mode changes successful when no Classic migration is required', async (
+        nextMode,
+        initialMode,
+        root
+    ) => {
+        mod._setProjectId('notebook-a');
+        mod.state.root = root;
+        mod.state.ungrouped = [];
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'LOAD_PREFERENCES') {
+                cb?.({ success: true, preferences: createCompletePreferences(initialMode) });
+                return;
+            }
+            if (message?.type === 'SAVE_PREFERENCES') {
+                cb?.({
+                    success: true,
+                    preferences: createCompletePreferences(message.preferences?.dragMode)
+                });
+            }
+        });
+        await mod._ensureDeveloperPreferencesLoadedForTest();
+
+        await expect(mod._applyDragModeChangeForTest(nextMode)).resolves.toBe(nextMode);
+        expect(global.chrome.runtime.sendMessage.mock.calls
+            .map(([message]) => message)
+            .filter((message) => message.type === 'SAVE_STATE'))
+            .toHaveLength(0);
+    });
+
+    it('does not save a panel reattach when the Classic checkpoint is rejected', async () => {
+        mod._setProjectId('notebook-a');
+        seedPositionedSource(mod);
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'LOAD_PREFERENCES') {
+                cb?.({ success: true, preferences: createCompletePreferences('classic') });
+                return;
+            }
+            if (message?.type === 'APPEND_STATE_HISTORY') {
+                cb?.({ success: false, errorCode: 'history_write_failed' });
+            }
+        });
+
+        await expect(mod._finalizePanelReattachPersistenceForTest({
+            expectedProjectId: 'notebook-a',
+            instanceToken: mod._getActiveManagerInstanceTokenForTest()
+        })).resolves.toEqual({
+            changed: false,
+            saved: false,
+            reason: 'checkpoint_failed'
+        });
+        expect(global.chrome.runtime.sendMessage.mock.calls
+            .map(([message]) => message)
+            .filter((message) => message.type === 'SAVE_STATE'))
+            .toHaveLength(0);
+    });
+
+    it('does not save a panel reattach when preferences are unverified or the instance is stale', async () => {
+        mod._setProjectId('notebook-a');
+        seedPositionedSource(mod);
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'LOAD_PREFERENCES') {
+                cb?.({ success: false, errorCode: 'runtime_failure' });
+            }
+        });
+
+        await expect(mod._finalizePanelReattachPersistenceForTest({
+            expectedProjectId: 'notebook-a',
+            instanceToken: mod._getActiveManagerInstanceTokenForTest()
+        })).resolves.toEqual({
+            changed: false,
+            saved: false,
+            reason: 'preferences_unverified'
+        });
+        expect(global.chrome.runtime.sendMessage.mock.calls
+            .map(([message]) => message)
+            .filter((message) => message.type === 'SAVE_STATE'))
+            .toHaveLength(0);
+    });
+
+    it('does not let a stale reattach continuation save into a newly selected notebook', async () => {
+        mod._setProjectId('notebook-a');
+        seedPositionedSource(mod);
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'LOAD_PREFERENCES') {
+                cb?.({ success: true, preferences: createCompletePreferences('reflow') });
+                return;
+            }
+            if (message?.type === 'SAVE_STATE') {
+                cb?.({ success: true, saveRevision: 1, savedAt: '2026-07-26T00:00:00.000Z' });
+            }
+        });
+
+        const pendingReattach = mod._finalizePanelReattachPersistenceForTest({
+            expectedProjectId: 'notebook-a',
+            instanceToken: mod._getActiveManagerInstanceTokenForTest(),
+            _beforeAdditionalSaveForTest: () => {
+                mod._setProjectId('notebook-b');
+            }
+        });
+
+        await expect(pendingReattach).resolves.toEqual({
+            changed: false,
+            saved: false,
+            reason: 'stale_instance'
+        });
+        expect(global.chrome.runtime.sendMessage.mock.calls
+            .map(([message]) => message)
+            .filter((message) => message.type === 'SAVE_STATE'))
+            .toHaveLength(0);
+    });
+
+    it('does not add a second reattach save after a failed Classic migration save', async () => {
+        mod._setProjectId('notebook-a');
+        seedPositionedSource(mod);
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'LOAD_PREFERENCES') {
+                cb?.({ success: true, preferences: createCompletePreferences('classic') });
+                return;
+            }
+            if (message?.type === 'APPEND_STATE_HISTORY') {
+                cb?.({ success: true, history: [message.entry] });
+                return;
+            }
+            if (message?.type === 'SAVE_STATE') {
+                cb?.({ success: false, errorCode: 'runtime_failure' });
+            }
+        });
+
+        await expect(mod._finalizePanelReattachPersistenceForTest({
+            expectedProjectId: 'notebook-a',
+            instanceToken: mod._getActiveManagerInstanceTokenForTest()
+        })).resolves.toEqual({
+            changed: true,
+            saved: false,
+            reason: 'runtime_failure'
+        });
+        expect(global.chrome.runtime.sendMessage.mock.calls
+            .map(([message]) => message)
+            .filter((message) => message.type === 'SAVE_STATE'))
+            .toHaveLength(1);
+    });
+
+    it('uses exactly one migration save for a Classic panel reattach', async () => {
+        mod._setProjectId('notebook-a');
+        seedPositionedSource(mod);
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'LOAD_PREFERENCES') {
+                cb?.({ success: true, preferences: createCompletePreferences('classic') });
+                return;
+            }
+            if (message?.type === 'APPEND_STATE_HISTORY') {
+                cb?.({ success: true, history: [message.entry] });
+                return;
+            }
+            if (message?.type === 'SAVE_STATE') {
+                cb?.({ success: true, saveRevision: 1, savedAt: '2026-07-26T00:00:00.000Z' });
+            }
+        });
+
+        await expect(mod._finalizePanelReattachPersistenceForTest({
+            expectedProjectId: 'notebook-a',
+            instanceToken: mod._getActiveManagerInstanceTokenForTest()
+        })).resolves.toEqual({ changed: true, saved: true });
+        expect(global.chrome.runtime.sendMessage.mock.calls
+            .map(([message]) => message)
+            .filter((message) => message.type === 'SAVE_STATE'))
+            .toHaveLength(1);
+    });
+
+    it.each([
+        ['reflow', [{ type: 'source', key: 'source-a' }], 'not_classic'],
+        ['classic', [], undefined]
+    ])('keeps one necessary reattach save for %s with no migration', async (
+        dragMode,
+        root,
+        expectedReason
+    ) => {
+        mod._setProjectId('notebook-a');
+        mod.state.root = root;
+        mod.state.ungrouped = root.length > 0 ? [] : ['source-a'];
+        mod.sourcesByKey.set('source-a', {
+            key: 'source-a',
+            enabled: true,
+            title: 'Source A',
+            normalizedTitle: 'source a',
+            fingerprint: 'source a||article',
+            identityType: 'fingerprint'
+        });
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'LOAD_PREFERENCES') {
+                cb?.({ success: true, preferences: createCompletePreferences(dragMode) });
+                return;
+            }
+            if (message?.type === 'SAVE_STATE') {
+                cb?.({ success: true, saveRevision: 1, savedAt: '2026-07-26T00:00:00.000Z' });
+            }
+        });
+
+        const result = await mod._finalizePanelReattachPersistenceForTest({
+            expectedProjectId: 'notebook-a',
+            instanceToken: mod._getActiveManagerInstanceTokenForTest()
+        });
+
+        expect(result).toEqual(expect.objectContaining({
+            changed: false,
+            saved: true
+        }));
+        expect(result.reason).toBe(expectedReason);
+        expect(global.chrome.runtime.sendMessage.mock.calls
+            .map(([message]) => message)
+            .filter((message) => message.type === 'SAVE_STATE'))
+            .toHaveLength(1);
+    });
+
+    it('resolves an invariant waiter when import rollback clears the pending initial state', async () => {
+        mod._setProjectId('notebook-a');
+        mod.state.root = [];
+        mod.state.ungrouped = ['source-a'];
+        mod.sourcesByKey.set('source-a', {
+            key: 'source-a',
+            enabled: true,
+            title: 'Source A',
+            normalizedTitle: 'source a',
+            fingerprint: 'source a||article',
+            identityType: 'fingerprint'
+        });
+        mod._setAwaitingInitialStateLoadForTest(true);
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'LOAD_PREFERENCES') {
+                cb?.({ success: true, preferences: createCompletePreferences('classic') });
+            }
+        });
+        const pendingInvariant = mod._enforceClassicPlacementInvariantForTest({
+            trigger: 'normal_load',
+            expectedProjectId: 'notebook-a',
+            instanceToken: mod._getActiveManagerInstanceTokenForTest()
+        });
+        await flushUntil(() => (
+            mod._getPendingInitialStateApplyWaiterCountForTest() === 1
+        ));
+
+        expect(mod._rollbackImportSnapshotForTest(mod.buildPersistableState())).toBe(true);
+        await expect(pendingInvariant).resolves.toEqual({
+            changed: false,
+            saved: false
+        });
     });
 
     it('abandons a deferred-apply continuation after SPA navigation changes notebook', async () => {
