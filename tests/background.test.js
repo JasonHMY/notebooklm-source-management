@@ -473,6 +473,47 @@ describe('background.js message listener', () => {
         }));
     });
 
+    it('loads the actual state after a same-key pending save task rejects', async () => {
+        const saveRequest = {
+            type: 'SAVE_STATE',
+            key: 'sourcesPlusState_123',
+            baseRevision: 0,
+            data: { groups: [], groupsById: {}, sourceStateById: {} }
+        };
+        const loadRequest = { type: 'LOAD_STATE', key: 'sourcesPlusState_123' };
+        let loadStorageCallback;
+        const loadResponse = jest.fn();
+
+        // Throwing during the save task's Promise executor produces a rejected FIFO task.
+        global.chrome.storage.local.get.mockImplementationOnce(() => {
+            throw new Error('save read failed');
+        });
+
+        listener(saveRequest, validSender, jest.fn());
+        global.chrome.storage.local.get.mockImplementation((keys, cb) => {
+            loadStorageCallback = cb;
+        });
+        listener(loadRequest, validSender, loadResponse);
+
+        expect(global.chrome.storage.local.get).toHaveBeenCalledTimes(1);
+        expect(loadResponse).not.toHaveBeenCalled();
+
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(global.chrome.storage.local.get).toHaveBeenCalledWith(
+            ['sourcesPlusState_123', 'sourcesPlusState_123__backup'],
+            expect.any(Function)
+        );
+        loadStorageCallback({
+            sourcesPlusState_123: { _saveRevision: 4, groups: ['persisted-after-failure'] }
+        });
+        expect(loadResponse).toHaveBeenCalledWith({
+            success: true,
+            data: { _saveRevision: 4, groups: ['persisted-after-failure'] }
+        });
+    });
+
     it('loads a different notebook state immediately while another notebook save is pending', () => {
         const saveRequest = {
             type: 'SAVE_STATE',
