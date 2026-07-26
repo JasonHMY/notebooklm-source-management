@@ -1,6 +1,14 @@
 (function () {
     'use strict';
 
+    if (
+        typeof globalThis.NSM_CREATE_STORAGE_CONTRACT !== 'function'
+        && typeof require !== 'undefined'
+    ) {
+        require('../utils/storage-contract.js');
+    }
+    const storageContract = globalThis.NSM_CREATE_STORAGE_CONTRACT();
+
     /**
      * createContentPersistence(context) — chrome.storage.local 持久层 + load/save 队列 + 历史 + recovery。
      * 最大的 content module,集中了所有持久化决策:
@@ -48,8 +56,7 @@
         const chromeApi = ctx.chrome ?? globalThis.chrome;
         const debounceFn = ctx.debounce ?? globalThis.debounce;
         const storageSchemaVersion = ctx.storageSchemaVersion
-            ?? globalThis.NSM_CONTENT_CONFIG?.STORAGE_SCHEMA_VERSION
-            ?? 3;
+            ?? storageContract.STORAGE_SCHEMA_VERSION;
         const normalizeSourceText = typeof ctx.normalizeSourceText === 'function'
             ? ctx.normalizeSourceText
             : (value) => String(value || '')
@@ -235,18 +242,18 @@
             return storage && typeof storage.getItem === 'function' ? storage : null;
         }
 
-        function getStateKey(projectId = ctx.projectId) {
-            return projectId ? `sourcesPlusState_${projectId}` : '';
-        }
+        const stateKeyForProject = (projectId = ctx.projectId) => (
+            storageContract.getStateKey(projectId)
+        );
 
         function getProjectIdFromStateKey(stateKey) {
             const value = String(stateKey || '');
-            return value.startsWith('sourcesPlusState_')
-                ? value.slice('sourcesPlusState_'.length)
+            return value.startsWith(storageContract.STATE_KEY_PREFIX)
+                ? value.slice(storageContract.STATE_KEY_PREFIX.length)
                 : '';
         }
 
-        function getSaveRevisionForStateKey(stateKey = getStateKey()) {
+        function getSaveRevisionForStateKey(stateKey = stateKeyForProject()) {
             if (!stateKey) return 0;
             return Number(saveRevisionByStateKey.get(stateKey)) || 0;
         }
@@ -258,18 +265,18 @@
                 Number(revision) || 0
             );
             saveRevisionByStateKey.set(stateKey, nextRevision);
-            if (stateKey === getStateKey()) {
+            if (stateKey === stateKeyForProject()) {
                 ctx.lastKnownSaveRevision = nextRevision;
             }
             return nextRevision;
         }
 
-        function rememberSnapshotSaveRevision(snapshot, stateKey = getStateKey()) {
+        function rememberSnapshotSaveRevision(snapshot, stateKey = stateKeyForProject()) {
             const revision = getSnapshotSaveRevision(snapshot);
             return setSaveRevisionForStateKey(stateKey, revision);
         }
 
-        function preparePersistableSnapshot(rawSnapshot, stateKey = getStateKey()) {
+        function preparePersistableSnapshot(rawSnapshot, stateKey = stateKeyForProject()) {
             const snapshot = cloneSerializableData(rawSnapshot || {});
             const nextRevision = Math.max(
                 getSaveRevisionForStateKey(stateKey),
@@ -295,14 +302,14 @@
             return value;
         }
 
-        function getRecoveryKey(projectId = ctx.projectId) {
-            return projectId ? `sourcesPlusRecovery_${projectId}` : '';
-        }
+        const recoveryKeyForProject = (projectId = ctx.projectId) => (
+            storageContract.getRecoveryKey(projectId)
+        );
 
         function resolveRecoveryKey(projectIdOrRecoveryKey = ctx.projectId) {
             const value = String(projectIdOrRecoveryKey || '');
-            if (value.startsWith('sourcesPlusRecovery_')) return value;
-            return getRecoveryKey(value);
+            if (value.startsWith(storageContract.RECOVERY_KEY_PREFIX)) return value;
+            return recoveryKeyForProject(value);
         }
 
         function isFailedImportRecovery(recovery) {
@@ -344,7 +351,7 @@
 
             try {
                 storage.setItem(key, JSON.stringify(payload));
-                if (key === getRecoveryKey()) {
+                if (key === recoveryKeyForProject()) {
                     setSaveStatus({
                         recoveryAvailable: true,
                         recoveryCreatedAt: payload.createdAt
@@ -396,7 +403,7 @@
                     }
                 }
                 storage.removeItem(key);
-                if (key === getRecoveryKey()) {
+                if (key === recoveryKeyForProject()) {
                     setSaveStatus({
                         recoveryAvailable: false,
                         recoveryCreatedAt: ''
@@ -491,13 +498,9 @@
             return false;
         }
 
-        function getStateBackupKey(primaryKey) {
-            return `${primaryKey}__backup`;
-        }
-
-        function getStateHistoryKey(projectId = ctx.projectId) {
-            return projectId ? `sourcesPlusHistory_${projectId}` : '';
-        }
+        const historyKeyForProject = (projectId = ctx.projectId) => (
+            storageContract.getStateHistoryKey(stateKeyForProject(projectId))
+        );
 
         function getStateHistorySnapshotSignature(snapshot) {
             return getPersistableSnapshotSignature(snapshot);
@@ -539,7 +542,7 @@
         }
 
         function loadStateHistory(projectId = ctx.projectId) {
-            const key = getStateHistoryKey(projectId);
+            const key = historyKeyForProject(projectId);
             if (!key) {
                 return Promise.resolve(setStateHistoryEntries([]));
             }
@@ -608,7 +611,7 @@
                 return Promise.resolve(getStateHistoryEntries());
             }
 
-            const key = getStateHistoryKey();
+            const key = historyKeyForProject();
             const payloadSnapshot = cloneSerializableData(snapshot);
             const normalizedOptions = options && typeof options === 'object' ? options : {};
             const counts = getPersistableStateCounts(payloadSnapshot);
@@ -977,7 +980,7 @@
             const operation = Object.freeze({
                 projectId,
                 stateKey: key,
-                recoveryKey: getRecoveryKey(projectId),
+                recoveryKey: recoveryKeyForProject(projectId),
                 instanceToken: ctx.activeManagerInstanceToken,
                 clientSaveId,
                 saveSnapshot,
@@ -1352,7 +1355,7 @@
         function saveState(options = {}) {
             if (!ctx.projectId || !canPersistManagerState()) return;
             const { immediate = false } = options;
-            const key = `sourcesPlusState_${ctx.projectId}`;
+            const key = storageContract.getStateKey(ctx.projectId);
             const persistableState = buildPersistableState();
 
             if (immediate) {
@@ -1384,7 +1387,7 @@
                 return;
             }
 
-            const key = `sourcesPlusState_${ctx.projectId}`;
+            const key = storageContract.getStateKey(ctx.projectId);
             return saveLifecycleSnapshot(key, persistableState);
         }
 
@@ -1415,10 +1418,10 @@
         }
 
         function normalizeLoadedState(stateData) {
-            const schemaCompatibility = getStorageSchemaCompatibility(stateData);
+            if (stateData == null) return null;
+            const schemaCompatibility = storageContract.getStateSchemaCompatibility(stateData);
             if (
-                schemaCompatibility === 'missing'
-                || schemaCompatibility === 'future'
+                schemaCompatibility === 'future'
                 || schemaCompatibility === 'invalid'
             ) {
                 return null;
@@ -1513,30 +1516,12 @@
             };
         }
 
-        function getStorageSchemaCompatibility(stateData) {
-            if (stateData == null) {
-                return 'missing';
-            }
-            if (typeof stateData !== 'object' || Array.isArray(stateData)) {
-                return 'invalid';
-            }
-            if (!Object.prototype.hasOwnProperty.call(stateData, 'schemaVersion')) {
-                return 'legacy';
-            }
-
-            const schemaVersion = stateData.schemaVersion;
-            if (!Number.isInteger(schemaVersion) || schemaVersion < 1) {
-                return 'invalid';
-            }
-            return schemaVersion > storageSchemaVersion ? 'future' : 'supported';
-        }
-
         function isUnsupportedFutureSchema(stateData) {
-            return getStorageSchemaCompatibility(stateData) === 'future';
+            return storageContract.getStateSchemaCompatibility(stateData) === 'future';
         }
 
         function isSupportedOrLegacyState(stateData) {
-            const compatibility = getStorageSchemaCompatibility(stateData);
+            const compatibility = storageContract.getStateSchemaCompatibility(stateData);
             return compatibility === 'supported' || compatibility === 'legacy';
         }
 
@@ -1901,7 +1886,7 @@
             }
             const requestId = ctx.nextLoadStateRequestId++;
             ctx.activeLoadStateRequestId = requestId;
-            const key = `sourcesPlusState_${expectedProjectId}`;
+            const key = storageContract.getStateKey(expectedProjectId);
 
             const finalizeLoadedState = (primaryState, backupState = null, historyEntries = []) => {
                 if (!isLiveManagerLoadRequest(expectedProjectId, expectedInstanceToken, requestId)) {
@@ -1913,7 +1898,7 @@
                 }
 
                 const authoritativeRawState = pickAuthoritativeRawState(primaryState, backupState);
-                const authoritativeCompatibility = getStorageSchemaCompatibility(authoritativeRawState);
+                const authoritativeCompatibility = storageContract.getStateSchemaCompatibility(authoritativeRawState);
                 if (authoritativeCompatibility === 'future' || authoritativeCompatibility === 'invalid') {
                     schemaWriteScopeGeneration += 1;
                     futureSchemaWriteBlocked = true;
@@ -1993,8 +1978,10 @@
 
             if (chromeApi?.storage?.local?.get) {
                 try {
-                    const backupKey = getStateBackupKey(key);
-                    const historyKey = getStateHistoryKey(expectedProjectId);
+                    const backupKey = storageContract.getStateBackupKey(key);
+                    const historyKey = storageContract.getStateHistoryKey(
+                        storageContract.getStateKey(expectedProjectId)
+                    );
                     chromeApi.storage.local.get([key, backupKey, historyKey], (data) => {
                         if (!isLiveManagerLoadRequest(expectedProjectId, expectedInstanceToken, requestId)) {
                             return;
@@ -2036,8 +2023,8 @@
 
         return {
             hasRestorableStateSnapshot,
-            getStateBackupKey,
-            getStateHistoryKey,
+            getStateBackupKey: storageContract.getStateBackupKey,
+            getStateHistoryKey: historyKeyForProject,
             getStateHistoryEntries,
             setStateHistoryEntries,
             loadStateHistory,
@@ -2053,7 +2040,7 @@
             getSnapshotSaveRevision,
             getSaveStatus,
             setSaveStatus,
-            getRecoveryKey,
+            getRecoveryKey: recoveryKeyForProject,
             writeRecoverySnapshot,
             readRecoverySnapshot,
             clearRecoverySnapshot,

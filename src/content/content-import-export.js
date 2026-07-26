@@ -1,8 +1,13 @@
 (function () {
     'use strict';
 
-    const IMPORT_EXPORT_FORMAT = 'notebooklm-source-management-config';
-    const IMPORT_EXPORT_FORMAT_VERSION = 1;
+    if (
+        typeof globalThis.NSM_CREATE_STORAGE_CONTRACT !== 'function'
+        && typeof require !== 'undefined'
+    ) {
+        require('../utils/storage-contract.js');
+    }
+    const storageContract = globalThis.NSM_CREATE_STORAGE_CONTRACT();
 
     /**
      * createContentImportExport(deps) — JSON 导入/导出 + 预览 + 应用流。
@@ -109,8 +114,8 @@
                 .some((key) => Object.prototype.hasOwnProperty.call(parsedConfig, key));
             if (!hasEnvelopeMarker) return parsedConfig;
             if (
-                parsedConfig.format !== IMPORT_EXPORT_FORMAT
-                || parsedConfig.formatVersion !== IMPORT_EXPORT_FORMAT_VERSION
+                parsedConfig.format !== storageContract.IMPORT_EXPORT_FORMAT
+                || parsedConfig.formatVersion !== storageContract.IMPORT_EXPORT_FORMAT_VERSION
                 || !parsedConfig.data
                 || typeof parsedConfig.data !== 'object'
                 || Array.isArray(parsedConfig.data)
@@ -351,8 +356,8 @@
         function createExportConfigPayload() {
             const manifest = globalThis.chrome?.runtime?.getManifest?.() || {};
             return {
-                format: IMPORT_EXPORT_FORMAT,
-                formatVersion: IMPORT_EXPORT_FORMAT_VERSION,
+                format: storageContract.IMPORT_EXPORT_FORMAT,
+                formatVersion: storageContract.IMPORT_EXPORT_FORMAT_VERSION,
                 extensionVersion: manifest.version || '',
                 exportedAt: new Date().toISOString(),
                 data: buildPersistableState()
@@ -504,8 +509,8 @@
         }
 
         return {
-            IMPORT_EXPORT_FORMAT,
-            IMPORT_EXPORT_FORMAT_VERSION,
+            IMPORT_EXPORT_FORMAT: storageContract.IMPORT_EXPORT_FORMAT,
+            IMPORT_EXPORT_FORMAT_VERSION: storageContract.IMPORT_EXPORT_FORMAT_VERSION,
             getExportConfigText,
             parseImportConfigText,
             previewImportConfig,

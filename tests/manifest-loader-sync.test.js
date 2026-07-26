@@ -5,17 +5,19 @@ const REPO_ROOT = path.resolve(__dirname, '..');
 const MANIFEST_PATH = path.join(REPO_ROOT, 'manifest.json');
 const LOADER_PATH = path.join(REPO_ROOT, 'tests/helpers/load-content-module.js');
 
-function getManifestContentJsList() {
+function getManifestRuntimeJsList() {
     const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf8'));
     const jsList = manifest.content_scripts[0].js;
     return jsList
-        .filter((entry) => entry.startsWith('src/content/'))
-        .map((entry) => entry.replace(/^src\/content\//, ''));
+        .filter((entry) => (
+            entry.startsWith('src/utils/')
+            || entry.startsWith('src/content/')
+        ));
 }
 
 function getLoaderRequireList() {
     const source = fs.readFileSync(LOADER_PATH, 'utf8');
-    const matches = source.matchAll(/require\(['"]\.\.\/\.\.\/src\/content\/([^'"]+)['"]\)/g);
+    const matches = source.matchAll(/require\(['"]\.\.\/\.\.\/(src\/(?:utils|content)\/[^'"]+)['"]\)/g);
     return Array.from(matches, (m) => m[1]);
 }
 
@@ -27,7 +29,7 @@ function getLoaderClearGlobalsList() {
 
 describe('manifest <-> load-content-module sync', () => {
     it('manifest content_scripts and loader require() the same files in the same order', () => {
-        const manifestFiles = getManifestContentJsList();
+        const manifestFiles = getManifestRuntimeJsList();
         const loaderFiles = getLoaderRequireList();
 
         expect(loaderFiles).toEqual(manifestFiles);
@@ -36,8 +38,29 @@ describe('manifest <-> load-content-module sync', () => {
     it('every file the loader requires actually exists on disk', () => {
         const loaderFiles = getLoaderRequireList();
         loaderFiles.forEach((file) => {
-            const fullPath = path.join(REPO_ROOT, 'src/content', file);
+            const fullPath = path.join(REPO_ROOT, file);
             expect(fs.existsSync(fullPath)).toBe(true);
+        });
+    });
+
+    it('loads the shared storage contract before every content storage consumer', () => {
+        const manifestFiles = getManifestRuntimeJsList();
+        const loaderFiles = getLoaderRequireList();
+        const storageContractPath = 'src/utils/storage-contract.js';
+        const consumers = [
+            'src/content/content-config.js',
+            'src/content/content-persistence.js',
+            'src/content/content-import-export.js',
+            'src/content/content-developer-logger.js'
+        ];
+
+        expect(manifestFiles).toContain(storageContractPath);
+        expect(loaderFiles).toContain(storageContractPath);
+        consumers.forEach((consumer) => {
+            expect(manifestFiles.indexOf(storageContractPath))
+                .toBeLessThan(manifestFiles.indexOf(consumer));
+            expect(loaderFiles.indexOf(storageContractPath))
+                .toBeLessThan(loaderFiles.indexOf(consumer));
         });
     });
 
@@ -45,7 +68,7 @@ describe('manifest <-> load-content-module sync', () => {
         const loaderFiles = getLoaderRequireList();
         const clearedGlobals = getLoaderClearGlobalsList();
 
-        const helperCount = loaderFiles.filter((file) => file !== 'index.js').length;
+        const helperCount = loaderFiles.filter((file) => !file.endsWith('/index.js')).length;
         expect(clearedGlobals.length).toBeGreaterThanOrEqual(helperCount);
     });
 

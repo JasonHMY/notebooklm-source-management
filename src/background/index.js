@@ -29,6 +29,12 @@ if (typeof importScripts === 'function') {
 } else if (typeof require !== 'undefined') {
     require('../utils/preference-normalizers.js');
 }
+if (typeof importScripts === 'function') {
+    importScripts('../utils/storage-contract.js');
+} else if (typeof require !== 'undefined') {
+    require('../utils/storage-contract.js');
+}
+const storageContract = globalThis.NSM_CREATE_STORAGE_CONTRACT();
 // normalizeCommandShortcutKey is used internally by normalizeCommandShortcutCombo
 // (within the utils file itself), so it's intentionally omitted from this destructure.
 const {
@@ -50,9 +56,6 @@ const NOTEBOOKLM_NOTEBOOK_PREFIX = 'https://notebooklm.google.com/notebook/';
 const CHROME_WEB_STORE_DETAIL_URL_PREFIX = 'https://chrome.google.com/webstore/detail/';
 const EXTENSION_ENABLED_KEY = 'extensionEnabled';
 const PREFERENCES_KEY = 'sourcesPlusPreferences';
-const STATE_KEY_PREFIX = 'sourcesPlusState_';
-const STATE_HISTORY_KEY_PREFIX = 'sourcesPlusHistory_';
-const DEVELOPER_LOG_KEY_PREFIX = 'sourcesPlusDeveloperLogs_';
 const STATE_HISTORY_LIMIT = 20;
 const HISTORY_RETENTION_LIMIT_OPTIONS = [20, 50, 100];
 const DEVELOPER_LOG_LIMIT = 500;
@@ -196,15 +199,13 @@ function getNotebookProjectIdFromSenderUrl(url) {
     return url.slice(NOTEBOOKLM_NOTEBOOK_PREFIX.length).split(/[/?#]/)[0] || '';
 }
 
-function getDeveloperLogKey(projectId) {
-    return projectId
-        ? `${DEVELOPER_LOG_KEY_PREFIX}${projectId}`
-        : '';
-}
-
 function senderOwnsExactDeveloperLogKey(sender, key) {
     const projectId = getNotebookProjectIdFromSenderUrl(sender?.tab?.url);
-    return Boolean(projectId) && key === getDeveloperLogKey(projectId);
+    return storageContract.isNotebookScopedKeyForProject(
+        key,
+        storageContract.DEVELOPER_LOG_KEY_PREFIX,
+        projectId
+    );
 }
 
 // Bind a notebook-scoped storage key to the sender tab's own notebook so a content script
@@ -214,7 +215,10 @@ function senderOwnsExactDeveloperLogKey(sender, key) {
 function senderOwnsNotebookKey(sender, key) {
     const projectId = getNotebookProjectIdFromSenderUrl(sender && sender.tab ? sender.tab.url : '');
     if (!projectId) return true;
-    return typeof key === 'string' && key.endsWith(`_${projectId}`);
+    return [
+        storageContract.STATE_KEY_PREFIX,
+        storageContract.STATE_HISTORY_KEY_PREFIX
+    ].some(prefix => storageContract.isNotebookScopedKeyForProject(key, prefix, projectId));
 }
 
 function pickPreferredNotebookTab(tabs) {
@@ -399,9 +403,9 @@ function createPreferenceUsageState(storageData = {}) {
     const keys = Object.keys(data);
     const hasStoredPreferences = Object.prototype.hasOwnProperty.call(data, PREFERENCES_KEY);
     const hasNotebookData = keys.some((key) => (
-        key.startsWith(STATE_KEY_PREFIX) ||
-        key.startsWith(STATE_HISTORY_KEY_PREFIX) ||
-        key.startsWith(DEVELOPER_LOG_KEY_PREFIX)
+        key.startsWith(storageContract.STATE_KEY_PREFIX) ||
+        key.startsWith(storageContract.STATE_HISTORY_KEY_PREFIX) ||
+        key.startsWith(storageContract.DEVELOPER_LOG_KEY_PREFIX)
     ));
     return {
         hasExistingPluginData: hasStoredPreferences || hasNotebookData,
@@ -512,8 +516,8 @@ function setPreferences(request, sendResponse) {
 
 function isValidDeveloperLogKey(key) {
     return typeof key === 'string' &&
-        key.startsWith(DEVELOPER_LOG_KEY_PREFIX) &&
-        key.length > DEVELOPER_LOG_KEY_PREFIX.length;
+        key.startsWith(storageContract.DEVELOPER_LOG_KEY_PREFIX) &&
+        key.length > storageContract.DEVELOPER_LOG_KEY_PREFIX.length;
 }
 
 function normalizeDeveloperLogEntry(entry = {}) {
@@ -668,22 +672,10 @@ function openOrFocusNotebookLm(request, sendResponse) {
     });
 }
 
-function getStateBackupKey(primaryKey) {
-    return `${primaryKey}__backup`;
-}
-
-function getStateHistoryKey(primaryKey) {
-    return `${STATE_HISTORY_KEY_PREFIX}${String(primaryKey || '').replace(/^sourcesPlusState_/, '')}`;
-}
-
 // SAVE_STATE writes a notebook's history under its STATE queue key, while
 // APPEND/LOAD_STATE_HISTORY arrive keyed by the HISTORY key. To keep every writer
 // of sourcesPlusHistory_<id> on ONE FIFO (no cross-queue lost update), history ops
 // serialize under the notebook's STATE queue key derived here.
-function getStateKeyFromHistoryKey(historyKey) {
-    return `${STATE_KEY_PREFIX}${String(historyKey || '').replace(/^sourcesPlusHistory_/, '')}`;
-}
-
 function hasRestorableStateSnapshot(snapshot) {
     if (!snapshot || typeof snapshot !== 'object') return false;
     if (Array.isArray(snapshot.groups) && snapshot.groups.length > 0) return true;
@@ -964,8 +956,8 @@ function pickPreferredStoredState(primaryState, backupState) {
 function writeStateWithRevisionGuard(request, sendResponse) {
     const key = request.key;
     const data = request.data;
-    const backupKey = getStateBackupKey(key);
-    const historyKey = getStateHistoryKey(key);
+    const backupKey = storageContract.getStateBackupKey(key);
+    const historyKey = storageContract.getStateHistoryKey(key);
     const baseRevision = getRequestBaseRevision(request);
     chrome.storage.local.get([key, backupKey, historyKey, PREFERENCES_KEY], (existingData) => {
         if (chrome.runtime.lastError) {
@@ -1193,7 +1185,7 @@ function enqueueStateWrite(request, sendResponse) {
 }
 
 function loadStateNow(request, sendResponse) {
-    const backupKey = getStateBackupKey(request.key);
+    const backupKey = storageContract.getStateBackupKey(request.key);
     chrome.storage.local.get([request.key, backupKey], (data) => {
         if (chrome.runtime.lastError) {
             console.error('GeminiNotebook-Source-Management background load error:', chrome.runtime.lastError);
@@ -1223,7 +1215,7 @@ function loadState(request, sendResponse) {
 function loadStateHistory(request, sendResponse) {
     // Wait on the notebook's STATE queue (which serializes SAVE_STATE's history write)
     // so a read never races a pending write of the same sourcesPlusHistory_<id> key.
-    const queueKey = getStateKeyFromHistoryKey(request.key);
+    const queueKey = storageContract.getStateKeyFromHistoryKey(request.key);
     const pendingTask = stateSaveQueueByKey.get(queueKey);
     if (!pendingTask) {
         loadStateHistoryNow(request, sendResponse);
@@ -1238,7 +1230,7 @@ function loadStateHistory(request, sendResponse) {
 function appendStateHistory(request, sendResponse) {
     // Serialize on the notebook's STATE queue key so APPEND shares one FIFO with
     // SAVE_STATE's history write (prevents a lost-update read-modify-write race).
-    enqueueStorageTask(getStateKeyFromHistoryKey(request.key), () => new Promise((resolve) => {
+    enqueueStorageTask(storageContract.getStateKeyFromHistoryKey(request.key), () => new Promise((resolve) => {
         appendStateHistoryNow(request, (response) => {
             sendResponse(response);
             resolve(response);
@@ -1329,7 +1321,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     if (request.type === 'SAVE_STATE') {
-        if (typeof request.key !== 'string' || !request.key.startsWith(STATE_KEY_PREFIX)) {
+        if (typeof request.key !== 'string' || !request.key.startsWith(storageContract.STATE_KEY_PREFIX)) {
             console.warn('GeminiNotebook-Source-Management: Received SAVE_STATE with invalid key:', request.key);
             sendResponse({ success: false, errorCode: ERROR_CODES.INVALID_STORAGE_KEY });
             return;
@@ -1345,7 +1337,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     if (request.type === 'LOAD_STATE_HISTORY' || request.type === 'APPEND_STATE_HISTORY') {
-        if (typeof request.key !== 'string' || !request.key.startsWith(STATE_HISTORY_KEY_PREFIX)) {
+        if (typeof request.key !== 'string' || !request.key.startsWith(storageContract.STATE_HISTORY_KEY_PREFIX)) {
             console.warn(`GeminiNotebook-Source-Management: Received ${request.type} with invalid key:`, request.key);
             sendResponse({ success: false, errorCode: ERROR_CODES.INVALID_STORAGE_KEY });
             return;
@@ -1365,7 +1357,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return true;
     }
 
-    if (typeof request.key !== 'string' || !request.key.startsWith(STATE_KEY_PREFIX)) {
+    if (typeof request.key !== 'string' || !request.key.startsWith(storageContract.STATE_KEY_PREFIX)) {
         console.warn('GeminiNotebook-Source-Management: Received LOAD_STATE with invalid key:', request.key);
         sendResponse({ success: false, errorCode: ERROR_CODES.INVALID_STORAGE_KEY });
         return;
@@ -1386,8 +1378,8 @@ if (typeof module !== 'undefined' && module.exports) {
         NOTEBOOKLM_NOTEBOOK_PREFIX,
         EXTENSION_ENABLED_KEY,
         PREFERENCES_KEY,
-        STATE_HISTORY_KEY_PREFIX,
-        DEVELOPER_LOG_KEY_PREFIX,
+        STATE_HISTORY_KEY_PREFIX: storageContract.STATE_HISTORY_KEY_PREFIX,
+        DEVELOPER_LOG_KEY_PREFIX: storageContract.DEVELOPER_LOG_KEY_PREFIX,
         STATE_HISTORY_LIMIT,
         HISTORY_RETENTION_LIMIT_OPTIONS,
         DEVELOPER_LOG_LIMIT,
@@ -1405,8 +1397,8 @@ if (typeof module !== 'undefined' && module.exports) {
         createStorageResponseFields,
         normalizeHistoryRetentionLimit,
         normalizeLanguageOverride,
-        getStateBackupKey,
-        getStateHistoryKey,
+        getStateBackupKey: storageContract.getStateBackupKey,
+        getStateHistoryKey: storageContract.getStateHistoryKey,
         getSnapshotSaveRevision,
         normalizeStateHistoryEntries,
         trimStateHistoryEntries,
@@ -1422,7 +1414,7 @@ if (typeof module !== 'undefined' && module.exports) {
         pickPreferredNotebookTab,
         isAuthorizedNotebookSender,
         getNotebookProjectIdFromSenderUrl,
-        getDeveloperLogKey,
+        getDeveloperLogKey: storageContract.getDeveloperLogKey,
         senderOwnsExactDeveloperLogKey,
         getManifestWebStoreFeedbackUrl,
         getWebStoreFeedbackUrl,

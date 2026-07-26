@@ -2759,6 +2759,40 @@ describe('loadState', () => {
         expect(callback).toHaveBeenCalledWith(null);
     });
 
+    it('keeps a first-save path open when the notebook has no stored state yet', () => {
+        const projectId = 'first-save-project';
+        const callback = jest.fn();
+        mod._setProjectId(projectId);
+        mod.state.ungrouped = ['first-source'];
+        mod.sourcesByKey.set('first-source', {
+            enabled: true,
+            title: 'First Source',
+            normalizedTitle: 'first source',
+            stableToken: 'first-token',
+            fingerprint: 'first source||article',
+            identityType: 'stable-token'
+        });
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => cb({}));
+
+        mod.loadState(callback);
+
+        expect(callback).toHaveBeenCalledWith(null);
+        expect(mod.getSaveStatus()).not.toMatchObject({
+            state: 'failed',
+            lastError: 'unsupported_schema'
+        });
+
+        global.chrome.runtime.sendMessage.mockClear();
+        mod.saveState({ immediate: true });
+        expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(
+            expect.objectContaining({
+                type: 'SAVE_STATE',
+                key: `sourcesPlusState_${projectId}`
+            }),
+            expect.any(Function)
+        );
+    });
+
     it('reads state directly from local storage before falling back to runtime messaging', () => {
         const callback = jest.fn();
         const storedState = {

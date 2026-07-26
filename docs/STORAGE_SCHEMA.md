@@ -22,6 +22,12 @@ chrome.storage.local
 
 `<projectId>` is derived from the notebook URL in Gemini Notebook. Notebook-scoped writes normally go through the background service worker, which validates the sender and key prefix before touching storage.
 
+`src/utils/storage-contract.js` is the executable source of truth for the current
+schema/import versions, all four notebook-scoped key prefixes, exact key builders,
+sender-to-key ownership checks, and schema compatibility classification. It is a
+pure frozen factory with no DOM, Chrome API, logging, or mutable runtime dependency;
+content scripts and the background service worker load the same contract.
+
 ### Recovery snapshot (sessionStorage)
 
 Separately from `chrome.storage.local`, critical saves write a per-tab recovery snapshot to `sessionStorage` under `sourcesPlusRecovery_<projectId>`, holding `{ snapshot, baseRevision, createdAt, reason, clientSaveId, failed }`. It is a last-resort fallback (e.g. a lifecycle save interrupted by runtime unavailability or quota pressure) so a tab can recover unsaved organization after an interruption. `visibilitychange:hidden` and `pagehide` enqueue a critical `SAVE_STATE` through the same background per-key FIFO as normal saves; they never directly overwrite the primary or backup key.
@@ -183,9 +189,13 @@ Every authoritative primary/backup candidate is classified before migration, str
 | Stored `schemaVersion` | Load result | Write behavior |
 |---|---|---|
 | Missing | Legacy state; normalize to v5 | A later safe save may rewrite it as v5. |
-| Integer `1`–`5` | Supported; normalize older versions to v5 | A later safe save may persist the normalized v5 state. |
+| Integer `1` | Legacy state; normalize to v5 | A later safe save may persist the normalized v5 state. |
+| Integer `2`–`5` | Supported; normalize older versions to v5 | A later safe save may persist the normalized v5 state. |
 | Integer greater than `5` | Unsupported future schema; do not normalize or apply | Set save status to `failed` with `lastError: "unsupported_schema"` and block notebook writes for this load instance. |
 | Any other present value | Invalid schema; do not normalize or apply | Use the same `unsupported_schema` fail-closed write block. |
+
+No persisted candidate (`null`) is a non-blocking empty/legacy state: nothing is
+applied or migrated, and the notebook remains able to perform its first save.
 
 The primary/backup revision and snapshot-quality comparison selects the authoritative raw candidate before this compatibility check. If that candidate is future or invalid, history repair is not inspected and no migration, repair, apply, lifecycle snapshot, or normal save runs. Save-queue entries capture the active load-scope generation: they recheck it before dispatch and again before applying completion effects, so an older queued save cannot start and an already in-flight result cannot replace `unsupported_schema`, advance the local revision, clear recovery, or emit critical-save completion feedback after the block activates. The block is scoped to the current notebook and manager load instance; loading another notebook or a new manager instance invalidates older queue entries, resets only the schema-specific failed status to idle, and resumes saves without clearing unrelated save metadata. A future schema is never automatically downgraded and written back.
 
@@ -222,6 +232,6 @@ Exports use this exact envelope:
 }
 ```
 
-Imports remain compatible with a bare raw-state object when none of `format`, `formatVersion`, or `data` is present. If any one of those envelope markers is present, all three must be valid: the exact format string above, integer `formatVersion: 1`, and an object `data` payload. Unknown or incomplete envelopes are rejected rather than reinterpreted as bare state. Imported state then passes the same schema gate: a missing version is legacy, integer versions `1`–`5` are normalizable, and future or invalid versions are rejected. Rejecting an imported config does not set the notebook-scoped write block because the imported payload is not authoritative stored state.
+Imports remain compatible with a bare raw-state object when none of `format`, `formatVersion`, or `data` is present. If any one of those envelope markers is present, all three must be valid: the exact format string above, integer `formatVersion: 1`, and an object `data` payload. Unknown or incomplete envelopes are rejected rather than reinterpreted as bare state. Imported state then passes the same schema gate: a missing version or version `1` is legacy, integer versions `2`–`5` are supported and normalizable, and future or invalid versions are rejected. Rejecting an imported config does not set the notebook-scoped write block because the imported payload is not authoritative stored state.
 
 Applying an import is atomic from the runtime user's perspective. Before any imported mutation, the manager clones its current persistable snapshot, records history, and writes the import backup. It then applies the imported runtime state and issues a critical background save with the cloned pre-import snapshot as recovery. A deferred apply, thrown save, explicit save failure, or ambiguous acknowledgement restores the complete pre-import runtime state, including clearing an imported inline height when the prior `customHeight` was `null`. Failure results expose only the declared import reasons (`deferred`, `rollback_failed`, `storage_quota_exceeded`, `import_ack_unknown`, or `save_failed`), and never display the import success action.

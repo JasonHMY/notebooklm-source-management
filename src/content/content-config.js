@@ -1,6 +1,14 @@
 (function () {
     'use strict';
 
+    if (
+        typeof globalThis.NSM_CREATE_STORAGE_CONTRACT !== 'function'
+        && typeof require !== 'undefined'
+    ) {
+        require('../utils/storage-contract.js');
+    }
+    const storageContract = globalThis.NSM_CREATE_STORAGE_CONTRACT();
+
     const DEPS = {
         panel: ['[data-testid="source-panel"]', '.source-panel'],
         scroll: ['.scroll-area'],
@@ -46,7 +54,7 @@
         SOURCE_TITLE_SELECTOR: DEPS.title[0],
         SOURCE_CHECKBOX_SELECTOR: DEPS.checkbox[0],
         SOURCE_ICON_SELECTOR: DEPS.icon[0],
-        STORAGE_SCHEMA_VERSION: 5,
+        STORAGE_SCHEMA_VERSION: storageContract.STORAGE_SCHEMA_VERSION,
         IMPORT_CONFIG_MAX_FILE_BYTES: 2 * 1024 * 1024,
         IMPORT_CONFIG_MAX_GROUPS: 1000,
         IMPORT_CONFIG_MAX_TAGS: 500,

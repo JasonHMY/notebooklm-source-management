@@ -121,6 +121,19 @@ describe('background.js message listener', () => {
         }));
     });
 
+    it('does not confuse a notebook id with a longer id that shares its prefix', () => {
+        listener({
+            type: 'LOAD_STATE',
+            key: 'sourcesPlusState_1234'
+        }, validSender, mockSendResponse);
+
+        expect(global.chrome.storage.local.get).not.toHaveBeenCalled();
+        expect(mockSendResponse).toHaveBeenCalledWith({
+            success: false,
+            errorCode: 'unauthorized_sender'
+        });
+    });
+
     it('should handle SAVE_STATE message successfully', () => {
         const request = {
             type: 'SAVE_STATE',

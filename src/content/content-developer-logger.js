@@ -1,6 +1,14 @@
 (function () {
     'use strict';
 
+    if (
+        typeof globalThis.NSM_CREATE_STORAGE_CONTRACT !== 'function'
+        && typeof require !== 'undefined'
+    ) {
+        require('../utils/storage-contract.js');
+    }
+    const storageContract = globalThis.NSM_CREATE_STORAGE_CONTRACT();
+
     /**
      * createContentDeveloperLogger(context) — developer log 流 + 偏好设置存档。
      * 双职责:
@@ -92,10 +100,6 @@
 
         function getNotebookId() {
             return String(getProjectId() || '');
-        }
-
-        function getDeveloperLogKey(projectId = getNotebookId()) {
-            return projectId ? `sourcesPlusDeveloperLogs_${projectId}` : '';
         }
 
         function getSerializedByteLength(value) {
@@ -449,7 +453,7 @@
         }
 
         async function loadDeveloperLogs() {
-            const key = getDeveloperLogKey();
+            const key = storageContract.getDeveloperLogKey(getNotebookId());
             if (!key) {
                 developerLogs = [];
                 return developerLogs;
@@ -529,7 +533,7 @@
                 notebookId: getNotebookId()
             });
             developerLogs = trimLogs([...developerLogs, entry]);
-            const key = getDeveloperLogKey();
+            const key = storageContract.getDeveloperLogKey(getNotebookId());
             if (key) {
                 sendRuntimeMessage({
                     type: 'APPEND_DEVELOPER_LOG',
@@ -546,7 +550,7 @@
 
         async function clearDeveloperLogs() {
             developerLogs = [];
-            const key = getDeveloperLogKey();
+            const key = storageContract.getDeveloperLogKey(getNotebookId());
             if (!key) return true;
             const response = await sendRuntimeMessage({ type: 'CLEAR_DEVELOPER_LOGS', key });
             if (response?.success) {

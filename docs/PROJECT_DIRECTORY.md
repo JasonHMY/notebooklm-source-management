@@ -136,6 +136,8 @@ GeminiNotebook-Source-Management
 │   ├── utils/
 │   │   ├── index.js
 │   │   │   └── el/debounce/isDescendant/getMessage；`el()` 是 XSS 防护核心
+│   │   ├── storage-contract.js
+│   │   │   └── storage schema/import format 常量、per-notebook key builders、精确 key ownership 与 schema compatibility 的纯共享契约
 │   │   └── preference-normalizers.js
 │   │       └── 偏好归一化 (10 个 normalizeXxx)；content + background SW 共享，挂 `globalThis.NSM_PREFERENCE_NORMALIZERS`
 │   └── assets/
@@ -152,6 +154,7 @@ GeminiNotebook-Source-Management
 │   ├── popup.test.js
 │   ├── locales.test.js
 │   ├── package.test.js
+│   ├── storage-contract.test.js
 │   └── utils.test.js
 ├── docs/
 │   ├── PROJECT_DIRECTORY.md
@@ -235,6 +238,7 @@ manifest.json
 │       └── src/popup/styles.css
 └── content_scripts on https://notebooklm.google.com/*
     ├── src/utils/index.js
+    ├── src/utils/storage-contract.js
     ├── src/utils/preference-normalizers.js
     ├── src/content/content-config.js
     ├── src/content/source-descriptor-helpers.js
@@ -842,9 +846,9 @@ CI: .github/workflows/ci.yml
 │   ├── 测试: content-source-sync.test.js, content-native-label-import.test.js, content-native-label-import-controller.test.js, content-native-label-import-modal.test.js
 │   └── 注意: preview 应尽量只读 DOM，必要展开后尝试恢复
 ├── 保存失败 / stale revision / quota
-│   ├── 先看: src/content/content-persistence.js
+│   ├── 先看: src/utils/storage-contract.js, src/content/content-persistence.js
 │   ├── 然后看: src/background/index.js, docs/STORAGE_SCHEMA.md, docs/MESSAGE_CONTRACTS.md
-│   ├── 测试: content-persistence.test.js, background.test.js
+│   ├── 测试: storage-contract.test.js, content-persistence.test.js, background.test.js
 │   └── 注意: 正常写入走 background；直接 storage 写只用于测试/降级路径
 ├── 开发者日志没记录
 │   ├── 先看: src/content/content-developer-logger.js

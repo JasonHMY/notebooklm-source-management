@@ -1,4 +1,5 @@
 function clearContentGlobals() {
+    delete globalThis.NSM_CREATE_STORAGE_CONTRACT;
     delete globalThis.NSM_PREFERENCE_NORMALIZERS;
     delete globalThis.NSM_CONTENT_CONFIG;
     delete globalThis.NSM_SOURCE_DESCRIPTOR_HELPERS;
@@ -50,6 +51,8 @@ function clearContentGlobals() {
 
 function loadContentModule() {
     clearContentGlobals();
+    require('../../src/utils/index.js');
+    globalThis.NSM_CREATE_STORAGE_CONTRACT = require('../../src/utils/storage-contract.js');
     require('../../src/utils/preference-normalizers.js');
     require('../../src/content/content-config.js');
     require('../../src/content/source-descriptor-helpers.js');

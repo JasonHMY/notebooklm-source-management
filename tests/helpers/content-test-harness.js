@@ -4,6 +4,7 @@ const nativeSetTimeout = global.setTimeout;
 const nativeClearTimeout = global.clearTimeout;
 
 const CONTENT_HELPER_GLOBALS = [
+    'NSM_CREATE_STORAGE_CONTRACT',
     'NSM_PREFERENCE_NORMALIZERS',
     'NSM_CONTENT_CONFIG',
     'NSM_SOURCE_DESCRIPTOR_HELPERS',
