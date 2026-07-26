@@ -2,6 +2,7 @@
     'use strict';
 
     const IMPORT_EXPORT_FORMAT = 'notebooklm-source-management-config';
+    const IMPORT_EXPORT_FORMAT_VERSION = 1;
 
     /**
      * createContentImportExport(deps) — JSON 导入/导出 + 预览 + 应用流。
@@ -16,7 +17,7 @@
      *   Optional: limits, developerLog, showToast, getMessage, buildSourceLookup, resolveStoredSourceKey,
      *   buildNormalizedTagState, normalizeSourceViewSwitchTarget, appendStateHistorySnapshot,
      *   writeImportBackupSnapshot, restoreInitialLoadedState, restoreImportBackupSnapshotFromUi, render.
-     * @returns {{ IMPORT_EXPORT_FORMAT, getExportConfigText, parseImportConfigText, previewImportConfig, applyImportConfig, collectImportSourceRefs, unwrapImportConfigPayload }}
+     * @returns {{ IMPORT_EXPORT_FORMAT, IMPORT_EXPORT_FORMAT_VERSION, getExportConfigText, parseImportConfigText, previewImportConfig, applyImportConfig, collectImportSourceRefs, unwrapImportConfigPayload }}
      *   完整 return 块见 line 432。
      */
     function createContentImportExport(deps = {}) {
@@ -87,11 +88,20 @@
         }
 
         function unwrapImportConfigPayload(parsedConfig) {
-            if (!parsedConfig || typeof parsedConfig !== 'object') return null;
-            if (parsedConfig.format === IMPORT_EXPORT_FORMAT && parsedConfig.data) {
-                return parsedConfig.data;
+            if (!parsedConfig || typeof parsedConfig !== 'object' || Array.isArray(parsedConfig)) return null;
+            const hasEnvelopeMarker = ['format', 'formatVersion', 'data']
+                .some((key) => Object.prototype.hasOwnProperty.call(parsedConfig, key));
+            if (!hasEnvelopeMarker) return parsedConfig;
+            if (
+                parsedConfig.format !== IMPORT_EXPORT_FORMAT
+                || parsedConfig.formatVersion !== IMPORT_EXPORT_FORMAT_VERSION
+                || !parsedConfig.data
+                || typeof parsedConfig.data !== 'object'
+                || Array.isArray(parsedConfig.data)
+            ) {
+                return null;
             }
-            return parsedConfig;
+            return parsedConfig.data;
         }
 
         function getImportGroupTreeValidationError(groupsByIdMap) {
@@ -305,7 +315,11 @@
 
             try {
                 const parsedConfig = JSON.parse(rawText);
-                const normalizedState = normalizeLoadedState(unwrapImportConfigPayload(parsedConfig));
+                const importState = unwrapImportConfigPayload(parsedConfig);
+                if (!importState) {
+                    return { ok: false, reason: 'invalid' };
+                }
+                const normalizedState = normalizeLoadedState(importState);
                 if (!normalizedState || !hasPersistableManagerState(normalizedState)) {
                     return { ok: false, reason: 'invalid' };
                 }
@@ -322,7 +336,7 @@
             const manifest = globalThis.chrome?.runtime?.getManifest?.() || {};
             return {
                 format: IMPORT_EXPORT_FORMAT,
-                formatVersion: 1,
+                formatVersion: IMPORT_EXPORT_FORMAT_VERSION,
                 extensionVersion: manifest.version || '',
                 exportedAt: new Date().toISOString(),
                 data: buildPersistableState()
@@ -453,6 +467,7 @@
 
         return {
             IMPORT_EXPORT_FORMAT,
+            IMPORT_EXPORT_FORMAT_VERSION,
             getExportConfigText,
             parseImportConfigText,
             previewImportConfig,

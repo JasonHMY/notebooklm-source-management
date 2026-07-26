@@ -184,6 +184,31 @@ describe('saveState', () => {
         expect(mod._getPendingStorageUpgrade()).toBe(true);
     });
 
+    it('rejects a schema newer than v5 without scheduling a storage upgrade', () => {
+        expect(mod.normalizeLoadedState({
+            schemaVersion: 6,
+            root: [{ type: 'source', key: 'future-source' }],
+            groupsById: {},
+            ungrouped: [],
+            sourceStateById: {
+                'future-source': { enabled: true }
+            }
+        })).toBeNull();
+        expect(mod._getPendingStorageUpgrade()).toBe(false);
+    });
+
+    it('rejects malformed schema versions without scheduling a storage upgrade', () => {
+        ['5', 0, -1, 1.5, null].forEach((schemaVersion) => {
+            expect(mod.normalizeLoadedState({
+                schemaVersion,
+                groupsById: {},
+                ungrouped: [],
+                sourceStateById: {}
+            })).toBeNull();
+        });
+        expect(mod._getPendingStorageUpgrade()).toBe(false);
+    });
+
     it('migrates a v4 snapshot with no groups to an empty root array', () => {
         const normalized = mod.normalizeLoadedState({
             schemaVersion: 4,
@@ -1419,6 +1444,7 @@ describe('settings import/export configuration', () => {
 
         const preview = mod.previewImportConfig(JSON.stringify({
             format: 'notebooklm-source-management-config',
+            formatVersion: 1,
             data: {
                 schemaVersion: 3,
                 groups: ['group1'],
@@ -1644,9 +1670,35 @@ describe('settings import/export configuration', () => {
         expect(mod.previewImportConfig('{bad json')).toMatchObject({ ok: false, reason: 'invalid' });
     });
 
+    it('rejects a future-schema import without blocking current notebook saves', () => {
+        mod._setProjectId('current-project');
+        const preview = mod.previewImportConfig(JSON.stringify({
+            format: 'notebooklm-source-management-config',
+            formatVersion: 1,
+            data: {
+                schemaVersion: 6,
+                root: [{ type: 'source', key: 'future-source' }],
+                groupsById: {},
+                ungrouped: [],
+                sourceStateById: {
+                    'future-source': { enabled: true }
+                }
+            }
+        }));
+
+        expect(preview).toEqual({ ok: false, reason: 'invalid' });
+        global.chrome.runtime.sendMessage.mockClear();
+        mod.saveState({ immediate: true });
+        expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(
+            expect.objectContaining({ type: 'SAVE_STATE' }),
+            expect.any(Function)
+        );
+    });
+
     it('rejects imported group trees that contain cycles', () => {
         const preview = mod.previewImportConfig(JSON.stringify({
             format: 'notebooklm-source-management-config',
+            formatVersion: 1,
             data: {
                 schemaVersion: 3,
                 groups: ['group-a'],
@@ -1697,6 +1749,7 @@ describe('settings import/export configuration', () => {
 
         const result = await mod.applyImportConfig(JSON.stringify({
             format: 'notebooklm-source-management-config',
+            formatVersion: 1,
             data: {
                 schemaVersion: 3,
                 groups: ['after'],
@@ -1755,6 +1808,7 @@ describe('settings import/export configuration', () => {
 
         const importPromise = mod.applyImportConfig(JSON.stringify({
             format: 'notebooklm-source-management-config',
+            formatVersion: 1,
             data: {
                 schemaVersion: 3,
                 groups: ['after'],
@@ -2175,6 +2229,122 @@ describe('loadState', () => {
             sourceTagsById: {}
         });
         expect(mod._getPendingStorageUpgrade()).toBe(true);
+    });
+
+    it('blocks saves when the authoritative stored state uses a future schema', () => {
+        const callback = jest.fn();
+        const futureState = {
+            schemaVersion: 6,
+            _saveRevision: 12,
+            root: [{ type: 'source', key: 'future-source' }],
+            groupsById: {},
+            ungrouped: [],
+            sourceStateById: {
+                'future-source': { enabled: true }
+            }
+        };
+        const repairCandidate = {
+            schemaVersion: 5,
+            _saveRevision: 11,
+            root: [{ type: 'group', id: 'group-1' }],
+            groupsById: {
+                'group-1': {
+                    id: 'group-1',
+                    title: 'Group',
+                    children: [{ type: 'source', key: 'future-source' }]
+                }
+            },
+            ungrouped: [],
+            sourceStateById: {
+                'future-source': { enabled: true }
+            }
+        };
+
+        mod._setProjectId('test-project');
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({
+                'sourcesPlusState_test-project': futureState,
+                'sourcesPlusState_test-project__backup': futureState,
+                'sourcesPlusHistory_test-project': [{
+                    id: 'history-1',
+                    snapshot: repairCandidate
+                }]
+            });
+        });
+
+        mod.loadState(callback);
+
+        expect(callback).toHaveBeenCalledWith(null);
+        expect(mod._getPendingStorageUpgrade()).toBe(false);
+        expect(mod.getSaveStatus()).toMatchObject({
+            state: 'failed',
+            lastError: 'unsupported_schema'
+        });
+
+        global.chrome.runtime.sendMessage.mockClear();
+        mod.saveState({ immediate: true });
+        expect(global.chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+            expect.objectContaining({ type: 'SAVE_STATE' }),
+            expect.any(Function)
+        );
+    });
+
+    it('clears the future-schema write block when a different notebook loads', () => {
+        const futureCallback = jest.fn();
+        const supportedCallback = jest.fn();
+        const futureState = {
+            schemaVersion: 6,
+            _saveRevision: 12,
+            root: [{ type: 'source', key: 'future-source' }],
+            groupsById: {},
+            ungrouped: [],
+            sourceStateById: {
+                'future-source': { enabled: true }
+            }
+        };
+        const supportedState = {
+            schemaVersion: 5,
+            _saveRevision: 3,
+            root: [],
+            groupsById: {},
+            ungrouped: ['supported-source'],
+            sourceStateById: {
+                'supported-source': { enabled: true }
+            },
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {}
+        };
+
+        mod._setProjectId('future-project');
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({
+                'sourcesPlusState_future-project': futureState,
+                'sourcesPlusState_future-project__backup': futureState
+            });
+        });
+        mod.loadState(futureCallback);
+        expect(futureCallback).toHaveBeenCalledWith(null);
+
+        mod._setProjectId('supported-project');
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({
+                'sourcesPlusState_supported-project': supportedState,
+                'sourcesPlusState_supported-project__backup': null
+            });
+        });
+        mod.loadState(supportedCallback);
+
+        expect(supportedCallback).toHaveBeenCalledWith(expect.objectContaining({
+            schemaVersion: 5,
+            ungrouped: ['supported-source']
+        }));
+        global.chrome.runtime.sendMessage.mockClear();
+        mod.saveState({ immediate: true });
+        expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(
+            expect.objectContaining({ type: 'SAVE_STATE' }),
+            expect.any(Function)
+        );
     });
 
     it('falls back to null when runtime messaging fails', () => {

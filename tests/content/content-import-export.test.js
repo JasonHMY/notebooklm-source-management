@@ -169,6 +169,37 @@ describe('content import/export helper', () => {
             expect(result.state).toEqual(innerState);
         });
 
+        it('rejects a wrapped config with an unknown formatVersion', () => {
+            const deps = createDeps();
+            const { IMPORT_EXPORT_FORMAT: format, parseImportConfigText } = createContentImportExport(deps);
+            expect(parseImportConfigText(JSON.stringify({
+                format,
+                formatVersion: 2,
+                data: {
+                    schemaVersion: 5,
+                    root: [],
+                    groupsById: {},
+                    ungrouped: [],
+                    sourceStateById: {}
+                }
+            }))).toEqual({ ok: false, reason: 'invalid' });
+        });
+
+        it('rejects an unknown envelope instead of treating data as a bare state', () => {
+            const { parseImportConfigText } = createContentImportExport(createDeps());
+            expect(parseImportConfigText(JSON.stringify({
+                format: 'unknown-config',
+                formatVersion: 1,
+                data: {
+                    schemaVersion: 5,
+                    root: [],
+                    groupsById: {},
+                    ungrouped: [],
+                    sourceStateById: {}
+                }
+            }))).toEqual({ ok: false, reason: 'invalid' });
+        });
+
         it('accepts a bare state without the export envelope', () => {
             const bare = { groupsById: {}, sourceStateById: { a: {} } };
             const { parseImportConfigText } = createContentImportExport(createDeps());

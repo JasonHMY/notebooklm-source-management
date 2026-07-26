@@ -184,6 +184,9 @@
         ensureStorageState();
         let saveQueueTail = null;
         let nextClientSaveId = 1;
+        let futureSchemaWriteBlocked = false;
+        let schemaWriteScopeProjectId = '';
+        let schemaWriteScopeInstanceToken = null;
 
         const DEFAULT_SAVE_STATUS = {
             state: 'idle',
@@ -379,6 +382,20 @@
                 return backupState;
             }
             return primaryState;
+        }
+
+        function pickAuthoritativeRawState(primaryState, backupState) {
+            const preferredState = getComparableStoredState(primaryState, backupState);
+            if (preferredState !== primaryState) {
+                return preferredState;
+            }
+            if (hasRestorableStateSnapshot(primaryState)) {
+                return primaryState;
+            }
+            if (hasRestorableStateSnapshot(backupState)) {
+                return backupState;
+            }
+            return primaryState ?? backupState ?? null;
         }
 
         function hasRestorableStateSnapshot(snapshot) {
@@ -1175,6 +1192,10 @@
                 return;
             }
 
+            if (futureSchemaWriteBlocked) {
+                return;
+            }
+
             flushPendingStateSave();
 
             if (!ctx.projectId) {
@@ -1217,7 +1238,14 @@
         }
 
         function normalizeLoadedState(stateData) {
-            if (!stateData || typeof stateData !== 'object') return null;
+            const schemaCompatibility = getStorageSchemaCompatibility(stateData);
+            if (
+                schemaCompatibility === 'missing'
+                || schemaCompatibility === 'future'
+                || schemaCompatibility === 'invalid'
+            ) {
+                return null;
+            }
             rememberSnapshotSaveRevision(stateData);
             const sourceViewDisplayKind = normalizeSourceViewDisplayKind(stateData.sourceViewDisplayKind);
 
@@ -1308,6 +1336,33 @@
             };
         }
 
+        function getStorageSchemaCompatibility(stateData) {
+            if (stateData == null) {
+                return 'missing';
+            }
+            if (typeof stateData !== 'object' || Array.isArray(stateData)) {
+                return 'invalid';
+            }
+            if (!Object.prototype.hasOwnProperty.call(stateData, 'schemaVersion')) {
+                return 'legacy';
+            }
+
+            const schemaVersion = stateData.schemaVersion;
+            if (!Number.isInteger(schemaVersion) || schemaVersion < 1) {
+                return 'invalid';
+            }
+            return schemaVersion > storageSchemaVersion ? 'future' : 'supported';
+        }
+
+        function isUnsupportedFutureSchema(stateData) {
+            return getStorageSchemaCompatibility(stateData) === 'future';
+        }
+
+        function isSupportedOrLegacyState(stateData) {
+            const compatibility = getStorageSchemaCompatibility(stateData);
+            return compatibility === 'supported' || compatibility === 'legacy';
+        }
+
         function hasPreservableManagerSnapshot() {
             if (ctx.pendingInitialLoadedState && hasPersistableManagerState(ctx.pendingInitialLoadedState)) {
                 return true;
@@ -1321,7 +1376,11 @@
         }
 
         function canPersistManagerState() {
-            if (!ctx.projectId || ctx.managerStatusReason === 'source_detail_view') {
+            if (
+                futureSchemaWriteBlocked
+                || !ctx.projectId
+                || ctx.managerStatusReason === 'source_detail_view'
+            ) {
                 return false;
             }
 
@@ -1644,11 +1703,19 @@
 
             const expectedProjectId = typeof options.expectedProjectId === 'string' ? options.expectedProjectId : ctx.projectId;
             const expectedInstanceToken = typeof options.instanceToken === 'number' ? options.instanceToken : ctx.activeManagerInstanceToken;
+            if (
+                schemaWriteScopeProjectId !== expectedProjectId
+                || schemaWriteScopeInstanceToken !== expectedInstanceToken
+            ) {
+                futureSchemaWriteBlocked = false;
+                schemaWriteScopeProjectId = expectedProjectId;
+                schemaWriteScopeInstanceToken = expectedInstanceToken;
+            }
             const requestId = ctx.nextLoadStateRequestId++;
             ctx.activeLoadStateRequestId = requestId;
             const key = `sourcesPlusState_${expectedProjectId}`;
 
-            const finalizeLoadedState = (rawState) => {
+            const finalizeLoadedState = (primaryState, backupState = null, historyEntries = []) => {
                 if (!isLiveManagerLoadRequest(expectedProjectId, expectedInstanceToken, requestId)) {
                     return;
                 }
@@ -1657,6 +1724,30 @@
                     ctx.activeLoadStateRequestId = null;
                 }
 
+                const authoritativeRawState = pickAuthoritativeRawState(primaryState, backupState);
+                const authoritativeCompatibility = getStorageSchemaCompatibility(authoritativeRawState);
+                if (authoritativeCompatibility === 'future' || authoritativeCompatibility === 'invalid') {
+                    futureSchemaWriteBlocked = true;
+                    ctx.pendingStorageUpgrade = false;
+                    ctx.pendingStructuralStateRepair = null;
+                    cancelPendingStateSave();
+                    setSaveStatus({
+                        state: 'failed',
+                        lastError: 'unsupported_schema'
+                    });
+                    callback(null);
+                    return;
+                }
+
+                const safePrimaryState = isSupportedOrLegacyState(primaryState) ? primaryState : null;
+                const safeBackupState = isSupportedOrLegacyState(backupState) ? backupState : null;
+                const safeHistoryEntries = (Array.isArray(historyEntries) ? historyEntries : [])
+                    .filter((entry) => isSupportedOrLegacyState(entry?.snapshot));
+                const rawState = pickPreferredStoredState(
+                    safePrimaryState,
+                    safeBackupState,
+                    safeHistoryEntries
+                );
                 const loadedState = normalizeLoadedState(rawState);
                 detectRecoverySnapshotAvailability(rawState);
                 if (loadedState && loadedState.customHeight != null) {
@@ -1729,7 +1820,7 @@
                         const primaryState = data && typeof data === 'object' ? data[key] : null;
                         const backupState = data && typeof data === 'object' ? data[backupKey] : null;
                         const historyEntries = data && typeof data === 'object' ? data[historyKey] : [];
-                        finalizeLoadedState(pickPreferredStoredState(primaryState, backupState, historyEntries));
+                        finalizeLoadedState(primaryState, backupState, historyEntries);
                     });
                     return;
                 } catch (error) {
@@ -1763,6 +1854,7 @@
             loadStateHistory,
             appendStateHistorySnapshot,
             pickPreferredStoredState,
+            pickAuthoritativeRawState,
             writeStateToLocalStorage,
             sendStateToStorage,
             enqueueStateSave,
@@ -1786,6 +1878,7 @@
             saveState,
             handlePageLifecyclePersistence,
             normalizeLoadedState,
+            isUnsupportedFutureSchema,
             hasPreservableManagerSnapshot,
             canPersistManagerState,
             hasPersistedSourceRefs,

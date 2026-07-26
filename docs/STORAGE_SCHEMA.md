@@ -148,6 +148,19 @@ schemaVersion 5
 
 Load paths normalize older schemas to the current runtime shape and mark `pendingStorageUpgrade` so a later safe save rewrites current schema data.
 
+### Schema compatibility gate
+
+Every authoritative primary/backup candidate is classified before migration, structural repair, history inspection, or revision bookkeeping:
+
+| Stored `schemaVersion` | Load result | Write behavior |
+|---|---|---|
+| Missing | Legacy state; normalize to v5 | A later safe save may rewrite it as v5. |
+| Integer `1`–`5` | Supported; normalize older versions to v5 | A later safe save may persist the normalized v5 state. |
+| Integer greater than `5` | Unsupported future schema; do not normalize or apply | Set save status to `failed` with `lastError: "unsupported_schema"` and block notebook writes for this load instance. |
+| Any other present value | Invalid schema; do not normalize or apply | Use the same `unsupported_schema` fail-closed write block. |
+
+The primary/backup revision and snapshot-quality comparison selects the authoritative raw candidate before this compatibility check. If that candidate is future or invalid, history repair is not inspected and no migration, repair, apply, lifecycle snapshot, or normal save runs. The block is scoped to the current notebook and manager load instance; loading another notebook or a new manager instance resets it. A future schema is never automatically downgraded and written back.
+
 ## Backup and history
 
 - Primary saves write both `sourcesPlusState_<projectId>` and `sourcesPlusState_<projectId>__backup`.
@@ -170,3 +183,15 @@ Diagnostics and developer logs must stay more restrictive:
 ## Import/export boundary
 
 Settings export/import can include organization metadata, source titles, group names, tag labels, and source identifiers. It must continue to enforce file/text size limits, count limits, tree depth limits, cycle checks, source remapping, and tag normalization before applying imported data.
+
+Exports use this exact envelope:
+
+```json
+{
+  "format": "notebooklm-source-management-config",
+  "formatVersion": 1,
+  "data": {}
+}
+```
+
+Imports remain compatible with a bare raw-state object when none of `format`, `formatVersion`, or `data` is present. If any one of those envelope markers is present, all three must be valid: the exact format string above, integer `formatVersion: 1`, and an object `data` payload. Unknown or incomplete envelopes are rejected rather than reinterpreted as bare state. Imported state then passes the same schema gate: a missing version is legacy, integer versions `1`–`5` are normalizable, and future or invalid versions are rejected. Rejecting an imported config does not set the notebook-scoped write block because the imported payload is not authoritative stored state.
