@@ -338,7 +338,16 @@
         // exit so both single- and multi-source drops (which reuse one intent) are covered.
         // Group reorder at root and source-into-folder are NOT demoted.
         function computeDropIntent(args) {
-            const intent = computeDropIntentRaw(args);
+            const geometrySnapshot = args && args.geometrySnapshot
+                ? args.geometrySnapshot
+                : readDragGeometry({
+                    rootElement: args && args.rootElement,
+                    session: runtime.dragReflowSession || null
+                });
+            const intent = computeDropIntentRaw({
+                ...(args || {}),
+                geometrySnapshot
+            });
             if (getDragMode() !== 'classic') return intent;
             if (!intent || !intent.isRootList) return intent;
             const ctx = args && args.activeDragContext;
@@ -357,648 +366,715 @@
             };
         }
 
-        function computeDropIntentRaw({ clientX, clientY, rootElement, state, groupsById, parentMap, activeDragContext, prevIntent }) {
-            if (typeof clientY !== 'number' || !rootElement || typeof rootElement.querySelectorAll !== 'function') {
+        const DRAG_GEOMETRY_SELECTOR = [
+            '.source-item[data-source-key]',
+            '.group-container[data-group-id]',
+            '.group-header',
+            '.group-children',
+            '.ungrouped-section',
+            '.sp-ungroup-dropzone'
+        ].join(', ');
+        let dragGeometryDomGeneration = 0;
+        let pendingDragScrollPatch = null;
+
+        function copyRect(rect) {
+            if (!rect) return null;
+            const top = Number(rect.top);
+            const bottom = Number(rect.bottom);
+            const left = Number(rect.left);
+            const right = Number(rect.right);
+            const width = Number(rect.width);
+            const height = Number(rect.height);
+            if (
+                !Number.isFinite(top)
+                || !Number.isFinite(bottom)
+                || !Number.isFinite(left)
+                || !Number.isFinite(right)
+                || !Number.isFinite(width)
+                || !Number.isFinite(height)
+            ) {
                 return null;
             }
-            // Reject cursors outside the source-list viewport entirely — handleDragOver bubbles
-            // up from anywhere in the panel; without this we'd compute a phantom slot when the
-            // cursor is over the chat / studio / outer chrome.
-            if (typeof rootElement.getBoundingClientRect === 'function') {
-                const rootRect = rootElement.getBoundingClientRect();
-                if (rootRect && (clientY < rootRect.top || clientY >= rootRect.bottom)) {
+            return { top, bottom, left, right, width, height };
+        }
+
+        function translateRect(rect, deltaY) {
+            if (!rect || !Number.isFinite(deltaY) || deltaY === 0) return rect;
+            return {
+                top: rect.top + deltaY,
+                bottom: rect.bottom + deltaY,
+                left: rect.left,
+                right: rect.right,
+                width: rect.width,
+                height: rect.height
+            };
+        }
+
+        function translateRectBy(rect, deltaX, deltaY) {
+            if (!rect) return rect;
+            const x = Number.isFinite(deltaX) ? deltaX : 0;
+            const y = Number.isFinite(deltaY) ? deltaY : 0;
+            if (x === 0 && y === 0) return rect;
+            return {
+                top: rect.top + y,
+                bottom: rect.bottom + y,
+                left: rect.left + x,
+                right: rect.right + x,
+                width: rect.width,
+                height: rect.height
+            };
+        }
+
+        function translateGeometryEntry(entry, deltaX, deltaY) {
+            if (!entry) return;
+            entry.visualRect = translateRectBy(entry.visualRect, deltaX, deltaY);
+            entry.layoutRect = translateRectBy(entry.layoutRect, deltaX, deltaY);
+        }
+
+        function translateGeometrySnapshot(snapshot, rootRect, deltaX, deltaY) {
+            for (const source of snapshot.sourceEntries.values()) {
+                translateGeometryEntry(source, deltaX, deltaY);
+            }
+            for (const group of snapshot.groups.values()) {
+                translateGeometryEntry(group, deltaX, deltaY);
+                translateGeometryEntry(group.header, deltaX, deltaY);
+                translateGeometryEntry(group.children, deltaX, deltaY);
+            }
+            if (snapshot.bin) {
+                snapshot.bin.visualRect = translateRectBy(
+                    snapshot.bin.visualRect,
+                    deltaX,
+                    deltaY
+                );
+                snapshot.bin.layoutRect = translateRectBy(
+                    snapshot.bin.layoutRect,
+                    deltaX,
+                    deltaY
+                );
+            }
+            snapshot.rootRect = rootRect;
+        }
+
+        function resolveScrollPatchPlan(snapshot, scrollDeltas) {
+            if (!snapshot || !(scrollDeltas instanceof Map)) return null;
+            const plan = [];
+            for (const [target, delta] of scrollDeltas) {
+                if (
+                    !target
+                    || !delta
+                    || !Number.isFinite(delta.left)
+                    || !Number.isFinite(delta.top)
+                ) {
                     return null;
                 }
+                if (target === snapshot.rootElement) {
+                    plan.push({
+                        kind: 'root',
+                        deltaX: -delta.left,
+                        deltaY: -delta.top
+                    });
+                    continue;
+                }
+                const groupId = snapshot.groupIdByChildrenElement instanceof Map
+                    ? snapshot.groupIdByChildrenElement.get(target)
+                    : null;
+                const group = groupId ? snapshot.groups.get(groupId) : null;
+                if (
+                    !group
+                    || !group.children
+                    || group.children.element !== target
+                    || (
+                        typeof snapshot.rootElement.contains === 'function'
+                        && !snapshot.rootElement.contains(target)
+                    )
+                ) {
+                    return null;
+                }
+                let currentRect = null;
+                try {
+                    currentRect = copyRect(target.getBoundingClientRect());
+                } catch (_) {
+                    return null;
+                }
+                if (
+                    !currentRect
+                    || !sameResizeBox(currentRect, group.children.visualRect)
+                ) {
+                    return null;
+                }
+                plan.push({
+                    kind: 'group-children',
+                    groupId,
+                    deltaX: -delta.left,
+                    deltaY: -delta.top
+                });
             }
-            // Hysteresis: once the pointer was judged INSIDE a group last frame
-            // (into-group), widen that SAME group's container + header Y band by this
-            // many px so jitter at the edge doesn't flip into-group ↔ reorder frame to
-            // frame. Entering still needs the precise band; only leaving gets the slack.
-            const HYSTERESIS_PX = 8;
-            const _stickyGroupId = prevIntent && prevIntent.kind === 'into-group'
-                ? prevIntent.targetGroupId
-                : null;
-            const stateObj = state || {};
-            const root = stateObj.root = Array.isArray(stateObj.root) ? stateObj.root : [];
-            // Normalize ungrouped to an array for downstream consumers; the root host branch
-            // itself never targets state.ungrouped (see the root-host return block below).
-            const ungrouped = stateObj.ungrouped = Array.isArray(stateObj.ungrouped) ? stateObj.ungrouped : [];
+            return plan;
+        }
 
-            // Non-empty "Ungrouped" bin region. When state.ungrouped is non-empty,
-            // render() puts the bin items inside a sibling <div class="ungrouped-section">
-            // (NOT direct children of #sources-list), so the root scan below cannot see
-            // them and the root after-all path would mis-route a bin drop to the end of
-            // state.root. Handle the bin as its own drop target here: if the cursor is
-            // within the section's Y band, slot-detect among the bin's .source-item rows
-            // and return a state.ungrouped intent. Empty bin (ungrouped.length === 0) is
-            // NOT rendered as a section — that case is handled by the empty-bin trailing
-            // branch. `isUngroupedBin` is informational (parallels isRootList /
-            // isEmptyBinTrailing), letting drag feedback flag the bin.
-            if (ungrouped.length > 0 && typeof rootElement.querySelector === 'function') {
-                const binSection = rootElement.querySelector('.ungrouped-section');
-                if (binSection && typeof binSection.getBoundingClientRect === 'function') {
-                    const binRect = binSection.getBoundingClientRect();
-                    if (binRect && typeof binRect.top === 'number' && typeof binRect.bottom === 'number'
-                        && clientY >= binRect.top && clientY < binRect.bottom) {
-                        const binNodes = typeof binSection.querySelectorAll === 'function'
-                            ? binSection.querySelectorAll(':scope > .source-item')
-                            : [];
-                        const binItems = binNodes && typeof binNodes.forEach === 'function'
-                            ? Array.from(binNodes)
-                            : (Array.isArray(binNodes) ? binNodes : []);
-                        const binCandidates = [];
-                        for (const el of binItems) {
-                            if (!el || typeof el.getBoundingClientRect !== 'function') continue;
-                            if (el.classList && el.classList.contains('sp-drag-folded')) continue;
-                            const key = el.dataset ? el.dataset.sourceKey : null;
-                            if (!key) continue;
-                            binCandidates.push({ el, key });
-                        }
-                        let binBeforeIndex = -1;
-                        for (let i = 0; i < binCandidates.length; i += 1) {
-                            const rect = binCandidates[i].el.getBoundingClientRect();
-                            if (!rect || typeof rect.top !== 'number' || typeof rect.height !== 'number') continue;
-                            const midY = rect.top + rect.height / 2;
-                            if (midY > clientY) { binBeforeIndex = i; break; }
-                        }
-                        if (binCandidates.length === 0) {
-                            const insertIndex = resolveVisibleAnchorInsertIndex({
-                                fullList: ungrouped,
-                                visibleIdentities: [],
-                                anchorIdentity: null,
-                                edge: 'after',
-                                lastVisiblePolicy: FILTERED_LAST_VISIBLE_POLICY
-                            });
-                            if (insertIndex === null) return null;
-                            return {
-                                kind: 'after-source',
-                                targetGroup: null,
-                                targetList: ungrouped,
-                                insertIndex,
-                                targetGroupId: null,
-                                hostGroupContainerEl: null,
-                                slotKey: null,
-                                isUngroupedBin: true
-                            };
-                        }
-                        if (binBeforeIndex >= 0) {
-                            const slot = binCandidates[binBeforeIndex];
-                            const visibleIdentities = binCandidates.map((candidate) => ({
-                                type: 'source',
-                                key: candidate.key
-                            }));
-                            const insertIndex = resolveVisibleAnchorInsertIndex({
-                                fullList: ungrouped,
-                                visibleIdentities,
-                                anchorIdentity: { type: 'source', key: slot.key },
-                                edge: 'before',
-                                lastVisiblePolicy: FILTERED_LAST_VISIBLE_POLICY
-                            });
-                            if (insertIndex === null) return null;
-                            return {
-                                kind: 'before-source',
-                                targetGroup: null,
-                                targetList: ungrouped,
-                                insertIndex,
-                                targetGroupId: null,
-                                hostGroupContainerEl: null,
-                                slotKey: slot.key,
-                                isUngroupedBin: true
-                            };
-                        }
-                        const lastBin = binCandidates[binCandidates.length - 1];
-                        const visibleIdentities = binCandidates.map((candidate) => ({
-                            type: 'source',
-                            key: candidate.key
-                        }));
-                        const insertIndex = resolveVisibleAnchorInsertIndex({
-                            fullList: ungrouped,
-                            visibleIdentities,
-                            anchorIdentity: { type: 'source', key: lastBin.key },
-                            edge: 'after',
-                            lastVisiblePolicy: FILTERED_LAST_VISIBLE_POLICY
-                        });
-                        if (insertIndex === null) return null;
-                        return {
-                            kind: 'after-source',
-                            targetGroup: null,
-                            targetList: ungrouped,
-                            insertIndex,
-                            targetGroupId: null,
-                            hostGroupContainerEl: null,
-                            slotKey: lastBin.key,
-                            isUngroupedBin: true
-                        };
+        function applyScrollGeometryPatch(snapshot, plan) {
+            if (!snapshot || !Array.isArray(plan)) return false;
+            for (const patch of plan) {
+                if (patch.kind === 'root') {
+                    translateGeometrySnapshot(
+                        snapshot,
+                        snapshot.rootRect,
+                        patch.deltaX,
+                        patch.deltaY
+                    );
+                    continue;
+                }
+                for (const source of snapshot.sourceEntries.values()) {
+                    const parentGroup = source.parentGroupId
+                        ? snapshot.groups.get(source.parentGroupId) || null
+                        : null;
+                    if (
+                        source.parentGroupId === patch.groupId
+                        || groupIsDescendantOf(parentGroup, patch.groupId, snapshot.groups)
+                    ) {
+                        translateGeometryEntry(source, patch.deltaX, patch.deltaY);
+                    }
+                }
+                for (const group of snapshot.groups.values()) {
+                    if (!groupIsDescendantOf(group, patch.groupId, snapshot.groups)) continue;
+                    translateGeometryEntry(group, patch.deltaX, patch.deltaY);
+                    translateGeometryEntry(group.header, patch.deltaX, patch.deltaY);
+                    translateGeometryEntry(group.children, patch.deltaX, patch.deltaY);
+                }
+            }
+            return true;
+        }
+
+        function getOwnShiftY(element) {
+            return extractInlineTranslateY(element);
+        }
+
+        function getInheritedShiftY(element, rootElement) {
+            let total = 0;
+            let cursor = element && element.parentElement;
+            const seen = new Set();
+            while (cursor && cursor !== rootElement && !seen.has(cursor)) {
+                seen.add(cursor);
+                total += getOwnShiftY(cursor);
+                cursor = cursor.parentElement;
+            }
+            return total;
+        }
+
+        function getAncestorGroupId(element, rootElement) {
+            let cursor = element && element.parentElement;
+            const seen = new Set();
+            while (cursor && cursor !== rootElement && !seen.has(cursor)) {
+                seen.add(cursor);
+                if (
+                    cursor.classList
+                    && typeof cursor.classList.contains === 'function'
+                    && cursor.classList.contains('group-container')
+                ) {
+                    return cursor.dataset ? cursor.dataset.groupId || null : null;
+                }
+                cursor = cursor.parentElement;
+            }
+            return null;
+        }
+
+        function createGeometryEntry({
+            type,
+            key,
+            element,
+            visualRect,
+            rootElement
+        }) {
+            const ownShiftY = getOwnShiftY(element);
+            const inheritedShiftY = getInheritedShiftY(element, rootElement);
+            return {
+                identity: type === 'group'
+                    ? { type: 'group', id: key }
+                    : { type: 'source', key },
+                element,
+                visualRect,
+                isFolded: Boolean(
+                    element
+                    && element.classList
+                    && typeof element.classList.contains === 'function'
+                    && element.classList.contains('sp-drag-folded')
+                ),
+                ownShiftY,
+                inheritedShiftY,
+                layoutRect: translateRect(visualRect, -(ownShiftY + inheritedShiftY))
+            };
+        }
+
+        function readDragGeometry({ rootElement, session } = {}) {
+            runtime.dragGeometryReadCount = (Number(runtime.dragGeometryReadCount) || 0) + 1;
+            const cached = runtime.dragGeometrySnapshot;
+            let rootRect = null;
+            if (
+                runtime.dragGeometryDirty === true
+                && runtime.dragGeometryInvalidationKind === 'scroll'
+                && pendingDragScrollPatch
+                && pendingDragScrollPatch.snapshot === cached
+                && pendingDragScrollPatch.rootElement === rootElement
+                && pendingDragScrollPatch.session === session
+                && pendingDragScrollPatch.domGeneration === dragGeometryDomGeneration
+                && cached
+                && cached.rootElement === rootElement
+                && cached.session === session
+                && cached.domGeneration === dragGeometryDomGeneration
+            ) {
+                try {
+                    rootRect = copyRect(rootElement.getBoundingClientRect());
+                } catch (_) {
+                    rootRect = null;
+                }
+                const previousRootRect = cached.rootRect;
+                const deltaX = previousRootRect && rootRect
+                    ? rootRect.left - previousRootRect.left
+                    : 0;
+                const deltaY = previousRootRect && rootRect
+                    ? rootRect.top - previousRootRect.top
+                    : 0;
+                const isPureViewportTranslation = Boolean(
+                    previousRootRect
+                    && rootRect
+                    && rootRect.width === previousRootRect.width
+                    && rootRect.height === previousRootRect.height
+                    && rootRect.right - previousRootRect.right === deltaX
+                    && rootRect.bottom - previousRootRect.bottom === deltaY
+                );
+                const scrollPatchPlan = isPureViewportTranslation
+                    ? resolveScrollPatchPlan(cached, pendingDragScrollPatch.deltas)
+                    : null;
+                if (scrollPatchPlan) {
+                    translateGeometrySnapshot(
+                        cached,
+                        rootRect,
+                        deltaX,
+                        deltaY
+                    );
+                    if (applyScrollGeometryPatch(cached, scrollPatchPlan)) {
+                        pendingDragScrollPatch = null;
+                        runtime.dragGeometryDirty = false;
+                        runtime.dragGeometryInvalidationKind = null;
+                        runtime.dragGeometryLastInvalidation = null;
+                        return cached;
                     }
                 }
             }
-
-            // Find the deepest group-container whose children-area encloses clientY.
-            const containers = rootElement.querySelectorAll('.group-container');
-            const containerList = containers && typeof containers.forEach === 'function'
-                ? Array.from(containers)
-                : (Array.isArray(containers) ? containers : []);
-
-            const getDepth = (groupId) => {
-                if (!groupId || !parentMap || typeof parentMap.get !== 'function') return 0;
-                let depth = 0;
-                let cursor = groupId;
-                const seen = new Set([cursor]);
-                while (true) {
-                    const p = parentMap.get(cursor);
-                    if (!p || seen.has(p)) break;
-                    seen.add(p);
-                    depth += 1;
-                    cursor = p;
+            if (runtime.dragGeometryDirty === true) {
+                pendingDragScrollPatch = null;
+            }
+            if (
+                runtime.dragGeometryDirty === false
+                && cached
+                && cached.rootElement === rootElement
+                && cached.session === session
+            ) {
+                try {
+                    rootRect = copyRect(rootElement.getBoundingClientRect());
+                } catch (_) {
+                    runtime.dragGeometryDirty = true;
+                    return null;
                 }
-                return depth;
-            };
+                if (!rootRect) {
+                    runtime.dragGeometryDirty = true;
+                    return null;
+                }
+                const previousRootRect = cached.rootRect;
+                if (
+                    previousRootRect
+                    && rootRect.top === previousRootRect.top
+                    && rootRect.bottom === previousRootRect.bottom
+                    && rootRect.left === previousRootRect.left
+                    && rootRect.right === previousRootRect.right
+                    && rootRect.width === previousRootRect.width
+                    && rootRect.height === previousRootRect.height
+                ) {
+                    cached.rootRect = rootRect;
+                    return cached;
+                }
+                const deltaX = previousRootRect
+                    ? rootRect.left - previousRootRect.left
+                    : 0;
+                const deltaY = previousRootRect
+                    ? rootRect.top - previousRootRect.top
+                    : 0;
+                const isPureViewportTranslation = Boolean(
+                    previousRootRect
+                    && rootRect.width === previousRootRect.width
+                    && rootRect.height === previousRootRect.height
+                    && rootRect.right - previousRootRect.right === deltaX
+                    && rootRect.bottom - previousRootRect.bottom === deltaY
+                );
+                if (isPureViewportTranslation) {
+                    translateGeometrySnapshot(
+                        cached,
+                        rootRect,
+                        deltaX,
+                        deltaY
+                    );
+                    return cached;
+                }
+                runtime.dragGeometryDirty = true;
+            }
+            if (
+                !rootElement
+                || typeof rootElement.getBoundingClientRect !== 'function'
+                || typeof rootElement.querySelectorAll !== 'function'
+            ) {
+                runtime.dragGeometryDirty = true;
+                return null;
+            }
 
-            const unshiftedRect = (el) => {
-                if (!el || typeof el.getBoundingClientRect !== 'function') return null;
-                const rect = el.getBoundingClientRect();
-                if (!rect || typeof rect.top !== 'number' || typeof rect.height !== 'number') return null;
-                const shift = extractInlineTranslateY(el);
+            let elements = null;
+            const rectByElement = new Map();
+            try {
+                rootRect = rootRect || copyRect(rootElement.getBoundingClientRect());
+                if (!rootRect) throw new Error('invalid root rect');
+                elements = Array.from(rootElement.querySelectorAll(DRAG_GEOMETRY_SELECTOR));
+                for (const element of elements) {
+                    if (!element || rectByElement.has(element)) continue;
+                    if (typeof element.getBoundingClientRect !== 'function') {
+                        throw new Error('geometry element missing rect reader');
+                    }
+                    const rect = copyRect(element.getBoundingClientRect());
+                    if (!rect) throw new Error('invalid geometry rect');
+                    rectByElement.set(element, rect);
+                }
+            } catch (_) {
+                runtime.dragGeometryDirty = true;
+                return null;
+            }
+
+            const sourceElements = new Map();
+            const groupElements = new Map();
+            const sourceEntries = new Map();
+            const groups = new Map();
+            const groupHeaders = [];
+            const groupChildren = [];
+            let binElement = null;
+            let dropzoneElement = null;
+
+            for (const element of elements) {
+                if (!element || !element.classList) continue;
+                if (
+                    typeof element.classList.contains === 'function'
+                    && element.classList.contains('source-item')
+                ) {
+                    const key = element.dataset ? element.dataset.sourceKey : null;
+                    if (!key || sourceElements.has(key)) continue;
+                    sourceElements.set(key, element);
+                    const entry = createGeometryEntry({
+                        type: 'source',
+                        key,
+                        element,
+                        visualRect: rectByElement.get(element),
+                        rootElement
+                    });
+                    entry.parentGroupId = getAncestorGroupId(element, rootElement);
+                    sourceEntries.set(key, entry);
+                    continue;
+                }
+                if (
+                    typeof element.classList.contains === 'function'
+                    && element.classList.contains('group-container')
+                ) {
+                    const id = element.dataset ? element.dataset.groupId : null;
+                    if (!id || groupElements.has(id)) continue;
+                    groupElements.set(id, element);
+                    const entry = createGeometryEntry({
+                        type: 'group',
+                        key: id,
+                        element,
+                        visualRect: rectByElement.get(element),
+                        rootElement
+                    });
+                    entry.parentGroupId = getAncestorGroupId(element, rootElement);
+                    entry.header = null;
+                    entry.children = null;
+                    entry.items = [];
+                    groups.set(id, entry);
+                    continue;
+                }
+                if (
+                    typeof element.classList.contains === 'function'
+                    && element.classList.contains('group-header')
+                ) {
+                    groupHeaders.push(element);
+                    continue;
+                }
+                if (
+                    typeof element.classList.contains === 'function'
+                    && element.classList.contains('group-children')
+                ) {
+                    groupChildren.push(element);
+                    continue;
+                }
+                if (
+                    typeof element.classList.contains === 'function'
+                    && element.classList.contains('ungrouped-section')
+                ) {
+                    binElement = element;
+                    continue;
+                }
+                if (
+                    typeof element.classList.contains === 'function'
+                    && element.classList.contains('sp-ungroup-dropzone')
+                ) {
+                    dropzoneElement = element;
+                }
+            }
+
+            const createBandEntry = (element) => {
+                if (!element) return null;
+                const ownShiftY = getOwnShiftY(element);
+                const inheritedShiftY = getInheritedShiftY(element, rootElement);
+                const visualRect = rectByElement.get(element);
                 return {
-                    top: rect.top - shift,
-                    bottom: rect.bottom - shift,
-                    height: rect.height,
-                    left: typeof rect.left === 'number' ? rect.left : 0,
-                    width: typeof rect.width === 'number' ? rect.width : 0
+                    element,
+                    visualRect,
+                    ownShiftY,
+                    inheritedShiftY,
+                    layoutRect: translateRect(visualRect, -(ownShiftY + inheritedShiftY))
                 };
             };
 
-            // Pick deepest container that contains pointer.
-            //
-            // For TOP-LEVEL group containers, apply a left/right X-split rule
-            // RESTRICTED TO COLLAPSED FOLDERS' HEADER STRIPS:
-            // - folder is COLLAPSED + cursor on header, LEFT HALF (X < header.left
-            //   + header.width / 2) → treated as OUTSIDE the container. User is
-            //   signalling "this folder should sibling-reorder, I'm not trying to
-            //   enter it". chosenContainer = null → root-level slot detection →
-            //   source goes to ungrouped, group is reordered.
-            // - folder is COLLAPSED + cursor on header, RIGHT HALF (X >= midX) →
-            //   INSIDE. User wants into-group behavior. hover-expand timer arms.
-            // - folder is EXPANDED → X-split DOES NOT APPLY at all. Cursor over
-            //   the header resolves to into-group (header drop), cursor over the
-            //   children area resolves to slot detection or into-group sentinel
-            //   normally.
-            // - cursor BELOW the header (children area / gap) on ANY folder →
-            //   X-split DOES NOT APPLY (same as above — pass 1 only ever fires
-            //   when cursor Y is in header's Y range).
-            //
-            // Why collapsed-only: an expanded folder has its sources visible to
-            // the user, so the natural escape gesture is Y position (gap between
-            // folders / above-below). Forcing left-half exclusion on expanded
-            // headers fights user intuition that "the header is a valid drop
-            // target — clicking/dragging the header should add to the folder".
-            // Collapsed folders only show their header — the children aren't on
-            // screen, so the user has no Y corridor inside; X-split is the only
-            // generous escape route, and applying it there matches the visual
-            // signal that the folder is a single "chip" the user can drop near.
-            //
-            // Why header-only (within collapsed): the X-split corridor is a
-            // gesture about the folder AS A UNIT — "I'm dragging near/around this
-            // folder, not into it". The header is the only part that visually
-            // represents the folder as a unit. Even when collapsed there's no
-            // children area, but keeping the header-only restriction means future
-            // hover-expand or other geometry changes don't accidentally extend
-            // the corridor beyond where the user can see the folder strip.
-            //
-            // Rationale for the X-split corridor itself: top-level group headers
-            // span the full panel width (~350-450px), so a left/right split gives
-            // the user a generous physical corridor on the left to express
-            // "between groups" / "at root level". The previous attempt (8px edge
-            // zones at top/bottom of each container) was too small — most of the
-            // group's Y-range was still "inside" and the user kept triggering
-            // hover-expand by accident.
-            //
-            // Nested groups INHERIT their top-level ancestor's X-split exclusion:
-            // when a user moves cursor into the left-half corridor of a collapsed
-            // top-level group A's header (rare but possible if A holds nested
-            // groups that get drag-folded out), any nested group B inside A is
-            // also excluded so cursor over B does NOT sneakily route into B.
-            const _isTopLevelGroup = (gid) => {
-                if (!gid) return false;
-                if (!parentMap || typeof parentMap.get !== 'function') return true;
-                const p = parentMap.get(gid);
-                return !p;
+            for (const headerElement of groupHeaders) {
+                const parent = headerElement.parentElement;
+                const id = parent && parent.dataset ? parent.dataset.groupId : null;
+                const group = id ? groups.get(id) : null;
+                if (group && !group.header) group.header = createBandEntry(headerElement);
+            }
+            for (const childrenElement of groupChildren) {
+                const parent = childrenElement.parentElement;
+                const id = parent && parent.dataset ? parent.dataset.groupId : null;
+                const group = id ? groups.get(id) : null;
+                if (group && !group.children) group.children = createBandEntry(childrenElement);
+            }
+
+            const rootItems = [];
+            const binItems = [];
+            for (const element of elements) {
+                const sourceKey = element && element.dataset
+                    ? element.dataset.sourceKey
+                    : null;
+                const groupId = element && element.dataset
+                    ? element.dataset.groupId
+                    : null;
+                const entry = sourceKey
+                    ? sourceEntries.get(sourceKey)
+                    : (groupId ? groups.get(groupId) : null);
+                if (!entry || entry.element !== element) continue;
+                if (entry.element.parentElement === rootElement) {
+                    rootItems.push(entry);
+                } else if (sourceKey && binElement && entry.element.parentElement === binElement) {
+                    entry.inBin = true;
+                    binItems.push(entry);
+                } else if (entry.parentGroupId) {
+                    const parentGroup = groups.get(entry.parentGroupId);
+                    if (
+                        parentGroup
+                        && parentGroup.children
+                        && entry.element.parentElement === parentGroup.children.element
+                    ) {
+                        parentGroup.items.push(entry);
+                    }
+                }
+            }
+
+            const snapshot = {
+                rootElement,
+                session,
+                domGeneration: dragGeometryDomGeneration,
+                rootRect,
+                bin: binElement
+                    ? {
+                        element: binElement,
+                        visualRect: rectByElement.get(binElement),
+                        layoutRect: translateRect(
+                            rectByElement.get(binElement),
+                            -getInheritedShiftY(binElement, rootElement)
+                        ),
+                        items: binItems
+                    }
+                    : null,
+                groups,
+                groupIdByChildrenElement: new Map(
+                    Array.from(groups.entries())
+                        .filter(([, group]) => group && group.children && group.children.element)
+                        .map(([groupId, group]) => [group.children.element, groupId])
+                ),
+                rootItems,
+                sourceElements,
+                groupElements,
+                sourceEntries,
+                dropzoneElement
             };
-            const _hasClientX = typeof clientX === 'number';
-
-            // Pass 1: identify top-level groups whose X-split rule excludes them
-            // at the current cursor position. Only COLLAPSED top-level folders
-            // participate — expanded folders are skipped because the user has
-            // visual access to the children and uses Y-axis gaps for escape, not
-            // header X position. X-split is evaluated against the HEADER's rect
-            // so cursor must be in the header's Y range for the corridor to fire.
-            // Cached so pass 2 can apply inheritance to nested groups without
-            // re-querying ancestor rects.
-            const _xSplitExcludedTopIds = new Set();
-            if (_hasClientX) {
-                const _groupsByIdSafe = groupsById && typeof groupsById.get === 'function'
-                    ? groupsById : null;
-                for (const container of containerList) {
-                    if (!container || !container.dataset) continue;
-                    const _gid = container.dataset.groupId;
-                    if (!_gid) continue;
-                    if (!_isTopLevelGroup(_gid)) continue;
-                    if (container.classList && container.classList.contains('sp-drag-folded')) continue;
-                    const _grp = _groupsByIdSafe ? _groupsByIdSafe.get(_gid) : null;
-                    if (!_grp || !_grp.collapsed) continue;
-                    const _headerEl = typeof container.querySelector === 'function'
-                        ? container.querySelector('.group-header')
-                        : null;
-                    if (!_headerEl) continue;
-                    const _hr = unshiftedRect(_headerEl);
-                    if (!_hr || _hr.width <= 0) continue;
-                    if (clientY < _hr.top || clientY >= _hr.bottom) continue;
-                    const _midX = _hr.left + _hr.width / 2;
-                    if (clientX < _midX) _xSplitExcludedTopIds.add(_gid);
-                }
+            try {
+                refreshDragGeometryLifecycleTargets(snapshot);
+            } catch (_) {
+                runtime.dragGeometryDirty = true;
+                return null;
             }
+            runtime.dragGeometrySnapshot = snapshot;
+            runtime.dragGeometryDirty = false;
+            runtime.dragGeometryInvalidationKind = null;
+            runtime.dragGeometryLastInvalidation = null;
+            pendingDragScrollPatch = null;
+            return snapshot;
+        }
 
-            // Pass 2: pick deepest container that contains pointer AND isn't excluded
-            // (directly or via top-level ancestor) by X-split.
-            let chosenContainer = null;
-            let chosenDepth = -1;
-            for (const container of containerList) {
-                if (!container || !container.dataset) continue;
-                if (container.classList && container.classList.contains('sp-drag-folded')) continue;
-                const r = unshiftedRect(container);
-                if (!r) continue;
-                // Sticky hysteresis: if this is the group we were inside last frame,
-                // extend its Y band so a few px of overshoot doesn't drop the pointer
-                // out of the container (which would flip into-group → reorder).
-                const _cBuf = (_stickyGroupId && container.dataset.groupId === _stickyGroupId)
-                    ? HYSTERESIS_PX : 0;
-                if (clientY < r.top - _cBuf || clientY >= r.bottom + _cBuf) continue;
-
-                // Resolve this container's top-level ancestor (self if already top-level)
-                // and skip if that ancestor is in the X-split excluded set.
-                let _topAncestorId = container.dataset.groupId;
-                if (parentMap && typeof parentMap.get === 'function') {
-                    const _seen = new Set([_topAncestorId]);
-                    while (true) {
-                        const _pid = parentMap.get(_topAncestorId);
-                        if (!_pid || _seen.has(_pid)) break;
-                        _seen.add(_pid);
-                        _topAncestorId = _pid;
-                    }
-                }
-                if (_xSplitExcludedTopIds.has(_topAncestorId)) continue;
-
-                const d = getDepth(container.dataset.groupId);
-                if (d > chosenDepth) {
-                    chosenContainer = container;
-                    chosenDepth = d;
-                }
+        function invalidateDragGeometry(reason, {
+            schedule = true,
+            scrollTarget = null,
+            scrollDeltaLeft = 0,
+            scrollDeltaTop = 0
+        } = {}) {
+            const normalizedReason = typeof reason === 'string' && reason
+                ? reason
+                : 'unspecified';
+            const wasDirty = runtime.dragGeometryDirty === true;
+            if (normalizedReason === 'render_rows_replaced') {
+                dragGeometryDomGeneration += 1;
             }
-
-            let host = null;
-            let hostGroup = null;
-            let hostContainerEl = null;
-
-            if (chosenContainer) {
-                const groupId = chosenContainer.dataset && chosenContainer.dataset.groupId;
-                const groupObj = groupId && groupsById && typeof groupsById.get === 'function'
-                    ? groupsById.get(groupId)
-                    : null;
-                if (!groupObj) return null;
-
-                // chosenContainer may ride a reflow translateY: a nested subfolder's
-                // .group-container is shifted +slotHeight whenever a slot lands at/before it
-                // in its PARENT's children. Its .group-header / .group-children carry NO
-                // inline transform of their own, yet getBoundingClientRect inherits the
-                // container's shift — and unshiftedRect only strips an element's OWN
-                // transform. So the header/children band reads below must additionally
-                // subtract this container shift to live in the SAME unshifted frame Pass-2's
-                // container band (line ~421) already trusts. Without it, a cursor genuinely
-                // PAST the header is mis-read as into-group for the frame the shift survives,
-                // producing the nested-subfolder drag "twitch".
-                const _containerShift = extractInlineTranslateY(chosenContainer);
-
-                const headerEl = typeof chosenContainer.querySelector === 'function'
-                    ? chosenContainer.querySelector('.group-header')
-                    : null;
-                const childrenEl = typeof chosenContainer.querySelector === 'function'
-                    ? chosenContainer.querySelector('.group-children')
-                    : null;
-
-                // Pointer in group-header → into-group sentinel.
-                if (headerEl) {
-                    const _headerRaw = unshiftedRect(headerEl);
-                    // Subtract the inherited container shift (see _containerShift above) so the
-                    // band is measured at the header's true layout position.
-                    const headerR = _headerRaw
-                        ? { top: _headerRaw.top - _containerShift, bottom: _headerRaw.bottom - _containerShift, height: _headerRaw.height }
-                        : null;
-                    // Same hysteresis as container selection: keep the header band
-                    // sticky for the group we were inside last frame so edge jitter
-                    // doesn't flip into-group ↔ reorder.
-                    const _hBuf = (_stickyGroupId && groupObj.id === _stickyGroupId) ? HYSTERESIS_PX : 0;
-                    if (headerR && clientY >= headerR.top - _hBuf && clientY < headerR.bottom + _hBuf) {
-                        return {
-                            kind: 'into-group',
-                            targetGroup: groupObj,
-                            targetList: Array.isArray(groupObj.children) ? groupObj.children : (groupObj.children = []),
-                            insertIndex: 0,
-                            targetGroupId: groupObj.id,
-                            hostGroupContainerEl: chosenContainer,
-                            slotKey: null
-                        };
-                    }
-                }
-
-                // Group drag override: cursor inside another group's body (but NOT on its
-                // header) should mean "reorder at THAT group's sibling level", NOT "nest
-                // dragged group inside it". Without this, dragging a folder over another
-                // folder always nested — users couldn't reorder folders by drag. Header
-                // drops still nest (handled above). Resolve host as chosenContainer's parent
-                // group (or root if chosenContainer is top-level), then fall through to slot
-                // detection so the chosen container itself becomes a slot candidate.
-                const _isGroupDrag = activeDragContext && activeDragContext.kind === 'group';
-                if (_isGroupDrag) {
-                    const _parentGroupId = parentMap && typeof parentMap.get === 'function'
-                        ? parentMap.get(groupId)
-                        : null;
-                    if (_parentGroupId) {
-                        const _parentGroup = groupsById && typeof groupsById.get === 'function'
-                            ? groupsById.get(_parentGroupId)
-                            : null;
-                        if (_parentGroup) {
-                            host = Array.isArray(_parentGroup.children) ? _parentGroup.children : (_parentGroup.children = []);
-                            hostGroup = _parentGroup;
-                            hostContainerEl = typeof rootElement.querySelector === 'function'
-                                ? rootElement.querySelector('[data-group-id="' + cssEscape(_parentGroupId) + '"]')
-                                : null;
-                        }
-                    }
-                    // else: chosenContainer is top-level → host stays null → slot detection
-                    // below uses the root list (state.root) via the DOM.
-                } else if (childrenEl) {
-                    const _childrenRaw = unshiftedRect(childrenEl);
-                    // Subtract the inherited container shift (see _containerShift above) so the
-                    // children band is measured at its true layout position.
-                    const childrenR = _childrenRaw
-                        ? { top: _childrenRaw.top - _containerShift, bottom: _childrenRaw.bottom - _containerShift, height: _childrenRaw.height }
-                        : null;
-                    if (childrenR && clientY >= childrenR.top && clientY < childrenR.bottom) {
-                        const groupChildren = Array.isArray(groupObj.children) ? groupObj.children : (groupObj.children = []);
-                        // Empty children area → user clearly wants 'into-group'.
-                        if (groupChildren.length === 0) {
-                            return {
-                                kind: 'into-group',
-                                targetGroup: groupObj,
-                                targetList: groupChildren,
-                                insertIndex: 0,
-                                targetGroupId: groupObj.id,
-                                hostGroupContainerEl: chosenContainer,
-                                slotKey: null
-                            };
-                        }
-                        host = groupChildren;
-                        hostGroup = groupObj;
-                        hostContainerEl = chosenContainer;
-                    } else {
-                        // Pointer is inside container but not header / not children-area.
-                        // Treat as into-group (gap between header and children).
-                        const groupChildren = Array.isArray(groupObj.children) ? groupObj.children : (groupObj.children = []);
-                        return {
-                            kind: 'into-group',
-                            targetGroup: groupObj,
-                            targetList: groupChildren,
-                            insertIndex: 0,
-                            targetGroupId: groupObj.id,
-                            hostGroupContainerEl: chosenContainer,
-                            slotKey: null
-                        };
-                    }
-                } else {
-                    // No children-area element; treat container as into-group sentinel.
-                    const groupChildren = Array.isArray(groupObj.children) ? groupObj.children : (groupObj.children = []);
-                    return {
-                        kind: 'into-group',
-                        targetGroup: groupObj,
-                        targetList: groupChildren,
-                        insertIndex: 0,
-                        targetGroupId: groupObj.id,
-                        hostGroupContainerEl: chosenContainer,
-                        slotKey: null
+            const canRecordScroll = Boolean(
+                normalizedReason === 'scroll_position_changed'
+                && scrollTarget
+                && Number.isFinite(scrollDeltaLeft)
+                && Number.isFinite(scrollDeltaTop)
+                && (
+                    (scrollDeltaLeft !== 0)
+                    || (scrollDeltaTop !== 0)
+                )
+            );
+            const cached = runtime.dragGeometrySnapshot;
+            const canStartScrollPatch = Boolean(
+                canRecordScroll
+                && !wasDirty
+                && cached
+                && cached.domGeneration === dragGeometryDomGeneration
+            );
+            const canExtendScrollPatch = Boolean(
+                canRecordScroll
+                && wasDirty
+                && runtime.dragGeometryInvalidationKind === 'scroll'
+                && pendingDragScrollPatch
+                && pendingDragScrollPatch.snapshot === cached
+                && pendingDragScrollPatch.domGeneration === dragGeometryDomGeneration
+            );
+            if (canStartScrollPatch || canExtendScrollPatch) {
+                if (canStartScrollPatch) {
+                    pendingDragScrollPatch = {
+                        snapshot: cached,
+                        rootElement: cached.rootElement,
+                        session: cached.session,
+                        domGeneration: dragGeometryDomGeneration,
+                        deltas: new Map()
                     };
                 }
-            }
-
-            // Build the DOM children list for slot detection.
-            let childElements;
-            if (host) {
-                // Inside a group: direct children of .group-children — both .source-item and .group-container at depth+1.
-                const groupChildrenEl = hostContainerEl && typeof hostContainerEl.querySelector === 'function'
-                    ? hostContainerEl.querySelector('.group-children')
-                    : null;
-                if (!groupChildrenEl || typeof groupChildrenEl.querySelectorAll !== 'function') {
-                    childElements = [];
-                } else {
-                    // Use selector that matches direct children only via :scope > * if available;
-                    // fall back to all descendants but filter to entries owned by this group via dataset checks.
-                    const allDesc = groupChildrenEl.querySelectorAll(':scope > .group-container, :scope > .source-item');
-                    childElements = allDesc && typeof allDesc.forEach === 'function'
-                        ? Array.from(allDesc)
-                        : (Array.isArray(allDesc) ? allDesc : []);
-                }
+                const priorDelta = pendingDragScrollPatch.deltas.get(scrollTarget)
+                    || { left: 0, top: 0 };
+                pendingDragScrollPatch.deltas.set(scrollTarget, {
+                    left: priorDelta.left + scrollDeltaLeft,
+                    top: priorDelta.top + scrollDeltaTop
+                });
+                runtime.dragGeometryInvalidationKind = 'scroll';
             } else {
-                // Root host. state.root is a single ordered heterogeneous list (groups + positioned sources).
-                // Use the children directly under rootElement.
-                const rootChildren = typeof rootElement.querySelectorAll === 'function'
-                    ? rootElement.querySelectorAll(':scope > .group-container, :scope > .source-item')
-                    : [];
-                childElements = rootChildren && typeof rootChildren.forEach === 'function'
-                    ? Array.from(rootChildren)
-                    : (Array.isArray(rootChildren) ? rootChildren : []);
+                pendingDragScrollPatch = null;
+                runtime.dragGeometryInvalidationKind = wasDirty ? 'mixed' : 'non_scroll';
             }
+            runtime.dragGeometryDirty = true;
+            runtime.dragGeometryLastInvalidation = normalizedReason;
+            if (schedule) scheduleDragFrameFromLatestPointer();
+        }
 
-            // Filter out folded items (they have height 0 / no meaningful position) and
-            // resolve a stable per-element key + kind. Tracking children flat so the index
-            // we use for downstream reflow matches the host array (parent.children) ordering.
-            const candidates = [];
-            for (const el of childElements) {
-                if (!el || typeof el.getBoundingClientRect !== 'function') continue;
-                if (el.classList && el.classList.contains('sp-drag-folded')) continue;
-                const isSrc = el.classList && el.classList.contains('source-item');
-                const isGrp = el.classList && el.classList.contains('group-container');
-                if (!isSrc && !isGrp) continue;
-                const key = isSrc
-                    ? (el.dataset ? el.dataset.sourceKey : null)
-                    : (el.dataset ? el.dataset.groupId : null);
-                if (!key) continue;
-                candidates.push({ el, key, kind: isSrc ? 'source' : 'group' });
-            }
-            const visibleIdentities = candidates.map((candidate) => (
-                candidate.kind === 'source'
-                    ? { type: 'source', key: candidate.key }
-                    : { type: 'group', id: candidate.key }
-            ));
+        function getEntryMidY(entry) {
+            const rect = entry && entry.visualRect;
+            return rect ? rect.top + rect.height / 2 : Number.POSITIVE_INFINITY;
+        }
 
-            // Slot match: first candidate whose VISUAL mid-Y > clientY → insert before it.
-            // Uses raw rect (no shift subtraction) so when a sibling has been translateY'd
-            // down to "open" a slot above it, the pointer crosses its new visual mid sooner
-            // — symmetric with the downward-avoidance case. Stability: a sibling only has
-            // shift != 0 when intent.insertIndex routes through (or before) it; once cursor
-            // crosses its visual mid moving down, intent flips, sibling unshifts on the
-            // next frame, its visual mid returns to layout mid (no longer > clientY) —
-            // single latching transition per shift state, no oscillation.
+        function isFoldedGeometryEntry(entry) {
+            return Boolean(entry && entry.isFolded);
+        }
+
+        function identityForEntry(entry) {
+            return entry && entry.identity ? entry.identity : null;
+        }
+
+        function resolveSlotIntent({
+            candidates,
+            targetList,
+            targetGroup,
+            targetGroupId,
+            hostGroupContainerEl,
+            clientY,
+            isRootList,
+            isUngroupedBin,
+            activeDragContext,
+            ungrouped
+        }) {
             let beforeIndex = -1;
-            for (let i = 0; i < candidates.length; i += 1) {
-                const el = candidates[i].el;
-                if (!el || typeof el.getBoundingClientRect !== 'function') continue;
-                const rect = el.getBoundingClientRect();
-                if (!rect || typeof rect.top !== 'number' || typeof rect.height !== 'number') continue;
-                const midY = rect.top + rect.height / 2;
-                if (midY > clientY) {
-                    beforeIndex = i;
+            for (let index = 0; index < candidates.length; index += 1) {
+                if (getEntryMidY(candidates[index]) > clientY) {
+                    beforeIndex = index;
                     break;
                 }
             }
-
-            // Resolve insertIndex against the actual targetList (state.root / state.ungrouped / group.children).
-            // For group host: resolve the visible slot anchor back into the full host array.
-            // For root host: insertIndex is in state.root (positioned drop) or state.ungrouped (empty-bin trailing).
-            if (host) {
-                if (candidates.length === 0) {
-                    const insertIndex = resolveVisibleAnchorInsertIndex({
-                        fullList: host,
-                        visibleIdentities,
-                        anchorIdentity: null,
-                        edge: 'after',
-                        lastVisiblePolicy: FILTERED_LAST_VISIBLE_POLICY
-                    });
-                    if (insertIndex === null) return null;
-                    return {
-                        kind: 'into-group',
-                        targetGroup: hostGroup,
-                        targetList: host,
-                        insertIndex,
-                        targetGroupId: hostGroup.id,
-                        hostGroupContainerEl: hostContainerEl,
-                        slotKey: null
-                    };
-                }
-                if (beforeIndex >= 0) {
-                    const slot = candidates[beforeIndex];
-                    const slotKind = slot.kind === 'source' ? 'before-source' : 'before-group';
-                    const anchorIdentity = slot.kind === 'source'
-                        ? { type: 'source', key: slot.key }
-                        : { type: 'group', id: slot.key };
-                    const insertIndex = resolveVisibleAnchorInsertIndex({
-                        fullList: host,
-                        visibleIdentities,
-                        anchorIdentity,
-                        edge: 'before',
-                        lastVisiblePolicy: FILTERED_LAST_VISIBLE_POLICY
-                    });
-                    if (insertIndex === null) return null;
-                    return {
-                        kind: slotKind,
-                        targetGroup: hostGroup,
-                        targetList: host,
-                        insertIndex,
-                        targetGroupId: hostGroup.id,
-                        hostGroupContainerEl: hostContainerEl,
-                        slotKey: slot.key
-                    };
-                }
-                // pointer past all children → after-last
-                const last = candidates[candidates.length - 1];
-                const anchorIdentity = last.kind === 'source'
-                    ? { type: 'source', key: last.key }
-                    : { type: 'group', id: last.key };
-                const insertIndex = resolveVisibleAnchorInsertIndex({
-                    fullList: host,
-                    visibleIdentities,
-                    anchorIdentity,
-                    edge: 'after',
-                    lastVisiblePolicy: FILTERED_LAST_VISIBLE_POLICY
-                });
-                if (insertIndex === null) return null;
-                return {
-                    kind: last.kind === 'group' ? 'after-group' : 'after-source',
-                    targetGroup: hostGroup,
-                    targetList: host,
-                    insertIndex,
-                    targetGroupId: hostGroup.id,
-                    hostGroupContainerEl: hostContainerEl,
-                    slotKey: last.key
-                };
-            }
-
-            // Root host: targetList is state.root (heterogeneous — { type:'group', id }
-            // | { type:'source', key }, same shape as group.children). Both source and
-            // group drops are valid at any root index; slot detection picks the index in
-            // state.root directly. The ungrouped bin is a separate drop region resolved
-            // elsewhere (handled by the bin/empty-bin dropzone task), so this branch never
-            // returns state.ungrouped.
             if (candidates.length === 0) {
                 const insertIndex = resolveVisibleAnchorInsertIndex({
-                    fullList: root,
-                    visibleIdentities,
+                    fullList: targetList,
+                    visibleIdentities: [],
                     anchorIdentity: null,
                     edge: 'after',
                     lastVisiblePolicy: FILTERED_LAST_VISIBLE_POLICY
                 });
                 if (insertIndex === null) return null;
                 return {
-                    kind: 'after-source',
-                    targetGroup: null,
-                    targetList: root,
-                    isRootList: true,
+                    kind: targetGroup ? 'into-group' : 'after-source',
+                    targetGroup,
+                    targetList,
                     insertIndex,
-                    targetGroupId: null,
-                    hostGroupContainerEl: null,
-                    slotKey: null
+                    targetGroupId,
+                    hostGroupContainerEl,
+                    slotKey: null,
+                    ...(isRootList ? { isRootList: true } : {}),
+                    ...(isUngroupedBin ? { isUngroupedBin: true } : {})
                 };
             }
-
             if (beforeIndex >= 0) {
                 const slot = candidates[beforeIndex];
-                const slotIsSource = slot.kind === 'source';
-                const anchorIdentity = slotIsSource
-                    ? { type: 'source', key: slot.key }
-                    : { type: 'group', id: slot.key };
+                const identity = identityForEntry(slot);
                 const insertIndex = resolveVisibleAnchorInsertIndex({
-                    fullList: root,
-                    visibleIdentities,
-                    anchorIdentity,
+                    fullList: targetList,
+                    visibleIdentities: [identity],
+                    anchorIdentity: identity,
                     edge: 'before',
                     lastVisiblePolicy: FILTERED_LAST_VISIBLE_POLICY
                 });
                 if (insertIndex === null) return null;
                 return {
-                    kind: slotIsSource ? 'before-source' : 'before-group',
-                    targetGroup: null,
-                    targetList: root,
-                    isRootList: true,
+                    kind: identity.type === 'group' ? 'before-group' : 'before-source',
+                    targetGroup,
+                    targetList,
                     insertIndex,
-                    targetGroupId: null,
-                    hostGroupContainerEl: null,
-                    slotKey: slot.key
+                    targetGroupId,
+                    hostGroupContainerEl,
+                    slotKey: identity.type === 'group' ? identity.id : identity.key,
+                    ...(isRootList ? { isRootList: true } : {}),
+                    ...(isUngroupedBin ? { isUngroupedBin: true } : {})
                 };
             }
 
-            // Empty-bin trailing drop zone: when the bottom bin (state.ungrouped) is
-            // empty and the cursor is below ALL root content (no candidate matched
-            // beforeIndex, so the pointer is past every root entry's mid-Y), a SOURCE
-            // drag here means "send this source to the (currently empty) bin". Returns
-            // a targetGroup-less ungrouped intent so the root-level reflow in
-            // _processDragOver opens a slot at the bottom and the .sp-ungroup-dropzone
-            // hint is mounted. isEmptyBinTrailing tells _processDragOver to render the
-            // transient hint. Group drags fall through to sibling-reorder routing below.
-            const _isSourceDragTrailing = activeDragContext
-                && (activeDragContext.kind === 'source-single' || activeDragContext.kind === 'source-multi');
-            if (_isSourceDragTrailing && stateObj.ungrouped.length === 0) {
+            if (
+                isRootList
+                && activeDragContext
+                && (activeDragContext.kind === 'source-single' || activeDragContext.kind === 'source-multi')
+                && ungrouped.length === 0
+            ) {
                 return {
                     kind: 'after-source',
                     targetGroup: null,
-                    targetList: stateObj.ungrouped,
+                    targetList: ungrouped,
                     insertIndex: 0,
                     targetGroupId: null,
                     hostGroupContainerEl: null,
@@ -1007,40 +1083,522 @@
                 };
             }
 
-            // After all root children.
-            const lastRoot = candidates[candidates.length - 1];
-            const lastIsSource = lastRoot.kind === 'source';
-            const anchorIdentity = lastIsSource
-                ? { type: 'source', key: lastRoot.key }
-                : { type: 'group', id: lastRoot.key };
+            const last = candidates[candidates.length - 1];
+            const identity = identityForEntry(last);
             const insertIndex = resolveVisibleAnchorInsertIndex({
-                fullList: root,
-                visibleIdentities,
-                anchorIdentity,
+                fullList: targetList,
+                visibleIdentities: [identity],
+                anchorIdentity: identity,
                 edge: 'after',
                 lastVisiblePolicy: FILTERED_LAST_VISIBLE_POLICY
             });
             if (insertIndex === null) return null;
             return {
-                kind: lastIsSource ? 'after-source' : 'after-group',
-                targetGroup: null,
-                targetList: root,
-                isRootList: true,
+                kind: identity.type === 'group' ? 'after-group' : 'after-source',
+                targetGroup,
+                targetList,
                 insertIndex,
+                targetGroupId,
+                hostGroupContainerEl,
+                slotKey: identity.type === 'group' ? identity.id : identity.key,
+                ...(isRootList ? { isRootList: true } : {}),
+                ...(isUngroupedBin ? { isUngroupedBin: true } : {})
+            };
+        }
+
+        function computeDropIntentRaw({
+            clientX,
+            clientY,
+            state,
+            groupsById,
+            parentMap,
+            activeDragContext,
+            prevIntent,
+            geometrySnapshot
+        }) {
+            if (
+                typeof clientY !== 'number'
+                || !geometrySnapshot
+                || !geometrySnapshot.rootRect
+            ) {
+                return null;
+            }
+            const rootRect = geometrySnapshot.rootRect;
+            if (clientY < rootRect.top || clientY >= rootRect.bottom) return null;
+            const stateObj = state || {};
+            const root = Array.isArray(stateObj.root) ? stateObj.root : [];
+            const ungrouped = Array.isArray(stateObj.ungrouped) ? stateObj.ungrouped : [];
+
+            if (
+                ungrouped.length > 0
+                && geometrySnapshot.bin
+                && geometrySnapshot.bin.visualRect
+            ) {
+                const binRect = geometrySnapshot.bin.visualRect;
+                if (clientY >= binRect.top && clientY < binRect.bottom) {
+                    return resolveSlotIntent({
+                        candidates: geometrySnapshot.bin.items.filter((entry) => !isFoldedGeometryEntry(entry)),
+                        targetList: ungrouped,
+                        targetGroup: null,
+                        targetGroupId: null,
+                        hostGroupContainerEl: null,
+                        clientY,
+                        isUngroupedBin: true,
+                        activeDragContext,
+                        ungrouped
+                    });
+                }
+            }
+
+            const HYSTERESIS_PX = 8;
+            const stickyGroupId = prevIntent && prevIntent.kind === 'into-group'
+                ? prevIntent.targetGroupId
+                : null;
+            const getDepth = (groupId) => {
+                if (!groupId || !(parentMap instanceof Map)) return 0;
+                let depth = 0;
+                let cursor = groupId;
+                const seen = new Set([cursor]);
+                while (true) {
+                    const parent = parentMap.get(cursor);
+                    if (!parent || seen.has(parent)) break;
+                    seen.add(parent);
+                    cursor = parent;
+                    depth += 1;
+                }
+                return depth;
+            };
+            const getTopAncestor = (groupId) => {
+                if (!groupId || !(parentMap instanceof Map)) return groupId;
+                let cursor = groupId;
+                const seen = new Set([cursor]);
+                while (true) {
+                    const parent = parentMap.get(cursor);
+                    if (!parent || seen.has(parent)) break;
+                    seen.add(parent);
+                    cursor = parent;
+                }
+                return cursor;
+            };
+
+            const excludedTopIds = new Set();
+            if (typeof clientX === 'number') {
+                for (const [groupId, groupGeometry] of geometrySnapshot.groups) {
+                    if (groupGeometry.parentGroupId) continue;
+                    const group = groupsById instanceof Map ? groupsById.get(groupId) : null;
+                    if (!group || !group.collapsed || !groupGeometry.header) continue;
+                    if (isFoldedGeometryEntry(groupGeometry)) continue;
+                    const rect = groupGeometry.header.layoutRect;
+                    if (!rect || clientY < rect.top || clientY >= rect.bottom) continue;
+                    if (clientX < rect.left + rect.width / 2) excludedTopIds.add(groupId);
+                }
+            }
+
+            let chosenGeometry = null;
+            let chosenDepth = -1;
+            for (const [groupId, groupGeometry] of geometrySnapshot.groups) {
+                if (isFoldedGeometryEntry(groupGeometry)) continue;
+                if (excludedTopIds.has(getTopAncestor(groupId))) continue;
+                const rect = groupGeometry.layoutRect;
+                if (!rect) continue;
+                const buffer = stickyGroupId === groupId ? HYSTERESIS_PX : 0;
+                if (clientY < rect.top - buffer || clientY >= rect.bottom + buffer) continue;
+                const depth = getDepth(groupId);
+                if (depth > chosenDepth) {
+                    chosenGeometry = groupGeometry;
+                    chosenDepth = depth;
+                }
+            }
+
+            let hostGeometry = null;
+            let hostGroup = null;
+            if (chosenGeometry) {
+                const groupId = chosenGeometry.identity.id;
+                const group = groupsById instanceof Map ? groupsById.get(groupId) : null;
+                if (!group) return null;
+                const buffer = stickyGroupId === groupId ? HYSTERESIS_PX : 0;
+                const headerRect = chosenGeometry.header && chosenGeometry.header.layoutRect;
+                if (
+                    headerRect
+                    && clientY >= headerRect.top - buffer
+                    && clientY < headerRect.bottom + buffer
+                ) {
+                    return {
+                        kind: 'into-group',
+                        targetGroup: group,
+                        targetList: Array.isArray(group.children) ? group.children : [],
+                        insertIndex: 0,
+                        targetGroupId: group.id,
+                        hostGroupContainerEl: chosenGeometry.element,
+                        slotKey: null
+                    };
+                }
+
+                if (activeDragContext && activeDragContext.kind === 'group') {
+                    const parentGroupId = chosenGeometry.parentGroupId;
+                    if (parentGroupId) {
+                        hostGeometry = geometrySnapshot.groups.get(parentGroupId) || null;
+                        hostGroup = groupsById instanceof Map ? groupsById.get(parentGroupId) : null;
+                    }
+                } else {
+                    const childrenRect = chosenGeometry.children && chosenGeometry.children.layoutRect;
+                    if (
+                        childrenRect
+                        && clientY >= childrenRect.top
+                        && clientY < childrenRect.bottom
+                    ) {
+                        const groupChildren = Array.isArray(group.children)
+                            ? group.children
+                            : [];
+                        if (groupChildren.length === 0) {
+                            return {
+                                kind: 'into-group',
+                                targetGroup: group,
+                                targetList: groupChildren,
+                                insertIndex: 0,
+                                targetGroupId: group.id,
+                                hostGroupContainerEl: chosenGeometry.element,
+                                slotKey: null
+                            };
+                        }
+                        hostGeometry = chosenGeometry;
+                        hostGroup = group;
+                    } else {
+                        return {
+                            kind: 'into-group',
+                            targetGroup: group,
+                            targetList: Array.isArray(group.children) ? group.children : [],
+                            insertIndex: 0,
+                            targetGroupId: group.id,
+                            hostGroupContainerEl: chosenGeometry.element,
+                            slotKey: null
+                        };
+                    }
+                }
+            }
+
+            if (hostGeometry && hostGroup) {
+                return resolveSlotIntent({
+                    candidates: hostGeometry.items.filter((entry) => !isFoldedGeometryEntry(entry)),
+                    targetList: Array.isArray(hostGroup.children)
+                        ? hostGroup.children
+                        : [],
+                    targetGroup: hostGroup,
+                    targetGroupId: hostGroup.id,
+                    hostGroupContainerEl: hostGeometry.element,
+                    clientY,
+                    activeDragContext,
+                    ungrouped
+                });
+            }
+
+            return resolveSlotIntent({
+                candidates: geometrySnapshot.rootItems.filter((entry) => !isFoldedGeometryEntry(entry)),
+                targetList: root,
+                targetGroup: null,
                 targetGroupId: null,
                 hostGroupContainerEl: null,
-                slotKey: lastRoot.key
-            };
+                clientY,
+                isRootList: true,
+                activeDragContext,
+                ungrouped
+            });
         }
 
         if (typeof runtime.activeDragContext === 'undefined') {
             runtime.activeDragContext = null;
+        }
+        if (typeof runtime.dragGeometryDirty !== 'boolean') {
+            runtime.dragGeometryDirty = true;
+        }
+        if (typeof runtime.dragGeometrySnapshot === 'undefined') {
+            runtime.dragGeometrySnapshot = null;
         }
         if (!(runtime.hoverExpandedGroupIds instanceof Set)) {
             runtime.hoverExpandedGroupIds = new Set();
         }
         if (!(runtime.hoverExpandTimers instanceof Map)) {
             runtime.hoverExpandTimers = new Map();
+        }
+
+        let dragGeometryLifecycleEpoch = 0;
+        let dragGeometryLifecycle = null;
+        let deferredFoldEpoch = 0;
+        let deferredFoldRafId = null;
+        const pendingGroupExpandSettles = new WeakMap();
+
+
+        function cancelDeferredDragFold() {
+            deferredFoldEpoch += 1;
+            if (
+                deferredFoldRafId != null
+                && typeof globalThis.cancelAnimationFrame === 'function'
+            ) {
+                try { globalThis.cancelAnimationFrame(deferredFoldRafId); } catch (_) {}
+            }
+            deferredFoldRafId = null;
+        }
+
+        function applyDragFold(session, rootElement) {
+            if (
+                !session
+                || runtime.dragReflowSession !== session
+                || !runtime.activeDragContext
+                || !dragReflow
+                || typeof dragReflow.foldDraggedItems !== 'function'
+            ) {
+                return;
+            }
+            dragReflow.foldDraggedItems({ session, rootElement });
+            invalidateDragGeometry('drag_items_folded');
+        }
+
+        function scheduleDeferredDragFold(session, rootElement) {
+            cancelDeferredDragFold();
+            const raf = typeof globalThis.requestAnimationFrame === 'function'
+                ? globalThis.requestAnimationFrame
+                : null;
+            if (!raf) {
+                applyDragFold(session, rootElement);
+                return;
+            }
+            const epoch = deferredFoldEpoch;
+            deferredFoldRafId = raf(() => {
+                deferredFoldRafId = null;
+                if (epoch !== deferredFoldEpoch) return;
+                applyDragFold(session, getSourceListContainer());
+            });
+        }
+
+        function readScrollPosition(element) {
+            return {
+                top: Number(element && element.scrollTop) || 0,
+                left: Number(element && element.scrollLeft) || 0
+            };
+        }
+
+        function teardownDragGeometryLifecycle() {
+            dragGeometryLifecycleEpoch += 1;
+            const lifecycle = dragGeometryLifecycle;
+            dragGeometryLifecycle = null;
+            if (!lifecycle) return;
+            if (
+                lifecycle.rootElement
+                && typeof lifecycle.rootElement.removeEventListener === 'function'
+            ) {
+                lifecycle.rootElement.removeEventListener(
+                    'scroll',
+                    lifecycle.onScroll,
+                    true
+                );
+            }
+            if (
+                lifecycle.resizeObserver
+                && typeof lifecycle.resizeObserver.disconnect === 'function'
+            ) {
+                lifecycle.resizeObserver.disconnect();
+            }
+        }
+
+        function installDragGeometryLifecycle(rootElement) {
+            teardownDragGeometryLifecycle();
+            if (!rootElement) return;
+            const epoch = dragGeometryLifecycleEpoch;
+            const scrollPositions = new WeakMap();
+            const observedElements = new Set();
+            const resizeBaselines = new WeakMap();
+            scrollPositions.set(rootElement, readScrollPosition(rootElement));
+
+            const isCurrent = () => Boolean(
+                dragGeometryLifecycle
+                && dragGeometryLifecycle.epoch === epoch
+                && dragGeometryLifecycle.rootElement === rootElement
+                && runtime.activeDragContext
+            );
+            const onScroll = (event) => {
+                if (!isCurrent()) return;
+                const target = event && event.target ? event.target : rootElement;
+                if (
+                    target !== rootElement
+                    && typeof rootElement.contains === 'function'
+                    && !rootElement.contains(target)
+                ) {
+                    return;
+                }
+                const next = readScrollPosition(target);
+                const previous = scrollPositions.get(target);
+                scrollPositions.set(target, next);
+                if (!previous) {
+                    invalidateDragGeometry('scroll_position_changed');
+                    return;
+                }
+                if (previous.top === next.top && previous.left === next.left) {
+                    return;
+                }
+                invalidateDragGeometry('scroll_position_changed', {
+                    scrollTarget: target,
+                    scrollDeltaLeft: next.left - previous.left,
+                    scrollDeltaTop: next.top - previous.top
+                });
+            };
+
+            const windowObj = getWindow();
+            const ResizeObserverCtor = deps.ResizeObserver
+                || (windowObj && windowObj.ResizeObserver)
+                || globalThis.ResizeObserver;
+
+            dragGeometryLifecycle = {
+                epoch,
+                rootElement,
+                onScroll,
+                resizeObserver: null,
+                ResizeObserverCtor,
+                observedElements,
+                scrollPositions,
+                resizeBaselines
+            };
+            if (typeof rootElement.addEventListener === 'function') {
+                rootElement.addEventListener('scroll', onScroll, {
+                    capture: true,
+                    passive: true
+                });
+            }
+        }
+
+        function readResizeBorderBox(entry) {
+            if (!entry || !entry.borderBoxSize) return null;
+            const borderBox = Array.isArray(entry.borderBoxSize)
+                ? entry.borderBoxSize[0]
+                : entry.borderBoxSize;
+            const width = Number(borderBox && borderBox.inlineSize);
+            const height = Number(borderBox && borderBox.blockSize);
+            return Number.isFinite(width) && Number.isFinite(height)
+                ? { width, height }
+                : null;
+        }
+
+        function sameResizeBox(left, right) {
+            return Boolean(
+                left
+                && right
+                && Math.abs(left.width - right.width) < 0.5
+                && Math.abs(left.height - right.height) < 0.5
+            );
+        }
+
+        function ensureDragResizeObserver(lifecycle, isCurrent) {
+            if (
+                lifecycle.resizeObserver
+                || typeof lifecycle.ResizeObserverCtor !== 'function'
+            ) {
+                return lifecycle.resizeObserver;
+            }
+            lifecycle.resizeObserver = new lifecycle.ResizeObserverCtor((entries) => {
+                if (!isCurrent()) return;
+                const reports = Array.isArray(entries) ? entries : Array.from(entries || []);
+                let geometryChanged = false;
+                for (const entry of reports) {
+                    if (
+                        !entry
+                        || !entry.target
+                        || !lifecycle.observedElements.has(entry.target)
+                    ) {
+                        continue;
+                    }
+                    const reportedSize = readResizeBorderBox(entry);
+                    const baseline = lifecycle.resizeBaselines.get(entry.target);
+                    if (!reportedSize || !sameResizeBox(reportedSize, baseline)) {
+                        geometryChanged = true;
+                        if (reportedSize) {
+                            lifecycle.resizeBaselines.set(entry.target, reportedSize);
+                        }
+                    }
+                }
+                if (geometryChanged) {
+                    invalidateDragGeometry('resize_observer_report');
+                }
+            });
+            return lifecycle.resizeObserver;
+        }
+
+        function refreshDragGeometryLifecycleElements(
+            rootElement,
+            targetSizes
+        ) {
+            const lifecycle = dragGeometryLifecycle;
+            if (
+                !lifecycle
+                || lifecycle.rootElement !== rootElement
+                || lifecycle.epoch !== dragGeometryLifecycleEpoch
+            ) {
+                return;
+            }
+            const isCurrent = () => Boolean(
+                dragGeometryLifecycle === lifecycle
+                && lifecycle.epoch === dragGeometryLifecycleEpoch
+                && runtime.activeDragContext
+            );
+            const nextObservedElements = new Set(targetSizes.keys());
+            for (const [targetElement, size] of targetSizes) {
+                lifecycle.resizeBaselines.set(targetElement, size);
+                if (targetElement === rootElement) continue;
+                lifecycle.scrollPositions.set(
+                    targetElement,
+                    readScrollPosition(targetElement)
+                );
+            }
+            const resizeObserver = ensureDragResizeObserver(lifecycle, isCurrent);
+            for (const targetElement of nextObservedElements) {
+                if (
+                    resizeObserver
+                    && typeof resizeObserver.observe === 'function'
+                    && !lifecycle.observedElements.has(targetElement)
+                ) {
+                    try {
+                        resizeObserver.observe(targetElement);
+                        lifecycle.observedElements.add(targetElement);
+                    } catch (_) { /* detached child; next render invalidates */ }
+                }
+            }
+            for (const observedElement of lifecycle.observedElements) {
+                if (nextObservedElements.has(observedElement)) continue;
+                if (
+                    resizeObserver
+                    && typeof resizeObserver.unobserve === 'function'
+                ) {
+                    try { resizeObserver.unobserve(observedElement); } catch (_) {}
+                }
+                lifecycle.observedElements.delete(observedElement);
+                lifecycle.resizeBaselines.delete(observedElement);
+            }
+        }
+
+        function refreshDragGeometryLifecycleTargets(snapshot) {
+            if (!snapshot || !(snapshot.groups instanceof Map)) return;
+            const targetSizes = new Map();
+            if (snapshot.rootElement && snapshot.rootRect) {
+                targetSizes.set(snapshot.rootElement, {
+                    width: snapshot.rootRect.width,
+                    height: snapshot.rootRect.height
+                });
+            }
+            for (const group of snapshot.groups.values()) {
+                if (
+                    group
+                    && group.children
+                    && group.children.element
+                    && group.children.visualRect
+                ) {
+                    targetSizes.set(group.children.element, {
+                        width: group.children.visualRect.width,
+                        height: group.children.visualRect.height
+                    });
+                }
+            }
+            refreshDragGeometryLifecycleElements(
+                snapshot.rootElement,
+                targetSizes
+            );
         }
 
         const autoScrollController = dragMulti && typeof dragMulti.createAutoScrollController === 'function'
@@ -1373,6 +1931,11 @@
                 save({ immediate: true });
                 return;
             }
+            const pendingSettle = pendingGroupExpandSettles.get(childrenContainer);
+            if (pendingSettle) {
+                childrenContainer.removeEventListener('transitionend', pendingSettle);
+                pendingGroupExpandSettles.delete(childrenContainer);
+            }
 
             if (group.collapsed) {
                 caret.classList.add('collapsed');
@@ -1389,11 +1952,26 @@
                 childrenContainer.offsetHeight;
                 childrenContainer.style.height = `${childrenContainer.scrollHeight}px`;
 
-                childrenContainer.addEventListener('transitionend', function handler() {
+                const settleExpandedChildren = (event) => {
+                    if (event?.target && event.target !== childrenContainer) return;
+                    if (event?.propertyName && event.propertyName !== 'height') return;
+                    childrenContainer.removeEventListener(
+                        'transitionend',
+                        settleExpandedChildren
+                    );
+                    pendingGroupExpandSettles.delete(childrenContainer);
+                    if (group.collapsed) return;
                     childrenContainer.style.height = 'auto';
                     childrenContainer.style.overflow = 'visible';
-                    childrenContainer.removeEventListener('transitionend', handler);
-                });
+                };
+                pendingGroupExpandSettles.set(
+                    childrenContainer,
+                    settleExpandedChildren
+                );
+                childrenContainer.addEventListener(
+                    'transitionend',
+                    settleExpandedChildren
+                );
             }
 
             save({ immediate: true });
@@ -1755,12 +2333,17 @@
         }
 
         function handleDragStart(e) {
+            cancelDeferredDragFold();
+            teardownDragGeometryLifecycle();
+            _cancelPendingDragOver();
+            runtime.dragGeometrySnapshot = null;
+            invalidateDragGeometry('drag_start_preflight', { schedule: false });
             const sourceTarget = e.target.closest('.source-item');
             const groupTarget = e.target.closest('.group-header');
             const setTimeoutFn = getSetTimeout();
 
             cancelAllHoverTimers();
-            runtime.hoverExpandedGroupIds.clear();
+            restoreTransientHoverExpandedGroups();
 
             // Preflight clean: defensively recover from any state the previous drag
             // may have left behind. dragend is supposed to clean everything up, but
@@ -1784,8 +2367,10 @@
             //     pointer-events:none — if it lingers, the row is invisible AND
             //     un-draggable, which manifests to the user as "I can't drag this
             //     source anymore". .sp-drop-shift carries an inline
-            //     transform: translateY(N) on siblings to "open the slot" —
-            //     lingering shift = visible visual offset until the page reloads.
+            //     transform: translateY(N) on siblings to "open the slot".
+            //     .sp-drop-shift-static is the same geometry for offscreen rows,
+            //     without their transform transition. Either lingering class =
+            //     visible visual offset until the page reloads.
             //     .drag-into / .drag-invalid / .dragging are visual indicators
             //     that handleDragOver / dragstart's setTimeout set; if dragend
             //     didn't clean them, they linger as stale highlights.
@@ -1808,6 +2393,7 @@
                     '.sp-drag-cancelled',
                     '.sp-drag-folded',
                     '.sp-drop-shift',
+                    '.sp-drop-shift-static',
                     '.drag-into',
                     '.drag-invalid',
                     '.dragging',
@@ -1819,7 +2405,10 @@
                         const hadFolded = typeof node.classList.contains === 'function'
                             && node.classList.contains('sp-drag-folded');
                         const hadShift = typeof node.classList.contains === 'function'
-                            && node.classList.contains('sp-drop-shift');
+                            && (
+                                node.classList.contains('sp-drop-shift')
+                                || node.classList.contains('sp-drop-shift-static')
+                            );
                         const hadGuide = typeof node.classList.contains === 'function'
                             && node.classList.contains('sp-drag-guide');
                         node.classList.remove('sp-drop-flying');
@@ -1834,6 +2423,7 @@
                         node.classList.remove('sp-drag-cancelled');
                         node.classList.remove('sp-drag-folded');
                         node.classList.remove('sp-drop-shift');
+                        node.classList.remove('sp-drop-shift-static');
                         node.classList.remove('drag-into');
                         node.classList.remove('drag-invalid');
                         node.classList.remove('dragging');
@@ -1958,57 +2548,87 @@
                 // before returning, so cloning/capturing the native drag image remains
                 // safe. Classic mode keeps its existing no-probe path.
                 let preparedReflowSession = null;
-                let preparedReflowRoot = null;
+                const preparedReflowRoot = getSourceListContainer();
+                installDragGeometryLifecycle(preparedReflowRoot);
                 if (getDragMode() !== 'classic' && dragReflow && typeof dragReflow.prepareDragSession === 'function') {
-                    preparedReflowRoot = getSourceListContainer();
                     preparedReflowSession = dragReflow.prepareDragSession({
                         draggedKeys: keys,
+                        originKey: key,
+                        draggedType: 'source',
                         rootElement: preparedReflowRoot
                     });
                     runtime.dragReflowSession = preparedReflowSession;
                 }
 
-                if (dragMulti && typeof dragMulti.createMultiDragGhost === 'function') {
-                    const doc = getDocument();
-                    const root = doc && doc.body ? doc.body : null;
-                    const sourcesListEl = getSourceListContainer();
-                    const sourceClones = keys.slice(0, 3).map((rowKey) => {
-                        if (!sourcesListEl || typeof sourcesListEl.querySelector !== 'function') return null;
-                        const original = sourcesListEl.querySelector(`[data-source-key="${cssEscape(rowKey)}"]`);
-                        if (!original) return null;
-                        return typeof dragMulti.cloneSourceItem === 'function'
-                            ? dragMulti.cloneSourceItem(original)
-                            : null;
-                    }).filter(Boolean);
-                    const ghost = dragMulti.createMultiDragGhost({
-                        count: keys.length,
-                        sourceClones,
-                        root
-                    });
-                    if (ghost && typeof e.dataTransfer.setDragImage === 'function') {
-                        let offsetX = 12;
-                        let offsetY = 12;
-                        if (sourcesListEl && typeof sourcesListEl.querySelector === 'function') {
-                            const originEl = sourcesListEl.querySelector(`[data-source-key="${cssEscape(key)}"]`);
-                            const cachedRect = preparedReflowSession?.itemMetrics?.get(key)?.visualRect;
-                            const rect = cachedRect && Number(cachedRect.width) > 0
-                                ? cachedRect
-                                : (
-                                    !preparedReflowSession
-                                    && originEl
-                                    && typeof originEl.getBoundingClientRect === 'function'
-                                        ? originEl.getBoundingClientRect()
+                try {
+                    if (dragMulti && typeof dragMulti.createMultiDragGhost === 'function') {
+                        const doc = getDocument();
+                        const root = doc && doc.body ? doc.body : null;
+                        const sourcesListEl = getSourceListContainer();
+                        const sourceClones = keys.slice(0, 3).map((rowKey) => {
+                            const preparedElement = preparedReflowSession
+                                && preparedReflowSession.preparedElements instanceof Map
+                                ? preparedReflowSession.preparedElements.get(rowKey) || null
+                                : null;
+                            if (
+                                !preparedElement
+                                && (!sourcesListEl || typeof sourcesListEl.querySelector !== 'function')
+                            ) {
+                                return null;
+                            }
+                            const original = preparedElement
+                                || sourcesListEl.querySelector(`[data-source-key="${cssEscape(rowKey)}"]`);
+                            if (!original) return null;
+                            return typeof dragMulti.cloneSourceItem === 'function'
+                                ? dragMulti.cloneSourceItem(original)
+                                : null;
+                        }).filter(Boolean);
+                        const ghost = dragMulti.createMultiDragGhost({
+                            count: keys.length,
+                            sourceClones,
+                            root
+                        });
+                        if (ghost && typeof e.dataTransfer.setDragImage === 'function') {
+                            let offsetX = 12;
+                            let offsetY = 12;
+                            if (sourcesListEl) {
+                                const originEl = (
+                                    preparedReflowSession
+                                    && preparedReflowSession.preparedElements instanceof Map
+                                        ? preparedReflowSession.preparedElements.get(key) || null
+                                        : null
+                                ) || (
+                                    typeof sourcesListEl.querySelector === 'function'
+                                        ? sourcesListEl.querySelector(`[data-source-key="${cssEscape(key)}"]`)
                                         : null
                                 );
-                            if (rect && typeof e.clientX === 'number' && typeof e.clientY === 'number') {
-                                offsetX = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
-                                offsetY = Math.max(0, Math.min(rect.height, e.clientY - rect.top));
+                                const cachedRect = preparedReflowSession?.itemMetrics?.get(key)?.visualRect;
+                                const rect = cachedRect && Number(cachedRect.width) > 0
+                                    ? cachedRect
+                                    : (
+                                        !preparedReflowSession
+                                        && originEl
+                                        && typeof originEl.getBoundingClientRect === 'function'
+                                            ? originEl.getBoundingClientRect()
+                                            : null
+                                    );
+                                if (rect && typeof e.clientX === 'number' && typeof e.clientY === 'number') {
+                                    offsetX = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
+                                    offsetY = Math.max(0, Math.min(rect.height, e.clientY - rect.top));
+                                }
                             }
+                            try {
+                                e.dataTransfer.setDragImage(ghost, offsetX, offsetY);
+                            } catch (err) { /* ignore setDragImage failure */ }
+                            runtime.activeDragGhost = ghost;
                         }
-                        try {
-                            e.dataTransfer.setDragImage(ghost, offsetX, offsetY);
-                        } catch (err) { /* ignore setDragImage failure */ }
-                        runtime.activeDragGhost = ghost;
+                    }
+                } finally {
+                    if (preparedReflowSession?.preparedElements instanceof Map) {
+                        preparedReflowSession.preparedElements.clear();
+                    }
+                    if (preparedReflowSession) {
+                        preparedReflowSession.preparedElements = null;
                     }
                 }
 
@@ -2023,24 +2643,10 @@
                     // source rect is zero. RAF defers fold until after Chrome has captured
                     // the ghost + seeded the drag, at which point the source is safe to hide.
                     // Accepted trade-off: one-frame visual overlap of ghost over origin row.
-                    const raf = typeof globalThis.requestAnimationFrame === 'function'
-                        ? globalThis.requestAnimationFrame
-                        : null;
-                    if (raf) {
-                        raf(() => {
-                            if (dragReflow.foldDraggedItems) {
-                                dragReflow.foldDraggedItems({
-                                    session: preparedReflowSession,
-                                    rootElement: getSourceListContainer()
-                                });
-                            }
-                        });
-                    } else if (typeof dragReflow.foldDraggedItems === 'function') {
-                        dragReflow.foldDraggedItems({
-                            session: preparedReflowSession,
-                            rootElement: preparedReflowRoot
-                        });
-                    }
+                    scheduleDeferredDragFold(
+                        preparedReflowSession,
+                        preparedReflowRoot
+                    );
                 }
                 // Mark the list actively dragging so CSS suppresses Chrome's frozen
                 // native :hover on the origin folder's guide bar — the blue bar should
@@ -2079,6 +2685,7 @@
                     e.dataTransfer.effectAllowed = 'move';
                     // See source branch: mark active so the guide bar follows .drag-into.
                     const _activeListGrp = getSourceListContainer();
+                    installDragGeometryLifecycle(_activeListGrp);
                     if (_activeListGrp && _activeListGrp.classList && typeof _activeListGrp.classList.add === 'function') {
                         _activeListGrp.classList.add('sp-drag-active');
                     }
@@ -2096,27 +2703,15 @@
                         const rootElement = getSourceListContainer();
                         const session = dragReflow.prepareDragSession({
                             draggedKeys: [key],
+                            originKey: key,
+                            draggedType: 'group',
                             rootElement
                         });
                         runtime.dragReflowSession = session;
                         // RAF-deferred fold (same reason as source branch — sync fold would
                         // turn the drag source into a 0×0 box during dragstart, which Chrome
                         // can cancel as "invalid drag source").
-                        const raf = typeof globalThis.requestAnimationFrame === 'function'
-                            ? globalThis.requestAnimationFrame
-                            : null;
-                        if (raf) {
-                            raf(() => {
-                                if (dragReflow.foldDraggedItems) {
-                                    dragReflow.foldDraggedItems({
-                                        session,
-                                        rootElement: getSourceListContainer()
-                                    });
-                                }
-                            });
-                        } else if (typeof dragReflow.foldDraggedItems === 'function') {
-                            dragReflow.foldDraggedItems({ session, rootElement });
-                        }
+                        scheduleDeferredDragFold(session, rootElement);
                     }
                 } else {
                     _clearPreflightDragActive();
@@ -2176,12 +2771,736 @@
             return false;
         }
 
+        function resolveVisibleSiblingEntries(intent, geometrySnapshot) {
+            if (!intent || !geometrySnapshot) return [];
+            if (intent.isUngroupedBin) {
+                return geometrySnapshot.bin && Array.isArray(geometrySnapshot.bin.items)
+                    ? geometrySnapshot.bin.items
+                    : [];
+            }
+            if (intent.targetGroupId) {
+                const group = geometrySnapshot.groups.get(intent.targetGroupId);
+                return group && Array.isArray(group.items) ? group.items : [];
+            }
+            return Array.isArray(geometrySnapshot.rootItems)
+                ? geometrySnapshot.rootItems
+                : [];
+        }
+
+        function isDraggedIdentity(identity, dragContext, draggedSourceKeys = null) {
+            if (!identity || !dragContext) return false;
+            if (identity.type === 'group') {
+                return dragContext.kind === 'group'
+                    && dragContext.draggedGroupId === identity.id;
+            }
+            return (
+                (dragContext.kind === 'source-single' || dragContext.kind === 'source-multi')
+                && (
+                    draggedSourceKeys instanceof Set
+                        ? draggedSourceKeys.has(identity.key)
+                        : (
+                            Array.isArray(dragContext.keys)
+                            && dragContext.keys.includes(identity.key)
+                        )
+                )
+            );
+        }
+
+        function addTypedShift(
+            shifts,
+            identity,
+            delta,
+            dragContext,
+            draggedSourceKeys = null,
+            currentShifts = null,
+            plannedShiftDeltas = null,
+            animate = false,
+            animatedShiftKeys = null
+        ) {
+            if (!identity || !Number.isFinite(delta) || delta <= 0) return;
+            if (isDraggedIdentity(identity, dragContext, draggedSourceKeys)) return;
+            if (identity.type === 'group') {
+                if (!shifts.groups.has(identity.id)) {
+                    shifts.groups.set(identity.id, delta);
+                    if (
+                        currentShifts
+                        && currentShifts.groups instanceof Map
+                        && plannedShiftDeltas
+                        && plannedShiftDeltas.groups instanceof Map
+                    ) {
+                        const change = delta - (Number(currentShifts.groups.get(identity.id)) || 0);
+                        if (change !== 0) plannedShiftDeltas.groups.set(identity.id, change);
+                    }
+                }
+                if (animate && animatedShiftKeys && animatedShiftKeys.groups instanceof Set) {
+                    animatedShiftKeys.groups.add(identity.id);
+                }
+                return;
+            }
+            if (!shifts.sources.has(identity.key)) {
+                shifts.sources.set(identity.key, delta);
+                if (
+                    currentShifts
+                    && currentShifts.sources instanceof Map
+                    && plannedShiftDeltas
+                    && plannedShiftDeltas.sources instanceof Map
+                ) {
+                    const change = delta - (Number(currentShifts.sources.get(identity.key)) || 0);
+                    if (change !== 0) plannedShiftDeltas.sources.set(identity.key, change);
+                }
+            }
+            if (animate && animatedShiftKeys && animatedShiftKeys.sources instanceof Set) {
+                animatedShiftKeys.sources.add(identity.key);
+            }
+        }
+
+        function shouldAnimateReflowEntry(entry, geometrySnapshot, slotHeight) {
+            const rect = entry && entry.visualRect;
+            const rootRect = geometrySnapshot && geometrySnapshot.rootRect;
+            if (!rect || !rootRect) return false;
+            const rowRect = entry.identity && entry.identity.type === 'group'
+                ? entry.header && entry.header.visualRect
+                : rect;
+            const rowHeight = Math.max(0, Number(rowRect && rowRect.height) || 0);
+            const overscan = Math.min(
+                Math.max(0, Number(slotHeight) || 0),
+                rowHeight
+            );
+            return (
+                rect.bottom >= rootRect.top - overscan
+                && rect.top <= rootRect.bottom + overscan
+            );
+        }
+
+        function planReflowShifts({
+            intent,
+            pointer,
+            geometrySnapshot,
+            dragContext,
+            session
+        }) {
+            const shifts = {
+                sources: new Map(),
+                groups: new Map()
+            };
+            if (!session || getDragMode() === 'classic') return shifts;
+            const currentShifts = {
+                sources: session.shiftedSourceItems instanceof Map
+                    ? session.shiftedSourceItems
+                    : new Map(),
+                groups: session.shiftedGroupItems instanceof Map
+                    ? session.shiftedGroupItems
+                    : new Map()
+            };
+            const plannedShiftDeltas = {
+                sources: new Map(),
+                groups: new Map()
+            };
+            const animatedShiftKeys = {
+                sources: new Set(),
+                groups: new Set()
+            };
+            Object.defineProperty(shifts, '_shiftDeltaPlan', {
+                configurable: true,
+                value: {
+                    deltas: plannedShiftDeltas,
+                    bases: currentShifts,
+                    baseSizes: {
+                        sources: currentShifts.sources.size,
+                        groups: currentShifts.groups.size
+                    },
+                    animatedKeys: animatedShiftKeys
+                }
+            });
+            const recordRemovedShifts = () => {
+                for (const [sourceKey, delta] of currentShifts.sources) {
+                    if (!shifts.sources.has(sourceKey)) {
+                        plannedShiftDeltas.sources.set(sourceKey, -(Number(delta) || 0));
+                    }
+                }
+                for (const [groupId, delta] of currentShifts.groups) {
+                    if (!shifts.groups.has(groupId)) {
+                        plannedShiftDeltas.groups.set(groupId, -(Number(delta) || 0));
+                    }
+                }
+            };
+            const slotHeight = Number(session.totalDraggedHeight) || 0;
+            if (!intent || slotHeight <= 0) {
+                recordRemovedShifts();
+                return shifts;
+            }
+            const draggedSourceKeys = session.draggedKeys instanceof Set
+                ? session.draggedKeys
+                : null;
+
+            const visibleSiblingEntries = resolveVisibleSiblingEntries(
+                intent,
+                geometrySnapshot
+            );
+            const slotType = (
+                intent.kind === 'before-group'
+                || intent.kind === 'after-group'
+            )
+                ? 'group'
+                : 'source';
+            const startsAfterSlot = (
+                intent.kind === 'after-group'
+                || intent.kind === 'after-source'
+            );
+            let shiftStarted = !intent.slotKey && intent.kind === 'into-group';
+            for (const entry of visibleSiblingEntries) {
+                if (isFoldedGeometryEntry(entry)) continue;
+                const identity = identityForEntry(entry);
+                if (!identity) continue;
+                const matchesSlot = Boolean(
+                    intent.slotKey
+                    && identity.type === slotType
+                    && (
+                        slotType === 'group'
+                            ? identity.id === intent.slotKey
+                            : identity.key === intent.slotKey
+                    )
+                );
+                if (matchesSlot) {
+                    shiftStarted = true;
+                    if (startsAfterSlot) continue;
+                }
+                if (shiftStarted) {
+                    addTypedShift(
+                        shifts,
+                        identity,
+                        slotHeight,
+                        dragContext,
+                        draggedSourceKeys,
+                        currentShifts,
+                        plannedShiftDeltas,
+                        shouldAnimateReflowEntry(entry, geometrySnapshot, slotHeight),
+                        animatedShiftKeys
+                    );
+                }
+            }
+
+            if (intent.targetGroupId) {
+                let cursor = geometrySnapshot.groups.get(intent.targetGroupId) || null;
+                const seen = new Set();
+                while (cursor && !seen.has(cursor.identity.id)) {
+                    seen.add(cursor.identity.id);
+                    const parent = cursor.parentGroupId
+                        ? geometrySnapshot.groups.get(cursor.parentGroupId) || null
+                        : null;
+                    const siblings = parent ? parent.items : geometrySnapshot.rootItems;
+                    const cursorIndex = siblings.indexOf(cursor);
+                    if (cursorIndex >= 0) {
+                        for (let index = cursorIndex + 1; index < siblings.length; index += 1) {
+                            addTypedShift(
+                                shifts,
+                                identityForEntry(siblings[index]),
+                                slotHeight,
+                                dragContext,
+                                draggedSourceKeys,
+                                currentShifts,
+                                plannedShiftDeltas,
+                                shouldAnimateReflowEntry(
+                                    siblings[index],
+                                    geometrySnapshot,
+                                    slotHeight
+                                ),
+                                animatedShiftKeys
+                            );
+                        }
+                    }
+                    cursor = parent;
+                }
+            }
+            recordRemovedShifts();
+            return shifts;
+        }
+
+        function resolvePointerOverCollapsedGroupId({
+            clientY,
+            groupsById,
+            geometrySnapshot
+        }) {
+            if (
+                typeof clientY !== 'number'
+                || !(groupsById instanceof Map)
+                || !geometrySnapshot
+                || !(geometrySnapshot.groups instanceof Map)
+            ) {
+                return null;
+            }
+            for (const [groupId, geometry] of geometrySnapshot.groups) {
+                const group = groupsById.get(groupId);
+                if (!group || !group.collapsed) continue;
+                if (!Array.isArray(group.children) || group.children.length === 0) continue;
+                if (isFoldedGeometryEntry(geometry)) continue;
+                const rect = geometry.header && geometry.header.visualRect;
+                if (!rect || clientY < rect.top || clientY >= rect.bottom) continue;
+                return groupId;
+            }
+            return null;
+        }
+
+        function resolveFeedbackElement(intent, geometrySnapshot) {
+            if (!intent || !intent.slotKey || !geometrySnapshot) return null;
+            if (intent.kind === 'before-group' || intent.kind === 'after-group') {
+                return geometrySnapshot.groupElements.get(intent.slotKey) || null;
+            }
+            return geometrySnapshot.sourceElements.get(intent.slotKey) || null;
+        }
+
+        function planDragFrame({
+            pointer,
+            geometrySnapshot,
+            state,
+            groupsById,
+            parentMap,
+            dragContext,
+            previousIntent,
+            dataTransfer
+        }) {
+            const intent = computeDropIntent({
+                clientX: pointer && pointer.clientX,
+                clientY: pointer && pointer.clientY,
+                rootElement: geometrySnapshot && geometrySnapshot.rootElement,
+                state,
+                groupsById,
+                parentMap,
+                activeDragContext: dragContext,
+                prevIntent: previousIntent,
+                geometrySnapshot
+            });
+            const isInvalid = computeIsInvalidDrop({ intent, dragContext });
+            const feedback = {
+                intoElement: null,
+                invalidElement: null,
+                lineElement: null,
+                lineClass: null,
+                guideElement: null,
+                guideHeight: 0,
+                showUngroupDropzone: Boolean(intent && intent.isEmptyBinTrailing),
+                pointerGroupId: null,
+                pointerGroupElement: null,
+                pointerAncestorSet: new Set(),
+                autoScrollVelocity: 0
+            };
+            if (intent) {
+                if (intent.kind === 'into-group') {
+                    feedback.intoElement = intent.hostGroupContainerEl || null;
+                }
+                const slotElement = resolveFeedbackElement(intent, geometrySnapshot);
+                if (isInvalid) {
+                    feedback.invalidElement = intent.kind === 'into-group'
+                        ? intent.hostGroupContainerEl || null
+                        : slotElement;
+                } else if (
+                    getDragMode() === 'classic'
+                    && intent.kind !== 'into-group'
+                    && slotElement
+                ) {
+                    feedback.lineElement = slotElement;
+                    feedback.lineClass = (
+                        intent.kind === 'before-source' || intent.kind === 'before-group'
+                    )
+                        ? 'drag-over-top'
+                        : 'drag-over-bottom';
+                }
+                if (
+                    getDragMode() !== 'classic'
+                    && !isInvalid
+                    && intent.targetGroupId
+                ) {
+                    const groupGeometry = geometrySnapshot.groups.get(intent.targetGroupId);
+                    feedback.guideElement = groupGeometry && groupGeometry.children
+                        ? groupGeometry.children.element
+                        : null;
+                    feedback.guideHeight = runtime.dragReflowSession
+                        ? Number(runtime.dragReflowSession.totalDraggedHeight) || 0
+                        : 0;
+                }
+
+                const isSourceDrag = dragContext
+                    && (dragContext.kind === 'source-single' || dragContext.kind === 'source-multi');
+                const collapsedGroupId = isSourceDrag
+                    ? resolvePointerOverCollapsedGroupId({
+                        clientY: pointer && pointer.clientY,
+                        groupsById,
+                        geometrySnapshot
+                    })
+                    : null;
+                feedback.pointerGroupId = intent.targetGroupId || collapsedGroupId;
+                if (feedback.pointerGroupId) {
+                    const pointerGeometry = geometrySnapshot.groups.get(feedback.pointerGroupId);
+                    feedback.pointerGroupElement = pointerGeometry ? pointerGeometry.element : null;
+                    feedback.pointerAncestorSet = new Set(
+                        getGroupAncestorChain(feedback.pointerGroupId)
+                    );
+                }
+            }
+
+            if (
+                geometrySnapshot
+                && geometrySnapshot.rootRect
+                && dragMulti
+                && typeof dragMulti.computeAutoScrollVelocity === 'function'
+            ) {
+                feedback.autoScrollVelocity = dragMulti.computeAutoScrollVelocity({
+                    pointerY: pointer && pointer.clientY,
+                    containerTop: geometrySnapshot.rootRect.top,
+                    containerBottom: geometrySnapshot.rootRect.bottom,
+                    edgePx: dragMulti.EDGE_PX,
+                    maxSpeed: dragMulti.MAX_SPEED
+                });
+            }
+
+            return {
+                intent,
+                isInvalid,
+                dropEffect: intent && !isInvalid ? 'move' : 'none',
+                shifts: planReflowShifts({
+                    intent,
+                    pointer,
+                    geometrySnapshot,
+                    dragContext,
+                    session: runtime.dragReflowSession
+                }),
+                feedback,
+                geometrySnapshot,
+                dataTransfer
+            };
+        }
+
+        function patchGeometryEntryVisual(entry, deltaY, { inherited = false } = {}) {
+            if (!entry || !entry.visualRect) return false;
+            entry.visualRect = translateRect(entry.visualRect, deltaY);
+            if (inherited) entry.inheritedShiftY += deltaY;
+            else entry.ownShiftY += deltaY;
+            return true;
+        }
+
+        function groupIsDescendantOf(groupEntry, ancestorGroupId, groups) {
+            let cursor = groupEntry;
+            const seen = new Set();
+            while (cursor && cursor.parentGroupId && !seen.has(cursor.parentGroupId)) {
+                if (cursor.parentGroupId === ancestorGroupId) return true;
+                seen.add(cursor.parentGroupId);
+                cursor = groups.get(cursor.parentGroupId) || null;
+            }
+            return false;
+        }
+
+        function patchGeometryTransformDeltas({
+            geometrySnapshot,
+            shiftDeltas
+        }) {
+            if (!geometrySnapshot || !shiftDeltas) return false;
+            let complete = true;
+            const sourceDeltas = shiftDeltas.sources instanceof Map
+                ? shiftDeltas.sources
+                : new Map();
+            const groupDeltas = shiftDeltas.groups instanceof Map
+                ? shiftDeltas.groups
+                : new Map();
+            for (const [groupId, rawDelta] of groupDeltas) {
+                const delta = Number(rawDelta) || 0;
+                if (delta === 0) continue;
+                const group = geometrySnapshot.groups.get(groupId);
+                if (!group) {
+                    complete = false;
+                    continue;
+                }
+                patchGeometryEntryVisual(group, delta);
+                if (group.header) {
+                    group.header.visualRect = translateRect(group.header.visualRect, delta);
+                    group.header.inheritedShiftY += delta;
+                }
+                if (group.children) {
+                    group.children.visualRect = translateRect(group.children.visualRect, delta);
+                    group.children.inheritedShiftY += delta;
+                }
+                for (const source of geometrySnapshot.sourceEntries.values()) {
+                    if (source.parentGroupId === groupId) {
+                        patchGeometryEntryVisual(source, delta, { inherited: true });
+                        continue;
+                    }
+                    const parent = source.parentGroupId
+                        ? geometrySnapshot.groups.get(source.parentGroupId)
+                        : null;
+                    if (parent && groupIsDescendantOf(parent, groupId, geometrySnapshot.groups)) {
+                        patchGeometryEntryVisual(source, delta, { inherited: true });
+                    }
+                }
+                for (const descendant of geometrySnapshot.groups.values()) {
+                    if (!groupIsDescendantOf(descendant, groupId, geometrySnapshot.groups)) continue;
+                    patchGeometryEntryVisual(descendant, delta, { inherited: true });
+                    if (descendant.header) {
+                        descendant.header.visualRect = translateRect(
+                            descendant.header.visualRect,
+                            delta
+                        );
+                        descendant.header.inheritedShiftY += delta;
+                    }
+                    if (descendant.children) {
+                        descendant.children.visualRect = translateRect(
+                            descendant.children.visualRect,
+                            delta
+                        );
+                        descendant.children.inheritedShiftY += delta;
+                    }
+                }
+            }
+            for (const [sourceKey, rawDelta] of sourceDeltas) {
+                const delta = Number(rawDelta) || 0;
+                if (delta === 0) continue;
+                const source = geometrySnapshot.sourceEntries.get(sourceKey);
+                if (!source) {
+                    complete = false;
+                    continue;
+                }
+                patchGeometryEntryVisual(source, delta);
+            }
+            return complete;
+        }
+
+        function patchGeometryTransforms({
+            geometrySnapshot,
+            previousSourceShifts,
+            previousGroupShifts,
+            nextShifts
+        }) {
+            if (!geometrySnapshot || !nextShifts) return false;
+            const shiftDeltas = {
+                sources: new Map(),
+                groups: new Map()
+            };
+            const collectShiftDeltas = (previous, next, deltas) => {
+                for (const [key, nextDelta] of next) {
+                    const delta = (Number(nextDelta) || 0)
+                        - (Number(previous.get(key)) || 0);
+                    if (delta !== 0) deltas.set(key, delta);
+                }
+                for (const [key, previousDelta] of previous) {
+                    if (next.has(key)) continue;
+                    const delta = -(Number(previousDelta) || 0);
+                    if (delta !== 0) deltas.set(key, delta);
+                }
+            };
+            collectShiftDeltas(
+                previousSourceShifts,
+                nextShifts.sources instanceof Map ? nextShifts.sources : new Map(),
+                shiftDeltas.sources
+            );
+            collectShiftDeltas(
+                previousGroupShifts,
+                nextShifts.groups instanceof Map ? nextShifts.groups : new Map(),
+                shiftDeltas.groups
+            );
+            return patchGeometryTransformDeltas({
+                geometrySnapshot,
+                shiftDeltas
+            });
+        }
+
+        function clearAppliedDragFeedback() {
+            const prior = runtime.dragFeedbackElements;
+            if (!prior || typeof prior !== 'object') return;
+            const removeClass = (element, ...classNames) => {
+                if (element && element.classList && typeof element.classList.remove === 'function') {
+                    element.classList.remove(...classNames);
+                }
+            };
+            removeClass(prior.intoElement, 'drag-into');
+            removeClass(prior.invalidElement, 'drag-invalid');
+            removeClass(prior.lineElement, 'drag-over-top', 'drag-over-bottom');
+            removeClass(prior.guideElement, 'sp-drag-guide');
+            if (
+                prior.guideElement
+                && prior.guideElement.style
+                && typeof prior.guideElement.style.removeProperty === 'function'
+            ) {
+                prior.guideElement.style.removeProperty('--sp-slot-comp');
+            }
+            runtime.dragFeedbackElements = null;
+        }
+
+        function applyHoverLifecycleFeedback(feedback) {
+            const ancestorSet = feedback.pointerAncestorSet instanceof Set
+                ? feedback.pointerAncestorSet
+                : new Set();
+            for (const [groupId, timerEntry] of runtime.hoverExpandTimers) {
+                if (
+                    timerEntry
+                    && timerEntry.kind === 'expand'
+                    && groupId !== feedback.pointerGroupId
+                ) {
+                    cancelHoverTimerForGroup(groupId);
+                }
+            }
+            if (runtime.hoverExpandedGroupIds.size > 0) {
+                for (const groupId of Array.from(runtime.hoverExpandedGroupIds)) {
+                    if (ancestorSet.has(groupId)) cancelHoverTimerForGroup(groupId);
+                    else armHoverCollapseTimerForGroup(groupId);
+                }
+            }
+            if (!feedback.pointerGroupId) return;
+            const group = getGroupsById().get(feedback.pointerGroupId);
+            if (
+                group
+                && group.collapsed
+                && Array.isArray(group.children)
+                && group.children.length > 0
+            ) {
+                armHoverExpandTimerForGroup(
+                    feedback.pointerGroupId,
+                    feedback.pointerGroupElement
+                );
+            } else {
+                cancelHoverTimerForGroup(feedback.pointerGroupId);
+            }
+        }
+
+        function applyDragFramePlan(plan) {
+            if (!plan || !plan.geometrySnapshot) return;
+            const snapshot = plan.geometrySnapshot;
+            const feedback = plan.feedback || {};
+            const session = runtime.dragReflowSession;
+            clearAppliedDragFeedback();
+
+            if (
+                feedback.intoElement
+                && feedback.intoElement.classList
+                && typeof feedback.intoElement.classList.add === 'function'
+            ) {
+                feedback.intoElement.classList.add('drag-into');
+            }
+            if (
+                feedback.invalidElement
+                && feedback.invalidElement.classList
+                && typeof feedback.invalidElement.classList.add === 'function'
+            ) {
+                feedback.invalidElement.classList.add('drag-invalid');
+            }
+            if (
+                feedback.lineElement
+                && feedback.lineClass
+                && feedback.lineElement.classList
+                && typeof feedback.lineElement.classList.add === 'function'
+            ) {
+                feedback.lineElement.classList.add(feedback.lineClass);
+            }
+            if (
+                feedback.guideElement
+                && feedback.guideElement.classList
+                && typeof feedback.guideElement.classList.add === 'function'
+            ) {
+                feedback.guideElement.classList.add('sp-drag-guide');
+                if (
+                    feedback.guideHeight > 0
+                    && feedback.guideElement.style
+                    && typeof feedback.guideElement.style.setProperty === 'function'
+                ) {
+                    feedback.guideElement.style.setProperty(
+                        '--sp-slot-comp',
+                        `${feedback.guideHeight}px`
+                    );
+                }
+            }
+            runtime.dragFeedbackElements = {
+                intoElement: feedback.intoElement || null,
+                invalidElement: feedback.invalidElement || null,
+                lineElement: feedback.lineElement || null,
+                guideElement: feedback.guideElement || null
+            };
+
+            if (plan.dataTransfer) {
+                try { plan.dataTransfer.dropEffect = plan.dropEffect; } catch (_) {}
+            }
+
+            let transformPatchComplete = true;
+            if (
+                session
+                && dragReflow
+                && typeof dragReflow.applyReflow === 'function'
+                && plan.shifts
+            ) {
+                const supportsAppliedShiftDeltas = (
+                    dragReflow.supportsAppliedShiftDeltas === true
+                );
+                const previousSourceShifts = session.shiftedSourceItems instanceof Map
+                    ? (
+                        supportsAppliedShiftDeltas
+                            ? null
+                            : new Map(session.shiftedSourceItems)
+                    )
+                    : new Map();
+                const previousGroupShifts = session.shiftedGroupItems instanceof Map
+                    ? (
+                        supportsAppliedShiftDeltas
+                            ? null
+                            : new Map(session.shiftedGroupItems)
+                    )
+                    : new Map();
+                const result = dragReflow.applyReflow({
+                    session,
+                    shifts: plan.shifts,
+                    rootElement: snapshot.rootElement,
+                    sourceElements: snapshot.sourceElements,
+                    groupElements: snapshot.groupElements
+                });
+                transformPatchComplete = supportsAppliedShiftDeltas
+                    ? patchGeometryTransformDeltas({
+                        geometrySnapshot: snapshot,
+                        shiftDeltas: result && result.appliedShiftDeltas
+                    })
+                    : patchGeometryTransforms({
+                        geometrySnapshot: snapshot,
+                        previousSourceShifts,
+                        previousGroupShifts,
+                        nextShifts: plan.shifts
+                    });
+                transformPatchComplete = Boolean(
+                    transformPatchComplete
+                    && result
+                    && result.complete !== false
+                );
+            } else if (
+                plan.shifts
+                && (
+                    (plan.shifts.sources instanceof Map && plan.shifts.sources.size > 0)
+                    || (plan.shifts.groups instanceof Map && plan.shifts.groups.size > 0)
+                )
+            ) {
+                transformPatchComplete = false;
+            }
+
+            if (session) {
+                session.currentIntent = plan.intent ? { ...plan.intent } : null;
+            }
+            const shouldShowUngroupDropzone = Boolean(feedback.showUngroupDropzone);
+            if (shouldShowUngroupDropzone !== Boolean(snapshot.dropzoneElement)) {
+                _setUngroupDropzoneVisible(
+                    shouldShowUngroupDropzone,
+                    snapshot
+                );
+                invalidateDragGeometry('ungroup_dropzone_changed', { schedule: false });
+            }
+            applyHoverLifecycleFeedback(feedback);
+            if (autoScrollController) {
+                autoScrollController.tick(Number(feedback.autoScrollVelocity) || 0);
+            }
+
+            if (!transformPatchComplete) {
+                invalidateDragGeometry('transform_patch_incomplete', { schedule: false });
+            }
+        }
+
         // dragover can fire well above 60Hz; collapsing computeDropIntent + reflow
         // + auto-scroll into per-frame batches keeps the main thread free on large
         // / deeply-nested lists. preventDefault stays on the synchronous path —
         // deferring it would set dropEffect='none' for the frame and suppress drop.
         let _pendingDragOverArgs = null;
         let _pendingDragOverRafId = null;
+        let _lastDragOverArgs = null;
         function _cancelPendingDragOver() {
             if (_pendingDragOverRafId != null
                 && typeof globalThis.cancelAnimationFrame === 'function') {
@@ -2189,6 +3508,31 @@
             }
             _pendingDragOverRafId = null;
             _pendingDragOverArgs = null;
+            _lastDragOverArgs = null;
+        }
+        function _scheduleDragOverArgs(args) {
+            _pendingDragOverArgs = args;
+            if (_pendingDragOverRafId != null) return;
+            const raf = typeof globalThis.requestAnimationFrame === 'function'
+                ? globalThis.requestAnimationFrame
+                : null;
+            const flush = () => {
+                const pendingArgs = _pendingDragOverArgs;
+                _pendingDragOverRafId = null;
+                _pendingDragOverArgs = null;
+                if (!pendingArgs) return;
+                _processDragOver(pendingArgs);
+            };
+            if (!raf) {
+                flush();
+            } else {
+                _pendingDragOverRafId = raf(flush);
+            }
+        }
+        function scheduleDragFrameFromLatestPointer() {
+            if (!runtime.activeDragContext || !_lastDragOverArgs) return;
+            if (typeof globalThis.requestAnimationFrame !== 'function') return;
+            _scheduleDragOverArgs({ ..._lastDragOverArgs });
         }
         // Drop / dragend are the terminus of the drag lifecycle and must see the
         // latest computed intent + applied reflow before mutating state. If a
@@ -2211,28 +3555,12 @@
             e.preventDefault();
             // Snapshot only the fields we read downstream. The DragEvent itself
             // is not safe to retain past the current event tick.
-            _pendingDragOverArgs = {
+            _lastDragOverArgs = {
                 clientX: e.clientX,
                 clientY: e.clientY,
                 dataTransfer: e.dataTransfer
             };
-            if (_pendingDragOverRafId != null) return;
-            const raf = typeof globalThis.requestAnimationFrame === 'function'
-                ? globalThis.requestAnimationFrame
-                : null;
-            const flush = () => {
-                const args = _pendingDragOverArgs;
-                _pendingDragOverRafId = null;
-                _pendingDragOverArgs = null;
-                if (!args) return;
-                _processDragOver(args);
-            };
-            if (!raf) {
-                // No rAF (e.g. jsdom without polyfill) — run synchronously.
-                flush();
-            } else {
-                _pendingDragOverRafId = raf(flush);
-            }
+            _scheduleDragOverArgs({ ..._lastDragOverArgs });
         }
         // During a drag, find the COLLAPSED folder whose header is visually under the
         // pointer. Intentionally decoupled from computeDropIntent's drop resolution: the
@@ -2243,324 +3571,72 @@
         // normal slot detection takes over). Uses the raw rect (on-screen position incl.
         // any reflow transform) — we want what the user visually sees under the cursor.
         // Returns null when the pointer isn't over a collapsed, non-empty folder header.
-        function resolvePointerOverCollapsedGroupId({ clientY, rootElement, groupsById }) {
-            if (typeof clientY !== 'number' || !rootElement || typeof rootElement.querySelectorAll !== 'function') {
-                return null;
-            }
-            const gById = groupsById && typeof groupsById.get === 'function' ? groupsById : null;
-            if (!gById) return null;
-            const containers = rootElement.querySelectorAll('.group-container');
-            const list = containers && typeof containers.forEach === 'function'
-                ? Array.from(containers)
-                : (Array.isArray(containers) ? containers : []);
-            for (const container of list) {
-                if (!container || !container.dataset) continue;
-                if (container.classList && typeof container.classList.contains === 'function'
-                    && container.classList.contains('sp-drag-folded')) continue;
-                const gid = container.dataset.groupId;
-                if (!gid) continue;
-                const grp = gById.get(gid);
-                if (!grp || !grp.collapsed) continue;
-                if (!Array.isArray(grp.children) || grp.children.length === 0) continue;
-                const headerEl = typeof container.querySelector === 'function'
-                    ? container.querySelector('.group-header')
-                    : null;
-                if (!headerEl || typeof headerEl.getBoundingClientRect !== 'function') continue;
-                const hr = headerEl.getBoundingClientRect();
-                if (!hr || typeof hr.top !== 'number' || typeof hr.bottom !== 'number') continue;
-                if (clientY < hr.top || clientY >= hr.bottom) continue;
-                return gid;
-            }
-            return null;
-        }
         function _processDragOver(args) {
             const sourceListEl = getSourceListContainer();
-            const intent = computeDropIntent({
-                clientX: args.clientX,
-                clientY: args.clientY,
+            const geometrySnapshot = readDragGeometry({
                 rootElement: sourceListEl,
-                state: getState(),
-                groupsById: getGroupsById(),
-                parentMap: getParentMap(),
-                activeDragContext: runtime.activeDragContext,
-                // Feed last frame's intent back in for into-group edge hysteresis.
-                prevIntent: runtime.dragReflowSession ? runtime.dragReflowSession.currentIntent : null
+                session: runtime.dragReflowSession || null
             });
-
-            if (intent) {
-                const isInvalid = computeIsInvalidDrop({
-                    intent,
-                    dragContext: runtime.activeDragContext
-                });
-
-                // Single sweep to clear stale .drag-into / .drag-invalid markers.
-                if (sourceListEl && typeof sourceListEl.querySelectorAll === 'function') {
-                    const stale = sourceListEl.querySelectorAll('.drag-into, .drag-invalid');
-                    if (stale && typeof stale.forEach === 'function') {
-                        stale.forEach((node) => {
-                            if (node && node.classList && typeof node.classList.remove === 'function') {
-                                node.classList.remove('drag-into', 'drag-invalid');
-                            }
-                        });
-                    }
-                    // Classic mode blue-line markers from the previous frame.
-                    const staleLines = sourceListEl.querySelectorAll('.drag-over-top, .drag-over-bottom');
-                    if (staleLines && typeof staleLines.forEach === 'function') {
-                        staleLines.forEach((node) => {
-                            if (node && node.classList && typeof node.classList.remove === 'function') {
-                                node.classList.remove('drag-over-top', 'drag-over-bottom');
-                            }
-                        });
-                    }
-                    // Clear last frame's folder-guide marker; it is re-applied below for
-                    // whichever folder the pointer is currently inside.
-                    const staleGuide = sourceListEl.querySelectorAll('.sp-drag-guide');
-                    if (staleGuide && typeof staleGuide.forEach === 'function') {
-                        staleGuide.forEach((node) => {
-                            if (!node || !node.classList || typeof node.classList.remove !== 'function') return;
-                            node.classList.remove('sp-drag-guide');
-                            if (node.style && typeof node.style.removeProperty === 'function') {
-                                node.style.removeProperty('--sp-slot-comp');
-                            }
-                        });
-                    }
-                }
-
-                // Apply current frame's markers.
-                if (intent.kind === 'into-group' && intent.hostGroupContainerEl
-                    && intent.hostGroupContainerEl.classList
-                    && typeof intent.hostGroupContainerEl.classList.add === 'function') {
-                    intent.hostGroupContainerEl.classList.add('drag-into');
-                }
-                // Classic mode: a before/after slot shows a blue line on the target row
-                // instead of the reflow avoidance shift. into-group is already covered by the
-                // .drag-into highlight above; root-source drops are demoted to the bin
-                // (slotKey null) so they show no line.
-                if (getDragMode() === 'classic' && !isInvalid && intent.kind !== 'into-group' && intent.slotKey
-                    && sourceListEl && typeof sourceListEl.querySelector === 'function') {
-                    const lineAttr = (intent.kind === 'before-group' || intent.kind === 'after-group')
-                        ? 'data-group-id'
-                        : 'data-source-key';
-                    const lineEl = sourceListEl.querySelector(`[${lineAttr}="${cssEscape(intent.slotKey)}"]`);
-                    if (lineEl && lineEl.classList && typeof lineEl.classList.add === 'function') {
-                        const isBefore = intent.kind === 'before-source' || intent.kind === 'before-group';
-                        lineEl.classList.add(isBefore ? 'drag-over-top' : 'drag-over-bottom');
-                    }
-                }
-                if (isInvalid) {
-                    if (args.dataTransfer) {
-                        try { args.dataTransfer.dropEffect = 'none'; } catch (_) { /* dataTransfer may be finalized across the rAF gap; cursor stays default */ }
-                    }
-                    if (intent.kind === 'into-group') {
-                        if (intent.hostGroupContainerEl && intent.hostGroupContainerEl.classList
-                            && typeof intent.hostGroupContainerEl.classList.add === 'function') {
-                            intent.hostGroupContainerEl.classList.add('drag-invalid');
-                        }
-                    } else if (intent.slotKey && sourceListEl && typeof sourceListEl.querySelector === 'function') {
-                        // before-/after-source uses data-source-key; before-/after-group uses data-group-id.
-                        const slotAttr = (intent.kind === 'before-group' || intent.kind === 'after-group')
-                            ? 'data-group-id'
-                            : 'data-source-key';
-                        const slotEl = sourceListEl.querySelector(`[${slotAttr}="${cssEscape(intent.slotKey)}"]`);
-                        if (slotEl && slotEl.classList && typeof slotEl.classList.add === 'function') {
-                            slotEl.classList.add('drag-invalid');
-                        }
-                    }
-                }
-
-                // Folder guide: the folder the pointer is currently inside (into-group OR
-                // a slot within an expanded folder) gets a blue left bar extended by one
-                // slot — previews where the dragged source lands, including the empty slot
-                // when dropping at the very end. Per-frame so it follows the cursor (the
-                // sweep above already cleared the previous target's marker).
-                if (getDragMode() !== 'classic' && !isInvalid && intent.hostGroupContainerEl
-                    && typeof intent.hostGroupContainerEl.querySelector === 'function') {
-                    const guideChildren = intent.hostGroupContainerEl.querySelector('.group-children');
-                    const slotH = runtime.dragReflowSession ? runtime.dragReflowSession.totalDraggedHeight : 0;
-                    if (guideChildren && guideChildren.classList && typeof guideChildren.classList.add === 'function') {
-                        guideChildren.classList.add('sp-drag-guide');
-                        if (typeof slotH === 'number' && slotH > 0
-                            && guideChildren.style && typeof guideChildren.style.setProperty === 'function') {
-                            guideChildren.style.setProperty('--sp-slot-comp', `${slotH}px`);
-                        }
-                    }
-                }
-
-                // Reflow: compute sibling shifts from host list, push them to the layout.
-                if (dragReflow && runtime.dragReflowSession && typeof dragReflow.computeReflow === 'function') {
-                    const siblingKeys = resolveSiblingKeys(intent);
-                    // intent.insertIndex is now an actual index (0 for into-group = top of
-                    // folder, slot index for before/after-source). No longer need the
-                    // special-case for into-group since 0 is a valid index that opens the
-                    // slot at the top of children — matching the drop position.
-                    const insertIndexForReflow = typeof intent.insertIndex === 'number' && intent.insertIndex >= 0
-                        ? intent.insertIndex
-                        : siblingKeys.length;
-                    const shifts = dragReflow.computeReflow({
-                        session: runtime.dragReflowSession,
-                        insertIndex: insertIndexForReflow,
-                        siblingKeys,
-                        rootElement: sourceListEl
+            if (!geometrySnapshot) {
+                const priorSnapshot = runtime.dragGeometrySnapshot;
+                if (priorSnapshot) {
+                    applyDragFramePlan({
+                        intent: null,
+                        isInvalid: true,
+                        dropEffect: 'none',
+                        shifts: {
+                            sources: new Map(),
+                            groups: new Map()
+                        },
+                        feedback: {
+                            showUngroupDropzone: false,
+                            pointerGroupId: null,
+                            pointerAncestorSet: new Set(),
+                            autoScrollVelocity: 0
+                        },
+                        geometrySnapshot: priorSnapshot,
+                        dataTransfer: args && args.dataTransfer
                     });
-                    // Cross-host shift extension: when host is a group's children, the
-                    // dragged item's fold shrinks the group container's layout height,
-                    // so root-level siblings below it shift UP. Meanwhile the group's
-                    // own children get translateY(+slotHeight) from the reflow above —
-                    // they visually overflow past the group container's edge and
-                    // overlap with the next group's header. To keep the list visually
-                    // static below the cursor, also shift every "subsequent sibling of
-                    // host's ancestor chain" (i.e. each level's siblings after the host
-                    // path, walking up until we reach #sources-list). This handles
-                    // nested groups too.
-                    if (intent.targetGroup && intent.hostGroupContainerEl
-                        && runtime.dragReflowSession && sourceListEl) {
-                        const _refSession = runtime.dragReflowSession;
-                        const _slotHeight = _refSession.totalDraggedHeight;
-                        if (typeof _slotHeight === 'number' && _slotHeight > 0) {
-                            // Walk up the host's DOM ancestor chain, shifting each level's
-                            // later DOM siblings. host group-container → .group-children
-                            // (skip) → ancestor group-container → ... → #sources-list (stop).
-                            let _cursorEl = intent.hostGroupContainerEl;
-                            while (_cursorEl && _cursorEl !== sourceListEl) {
-                                let _sibling = _cursorEl.nextElementSibling;
-                                while (_sibling) {
-                                    const _isSrc = _sibling.classList
-                                        && _sibling.classList.contains('source-item');
-                                    const _isGrp = _sibling.classList
-                                        && _sibling.classList.contains('group-container');
-                                    if (_isSrc || _isGrp) {
-                                        const _key = _isSrc
-                                            ? (_sibling.dataset && _sibling.dataset.sourceKey)
-                                            : (_sibling.dataset && _sibling.dataset.groupId);
-                                        if (_key && !_refSession.draggedKeys.has(_key) && !shifts.has(_key)) {
-                                            shifts.set(_key, _slotHeight);
-                                        }
-                                    }
-                                    _sibling = _sibling.nextElementSibling;
-                                }
-                                // Climb one layout level. host's parent is .group-children
-                                // (if nested) or #sources-list (if top-level). When parent
-                                // is #sources-list we've already shifted top-level siblings.
-                                const _parentEl = _cursorEl.parentElement;
-                                if (!_parentEl || _parentEl === sourceListEl) break;
-                                // parent is .group-children → climb to its enclosing .group-container.
-                                _cursorEl = _parentEl.parentElement;
-                            }
-                        }
-                    }
-                    // Root-level visual shift: when intent has no targetGroup (cursor is in
-                    // root-level corridor, e.g. left-half of a top-level group, or in the gap
-                    // between groups, or above an empty ungrouped section) the host array can
-                    // be empty (e.g. source dragged but state.ungrouped is []) so the per-host
-                    // sibling shifts above produced an empty Map. Without any shifts the user
-                    // sees no avoidance — the groups stay flush together and there's no
-                    // visible "slot" being opened. Iterate the sources-list direct children
-                    // here and shift every one whose visual mid-Y is below the cursor by
-                    // +slotHeight. Result: cursor in top half of group A → A, B, C all push
-                    // down (slot opens above A). Cursor in bottom half of group A → only B,
-                    // C push down (slot opens between A and B). Matches user intuition:
-                    // "wherever I hover, everything below shifts to make room".
-                    if (!intent.targetGroup && sourceListEl && runtime.dragReflowSession
-                        && typeof sourceListEl.querySelectorAll === 'function') {
-                        const _rootSession = runtime.dragReflowSession;
-                        const _rootSlotHeight = _rootSession.totalDraggedHeight;
-                        if (typeof _rootSlotHeight === 'number' && _rootSlotHeight > 0) {
-                            const _rootKids = sourceListEl.querySelectorAll(':scope > .source-item, :scope > .group-container');
-                            _rootKids.forEach((kid) => {
-                                if (!kid || !kid.classList) return;
-                                if (kid.classList.contains('sp-drag-folded')) return;
-                                if (typeof kid.getBoundingClientRect !== 'function') return;
-                                const _kr = kid.getBoundingClientRect();
-                                if (!_kr || typeof _kr.top !== 'number' || typeof _kr.height !== 'number') return;
-                                const _kMidY = _kr.top + _kr.height / 2;
-                                if (_kMidY <= args.clientY) return; // child is above cursor → not affected
-                                const _kIsSrc = kid.classList.contains('source-item');
-                                const _kKey = _kIsSrc
-                                    ? (kid.dataset && kid.dataset.sourceKey)
-                                    : (kid.dataset && kid.dataset.groupId);
-                                if (!_kKey || _rootSession.draggedKeys.has(_kKey)) return;
-                                if (!shifts.has(_kKey)) shifts.set(_kKey, _rootSlotHeight);
+                } else {
+                    clearAppliedDragFeedback();
+                    if (runtime.dragReflowSession) {
+                        runtime.dragReflowSession.currentIntent = null;
+                        if (
+                            dragReflow
+                            && typeof dragReflow.clearReflow === 'function'
+                            && sourceListEl
+                        ) {
+                            dragReflow.clearReflow({
+                                session: runtime.dragReflowSession,
+                                rootElement: sourceListEl
                             });
                         }
                     }
-                    if (typeof dragReflow.applyReflow === 'function') {
-                        dragReflow.applyReflow({
-                            session: runtime.dragReflowSession,
-                            shifts,
-                            rootElement: sourceListEl
-                        });
-                    }
-                    runtime.dragReflowSession.currentIntent = { ...intent };
-                }
-
-                // Mount / unmount the transient "drop to ungroup" hint in the reflow-opened
-                // bottom slot. Only when the intent is the empty-bin trailing drop.
-                _setUngroupDropzoneVisible(intent.isEmptyBinTrailing === true);
-
-                // Hover-expand: derive pointerGroupId from the host group-container we already
-                // resolved. DECOUPLING: when a SOURCE drag's drop intent is a root-level reorder
-                // (X-split left-half escape, or the empty-ungrouped fallback → hostGroupContainerEl
-                // null), still arm hover-expand for the collapsed folder the cursor is physically
-                // over. A dwell then opens it (revealing its slots) so the user can drop inside;
-                // armHoverExpandTimerForGroup paints the honest .sp-hover-expand-pending cue
-                // meanwhile. Group drags keep their existing behavior (no pointer-over fallback).
-                const _isSourceDragCtx = runtime.activeDragContext
-                    && (runtime.activeDragContext.kind === 'source-single'
-                        || runtime.activeDragContext.kind === 'source-multi');
-                const pointerOverCollapsedId = _isSourceDragCtx
-                    ? resolvePointerOverCollapsedGroupId({
-                        clientY: args.clientY,
-                        rootElement: sourceListEl,
-                        groupsById: getGroupsById()
-                    })
-                    : null;
-                const pointerGroupId = (intent.hostGroupContainerEl && intent.hostGroupContainerEl.dataset
-                    ? intent.hostGroupContainerEl.dataset.groupId
-                    : null) || pointerOverCollapsedId;
-                const ancestorChain = pointerGroupId ? getGroupAncestorChain(pointerGroupId) : [];
-                const ancestorSet = new Set(ancestorChain);
-
-                if (runtime.hoverExpandedGroupIds.size > 0) {
-                    const openedIds = Array.from(runtime.hoverExpandedGroupIds);
-                    for (const G of openedIds) {
-                        if (ancestorSet.has(G)) {
-                            cancelHoverTimerForGroup(G);
-                        } else {
-                            armHoverCollapseTimerForGroup(G);
-                        }
+                    cancelAllHoverTimers();
+                    _setUngroupDropzoneVisible(false);
+                    if (autoScrollController) autoScrollController.stop();
+                    if (args && args.dataTransfer) {
+                        try { args.dataTransfer.dropEffect = 'none'; } catch (_) {}
                     }
                 }
-
-                if (pointerGroupId) {
-                    const groupsById = getGroupsById();
-                    const pointerGroup = groupsById.get(pointerGroupId);
-                    if (pointerGroup && pointerGroup.collapsed && Array.isArray(pointerGroup.children) && pointerGroup.children.length > 0) {
-                        armHoverExpandTimerForGroup(pointerGroupId);
-                    } else {
-                        cancelHoverTimerForGroup(pointerGroupId);
-                    }
-                }
-            } else {
-                cancelAllHoverTimers();
-                _setUngroupDropzoneVisible(false);
+                return;
             }
-
-            if (autoScrollController && dragMulti && typeof dragMulti.computeAutoScrollVelocity === 'function') {
-                // Reuse the sources-list element already resolved at the top of this frame
-                // (getSourceListContainer() === getShadowRoot().getElementById('sources-list')),
-                // rather than re-resolving the shadow root + element on every dragover frame.
-                if (sourceListEl && typeof sourceListEl.getBoundingClientRect === 'function') {
-                    const listRect = sourceListEl.getBoundingClientRect();
-                    const velocity = dragMulti.computeAutoScrollVelocity({
-                        pointerY: args.clientY,
-                        containerTop: listRect.top,
-                        containerBottom: listRect.bottom,
-                        edgePx: dragMulti.EDGE_PX,
-                        maxSpeed: dragMulti.MAX_SPEED
-                    });
-                    autoScrollController.tick(velocity);
-                }
-            }
+            const plan = planDragFrame({
+                pointer: {
+                    clientX: args && args.clientX,
+                    clientY: args && args.clientY
+                },
+                geometrySnapshot,
+                state: getState(),
+                groupsById: getGroupsById(),
+                parentMap: getParentMap(),
+                dragContext: runtime.activeDragContext,
+                previousIntent: runtime.dragReflowSession
+                    ? runtime.dragReflowSession.currentIntent
+                    : null,
+                dataTransfer: args && args.dataTransfer
+            });
+            applyDragFramePlan(plan);
         }
 
         // Transient "drop to ungroup" hint shown in the bottom slot opened by reflow
@@ -2571,14 +3647,23 @@
         // existing node. Torn down on leave / dragend via _setUngroupDropzoneVisible(false).
         // el(...) is not in scope in this module (and not wired through its deps), so the
         // node is built via getDocument().createElement + createTextNode — never innerHTML.
-        function _setUngroupDropzoneVisible(visible) {
-            const listEl = getSourceListContainer();
-            if (!listEl || typeof listEl.querySelector !== 'function') return;
-            const existing = listEl.querySelector('.sp-ungroup-dropzone');
+        function _setUngroupDropzoneVisible(visible, geometrySnapshot = null) {
+            const listEl = geometrySnapshot && geometrySnapshot.rootElement
+                ? geometrySnapshot.rootElement
+                : getSourceListContainer();
+            if (!listEl) return;
+            const existing = geometrySnapshot
+                ? geometrySnapshot.dropzoneElement
+                : (
+                    typeof listEl.querySelector === 'function'
+                        ? listEl.querySelector('.sp-ungroup-dropzone')
+                        : null
+                );
             if (!visible) {
                 if (existing && typeof listEl.removeChild === 'function') {
                     try { listEl.removeChild(existing); } catch (_) { /* already detached */ }
                 }
+                if (geometrySnapshot) geometrySnapshot.dropzoneElement = null;
                 return;
             }
             if (existing) return;
@@ -2593,6 +3678,7 @@
                 zone.textContent = getMessage('ui_drop_to_ungroup_hint');
             }
             listEl.appendChild(zone);
+            if (geometrySnapshot) geometrySnapshot.dropzoneElement = zone;
         }
 
         function handleDragLeave(e) {
@@ -2646,17 +3732,39 @@
             // Drop any dragover work that was queued for the next frame — running
             // it after the drag terminated would touch DOM with stale intent.
             _cancelPendingDragOver();
+            cancelDeferredDragFold();
+            teardownDragGeometryLifecycle();
             _setUngroupDropzoneVisible(false);
             runtime.activeDragContext = null;
             cancelAllHoverTimers();
-            if (runtime.hoverExpandedGroupIds.size > 0) {
-                const openedIds = Array.from(runtime.hoverExpandedGroupIds);
-                for (const G of openedIds) {
-                    executeHoverCollapse(G);
-                }
-                runtime.hoverExpandedGroupIds.clear();
-            }
+            restoreTransientHoverExpandedGroups();
+            runtime.dragGeometrySnapshot = null;
+            invalidateDragGeometry('drag_ended', { schedule: false });
             return count;
+        }
+
+        function teardownDragInteractions() {
+            _cancelPendingDragOver();
+            cancelDeferredDragFold();
+            teardownDragGeometryLifecycle();
+            if (autoScrollController && typeof autoScrollController.stop === 'function') {
+                autoScrollController.stop();
+            }
+            runtime.activeDragContext = null;
+            cancelAllHoverTimers();
+            restoreTransientHoverExpandedGroups();
+            if (
+                runtime.activeDragGhost
+                && dragMulti
+                && typeof dragMulti.destroyMultiDragGhost === 'function'
+            ) {
+                try { dragMulti.destroyMultiDragGhost(runtime.activeDragGhost); } catch (_) {}
+            }
+            runtime.activeDragGhost = null;
+            runtime.dragReflowSession = null;
+            runtime.dragFeedbackElements = null;
+            runtime.dragGeometrySnapshot = null;
+            invalidateDragGeometry('manager_teardown', { schedule: false });
         }
 
         function getGroupAncestorChain(groupId) {
@@ -2678,6 +3786,7 @@
         function cancelHoverTimerForGroup(groupId) {
             const entry = runtime.hoverExpandTimers.get(groupId);
             if (!entry) return;
+            invalidateDragGeometry('hover_timer_cancelled');
             if (typeof clearTimeout === 'function' && entry.timeoutId !== null && entry.timeoutId !== undefined) {
                 clearTimeout(entry.timeoutId);
             }
@@ -2700,7 +3809,53 @@
             }
         }
 
+        function restoreTransientHoverExpandedGroups() {
+            if (runtime.hoverExpandedGroupIds.size === 0) return 0;
+            const openedIds = Array.from(runtime.hoverExpandedGroupIds);
+            const groupsById = getGroupsById();
+            const root = getShadowRoot();
+            let restored = 0;
+            for (const groupId of openedIds) {
+                const group = groupsById.get(groupId);
+                if (group && !group.collapsed) {
+                    group.collapsed = true;
+                    restored += 1;
+                }
+                const container = root && typeof root.querySelector === 'function'
+                    ? root.querySelector(
+                        `.group-container[data-group-id="${cssEscape(groupId)}"]`
+                    )
+                    : null;
+                if (!container || typeof container.querySelector !== 'function') continue;
+                const caret = container.querySelector('.sp-caret');
+                const children = container.querySelector('.group-children');
+                if (caret?.classList && typeof caret.classList.add === 'function') {
+                    caret.classList.add('collapsed');
+                }
+                if (children?.classList && typeof children.classList.add === 'function') {
+                    children.classList.add('collapsed');
+                }
+                const pendingSettle = children
+                    ? pendingGroupExpandSettles.get(children)
+                    : null;
+                if (pendingSettle) {
+                    children.removeEventListener('transitionend', pendingSettle);
+                    pendingGroupExpandSettles.delete(children);
+                }
+                if (children?.style) {
+                    children.style.height = '';
+                    children.style.overflow = '';
+                }
+            }
+            runtime.hoverExpandedGroupIds.clear();
+            if (restored > 0) {
+                saveState({ immediate: true });
+            }
+            return restored;
+        }
+
         function executeHoverExpand(groupId) {
+            invalidateDragGeometry('hover_expand_started', { schedule: false });
             // Drop the pending-cue class on whatever container we tracked when
             // the timer was armed — the actual expand is about to happen, so
             // the "about to open" outline should give way to the open state.
@@ -2735,13 +3890,22 @@
                     ? container.querySelector('.group-children')
                     : null;
                 if (childrenEl && childrenEl.style) {
+                    const pendingSettle = pendingGroupExpandSettles.get(childrenEl);
+                    if (pendingSettle) {
+                        childrenEl.removeEventListener(
+                            'transitionend',
+                            pendingSettle
+                        );
+                        pendingGroupExpandSettles.delete(childrenEl);
+                    }
                     childrenEl.style.height = 'auto';
                     childrenEl.style.overflow = 'visible';
                 }
+                invalidateDragGeometry('hover_expand_completed');
             }
         }
 
-        function armHoverExpandTimerForGroup(groupId) {
+        function armHoverExpandTimerForGroup(groupId, knownContainerEl = null) {
             if (!groupId) return;
             const groupsById = getGroupsById();
             const group = groupsById.get(groupId);
@@ -2767,18 +3931,21 @@
             // runs (pointer moved elsewhere) — see both call sites.
             // Delay was raised from 600ms after users reported accidental
             // hover-opens while dragging past collapsed folders.
-            let _armContainerEl = null;
-            const _armRoot = getShadowRoot();
-            if (_armRoot && typeof _armRoot.querySelector === 'function') {
-                _armContainerEl = _armRoot.querySelector(`.group-container[data-group-id="${cssEscape(groupId)}"]`);
-                if (_armContainerEl && _armContainerEl.classList
-                    && typeof _armContainerEl.classList.add === 'function') {
-                    _armContainerEl.classList.add('sp-hover-expand-pending');
+            let _armContainerEl = knownContainerEl;
+            if (!_armContainerEl) {
+                const _armRoot = getShadowRoot();
+                if (_armRoot && typeof _armRoot.querySelector === 'function') {
+                    _armContainerEl = _armRoot.querySelector(`.group-container[data-group-id="${cssEscape(groupId)}"]`);
                 }
+            }
+            if (_armContainerEl && _armContainerEl.classList
+                && typeof _armContainerEl.classList.add === 'function') {
+                _armContainerEl.classList.add('sp-hover-expand-pending');
             }
 
             const timeoutId = setTimeoutFn(() => executeHoverExpand(groupId), 1000);
             runtime.hoverExpandTimers.set(groupId, { kind: 'expand', timeoutId, containerEl: _armContainerEl });
+            invalidateDragGeometry('hover_expand_armed');
         }
 
         function armHoverCollapseTimerForGroup(groupId) {
@@ -2793,9 +3960,11 @@
             if (typeof setTimeoutFn !== 'function') return;
             const timeoutId = setTimeoutFn(() => executeHoverCollapse(groupId), 1000);
             runtime.hoverExpandTimers.set(groupId, { kind: 'collapse', timeoutId });
+            invalidateDragGeometry('hover_collapse_armed');
         }
 
         function executeHoverCollapse(groupId) {
+            invalidateDragGeometry('hover_collapse_started', { schedule: false });
             runtime.hoverExpandTimers.delete(groupId);
             if (!runtime.hoverExpandedGroupIds.has(groupId)) return;
             runtime.hoverExpandedGroupIds.delete(groupId);
@@ -2811,6 +3980,7 @@
                 : null;
             if (container) {
                 toggleGroupCollapse(group, container);
+                invalidateDragGeometry('hover_collapse_completed');
                 return;
             }
             // DOM unreachable (external state sync rebuilt/removed the node mid-drag).
@@ -2820,6 +3990,7 @@
             // group.collapsed. State is the source of truth; the DOM is its product.
             group.collapsed = true;
             saveState({ immediate: true });
+            invalidateDragGeometry('hover_collapse_completed');
         }
 
         function cancelExpandTimersForOtherGroups(keepGroupId) {
@@ -2958,8 +4129,17 @@
                     for (const key of runtime.dragReflowSession.draggedKeys) {
                         if (typeof key !== 'string' || !key) continue;
                         const safe = cssEscape(key);
-                        const el = _cancelRoot.querySelector(`[data-source-key="${safe}"]`)
-                            || _cancelRoot.querySelector(`[data-group-id="${safe}"]`);
+                        const draggedType = runtime.dragReflowSession.draggedType;
+                        const el = draggedType === 'source'
+                            ? _cancelRoot.querySelector(`[data-source-key="${safe}"]`)
+                            : (
+                                draggedType === 'group'
+                                    ? _cancelRoot.querySelector(`[data-group-id="${safe}"]`)
+                                    : (
+                                        _cancelRoot.querySelector(`[data-source-key="${safe}"]`)
+                                        || _cancelRoot.querySelector(`[data-group-id="${safe}"]`)
+                                    )
+                            );
                         if (el && el.classList && typeof el.classList.add === 'function') {
                             el.classList.add('sp-drag-cancelled');
                             _cancelledNodes.push(el);
@@ -2987,6 +4167,25 @@
                 }
                 runtime.dragReflowSession = null;
             }
+        }
+
+        function getTypedDragRowKey(element) {
+            if (!element || !element.dataset || !element.classList) return null;
+            if (
+                typeof element.classList.contains === 'function'
+                && element.classList.contains('source-item')
+                && element.dataset.sourceKey
+            ) {
+                return `source:${element.dataset.sourceKey}`;
+            }
+            if (
+                typeof element.classList.contains === 'function'
+                && element.classList.contains('group-container')
+                && element.dataset.groupId
+            ) {
+                return `group:${element.dataset.groupId}`;
+            }
+            return null;
         }
 
         function handleDrop(e) {
@@ -3037,10 +4236,12 @@
                 const _preDropRoot = getSourceListContainer();
                 const _preDropRects = new Map();
                 if (_preDropRoot && typeof _preDropRoot.querySelectorAll === 'function') {
-                    const _preEls = _preDropRoot.querySelectorAll('[data-source-key], [data-group-id]');
+                    const _preEls = _preDropRoot.querySelectorAll(
+                        '.source-item[data-source-key], .group-container[data-group-id]'
+                    );
                     for (const _pEl of _preEls) {
                         if (!_pEl || typeof _pEl.getBoundingClientRect !== 'function') continue;
-                        const _pKey = _pEl.dataset && (_pEl.dataset.sourceKey || _pEl.dataset.groupId);
+                        const _pKey = getTypedDragRowKey(_pEl);
                         if (!_pKey) continue;
                         const _pRect = _pEl.getBoundingClientRect();
                         if (_pRect) _preDropRects.set(_pKey, _pRect.top);
@@ -3118,7 +4319,13 @@
                             render();
                             showToast(getMessage('ui_batch_moved_sources_toast', [String(result.moved)]));
                             disposeHoverOpenedGroupsAfterDrop(intent, augmentedIntent);
-                            applyDropLandingAndFlash(Array.isArray(keys) ? keys : [], e.clientX, e.clientY, _preDropRects);
+                            applyDropLandingAndFlash(
+                                Array.isArray(keys) ? keys : [],
+                                e.clientX,
+                                e.clientY,
+                                _preDropRects,
+                                'source'
+                            );
                         }
                         clearDragFeedback();
                         return;
@@ -3197,7 +4404,8 @@
                 applyDropLandingAndFlash(
                     sourceKey ? [sourceKey] : (draggedGroupId ? [draggedGroupId] : []),
                     e.clientX, e.clientY,
-                    _preDropRects
+                    _preDropRects,
+                    sourceKey ? 'source' : (draggedGroupId ? 'group' : null)
                 );
                 // Discoverability hint: when a source drop lands in the bottom ungrouped
                 // bin via the trailing drop zone (targetGroup null, slotKey null, and NOT a
@@ -3229,7 +4437,13 @@
         // `.sp-drop-landing` (scaleY 0 → 1, read as "growing from top") effects. cursorX /
         // cursorY parameters retained for backward compatibility with callers — no longer
         // used because opacity fade-in needs no positional input.
-        function applyDropLandingAndFlash(landedKeys, _cursorX, _cursorY, preRects) {
+        function applyDropLandingAndFlash(
+            landedKeys,
+            _cursorX,
+            _cursorY,
+            preRects,
+            landedType = null
+        ) {
             // Classic mode has no fly-in / FLIP landing animation (26.5.26 dropped instantly).
             if (getDragMode() === 'classic') return;
             if (!Array.isArray(landedKeys) || landedKeys.length === 0) return;
@@ -3273,7 +4487,9 @@
             // restores inline transition on all rows so future hover/etc. transitions work.
             const _suppressedRows = [];
             if (typeof rootElement.querySelectorAll === 'function') {
-                rootElement.querySelectorAll('[data-source-key], [data-group-id]').forEach((row) => {
+                rootElement.querySelectorAll(
+                    '.source-item[data-source-key], .group-container[data-group-id]'
+                ).forEach((row) => {
                     if (!row || !row.style) return;
                     row.style.transition = 'none';
                     _suppressedRows.push(row);
@@ -3288,14 +4504,27 @@
             // itself is already animating smoothly via fly-in. This block makes every
             // visible row's drop-time motion smooth, in parallel with the dragged
             // element's fly-in/scaleY animation.
-            const _landedSet = new Set(Array.isArray(landedKeys) ? landedKeys : []);
+            const _rawLandedSet = new Set(Array.isArray(landedKeys) ? landedKeys : []);
+            const _landedSet = new Set(
+                landedType
+                    ? Array.from(_rawLandedSet, (key) => `${landedType}:${key}`)
+                    : []
+            );
             if (preRects && typeof preRects.get === 'function' && typeof rootElement.querySelectorAll === 'function') {
-                const _flipEls = rootElement.querySelectorAll('[data-source-key], [data-group-id]');
+                const _flipEls = rootElement.querySelectorAll(
+                    '.source-item[data-source-key], .group-container[data-group-id]'
+                );
                 for (const _flipEl of _flipEls) {
                     if (!_flipEl || !_flipEl.classList || !_flipEl.style) continue;
-                    const _flipKey = _flipEl.dataset && (_flipEl.dataset.sourceKey || _flipEl.dataset.groupId);
+                    const _flipKey = getTypedDragRowKey(_flipEl);
                     if (!_flipKey) continue;
-                    if (_landedSet.has(_flipKey)) continue; // landed items use fly-in / scaleY below
+                    const _rawFlipKey = _flipKey.slice(_flipKey.indexOf(':') + 1);
+                    if (
+                        _landedSet.has(_flipKey)
+                        || (!landedType && _rawLandedSet.has(_rawFlipKey))
+                    ) {
+                        continue; // landed items use the opacity path below
+                    }
                     if (typeof _flipEl.getBoundingClientRect !== 'function') continue;
                     const _oldTop = preRects.get(_flipKey);
                     if (typeof _oldTop !== 'number') continue; // newly inserted / no snapshot
@@ -3351,8 +4580,16 @@
             for (const key of landedKeys) {
                 if (typeof key !== 'string' || !key) continue;
                 const safe = cssEscape(key);
-                const el = rootElement.querySelector(`[data-source-key="${safe}"]`)
-                    || rootElement.querySelector(`[data-group-id="${safe}"]`);
+                const el = landedType === 'source'
+                    ? rootElement.querySelector(`[data-source-key="${safe}"]`)
+                    : (
+                        landedType === 'group'
+                            ? rootElement.querySelector(`[data-group-id="${safe}"]`)
+                            : (
+                                rootElement.querySelector(`[data-source-key="${safe}"]`)
+                                || rootElement.querySelector(`[data-group-id="${safe}"]`)
+                            )
+                    );
                 if (!el || !el.style) continue;
                 el.style.opacity = '0';
                 void el.offsetHeight; // force layout flush so opacity 0 commits
@@ -3535,8 +4772,124 @@
         // visually-shifted positions across the render. Idempotent: if shifts
         // already match (prev === delta) applyReflow skips per-element work.
         function applyReflowAfterRender() {
+            if (!runtime.activeDragContext && !runtime.dragReflowSession) return;
+            const rootElement = getSourceListContainer();
+            if (!rootElement) return;
+            const sourceElements = new Map();
+            const groupElements = new Map();
+            const groupChildrenElements = [];
+            if (typeof rootElement.querySelectorAll === 'function') {
+                const freshElements = Array.from(rootElement.querySelectorAll([
+                    '.source-item[data-source-key]',
+                    '.group-container[data-group-id]',
+                    '.group-children'
+                ].join(', ')));
+                for (const element of freshElements) {
+                    if (!element || !element.classList) continue;
+                    if (element.classList.contains('source-item')) {
+                        const key = element.dataset ? element.dataset.sourceKey : null;
+                        if (key && !sourceElements.has(key)) sourceElements.set(key, element);
+                    } else if (element.classList.contains('group-container')) {
+                        const id = element.dataset ? element.dataset.groupId : null;
+                        if (id && !groupElements.has(id)) groupElements.set(id, element);
+                    } else if (element.classList.contains('group-children')) {
+                        groupChildrenElements.push(element);
+                    }
+                }
+            }
+            const cachedSnapshot = runtime.dragGeometrySnapshot;
+            const lifecycleTargetSizes = new Map();
+            if (
+                cachedSnapshot
+                && cachedSnapshot.rootElement === rootElement
+                && cachedSnapshot.rootRect
+            ) {
+                lifecycleTargetSizes.set(rootElement, {
+                    width: cachedSnapshot.rootRect.width,
+                    height: cachedSnapshot.rootRect.height
+                });
+                for (const childrenElement of groupChildrenElements) {
+                    const groupId = childrenElement
+                        && childrenElement.parentElement
+                        && childrenElement.parentElement.dataset
+                        ? childrenElement.parentElement.dataset.groupId
+                        : null;
+                    const priorChildren = groupId
+                        ? cachedSnapshot.groups.get(groupId)?.children
+                        : null;
+                    if (priorChildren && priorChildren.visualRect) {
+                        lifecycleTargetSizes.set(childrenElement, {
+                            width: priorChildren.visualRect.width,
+                            height: priorChildren.visualRect.height
+                        });
+                    }
+                }
+            }
+            refreshDragGeometryLifecycleElements(
+                rootElement,
+                lifecycleTargetSizes
+            );
             if (!runtime.dragReflowSession || !dragReflow) return;
             if (typeof dragReflow.applyReflow !== 'function') return;
+
+            const liveSourceShifts = runtime.dragReflowSession.shiftedSourceItems;
+            const liveGroupShifts = runtime.dragReflowSession.shiftedGroupItems;
+            const hasTypedShifts = (
+                liveSourceShifts instanceof Map
+                && liveSourceShifts.size > 0
+            ) || (
+                liveGroupShifts instanceof Map
+                && liveGroupShifts.size > 0
+            );
+            if (hasTypedShifts) {
+                const shifts = {
+                    sources: liveSourceShifts instanceof Map
+                        ? new Map(liveSourceShifts)
+                        : new Map(),
+                    groups: liveGroupShifts instanceof Map
+                        ? new Map(liveGroupShifts)
+                        : new Map()
+                };
+                if (liveSourceShifts instanceof Map) liveSourceShifts.clear();
+                if (liveGroupShifts instanceof Map) liveGroupShifts.clear();
+                Object.defineProperty(shifts, '_shiftDeltaPlan', {
+                    configurable: true,
+                    value: {
+                        deltas: {
+                            sources: new Map(shifts.sources),
+                            groups: new Map(shifts.groups)
+                        },
+                        bases: {
+                            sources: liveSourceShifts,
+                            groups: liveGroupShifts
+                        },
+                        baseSizes: {
+                            sources: liveSourceShifts instanceof Map
+                                ? liveSourceShifts.size
+                                : 0,
+                            groups: liveGroupShifts instanceof Map
+                                ? liveGroupShifts.size
+                                : 0
+                        },
+                        // The render invalidated geometry, so prior viewport
+                        // membership is no longer trustworthy. Re-apply every
+                        // shift statically; the already-scheduled fresh drag
+                        // frame will promote only viewport-near rows.
+                        animatedKeys: {
+                            sources: new Set(),
+                            groups: new Set()
+                        }
+                    }
+                });
+                dragReflow.applyReflow({
+                    session: runtime.dragReflowSession,
+                    shifts,
+                    rootElement,
+                    sourceElements,
+                    groupElements
+                });
+                return;
+            }
             const live = runtime.dragReflowSession.shiftedItems;
             if (!(live instanceof Map) || live.size === 0) return;
             // render() rebuilt the rows, so the fresh nodes carry no inline
@@ -3552,7 +4905,7 @@
             dragReflow.applyReflow({
                 session: runtime.dragReflowSession,
                 shifts: snapshot,
-                rootElement: getSourceListContainer()
+                rootElement
             });
         }
 
@@ -3604,6 +4957,13 @@
             resolveSiblingKeys,
             resolveVisibleAnchorInsertIndex,
             computeDropIntent,
+            readDragGeometry,
+            computeDropIntentRaw,
+            planDragFrame,
+            applyDragFramePlan,
+            invalidateDragGeometry,
+            teardownDragInteractions,
+            restoreTransientHoverExpandedGroups,
             sweepPositionedRootSourcesToBin,
             applyReflowAfterRender
         };

@@ -287,6 +287,58 @@ describe('content-drag-multi factory', () => {
             expect(childClone.style.cssText).toContain('color: red;');
         });
 
+        it('copies ghost-critical checkbox, title, tag, and icon appearance without transient motion', () => {
+            const helper = createContentDragMulti();
+            const computed = makeComputed({
+                appearance: 'none',
+                '-webkit-appearance': 'none',
+                'overflow-wrap': 'anywhere',
+                'background-color': 'rgb(20, 30, 40)',
+                'border-radius': '6px',
+                'font-variation-settings': '"FILL" 1',
+                transition: 'all 180ms',
+                animation: 'pulse 1s',
+                filter: 'brightness(1.1)',
+                transform: 'scale(1.01)'
+            });
+            const originalCheckbox = {
+                nodeType: 1,
+                checked: true,
+                indeterminate: true,
+                children: []
+            };
+            const clonedCheckbox = makeStyledNode();
+            clonedCheckbox.checked = false;
+            clonedCheckbox.indeterminate = false;
+            const original = {
+                nodeType: 1,
+                children: [originalCheckbox]
+            };
+            const clone = makeStyledNode({ children: [clonedCheckbox] });
+            const previousWindow = globalThis.window;
+            globalThis.window = {
+                getComputedStyle: jest.fn(() => computed)
+            };
+            try {
+                helper.inlineStylesRecursive(clone, original);
+            } finally {
+                globalThis.window = previousWindow;
+            }
+
+            expect(clone.style.cssText).toContain('appearance: none;');
+            expect(clone.style.cssText).toContain('-webkit-appearance: none;');
+            expect(clone.style.cssText).toContain('overflow-wrap: anywhere;');
+            expect(clone.style.cssText).toContain('background-color: rgb(20, 30, 40);');
+            expect(clone.style.cssText).toContain('border-radius: 6px;');
+            expect(clone.style.cssText).toContain('font-variation-settings: "FILL" 1;');
+            expect(clone.style.cssText).not.toContain('transition:');
+            expect(clone.style.cssText).not.toContain('animation:');
+            expect(clone.style.cssText).not.toContain('filter:');
+            expect(clone.style.cssText).not.toContain('transform:');
+            expect(clonedCheckbox.checked).toBe(true);
+            expect(clonedCheckbox.indeterminate).toBe(true);
+        });
+
         it('is null-safe (no throw on null / non-element nodes)', () => {
             const helper = createContentDragMulti();
             expect(() => helper.inlineStylesRecursive(null, null)).not.toThrow();

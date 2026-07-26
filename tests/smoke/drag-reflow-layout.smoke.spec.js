@@ -72,6 +72,23 @@ function createBridgeScript() {
                 : [],
             probeMetrics: session?.probeMetrics || null
         });
+        const getSelectedTransitionProperties = (fixtureRoot, keys) => (
+            (keys || []).flatMap((key) => (
+                (findByKey(fixtureRoot, key)?.getAnimations() || [])
+                    .map((animation) => animation.transitionProperty || '')
+                    .filter(Boolean)
+            ))
+        );
+        const getSelectedComputedTransitionProperties = (fixtureRoot, keys) => (
+            (keys || []).flatMap((key) => {
+                const element = findByKey(fixtureRoot, key);
+                if (!element) return [];
+                return getComputedStyle(element).transitionProperty
+                    .split(',')
+                    .map((property) => property.trim())
+                    .filter(Boolean);
+            })
+        );
         const getHost = () => document.querySelector('#sources-plus-root');
         const respond = (host, result) => {
             host.setAttribute('data-drag-reflow-layout-result', JSON.stringify(result));
@@ -126,6 +143,15 @@ function createBridgeScript() {
                     selectedAnimationCount: draggedKeys.reduce((count, key) => (
                         count + (findByKey(fixtureRoot, key)?.getAnimations().length || 0)
                     ), 0),
+                    selectedTransitionProperties: getSelectedTransitionProperties(
+                        fixtureRoot,
+                        draggedKeys
+                    ),
+                    selectedComputedTransitionProperties:
+                        getSelectedComputedTransitionProperties(
+                            fixtureRoot,
+                            draggedKeys
+                        ),
                     inline: serializeInline(dragged)
                 });
                 return;
@@ -187,6 +213,15 @@ function createBridgeScript() {
                     selectedAnimationCount: (active?.draggedKeys || []).reduce((count, key) => (
                         count + (findByKey(fixtureRoot, key)?.getAnimations().length || 0)
                     ), 0),
+                    selectedTransitionProperties: getSelectedTransitionProperties(
+                        fixtureRoot,
+                        active?.draggedKeys || []
+                    ),
+                    selectedComputedTransitionProperties:
+                        getSelectedComputedTransitionProperties(
+                            fixtureRoot,
+                            active?.draggedKeys || []
+                        ),
                     inline: {
                         height: dragged?.style.getPropertyValue('height') || '',
                         heightPriority: dragged?.style.getPropertyPriority('height') || '',
@@ -270,12 +305,7 @@ async function installSyntheticLayoutFixture(page, nodes) {
                 padding: 4px 8px;
                 border: 1px solid transparent;
                 margin: 4px 0;
-                transition:
-                    height 180ms linear,
-                    opacity 180ms linear,
-                    padding 180ms linear,
-                    margin 180ms linear,
-                    border-width 180ms linear;
+                transition: opacity 180ms linear;
             }
             #sp-drag-layout-fixture .layout-group {
                 display: flow-root;
@@ -283,12 +313,7 @@ async function installSyntheticLayoutFixture(page, nodes) {
                 padding: 3px;
                 border: 1px solid transparent;
                 margin: 8px 0 12px;
-                transition:
-                    height 180ms linear,
-                    opacity 180ms linear,
-                    padding 180ms linear,
-                    margin 180ms linear,
-                    border-width 180ms linear;
+                transition: opacity 180ms linear;
             }
             #sp-drag-layout-fixture .layout-group-header {
                 box-sizing: border-box;
@@ -458,6 +483,84 @@ test('measures the real 48px folded footprint and restores the probe synchronous
             opacityPriority: 'important'
         });
         expect.soft(restored.sentinelCount).toBe(0);
+    } finally {
+        await closeExtensionContext(env);
+        fs.rmSync(extensionRoot, { recursive: true, force: true });
+    }
+});
+
+test('keeps root and grouped-source geometry stable after the deferred fold frame', async () => {
+    const extensionRoot = createInstrumentedExtensionRoot();
+    let env;
+    try {
+        env = await launchExtensionContext(extensionRoot);
+        await installNotebookFixture(env.context);
+        const extensionId = await waitForExtensionId(
+            env.context,
+            env.userDataDir,
+            extensionRoot
+        );
+        await seedReflowPreference(env.context, extensionId);
+
+        const page = await env.context.newPage();
+        await page.goto('https://notebooklm.google.com/notebook/drag-fold-stability');
+        await expect(page.locator('#sources-plus-root')).toBeVisible({
+            timeout: 20_000
+        });
+        const fixtures = [
+            [
+                { key: 'before' },
+                { key: 'drag' },
+                { key: 'next' }
+            ],
+            [
+                {
+                    type: 'group',
+                    key: 'host',
+                    children: [
+                        { key: 'before' },
+                        { key: 'drag' },
+                        { key: 'next' }
+                    ]
+                },
+                { key: 'tail' }
+            ]
+        ];
+
+        for (const nodes of fixtures) {
+            await installSyntheticLayoutFixture(page, nodes);
+            await page.evaluate(() => {
+                const root = document.querySelector('#sources-plus-root')
+                    .shadowRoot
+                    .querySelector('#sp-drag-layout-fixture');
+                root.style.height = '240px';
+                root.style.overflow = 'auto';
+            });
+            const prepared = await bridge(page, 'prepare', {
+                draggedKeys: ['drag']
+            });
+
+            await bridge(page, 'fold');
+            const immediate = await bridge(page, 'snapshot');
+            await page.evaluate(() => new Promise((resolve) => {
+                requestAnimationFrame(resolve);
+            }));
+            const nextFrame = await bridge(page, 'snapshot');
+
+            expect.soft(immediate.rect.height).toBeLessThanOrEqual(1);
+            expect.soft(
+                prepared.beforeRects.next.top - immediate.rects.next.top
+            ).toBeCloseTo(prepared.session.totalDraggedHeight, 0);
+            expect(immediate.selectedComputedTransitionProperties).toEqual([
+                'opacity'
+            ]);
+            expect(
+                immediate.selectedTransitionProperties.every(
+                    (property) => property === 'opacity'
+                )
+            ).toBe(true);
+            expectRectMapsClose(nextFrame.rects, immediate.rects, 0.5);
+        }
     } finally {
         await closeExtensionContext(env);
         fs.rmSync(extensionRoot, { recursive: true, force: true });

@@ -540,6 +540,27 @@ describe('manager shell structure', () => {
         expect(global.NSM_CONTENT_STYLE_TEXT).toContain('transition-delay: 0ms !important;');
     });
 
+    it('folds physical row geometry synchronously while keeping only opacity motion', () => {
+        jest.resetModules();
+        require('../../src/content/content-style-text.js');
+
+        const css = global.NSM_CONTENT_STYLE_TEXT;
+        const folded = extractCssBlock(css, '.sp-drag-folded {');
+        expect(folded).toContain(
+            'transition: opacity var(--sp-motion-base) var(--sp-ease-emphasized);'
+        );
+        expect(folded).not.toMatch(/transition:[^;]*(height|padding|margin|border-width)/);
+        const staticShift = extractCssBlock(css, '.sp-drop-shift-static {');
+        expect(staticShift).toContain('transition: none !important;');
+        const groupContainer = extractCssBlock(css, '.group-container {');
+        expect(groupContainer).toContain(
+            'transition: transform var(--sp-motion-base) var(--sp-ease-emphasized);'
+        );
+        expect(css).toContain(
+            '@media (prefers-reduced-motion: reduce) {\n                .sp-drag-folded,'
+        );
+    });
+
     it('gives source menus and batch surfaces explicit motion', () => {
         jest.resetModules();
         require('../../src/content/content-style-text.js');
@@ -768,6 +789,7 @@ describe('batch count and source menu motion rendering', () => {
     it('renders quick view buttons with active state before source rows', () => {
         const quickRail = createRenderTestElement('div', { id: 'sp-quick-view-rail' });
         const listContainer = createRenderTestElement('div', { id: 'sources-list' });
+        const rowCountsBeforePatch = [];
         const renderModule = createContentRender({
             el: createRenderTestElement,
             getDocument: () => ({
@@ -786,6 +808,9 @@ describe('batch count and source menu motion rendering', () => {
                     if (id === 'sp-quick-view-rail') return quickRail;
                     return null;
                 })
+            }),
+            onBeforeRowsPatch: jest.fn(() => {
+                rowCountsBeforePatch.push(listContainer.children.length);
             }),
             getState: () => ({
                 groups: [],
@@ -810,6 +835,7 @@ describe('batch count and source menu motion rendering', () => {
         ]);
         expect(buttons.find((button) => button.dataset.quickViewKind === 'recent').attrs['aria-pressed']).toBe('true');
         expect(buttons.find((button) => button.dataset.quickViewKind === 'all').attrs['aria-pressed']).toBe('false');
+        expect(rowCountsBeforePatch).toEqual([0]);
     });
 
     it('reflects batch mode on the persistent batch toggle button via aria-pressed and is-active', () => {

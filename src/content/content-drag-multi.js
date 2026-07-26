@@ -3,6 +3,75 @@
 
     const DEFAULT_AUTO_SCROLL_EDGE_PX = 60;
     const DEFAULT_AUTO_SCROLL_MAX_SPEED = 14;
+    const GHOST_STYLE_PROPERTIES = [
+        'display',
+        'position',
+        'top',
+        'right',
+        'bottom',
+        'left',
+        'box-sizing',
+        'width',
+        'height',
+        'min-width',
+        'min-height',
+        'max-width',
+        'max-height',
+        'margin',
+        'padding',
+        'border',
+        'border-radius',
+        'background',
+        'background-color',
+        'background-image',
+        'box-shadow',
+        'opacity',
+        'overflow',
+        'overflow-x',
+        'overflow-y',
+        'visibility',
+        'flex',
+        'flex-basis',
+        'flex-direction',
+        'flex-grow',
+        'flex-shrink',
+        'flex-wrap',
+        'align-content',
+        'align-items',
+        'align-self',
+        'justify-content',
+        'justify-items',
+        'justify-self',
+        'gap',
+        'column-gap',
+        'row-gap',
+        'grid',
+        'grid-area',
+        'grid-template-columns',
+        'grid-template-rows',
+        'font',
+        'font-family',
+        'font-size',
+        'font-style',
+        'font-variant',
+        'font-weight',
+        'font-stretch',
+        'font-variation-settings',
+        'line-height',
+        'letter-spacing',
+        'color',
+        'text-align',
+        'text-decoration',
+        'text-overflow',
+        'text-transform',
+        'white-space',
+        'word-break',
+        'object-fit',
+        'object-position',
+        'appearance',
+        '-webkit-appearance',
+        'overflow-wrap'
+    ];
 
     /**
      * createContentDragMulti(deps) — 多源拖拽 / 自定义 drag ghost / 边缘 auto-scroll 工具集。
@@ -62,6 +131,12 @@
         function inlineStylesRecursive(cloneNode, originalNode) {
             if (!cloneNode || !originalNode) return;
             if (cloneNode.nodeType === 1 && originalNode.nodeType === 1) {
+                if ('checked' in originalNode && 'checked' in cloneNode) {
+                    cloneNode.checked = Boolean(originalNode.checked);
+                }
+                if ('indeterminate' in originalNode && 'indeterminate' in cloneNode) {
+                    cloneNode.indeterminate = Boolean(originalNode.indeterminate);
+                }
                 const win = typeof globalThis.window === 'object' && globalThis.window
                     ? globalThis.window
                     : (typeof window !== 'undefined' ? window : null);
@@ -69,12 +144,13 @@
                     ? win.getComputedStyle(originalNode)
                     : null;
                 if (computed && cloneNode.style) {
-                    let cssText = '';
-                    for (let i = 0; i < computed.length; i += 1) {
-                        const prop = computed[i];
-                        cssText += `${prop}: ${computed.getPropertyValue(prop)}; `;
+                    const declarations = [];
+                    for (const property of GHOST_STYLE_PROPERTIES) {
+                        const value = computed.getPropertyValue(property);
+                        if (!value) continue;
+                        declarations.push(`${property}: ${value};`);
                     }
-                    cloneNode.style.cssText = cssText;
+                    cloneNode.style.cssText = declarations.join(' ');
                 }
             }
             const origChildren = (originalNode && originalNode.children) || [];

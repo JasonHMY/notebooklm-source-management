@@ -896,6 +896,14 @@
         getSourceViewInfo: () => getSourceDisplayViewInfo(findSourcePanel()),
         getNativeLabelImportPreview: (...args) => getNativeLabelImportPreview(...args),
         getLastNativeLabelImportSummary: () => lastNativeLabelImportSummary,
+        onBeforeRowsPatch: () => {
+            if (
+                treeInteractionsModule
+                && typeof treeInteractionsModule.invalidateDragGeometry === 'function'
+            ) {
+                treeInteractionsModule.invalidateDragGeometry('render_rows_replaced');
+            }
+        },
         // Post-render hook: re-apply active drag reflow shifts after render() rebuilds
         // the DOM. Without this, when render() runs mid-drag (notebookLM SPA sync,
         // hover-expand setState), patchNode may strip inline transforms from siblings
@@ -4162,6 +4170,12 @@
         preserveReattach = false,
         reason = 'teardown'
     } = {}) {
+        if (
+            treeInteractionsModule
+            && typeof treeInteractionsModule.teardownDragInteractions === 'function'
+        ) {
+            treeInteractionsModule.teardownDragInteractions();
+        }
         const savePromise = Promise.resolve(flushPendingStateSave());
         if (preserveReattach) {
             pendingPanelReattachState = capturePendingPanelReattachState();
@@ -5072,6 +5086,11 @@
                 treeInteractionsModule.sweepPositionedRootSourcesToBin = fn;
             },
             _replaceStateReferenceForTest: (nextState) => { state = nextState; },
+            _trackHoverExpandedGroupForTest: (groupId) => {
+                if (typeof groupId === 'string' && groupId) {
+                    runtimeContext.hoverExpandedGroupIds.add(groupId);
+                }
+            },
             _resolvePendingInitialStateApplyWaitersForTest: resolvePendingInitialStateApplyWaiters,
             _getPendingInitialStateApplyWaiterCountForTest: () => pendingInitialStateApplyWaiters.length,
             _getAwaitingInitialStateLoadForTest: () => isAwaitingInitialStateLoad,

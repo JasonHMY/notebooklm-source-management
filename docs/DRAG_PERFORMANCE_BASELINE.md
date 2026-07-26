@@ -31,7 +31,41 @@ The isolated-world rAF wrapper assigns a monotonic logical ID to every callback.
 
 | Rows | Selection | Prepare p50 / p95 (ms) | Prepare forced-layout phases max | Callback p50 / p95 (ms) | getBoundingClientRect | querySelector | querySelectorAll |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 100 | 1 | 1.7 / 1.9 | 3 | 0.5 / 0.7 | 357 | 20 | 21 |
+| 100 | 50 | 10.7 / 13.3 | 3 | 0.6 / 1.3 | 637 | 0 | 21 |
+| 500 | 1 | 2.7 / 3.3 | 3 | 0.3 / 0.5 | 757 | 20 | 21 |
+| 500 | 50 | 12.1 / 13.0 | 3 | 0.9 / 2.1 | 1,037 | 0 | 21 |
 
 ## Acceptance Comparison
 
-Acceptance is intentionally deferred until the planned drag hot-path changes have an After Optimization measurement collected with the same command and environment.
+All acceptance gates passed:
+
+| Gate | Limit | Result |
+| --- | ---: | ---: |
+| 500 rows / 50 selected prepare p95 | ≤ 18.59 ms | 13.0 ms |
+| 500 rows / 1 selected callback p95 | ≤ 2.64 ms | 0.5 ms |
+| 500 rows / 50 selected callback p95 | ≤ 5.83 ms | 2.1 ms |
+| Prepare forced-layout phases | ≤ 3 | 3 |
+| 100 rows / 1 selected combined geometry/query calls | < 1,872 | 398 |
+| 100 rows / 50 selected combined geometry/query calls | < 1,490 | 658 |
+| 500 rows / 1 selected combined geometry/query calls | < 1,906 | 798 |
+| 500 rows / 50 selected combined geometry/query calls | < 1,890 | 1,058 |
+
+At 500 rows, callback p95 fell from 2.4 ms to 0.5 ms for a single source and
+from 5.3 ms to 2.1 ms for 50 selected sources. The 50-selection prepare p95
+fell from 16.9 ms to 13.0 ms. Combined geometry/query calls fell by 58.1% for
+the single-source case and 44.0% for the 50-source case.
+
+The implementation now batches each drag frame into one geometry snapshot,
+pure planning, and a write phase. Clean frames reuse the snapshot; exact root
+or nested-scroll deltas patch cached rects, while render, size, mixed, or
+unverifiable invalidations rebuild fail closed. Typed source/group maps avoid
+per-row selectors. Only rows in the viewport plus one physical row of overscan
+animate their reflow transform; shifted offscreen rows use static transforms,
+and their static class is retained while a shift is cleared so the base row
+transition cannot accidentally animate hundreds of offscreen elements.
+
+Two additional clean 500-row runs confirmed the result before the full matrix:
+
+- Run 1 callback p95: 1.4 ms (single), 1.8 ms (50 selected).
+- Run 2 callback p95: 0.7 ms (single), 2.7 ms (50 selected).

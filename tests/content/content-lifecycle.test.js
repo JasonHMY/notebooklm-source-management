@@ -2288,6 +2288,68 @@ describe('manager launcher messaging', () => {
         expect(global.chrome.runtime.sendMessage).toHaveBeenCalledTimes(1);
     });
 
+    it('restores hover-opened groups before cleanup saves and captures reattach state', async () => {
+        const events = [];
+        const group = {
+            id: 'hover-group',
+            title: 'Hover group',
+            collapsed: false,
+            children: [{ type: 'source', key: 'source-1' }]
+        };
+        const mockHost = {
+            isConnected: true,
+            remove: jest.fn(() => events.push('host_removed'))
+        };
+        const mockShadowRoot = {
+            host: mockHost,
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        mod._setProjectId('test-project');
+        mod._setManagerRuntimeForTest({
+            extensionHost: mockHost,
+            shadowRoot: mockShadowRoot
+        });
+        mod.state.root = [{ type: 'group', id: group.id }];
+        mod.groupsById.set(group.id, group);
+        mod.sourcesByKey.set('source-1', {
+            key: 'source-1',
+            title: 'Source 1',
+            normalizedTitle: 'source 1',
+            fingerprint: 'source 1||article',
+            identityType: 'fingerprint',
+            enabled: true
+        });
+        mod._trackHoverExpandedGroupForTest(group.id);
+        global.chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+            if (message?.type === 'SAVE_STATE') {
+                events.push('save_dispatched');
+                callback?.({
+                    success: true,
+                    saveRevision: 1,
+                    savedAt: '2026-07-27T00:00:00.000Z'
+                });
+                return;
+            }
+            callback?.({});
+        });
+
+        await mod.beginManagerCleanup({
+            preserveReattach: true,
+            reason: 'test_hover_restore'
+        });
+
+        expect(group.collapsed).toBe(true);
+        expect(events).toEqual(['save_dispatched', 'host_removed']);
+        const saved = global.chrome.runtime.sendMessage.mock.calls
+            .map(([message]) => message)
+            .find((message) => message?.type === 'SAVE_STATE');
+        expect(saved.data.groupsById[group.id].collapsed).toBe(true);
+        expect(
+            mod._getPendingPanelReattachStateForTest().groupsById[group.id].collapsed
+        ).toBe(true);
+    });
+
     it('reenables the manager runtime when ENABLE_MANAGER is received', () => {
         const sendResponse = jest.fn();
 

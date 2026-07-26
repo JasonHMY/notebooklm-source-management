@@ -100,8 +100,24 @@ function makeMockShadowList({ items = [], ungroupedSection = null, listRect = { 
         const childrenEl = {
             classList: makeMockClassList(['group-children']),
             style: { setProperty: jest.fn(), removeProperty: jest.fn() },
+            _listeners: new Map(),
             rect: { top: childrenStart, bottom: childrenEnd, height: childrenEnd - childrenStart, left: 0, right: 200, width: 200 },
             getBoundingClientRect() { return this.rect; },
+            addEventListener(type, listener) {
+                if (!this._listeners.has(type)) this._listeners.set(type, new Set());
+                this._listeners.get(type).add(listener);
+            },
+            removeEventListener(type, listener) {
+                this._listeners.get(type)?.delete(listener);
+            },
+            dispatchEvent(event) {
+                const payload = event || {};
+                if (!payload.target) payload.target = this;
+                for (const listener of Array.from(this._listeners.get(payload.type) || [])) {
+                    listener.call(this, payload);
+                }
+                return true;
+            },
             querySelectorAll(selector) {
                 if (selector === ':scope > .group-container, :scope > .source-item') {
                     return childElements;
@@ -121,8 +137,15 @@ function makeMockShadowList({ items = [], ungroupedSection = null, listRect = { 
                 return null;
             },
             querySelectorAll() { return []; },
-            _children: childElements
+            _children: childElements,
+            _header: headerEl,
+            _childrenHost: childrenEl
         };
+        headerEl.parentElement = container;
+        childrenEl.parentElement = container;
+        childElements.forEach((childElement) => {
+            childElement.parentElement = childrenEl;
+        });
         elementMap.set('group:' + item.id, container);
         allContainers.push(container);
         return container;
@@ -179,6 +202,26 @@ function makeMockShadowList({ items = [], ungroupedSection = null, listRect = { 
                 return [];
             }
         };
+        binItemEls.forEach((binItemEl) => {
+            binItemEl.parentElement = ungroupedSectionEl;
+        });
+    }
+
+    const geometryElements = [];
+    function appendGeometryElements(elements) {
+        elements.forEach((element) => {
+            geometryElements.push(element);
+            if (element && element.classList && element.classList.contains('group-container')) {
+                geometryElements.push(element._header, element._childrenHost);
+                appendGeometryElements(element._children || []);
+            }
+        });
+    }
+    appendGeometryElements(rootChildren);
+    if (ungroupedSectionEl) {
+        geometryElements.push(ungroupedSectionEl);
+        const binItems = ungroupedSectionEl.querySelectorAll(':scope > .source-item');
+        geometryElements.push(...binItems);
     }
 
     const sourcesListEl = {
@@ -200,6 +243,11 @@ function makeMockShadowList({ items = [], ungroupedSection = null, listRect = { 
             return null;
         },
         querySelectorAll(selector) {
+            if (
+                selector === '.source-item[data-source-key], .group-container[data-group-id], .group-header, .group-children, .ungrouped-section, .sp-ungroup-dropzone'
+            ) {
+                return geometryElements.slice();
+            }
             if (selector === '.group-container') return allContainers.slice();
             if (selector === ':scope > .group-container, :scope > .source-item') return rootChildren.slice();
             if (selector === '.drag-into, .drag-invalid') {
@@ -227,8 +275,12 @@ function makeMockShadowList({ items = [], ungroupedSection = null, listRect = { 
                 return out;
             }
             return [];
-        }
+        },
+        contains: (element) => element === sourcesListEl || geometryElements.includes(element)
     };
+    rootChildren.forEach((element) => {
+        element.parentElement = sourcesListEl;
+    });
 
     const shadowRoot = {
         getElementById: (id) => (id === 'sources-list' ? sourcesListEl : null),
@@ -2024,6 +2076,7 @@ describe('drag auto-scroll integration', () => {
             id: 'sources-list',
             scrollTop: 0,
             scrollBy: jest.fn(),
+            querySelectorAll: jest.fn(() => []),
             getBoundingClientRect: jest.fn(() => ({ top, bottom, left: 0, right: 200, height: bottom - top, width: 200 }))
         };
     }
@@ -2374,9 +2427,110 @@ describe('handleDragStart reflow session + unified ghost', () => {
         expect(dragReflow.prepareDragSession).toHaveBeenCalledTimes(1);
         const prepCallArgs = dragReflow.prepareDragSession.mock.calls[0][0];
         expect(prepCallArgs.draggedKeys).toEqual(['A']);
+        expect(prepCallArgs.draggedType).toBe('source');
         expect(prepCallArgs.rootElement).toBe(sourcesListEl);
         expect(runtime.dragReflowSession).toBeDefined();
         expect(runtime.dragReflowSession.draggedKeys.has('A')).toBe(true);
+    });
+
+    it('releases prepared row references after dragstart when no ghost factory is installed', () => {
+        const runtime = {};
+        const state = { isBatchMode: false, ungrouped: ['A'], groups: [] };
+        const sourceRow = createSourceRow('A');
+        const preparedElements = new Map([['A', sourceRow]]);
+        const session = {
+            draggedKeys: new Set(['A']),
+            preparedElements,
+            itemMetrics: new Map([['A', {
+                visualRect: { left: 0, top: 0, width: 100, height: 40 }
+            }]]),
+            totalDraggedHeight: 40,
+            shiftedItems: new Map()
+        };
+        const sourcesListEl = {
+            querySelector: jest.fn(() => sourceRow)
+        };
+        const interactions = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getPendingBatchKeys: () => new Set(),
+            getShadowRoot: () => ({
+                querySelectorAll: jest.fn(() => []),
+                getElementById: jest.fn(() => sourcesListEl)
+            }),
+            getDocument: () => null,
+            getSetTimeout: () => () => {},
+            dragMulti: {
+                resolveDragSelection: ({ originKey }) => ({
+                    keys: [originKey],
+                    isMulti: false
+                })
+            },
+            dragReflow: {
+                prepareDragSession: jest.fn(() => session),
+                foldDraggedItems: jest.fn()
+            }
+        });
+
+        interactions.handleDragStart({
+            target: createSourceRowTargetStub(sourceRow),
+            dataTransfer: createDataTransfer()
+        });
+
+        expect(preparedElements.size).toBe(0);
+        expect(session.preparedElements).toBeNull();
+        global.__rafCallbacks.forEach((callback) => callback && callback());
+        expect(session.preparedElements).toBeNull();
+    });
+
+    it('releases prepared row references when ghost creation throws', () => {
+        const runtime = {};
+        const state = { isBatchMode: false, ungrouped: ['A'], groups: [] };
+        const sourceRow = createSourceRow('A');
+        const preparedElements = new Map([['A', sourceRow]]);
+        const session = {
+            draggedKeys: new Set(['A']),
+            preparedElements,
+            itemMetrics: new Map(),
+            totalDraggedHeight: 40,
+            shiftedItems: new Map()
+        };
+        const interactions = createContentTreeInteractions({
+            runtime,
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getPendingBatchKeys: () => new Set(),
+            getShadowRoot: () => ({
+                querySelectorAll: jest.fn(() => []),
+                getElementById: jest.fn(() => ({
+                    querySelector: jest.fn(() => sourceRow)
+                }))
+            }),
+            getDocument: () => ({ body: {} }),
+            getSetTimeout: () => () => {},
+            dragMulti: {
+                resolveDragSelection: ({ originKey }) => ({
+                    keys: [originKey],
+                    isMulti: false
+                }),
+                cloneSourceItem: jest.fn(() => ({})),
+                createMultiDragGhost: jest.fn(() => {
+                    throw new Error('ghost failed');
+                })
+            },
+            dragReflow: {
+                prepareDragSession: jest.fn(() => session),
+                foldDraggedItems: jest.fn()
+            }
+        });
+
+        expect(() => interactions.handleDragStart({
+            target: createSourceRowTargetStub(sourceRow),
+            dataTransfer: createDataTransfer()
+        })).toThrow('ghost failed');
+        expect(preparedElements.size).toBe(0);
+        expect(session.preparedElements).toBeNull();
     });
 
     it('schedules foldDraggedItems via requestAnimationFrame after prepare', () => {
@@ -2693,7 +2847,10 @@ describe('handleDragStart reflow session + unified ghost', () => {
         // Stale sibling C: lingering translateY offset.
         const staleStyleC = { transform: 'translateY(40px)' };
         const staleClassListC = {
-            contains: jest.fn((name) => name === 'sp-drop-shift'),
+            contains: jest.fn((name) => (
+                name === 'sp-drop-shift'
+                || name === 'sp-drop-shift-static'
+            )),
             add: jest.fn(),
             remove: jest.fn()
         };
@@ -2702,7 +2859,11 @@ describe('handleDragStart reflow session + unified ghost', () => {
         const sourcesListEl = {
             id: 'sources-list',
             querySelectorAll: jest.fn((selector) => {
-                if (selector.includes('.sp-drag-folded') && selector.includes('.sp-drop-shift')) {
+                if (
+                    selector.includes('.sp-drag-folded')
+                    && selector.includes('.sp-drop-shift')
+                    && selector.includes('.sp-drop-shift-static')
+                ) {
                     return [staleB, staleC];
                 }
                 return [];
@@ -2740,6 +2901,7 @@ describe('handleDragStart reflow session + unified ghost', () => {
 
         // C's lingering shift is cleared — class removed + inline transform reset.
         expect(staleClassListC.remove).toHaveBeenCalledWith('sp-drop-shift');
+        expect(staleClassListC.remove).toHaveBeenCalledWith('sp-drop-shift-static');
         expect(staleStyleC.transform).toBe('');
 
         // Stale dragReflowSession reference replaced by the new drag's fresh session.
@@ -3206,17 +3368,17 @@ describe('handleDragOver physical reflow', () => {
             dataTransfer: { dropEffect: 'move' }
         });
 
-        expect(dragReflow.computeReflow).toHaveBeenCalledTimes(1);
+        expect(dragReflow.computeReflow).not.toHaveBeenCalled();
         expect(dragReflow.applyReflow).toHaveBeenCalledTimes(1);
-        const computeArgs = dragReflow.computeReflow.mock.calls[0][0];
-        expect(computeArgs.session).toBe(ctx.runtime.dragReflowSession);
-        expect(computeArgs.insertIndex).toBe(1);
-        expect(computeArgs.siblingKeys).toEqual(['A', 'B']);
-        expect(computeArgs.rootElement).toBe(ctx.sourcesListEl);
         const applyArgs = dragReflow.applyReflow.mock.calls[0][0];
         expect(applyArgs.session).toBe(ctx.runtime.dragReflowSession);
-        expect(applyArgs.shifts).toBeInstanceOf(Map);
+        expect(applyArgs.shifts).toEqual({
+            sources: expect.any(Map),
+            groups: expect.any(Map)
+        });
+        expect(applyArgs.shifts.sources).toEqual(new Map([['B', 40]]));
         expect(applyArgs.rootElement).toBe(ctx.sourcesListEl);
+        expect(ctx.runtime.dragReflowSession.currentIntent.insertIndex).toBe(1);
 
         // No blue-bar classes should ever be added to the slot element
         const slotElB = ctx.elementMap.get('source:B');
@@ -3462,11 +3624,11 @@ describe('handleDragOver rAF coalescing', () => {
         }
 
         expect(globalThis.requestAnimationFrame).toHaveBeenCalledTimes(1);
-        expect(dragReflow.computeReflow).not.toHaveBeenCalled();
+        expect(dragReflow.applyReflow).not.toHaveBeenCalled();
 
         flushRaf();
 
-        expect(dragReflow.computeReflow).toHaveBeenCalledTimes(1);
+        expect(dragReflow.applyReflow).toHaveBeenCalledTimes(1);
     });
 
     it('always calls preventDefault synchronously so the browser accepts drop', () => {
@@ -3502,8 +3664,7 @@ describe('handleDragOver rAF coalescing', () => {
         // v5: A,B,C are positioned root sources. y=170 sits in the upper half of C
         // (180..220, mid 200) → before-source C → state.root index 2. The first event
         // y=110 → before-source A index 0, so insertIndex=2 proves the latest snapshot won.
-        const arg = dragReflow.computeReflow.mock.calls[0][0];
-        expect(arg.insertIndex).toBe(2);
+        expect(ctx.runtime.dragReflowSession.currentIntent.insertIndex).toBe(2);
     });
 
     it('cancels the pending rAF when clearDragFeedback runs', () => {
@@ -3520,7 +3681,7 @@ describe('handleDragOver rAF coalescing', () => {
         ctx.tree.clearDragFeedback();
         expect(globalThis.cancelAnimationFrame).toHaveBeenCalledTimes(1);
         flushRaf();
-        expect(dragReflow.computeReflow).not.toHaveBeenCalled();
+        expect(dragReflow.applyReflow).not.toHaveBeenCalled();
     });
 });
 
@@ -3908,6 +4069,44 @@ describe('computeDropIntent', () => {
                 expect(activeDragContext.keys).toEqual(['selected-C', 'selected-A']);
             });
 
+            it('keeps a filtered ungrouped-bin drop after C anchor-relative at index 3', () => {
+                const state = {
+                    root: [],
+                    ungrouped: ['A', 'hidden-B', 'C', 'hidden-D']
+                };
+                const tree = buildTree({ state });
+                const { sourcesListEl } = makeMockShadowList({
+                    items: [],
+                    ungroupedSection: {
+                        bounds: { top: 80, bottom: 200, height: 120 },
+                        items: [
+                            { key: 'A', top: 100, height: 40 },
+                            { key: 'C', top: 140, height: 40 }
+                        ]
+                    }
+                });
+
+                const intent = tree.computeDropIntent({
+                    clientX: 100,
+                    clientY: 175,
+                    rootElement: sourcesListEl,
+                    state,
+                    groupsById: new Map(),
+                    parentMap: new Map(),
+                    activeDragContext: {
+                        kind: 'source-single',
+                        keys: ['external']
+                    }
+                });
+
+                expect(intent).toMatchObject({
+                    kind: 'after-source',
+                    slotKey: 'C',
+                    insertIndex: 3,
+                    isUngroupedBin: true
+                });
+            });
+
             it('aligns nested group reorder after visible C to anchor-relative index 3', () => {
                 const parent = {
                     id: 'parent',
@@ -4028,6 +4227,67 @@ describe('computeDropIntent', () => {
         expect(intent.insertIndex).toBe(1);
         expect(intent.slotKey).toBe('B');
         expect(intent.targetGroup).toBeNull();
+    });
+
+    it('distinguishes same-layer source and group slots with the same raw identifier', () => {
+        const state = {
+            root: [
+                { type: 'source', key: 'shared' },
+                { type: 'group', id: 'shared' }
+            ],
+            ungrouped: []
+        };
+        const groupsById = new Map([['shared', {
+            id: 'shared',
+            collapsed: true,
+            children: []
+        }]]);
+        const tree = buildTree({ state, groupsById });
+        const { sourcesListEl } = makeMockShadowList({
+            items: [
+                { kind: 'source', key: 'shared', top: 100, height: 40 },
+                {
+                    kind: 'group',
+                    id: 'shared',
+                    top: 140,
+                    headerHeight: 30,
+                    childrenStart: 170,
+                    childrenEnd: 170
+                }
+            ]
+        });
+        const args = {
+            rootElement: sourcesListEl,
+            state,
+            groupsById,
+            parentMap: new Map(),
+            activeDragContext: {
+                kind: 'group',
+                draggedGroupId: 'external'
+            }
+        };
+
+        const sourceIntent = tree.computeDropIntent({
+            ...args,
+            clientX: 100,
+            clientY: 105
+        });
+        const groupIntent = tree.computeDropIntent({
+            ...args,
+            clientX: 100,
+            clientY: 135
+        });
+
+        expect(sourceIntent).toMatchObject({
+            kind: 'before-source',
+            slotKey: 'shared',
+            insertIndex: 0
+        });
+        expect(groupIntent).toMatchObject({
+            kind: 'before-group',
+            slotKey: 'shared',
+            insertIndex: 1
+        });
     });
 
     it('classic mode: a source dropped at a root position is demoted to the ungrouped bin', () => {
@@ -4821,7 +5081,14 @@ describe('handleDragOver hover-expand', () => {
     let createContentTreeInteractions;
     let createContentDragMulti;
 
-    function setupTreeInteractionsTestContext({ state, pendingBatchKeys, groups, parentMap, items }) {
+    function setupTreeInteractionsTestContext({
+        state,
+        pendingBatchKeys,
+        groups,
+        parentMap,
+        items,
+        saveState
+    }) {
         const groupsById = new Map();
         const runtime = { groupsById };
         if (groups && typeof groups === 'object') {
@@ -4854,7 +5121,8 @@ describe('handleDragOver hover-expand', () => {
             getParentMap: () => resolvedParentMap,
             getSetTimeout: () => globalThis.setTimeout,
             isDescendant: globalThis.isDescendant,
-            dragMulti
+            dragMulti,
+            saveState
         });
 
         // Compatibility shim: dragOverFor(groupId) sends a synthetic dragover whose pointer
@@ -4987,6 +5255,43 @@ describe('handleDragOver hover-expand', () => {
         expect(ctx.groupsById.get('g1').collapsed).toBe(false);
     });
 
+    it('cancels a pending collapsed-folder expand when the next frame has no intent', () => {
+        const ctx = setupTreeInteractionsTestContext({
+            state: { isBatchMode: false, ungrouped: [], groups: ['g1'] },
+            pendingBatchKeys: new Set(),
+            groups: {
+                g1: {
+                    id: 'g1',
+                    children: [{ type: 'source', key: 'X' }],
+                    collapsed: true
+                }
+            },
+            items: [{
+                kind: 'group',
+                id: 'g1',
+                top: 100,
+                headerHeight: 40,
+                childrenStart: 140,
+                childrenEnd: 140
+            }]
+        });
+        ctx.runtime.activeDragContext = { kind: 'source-single', keys: ['Y'] };
+        ctx.helpers.dragOverFor('g1');
+        expect(ctx.runtime.hoverExpandTimers.get('g1')).toMatchObject({ kind: 'expand' });
+
+        ctx.tree.handleDragOver({
+            target: { closest: () => null },
+            clientX: 100,
+            clientY: 1200,
+            preventDefault: jest.fn(),
+            dataTransfer: { dropEffect: 'move' }
+        });
+
+        expect(ctx.runtime.hoverExpandTimers.has('g1')).toBe(false);
+        jest.advanceTimersByTime(1000);
+        expect(ctx.groupsById.get('g1').collapsed).toBe(true);
+    });
+
     it('expands a collapsed group after 1000ms of continuous hover', () => {
         const ctx = setupTreeInteractionsTestContext({
             state: { isBatchMode: false, ungrouped: [], groups: ['g1'] },
@@ -4997,6 +5302,59 @@ describe('handleDragOver hover-expand', () => {
         ctx.helpers.dragOverFor('g1');
         jest.advanceTimersByTime(1000);
         expect(ctx.groupsById.get('g1').collapsed).toBe(false);
+    });
+
+    it('restores and saves an interrupted hover-open group before the next drag starts', () => {
+        const saveState = jest.fn();
+        const ctx = setupTreeInteractionsTestContext({
+            state: {
+                isBatchMode: false,
+                root: [{ type: 'group', id: 'g1' }],
+                ungrouped: ['A']
+            },
+            pendingBatchKeys: new Set(),
+            groups: {
+                g1: {
+                    id: 'g1',
+                    children: [{ type: 'source', key: 'X' }],
+                    collapsed: false
+                }
+            },
+            items: [
+                {
+                    kind: 'group',
+                    id: 'g1',
+                    top: 100,
+                    headerHeight: 40,
+                    childrenStart: 140,
+                    childrenEnd: 200
+                },
+                { kind: 'source', key: 'A', top: 220, height: 40 }
+            ],
+            saveState
+        });
+        ctx.runtime.hoverExpandedGroupIds.add('g1');
+        const source = ctx.elementMap.get('source:A');
+
+        ctx.tree.handleDragStart({
+            target: {
+                closest: (selector) => {
+                    if (selector === '.source-item') return source;
+                    if (selector === '.group-header') return null;
+                    return null;
+                }
+            },
+            dataTransfer: {
+                setData: jest.fn(),
+                setDragImage: jest.fn(),
+                effectAllowed: ''
+            }
+        });
+
+        expect(ctx.groupsById.get('g1').collapsed).toBe(true);
+        expect(ctx.runtime.hoverExpandedGroupIds.size).toBe(0);
+        expect(saveState).toHaveBeenCalledTimes(1);
+        expect(saveState).toHaveBeenCalledWith({ immediate: true });
     });
 
     it('cancels the timer when the drop target changes before 1000ms', () => {
@@ -5163,6 +5521,56 @@ describe('handleDragOver hover-expand', () => {
         // Hover-expand must leave the folder immediately drag-ready, NOT wait for transitionend.
         expect(childrenEl.style.overflow).toBe('visible');
         expect(childrenEl.style.height).toBe('auto');
+    });
+
+    it('keeps a restored hover-open folder collapsed after stale transitionend events', () => {
+        const ctx = setupTreeInteractionsTestContext({
+            state: { isBatchMode: false, ungrouped: [], groups: ['g1'] },
+            pendingBatchKeys: new Set(),
+            groups: {
+                g1: {
+                    id: 'g1',
+                    children: [{ type: 'source', key: 'X' }],
+                    collapsed: true
+                }
+            },
+            items: [{
+                kind: 'group',
+                id: 'g1',
+                top: 100,
+                headerHeight: 40,
+                childrenStart: 140,
+                childrenEnd: 180
+            }]
+        });
+        const container = ctx.elementMap.get('group:g1');
+        const childrenEl = container.querySelector('.group-children');
+
+        ctx.helpers.dragOverFor('g1');
+        jest.advanceTimersByTime(1000);
+        expect(childrenEl.style.height).toBe('auto');
+        expect(childrenEl.style.overflow).toBe('visible');
+
+        ctx.tree.handleDragEnd({ target: { closest: () => null } });
+        expect(ctx.groupsById.get('g1').collapsed).toBe(true);
+        expect(childrenEl.classList.contains('collapsed')).toBe(true);
+        expect(childrenEl.style.height).toBe('');
+        expect(childrenEl.style.overflow).toBe('');
+
+        childrenEl.dispatchEvent({
+            type: 'transitionend',
+            propertyName: 'opacity',
+            target: childrenEl
+        });
+        childrenEl.dispatchEvent({
+            type: 'transitionend',
+            propertyName: 'height',
+            target: childrenEl
+        });
+
+        expect(childrenEl.classList.contains('collapsed')).toBe(true);
+        expect(childrenEl.style.height).toBe('');
+        expect(childrenEl.style.overflow).toBe('');
     });
 
     it('removes .sp-hover-expand-pending when the expand timer fires (group opens)', () => {
@@ -5701,6 +6109,128 @@ describe('handleDrop reflow cleanup', () => {
         // Sequence: jump to 0 (instant, transition still 'none' from suppression),
         // force layout flush, switch transition to opacity 180ms, target ''.
         expect(opacityWrites).toEqual(['0', '']);
+    });
+
+    it('keeps source and group FLIP snapshots separate when their raw ids match', () => {
+        const state = {
+            root: [
+                { type: 'source', key: 'mover' },
+                { type: 'source', key: 'shared' },
+                { type: 'group', id: 'shared' }
+            ],
+            ungrouped: []
+        };
+        const group = { id: 'shared', children: [] };
+        let rendered = false;
+        const createRow = ({ type, key, beforeTop, afterTop }) => {
+            const transformWrites = [];
+            const style = { transition: '' };
+            Object.defineProperty(style, 'transform', {
+                get() { return this._transform || ''; },
+                set(value) {
+                    transformWrites.push(value);
+                    this._transform = value;
+                }
+            });
+            return {
+                dataset: type === 'source'
+                    ? { sourceKey: key }
+                    : { groupId: key },
+                classList: createClassList([
+                    type === 'source' ? 'source-item' : 'group-container'
+                ]),
+                style,
+                offsetHeight: 40,
+                transformWrites,
+                getBoundingClientRect: () => {
+                    const top = rendered ? afterTop : beforeTop;
+                    return {
+                        top,
+                        bottom: top + 40,
+                        left: 0,
+                        right: 200,
+                        width: 200,
+                        height: 40
+                    };
+                }
+            };
+        };
+        const mover = createRow({
+            type: 'source',
+            key: 'mover',
+            beforeTop: 100,
+            afterTop: 180
+        });
+        const sourceShared = createRow({
+            type: 'source',
+            key: 'shared',
+            beforeTop: 140,
+            afterTop: 100
+        });
+        const groupShared = createRow({
+            type: 'group',
+            key: 'shared',
+            beforeTop: 180,
+            afterTop: 140
+        });
+        const rows = [mover, sourceShared, groupShared];
+        const sourcesListEl = {
+            id: 'sources-list',
+            querySelectorAll: jest.fn((selector) => (
+                selector.includes('[data-source-key]')
+                    ? rows
+                    : []
+            )),
+            querySelector: jest.fn((selector) => {
+                if (selector === '[data-source-key="mover"]') return mover;
+                return null;
+            })
+        };
+        const shadowRoot = {
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => []),
+            getElementById: jest.fn((id) => (
+                id === 'sources-list' ? sourcesListEl : null
+            ))
+        };
+        const session = {
+            draggedKeys: new Set(['mover']),
+            currentIntent: {
+                kind: 'after-group',
+                targetGroup: null,
+                targetList: state.root,
+                insertIndex: 3,
+                targetGroupId: null,
+                slotKey: 'shared'
+            },
+            shiftedItems: new Map()
+        };
+        const dragReflow = makeDragReflowMock();
+        const interactions = createContentTreeInteractions({
+            runtime: { dragReflowSession: session },
+            getState: () => state,
+            getGroupsById: () => new Map([['shared', group]]),
+            getParentMap: () => new Map(),
+            getShadowRoot: () => shadowRoot,
+            saveState: jest.fn(),
+            render: jest.fn(() => { rendered = true; }),
+            dragMulti: createContentDragMulti({}),
+            dragReflow
+        });
+
+        interactions.handleDrop(createDropEvent({
+            dropTarget: groupShared,
+            sourceKey: 'mover'
+        }));
+
+        expect(sourceShared.transformWrites).toEqual([
+            'translateY(40px)',
+            ''
+        ]);
+        expect(groupShared.transformWrites).toEqual([
+            'translateY(40px)',
+            ''
+        ]);
     });
 
     it('does NOT animate landed elements on a multi-source drop (scaleY landing removed)', () => {
@@ -6384,6 +6914,68 @@ describe('applyReflowAfterRender hook', () => {
         // The live Map is restored to the same content after the re-apply.
         expect(runtime.dragReflowSession.shiftedItems).toEqual(new Map([['B', 40], ['C', 40]]));
     });
+
+    it('replays typed shifts statically until fresh post-render geometry is available', () => {
+        const createContentDragReflow = require('../../src/content/content-drag-reflow.js');
+        const dragReflow = createContentDragReflow({});
+        const makeRow = (key) => ({
+            style: {},
+            classList: makeMockClassList(['source-item']),
+            dataset: { sourceKey: key },
+            getAttribute: (name) => (name === 'data-source-key' ? key : null)
+        });
+        const rows = { B: makeRow('B'), C: makeRow('C') };
+        const container = {
+            querySelectorAll: jest.fn(() => [rows.B, rows.C]),
+            querySelector: jest.fn(() => {
+                throw new Error('typed render replay must not use selector fallback');
+            }),
+            contains: (element) => element === rows.B || element === rows.C
+        };
+        rows.B.parentElement = container;
+        rows.C.parentElement = container;
+        const shadowRoot = {
+            querySelector: () => null,
+            querySelectorAll: () => [],
+            getElementById: (id) => (id === 'sources-list' ? container : null)
+        };
+        const session = dragReflow.createDragSession();
+        session.draggedKeys = new Set(['A']);
+        session.totalDraggedHeight = 40;
+        session.shiftedSourceItems = new Map([
+            ['B', 40],
+            ['C', 40]
+        ]);
+        session.animatedShiftedSourceItems = new Set(['B']);
+        session.staticShiftClassSourceItems = new Set(['C']);
+        session.usesScopedShiftClasses = true;
+        const runtime = {
+            activeDragContext: { kind: 'source-single', keys: ['A'] },
+            dragReflowSession: session
+        };
+        const interactions = createContentTreeInteractions({
+            runtime,
+            getState: () => ({ ungrouped: [], groups: [] }),
+            getGroupsById: () => new Map(),
+            getParentMap: () => new Map(),
+            getShadowRoot: () => shadowRoot,
+            dragMulti: createContentDragMulti({}),
+            dragReflow
+        });
+
+        interactions.applyReflowAfterRender();
+
+        expect(rows.B.style.transform).toBe('translateY(40px)');
+        expect(rows.C.style.transform).toBe('translateY(40px)');
+        expect(rows.B.classList.contains('sp-drop-shift')).toBe(false);
+        expect(rows.C.classList.contains('sp-drop-shift')).toBe(false);
+        expect(rows.B.classList.contains('sp-drop-shift-static')).toBe(true);
+        expect(rows.C.classList.contains('sp-drop-shift-static')).toBe(true);
+        expect(session.animatedShiftedSourceItems).toEqual(new Set());
+        expect(session.staticShiftClassSourceItems).toEqual(new Set(['B', 'C']));
+        expect(session.usesScopedShiftClasses).toBe(true);
+        expect(container.querySelector).not.toHaveBeenCalled();
+    });
 });
 
 // H3: when the cursor leaves #sources-list, handleDragLeave must cancel any
@@ -6620,11 +7212,17 @@ describe('empty-bin ungroup dropzone (transient element)', () => {
             return node;
         });
         const origQS = base.querySelector.bind(base);
+        const origQSA = base.querySelectorAll.bind(base);
         base.querySelector = (sel) => {
             if (sel === '.sp-ungroup-dropzone') {
                 return appended.find((n) => n.classList && n.classList.contains('sp-ungroup-dropzone')) || null;
             }
             return origQS(sel);
+        };
+        base.querySelectorAll = (sel) => {
+            const result = Array.from(origQSA(sel));
+            if (sel.includes('.sp-ungroup-dropzone')) result.push(...appended);
+            return result;
         };
         return appended;
     }
@@ -6641,6 +7239,9 @@ describe('empty-bin ungroup dropzone (transient element)', () => {
                     get className() { return Array.from(classes).join(' '); },
                     classList: { contains: (c) => classes.has(c) },
                     textContent: '',
+                    getBoundingClientRect: () => ({
+                        top: 940, bottom: 980, left: 0, right: 200, width: 200, height: 40
+                    }),
                     appendChild(node) { if (node && typeof node.__text === 'string') this.textContent += node.__text; return node; }
                 };
             }),
@@ -6709,5 +7310,1806 @@ describe('empty-bin ungroup dropzone (transient element)', () => {
         tree.handleDragOver({ preventDefault() {}, clientX: 100, clientY: 110, dataTransfer: {} });
         expect(sourcesListEl.querySelector('.sp-ungroup-dropzone')).toBeNull();
         expect(appended.length).toBe(0);
+    });
+});
+
+describe('single-frame drag geometry snapshot budgets', () => {
+    let createContentTreeInteractions;
+
+    function createTrackedClassList(initial, onWrite) {
+        const classes = new Set(initial);
+        return {
+            add: jest.fn((...names) => {
+                onWrite();
+                names.forEach((name) => classes.add(name));
+            }),
+            remove: jest.fn((...names) => {
+                onWrite();
+                names.forEach((name) => classes.delete(name));
+            }),
+            contains: (name) => classes.has(name),
+            has: (name) => classes.has(name)
+        };
+    }
+
+    function createGeometryFixture(rowCount) {
+        let writeStarted = false;
+        const rectReads = new Map();
+        const listeners = new Map();
+        const sources = [];
+        const sourceByKey = new Map();
+        const markWrite = () => { writeStarted = true; };
+        const readRect = (name, rect) => {
+            if (writeStarted) {
+                throw new Error(`geometry read after first write: ${name}`);
+            }
+            rectReads.set(name, (rectReads.get(name) || 0) + 1);
+            return { ...rect };
+        };
+        const root = {
+            id: 'sources-list',
+            style: {},
+            dataset: {},
+            scrollTop: 0,
+            scrollLeft: 0,
+            classList: createTrackedClassList([], markWrite),
+            querySelector: jest.fn((selector) => {
+                if (writeStarted) {
+                    throw new Error(`selector read after first write: ${selector}`);
+                }
+                if (selector === '.ungrouped-section' || selector === '.sp-ungroup-dropzone') return null;
+                const sourceMatch = /\[data-source-key="([^"]+)"\]/.exec(selector);
+                if (sourceMatch) return sourceByKey.get(sourceMatch[1]) || null;
+                return null;
+            }),
+            querySelectorAll: jest.fn((selector) => {
+                if (
+                    selector === '.source-item[data-source-key], .group-container[data-group-id], .group-header, .group-children, .ungrouped-section, .sp-ungroup-dropzone'
+                ) {
+                    return sources.slice();
+                }
+                if (selector === ':scope > .group-container, :scope > .source-item') {
+                    return sources.slice();
+                }
+                return [];
+            }),
+            getBoundingClientRect: jest.fn(() => readRect('root', {
+                top: 0,
+                bottom: 1000,
+                left: 0,
+                right: 240,
+                width: 240,
+                height: 1000
+            })),
+            contains: (element) => element === root || sources.includes(element),
+            addEventListener: jest.fn((type, listener) => {
+                listeners.set(type, listener);
+            }),
+            removeEventListener: jest.fn((type, listener) => {
+                if (listeners.get(type) === listener) listeners.delete(type);
+            }),
+            appendChild: jest.fn(markWrite),
+            removeChild: jest.fn(markWrite)
+        };
+        for (let index = 0; index < rowCount; index += 1) {
+            const key = `source-${index}`;
+            const top = 100 + index * 40;
+            const source = {
+                dataset: { sourceKey: key },
+                style: { transform: '' },
+                parentElement: root,
+                classList: createTrackedClassList(['source-item'], markWrite),
+                getAttribute: (name) => (name === 'data-source-key' ? key : null),
+                getBoundingClientRect: jest.fn(() => readRect(key, {
+                    top,
+                    bottom: top + 40,
+                    left: 0,
+                    right: 200,
+                    width: 200,
+                    height: 40
+                }))
+            };
+            sources.push(source);
+            sourceByKey.set(key, source);
+        }
+        sources.forEach((source, index) => {
+            source.nextElementSibling = sources[index + 1] || null;
+        });
+        root.children = sources;
+        return {
+            root,
+            sources,
+            rectReads,
+            listeners,
+            resetWritePhase() { writeStarted = false; },
+            didWrite() { return writeStarted; }
+        };
+    }
+
+    function createNestedFixture() {
+        let writeStarted = false;
+        const rectReads = new Map();
+        const listeners = new Map();
+        const markWrite = () => { writeStarted = true; };
+        const makeRectReader = (name, rect) => jest.fn(() => {
+            if (writeStarted) throw new Error(`geometry read after first write: ${name}`);
+            rectReads.set(name, (rectReads.get(name) || 0) + 1);
+            return { ...rect };
+        });
+        const root = {
+            id: 'sources-list',
+            style: {},
+            scrollTop: 0,
+            scrollLeft: 0,
+            classList: createTrackedClassList([], markWrite),
+            getBoundingClientRect: makeRectReader('root', {
+                top: 0, bottom: 500, left: 0, right: 240, width: 240, height: 500
+            }),
+            addEventListener: jest.fn((type, listener) => {
+                listeners.set(type, listener);
+            }),
+            removeEventListener: jest.fn((type, listener) => {
+                if (listeners.get(type) === listener) listeners.delete(type);
+            })
+        };
+        const group = {
+            dataset: { groupId: 'same-key' },
+            style: { transform: '' },
+            parentElement: root,
+            classList: createTrackedClassList(['group-container'], markWrite),
+            getAttribute: (name) => (name === 'data-group-id' ? 'same-key' : null),
+            getBoundingClientRect: makeRectReader('group', {
+                top: 100, bottom: 180, left: 0, right: 200, width: 200, height: 80
+            })
+        };
+        const header = {
+            style: {},
+            parentElement: group,
+            classList: createTrackedClassList(['group-header'], markWrite),
+            getBoundingClientRect: makeRectReader('header', {
+                top: 100, bottom: 140, left: 0, right: 200, width: 200, height: 40
+            })
+        };
+        const children = {
+            scrollTop: 0,
+            scrollLeft: 0,
+            style: {
+                setProperty: jest.fn(markWrite),
+                removeProperty: jest.fn(markWrite)
+            },
+            parentElement: group,
+            classList: createTrackedClassList(['group-children'], markWrite),
+            getBoundingClientRect: makeRectReader('children', {
+                top: 140, bottom: 180, left: 0, right: 200, width: 200, height: 40
+            })
+        };
+        const source = {
+            dataset: { sourceKey: 'same-key' },
+            style: { transform: '' },
+            parentElement: children,
+            classList: createTrackedClassList(['source-item'], markWrite),
+            getAttribute: (name) => (name === 'data-source-key' ? 'same-key' : null),
+            getBoundingClientRect: makeRectReader('source', {
+                top: 140, bottom: 180, left: 0, right: 200, width: 200, height: 40
+            })
+        };
+        root.children = [group];
+        group.children = [header, children];
+        children.children = [source];
+        root.contains = (element) => [root, group, header, children, source].includes(element);
+        root.querySelectorAll = jest.fn((selector) => {
+            if (
+                selector === '.source-item[data-source-key], .group-container[data-group-id], .group-header, .group-children, .ungrouped-section, .sp-ungroup-dropzone'
+            ) {
+                return [group, header, children, source];
+            }
+            if (selector === ':scope > .group-container, :scope > .source-item') return [group];
+            if (selector === '.group-container') return [group];
+            return [];
+        });
+        root.querySelector = jest.fn((selector) => {
+            if (selector === '.ungrouped-section' || selector === '.sp-ungroup-dropzone') return null;
+            if (selector.includes('data-group-id')) return group;
+            if (selector.includes('data-source-key')) return source;
+            return null;
+        });
+        group.querySelector = jest.fn((selector) => {
+            if (selector === '.group-header') return header;
+            if (selector === '.group-children') return children;
+            return null;
+        });
+        children.querySelectorAll = jest.fn(() => [source]);
+        return {
+            root,
+            group,
+            header,
+            children,
+            source,
+            rectReads,
+            listeners,
+            resetWritePhase() { writeStarted = false; }
+        };
+    }
+
+    function buildTree({
+        fixture,
+        runtime = {},
+        state,
+        groupsById,
+        getSetTimeout,
+        dragReflow = null,
+        extraDeps = {}
+    } = {}) {
+        const resolvedState = state || {
+            root: fixture.sources
+                ? fixture.sources.map((source) => ({ type: 'source', key: source.dataset.sourceKey }))
+                : [{ type: 'group', id: 'same-key' }],
+            ungrouped: []
+        };
+        const resolvedGroups = groupsById || new Map();
+        const shadowRoot = {
+            getElementById: (id) => (id === 'sources-list' ? fixture.root : null),
+            querySelector: (selector) => fixture.root.querySelector(selector),
+            querySelectorAll: () => []
+        };
+        return createContentTreeInteractions({
+            runtime,
+            getState: () => resolvedState,
+            getGroupsById: () => resolvedGroups,
+            getParentMap: () => new Map(),
+            getShadowRoot: () => shadowRoot,
+            getDocument: () => null,
+            getSetTimeout: getSetTimeout || (() => () => 1),
+            dragMulti: null,
+            dragReflow,
+            ...extraDeps
+        });
+    }
+
+    beforeEach(() => {
+        jest.resetModules();
+        setupGlobalMocks();
+        require('../../src/content/content-native-checkbox-sync.js');
+        createContentTreeInteractions = require('../../src/content/content-tree-interactions.js');
+    });
+
+    afterEach(teardownGlobalMocks);
+
+    it('exports the read-plan-write and invalidation interfaces', () => {
+        const tree = createContentTreeInteractions({});
+        expect(tree.readDragGeometry).toBeInstanceOf(Function);
+        expect(tree.computeDropIntentRaw).toBeInstanceOf(Function);
+        expect(tree.planDragFrame).toBeInstanceOf(Function);
+        expect(tree.applyDragFramePlan).toBeInstanceOf(Function);
+        expect(tree.invalidateDragGeometry).toBeInstanceOf(Function);
+    });
+
+    it.each([100, 500])('reads %i rows with one query batch and one rect read per element', (rowCount) => {
+        const fixture = createGeometryFixture(rowCount);
+        const runtime = {};
+        const tree = buildTree({ fixture, runtime });
+
+        tree.invalidateDragGeometry('test_prime', { schedule: false });
+        const snapshot = tree.readDragGeometry({
+            rootElement: fixture.root,
+            session: null
+        });
+
+        expect(snapshot).toBeTruthy();
+        expect(fixture.root.querySelectorAll).toHaveBeenCalledTimes(1);
+        expect(fixture.root.getBoundingClientRect).toHaveBeenCalledTimes(1);
+        fixture.sources.forEach((source) => {
+            expect(source.getBoundingClientRect).toHaveBeenCalledTimes(1);
+        });
+        expect(runtime.dragGeometryDirty).toBe(false);
+    });
+
+    it('patches a clean snapshot for pure root viewport translation without rereading rows', () => {
+        const fixture = createGeometryFixture(2);
+        const runtime = {};
+        const tree = buildTree({ fixture, runtime });
+        const snapshot = tree.readDragGeometry({
+            rootElement: fixture.root,
+            session: null
+        });
+        const beforeVisualTop = snapshot.sourceEntries.get('source-0').visualRect.top;
+        const beforeLayoutTop = snapshot.sourceEntries.get('source-0').layoutRect.top;
+        fixture.root.getBoundingClientRect.mockImplementation(() => ({
+            top: 30,
+            bottom: 1030,
+            left: 15,
+            right: 255,
+            width: 240,
+            height: 1000
+        }));
+
+        const translated = tree.readDragGeometry({
+            rootElement: fixture.root,
+            session: null
+        });
+
+        expect(translated).toBe(snapshot);
+        expect(fixture.root.getBoundingClientRect).toHaveBeenCalledTimes(2);
+        expect(fixture.root.querySelectorAll).toHaveBeenCalledTimes(1);
+        fixture.sources.forEach((source) => {
+            expect(source.getBoundingClientRect).toHaveBeenCalledTimes(1);
+        });
+        expect(translated.sourceEntries.get('source-0').visualRect.top).toBe(
+            beforeVisualTop + 30
+        );
+        expect(translated.sourceEntries.get('source-0').layoutRect.top).toBe(
+            beforeLayoutTop + 30
+        );
+        expect(translated.sourceEntries.get('source-0').visualRect.left).toBe(15);
+        expect(runtime.dragGeometryDirty).toBe(false);
+    });
+
+    it('patches every cached visual and layout rect from an exact root scroll delta', () => {
+        const fixture = createGeometryFixture(2);
+        const runtime = {};
+        const tree = buildTree({ fixture, runtime });
+        tree.handleDragStart({
+            target: {
+                closest: (selector) => (
+                    selector === '.source-item' ? fixture.sources[0] : null
+                )
+            },
+            dataTransfer: {
+                setData: jest.fn(),
+                effectAllowed: ''
+            }
+        });
+        fixture.resetWritePhase();
+        const snapshot = tree.readDragGeometry({
+            rootElement: fixture.root,
+            session: null
+        });
+        const before = Array.from(snapshot.sourceEntries.values()).map((entry) => ({
+            visualTop: entry.visualRect.top,
+            visualLeft: entry.visualRect.left,
+            layoutTop: entry.layoutRect.top,
+            layoutLeft: entry.layoutRect.left
+        }));
+        const geometryQueryCount = fixture.root.querySelectorAll.mock.calls.length;
+        const rootRectReadCount = fixture.root.getBoundingClientRect.mock.calls.length;
+        const scrollListener = fixture.listeners.get('scroll');
+
+        fixture.root.scrollTop = 24;
+        fixture.root.scrollLeft = 7;
+        scrollListener({ target: fixture.root });
+        fixture.resetWritePhase();
+        const patched = tree.readDragGeometry({
+            rootElement: fixture.root,
+            session: null
+        });
+
+        expect(patched).toBe(snapshot);
+        expect(fixture.root.querySelectorAll).toHaveBeenCalledTimes(geometryQueryCount);
+        expect(fixture.root.getBoundingClientRect).toHaveBeenCalledTimes(rootRectReadCount + 1);
+        fixture.sources.forEach((source) => {
+            expect(source.getBoundingClientRect).toHaveBeenCalledTimes(1);
+        });
+        Array.from(patched.sourceEntries.values()).forEach((entry, index) => {
+            expect(entry.visualRect.top).toBe(before[index].visualTop - 24);
+            expect(entry.visualRect.left).toBe(before[index].visualLeft - 7);
+            expect(entry.layoutRect.top).toBe(before[index].layoutTop - 24);
+            expect(entry.layoutRect.left).toBe(before[index].layoutLeft - 7);
+        });
+        expect(runtime.dragGeometryDirty).toBe(false);
+    });
+
+    it('combines a root viewport translation with the pending root scroll delta', () => {
+        const fixture = createGeometryFixture(1);
+        const runtime = {};
+        const tree = buildTree({ fixture, runtime });
+        tree.handleDragStart({
+            target: {
+                closest: (selector) => (
+                    selector === '.source-item' ? fixture.sources[0] : null
+                )
+            },
+            dataTransfer: {
+                setData: jest.fn(),
+                effectAllowed: ''
+            }
+        });
+        fixture.resetWritePhase();
+        const snapshot = tree.readDragGeometry({
+            rootElement: fixture.root,
+            session: null
+        });
+        const source = snapshot.sourceEntries.get('source-0');
+        const before = {
+            visualTop: source.visualRect.top,
+            visualLeft: source.visualRect.left,
+            layoutTop: source.layoutRect.top,
+            layoutLeft: source.layoutRect.left
+        };
+        const geometryQueryCount = fixture.root.querySelectorAll.mock.calls.length;
+        const rootRectReadCount = fixture.root.getBoundingClientRect.mock.calls.length;
+        fixture.root.getBoundingClientRect.mockImplementation(() => ({
+            top: 30,
+            bottom: 1030,
+            left: 15,
+            right: 255,
+            width: 240,
+            height: 1000
+        }));
+
+        fixture.root.scrollTop = 24;
+        fixture.root.scrollLeft = 7;
+        fixture.listeners.get('scroll')({ target: fixture.root });
+        fixture.resetWritePhase();
+        const patched = tree.readDragGeometry({
+            rootElement: fixture.root,
+            session: null
+        });
+
+        expect(patched).toBe(snapshot);
+        expect(fixture.root.querySelectorAll).toHaveBeenCalledTimes(geometryQueryCount);
+        expect(fixture.root.getBoundingClientRect).toHaveBeenCalledTimes(rootRectReadCount + 1);
+        expect(source.visualRect.top).toBe(before.visualTop + 30 - 24);
+        expect(source.visualRect.left).toBe(before.visualLeft + 15 - 7);
+        expect(source.layoutRect.top).toBe(before.layoutTop + 30 - 24);
+        expect(source.layoutRect.left).toBe(before.layoutLeft + 15 - 7);
+        expect(patched.rootRect.top).toBe(30);
+        expect(patched.rootRect.left).toBe(15);
+        expect(runtime.dragGeometryDirty).toBe(false);
+    });
+
+    it('rebuilds after root scroll when the root size changed before ResizeObserver reports', () => {
+        const fixture = createGeometryFixture(1);
+        const runtime = {};
+        const tree = buildTree({ fixture, runtime });
+        tree.handleDragStart({
+            target: {
+                closest: (selector) => (
+                    selector === '.source-item' ? fixture.sources[0] : null
+                )
+            },
+            dataTransfer: {
+                setData: jest.fn(),
+                effectAllowed: ''
+            }
+        });
+        fixture.resetWritePhase();
+        const first = tree.readDragGeometry({
+            rootElement: fixture.root,
+            session: null
+        });
+        const geometryQueryCount = fixture.root.querySelectorAll.mock.calls.length;
+        const rootRectReadCount = fixture.root.getBoundingClientRect.mock.calls.length;
+        fixture.root.getBoundingClientRect.mockImplementation(() => ({
+            top: 0,
+            bottom: 900,
+            left: 0,
+            right: 240,
+            width: 240,
+            height: 900
+        }));
+        fixture.sources[0].getBoundingClientRect.mockImplementation(() => ({
+            top: 90,
+            bottom: 130,
+            left: 0,
+            right: 200,
+            width: 200,
+            height: 40
+        }));
+
+        fixture.root.scrollTop = 10;
+        fixture.listeners.get('scroll')({ target: fixture.root });
+        fixture.resetWritePhase();
+        const rebuilt = tree.readDragGeometry({
+            rootElement: fixture.root,
+            session: null
+        });
+
+        expect(rebuilt).not.toBe(first);
+        expect(fixture.root.querySelectorAll).toHaveBeenCalledTimes(geometryQueryCount + 1);
+        expect(fixture.root.getBoundingClientRect).toHaveBeenCalledTimes(rootRectReadCount + 1);
+        expect(fixture.sources[0].getBoundingClientRect).toHaveBeenCalledTimes(2);
+        expect(rebuilt.rootRect.height).toBe(900);
+        expect(rebuilt.sourceEntries.get('source-0').visualRect.top).toBe(90);
+        expect(runtime.dragGeometryDirty).toBe(false);
+    });
+
+    it('patches only descendants when a nested group-children scroller moves', () => {
+        const fixture = createNestedFixture();
+        const runtime = {};
+        const tree = buildTree({
+            fixture,
+            runtime,
+            state: { root: [{ type: 'group', id: 'same-key' }], ungrouped: [] },
+            groupsById: new Map([['same-key', {
+                id: 'same-key',
+                collapsed: false,
+                children: [{ type: 'source', key: 'same-key' }]
+            }]])
+        });
+        tree.handleDragStart({
+            target: {
+                closest: (selector) => (
+                    selector === '.source-item' ? fixture.source : null
+                )
+            },
+            dataTransfer: {
+                setData: jest.fn(),
+                effectAllowed: ''
+            }
+        });
+        fixture.resetWritePhase();
+        const snapshot = tree.readDragGeometry({
+            rootElement: fixture.root,
+            session: null
+        });
+        const group = snapshot.groups.get('same-key');
+        const source = snapshot.sourceEntries.get('same-key');
+        const before = {
+            groupVisualTop: group.visualRect.top,
+            groupLayoutTop: group.layoutRect.top,
+            headerVisualTop: group.header.visualRect.top,
+            childrenVisualTop: group.children.visualRect.top,
+            sourceVisualTop: source.visualRect.top,
+            sourceLayoutTop: source.layoutRect.top
+        };
+        const geometryQueryCount = fixture.root.querySelectorAll.mock.calls.length;
+        const rootRectReadCount = fixture.root.getBoundingClientRect.mock.calls.length;
+        const scrollListener = fixture.listeners.get('scroll');
+
+        fixture.children.scrollTop = 18;
+        scrollListener({ target: fixture.children });
+        fixture.resetWritePhase();
+        const patched = tree.readDragGeometry({
+            rootElement: fixture.root,
+            session: null
+        });
+
+        expect(patched).toBe(snapshot);
+        expect(fixture.root.querySelectorAll).toHaveBeenCalledTimes(geometryQueryCount);
+        expect(fixture.root.getBoundingClientRect).toHaveBeenCalledTimes(rootRectReadCount + 1);
+        expect(fixture.group.getBoundingClientRect).toHaveBeenCalledTimes(1);
+        expect(fixture.header.getBoundingClientRect).toHaveBeenCalledTimes(1);
+        expect(fixture.children.getBoundingClientRect).toHaveBeenCalledTimes(2);
+        expect(fixture.source.getBoundingClientRect).toHaveBeenCalledTimes(1);
+        expect(group.visualRect.top).toBe(before.groupVisualTop);
+        expect(group.layoutRect.top).toBe(before.groupLayoutTop);
+        expect(group.header.visualRect.top).toBe(before.headerVisualTop);
+        expect(group.children.visualRect.top).toBe(before.childrenVisualTop);
+        expect(source.visualRect.top).toBe(before.sourceVisualTop - 18);
+        expect(source.layoutRect.top).toBe(before.sourceLayoutTop - 18);
+        expect(runtime.dragGeometryDirty).toBe(false);
+    });
+
+    it('rebuilds when a nested scroller size changes before ResizeObserver reports', () => {
+        const fixture = createNestedFixture();
+        const runtime = {};
+        const tree = buildTree({
+            fixture,
+            runtime,
+            state: { root: [{ type: 'group', id: 'same-key' }], ungrouped: [] },
+            groupsById: new Map([['same-key', {
+                id: 'same-key',
+                collapsed: false,
+                children: [{ type: 'source', key: 'same-key' }]
+            }]])
+        });
+        tree.handleDragStart({
+            target: {
+                closest: (selector) => (
+                    selector === '.source-item' ? fixture.source : null
+                )
+            },
+            dataTransfer: {
+                setData: jest.fn(),
+                effectAllowed: ''
+            }
+        });
+        fixture.resetWritePhase();
+        const first = tree.readDragGeometry({
+            rootElement: fixture.root,
+            session: null
+        });
+        const geometryQueryCount = fixture.root.querySelectorAll.mock.calls.length;
+        const rootRectReadCount = fixture.root.getBoundingClientRect.mock.calls.length;
+        fixture.children.getBoundingClientRect.mockImplementation(() => ({
+            top: 140,
+            bottom: 200,
+            left: 0,
+            right: 200,
+            width: 200,
+            height: 60
+        }));
+
+        fixture.children.scrollTop = 10;
+        fixture.listeners.get('scroll')({ target: fixture.children });
+        fixture.resetWritePhase();
+        const rebuilt = tree.readDragGeometry({
+            rootElement: fixture.root,
+            session: null
+        });
+
+        expect(rebuilt).not.toBe(first);
+        expect(fixture.root.querySelectorAll).toHaveBeenCalledTimes(geometryQueryCount + 1);
+        expect(fixture.root.getBoundingClientRect).toHaveBeenCalledTimes(rootRectReadCount + 1);
+        expect(fixture.children.getBoundingClientRect).toHaveBeenCalledTimes(3);
+        expect(rebuilt.groups.get('same-key').children.visualRect.height).toBe(60);
+        expect(runtime.dragGeometryDirty).toBe(false);
+    });
+
+    it.each([
+        ['scroll then render', true],
+        ['render then scroll', false]
+    ])('rebuilds instead of scroll-patching after mixed invalidation: %s', (_label, scrollFirst) => {
+        const fixture = createGeometryFixture(1);
+        const runtime = {};
+        const tree = buildTree({ fixture, runtime });
+        tree.handleDragStart({
+            target: {
+                closest: (selector) => (
+                    selector === '.source-item' ? fixture.sources[0] : null
+                )
+            },
+            dataTransfer: {
+                setData: jest.fn(),
+                effectAllowed: ''
+            }
+        });
+        fixture.resetWritePhase();
+        const first = tree.readDragGeometry({
+            rootElement: fixture.root,
+            session: null
+        });
+        const geometryQueryCount = fixture.root.querySelectorAll.mock.calls.length;
+        const scrollListener = fixture.listeners.get('scroll');
+        const invalidateRender = () => tree.invalidateDragGeometry(
+            'render_rows_replaced',
+            { schedule: false }
+        );
+        const invalidateScroll = () => {
+            fixture.root.scrollTop = 10;
+            scrollListener({ target: fixture.root });
+        };
+        if (scrollFirst) {
+            invalidateScroll();
+            invalidateRender();
+        } else {
+            invalidateRender();
+            invalidateScroll();
+        }
+        fixture.sources[0].getBoundingClientRect.mockImplementation(() => ({
+            top: 90,
+            bottom: 130,
+            left: 0,
+            right: 200,
+            width: 200,
+            height: 40
+        }));
+
+        fixture.resetWritePhase();
+        const rebuilt = tree.readDragGeometry({
+            rootElement: fixture.root,
+            session: null
+        });
+
+        expect(rebuilt).not.toBe(first);
+        expect(fixture.root.querySelectorAll).toHaveBeenCalledTimes(geometryQueryCount + 1);
+        expect(fixture.sources[0].getBoundingClientRect).toHaveBeenCalledTimes(2);
+        expect(rebuilt.sourceEntries.get('source-0').visualRect.top).toBe(90);
+        expect(runtime.dragGeometryDirty).toBe(false);
+    });
+
+    it('reuses the changed root rect while rebuilding once after root size changes', () => {
+        const fixture = createGeometryFixture(2);
+        const runtime = {};
+        const tree = buildTree({ fixture, runtime });
+        const first = tree.readDragGeometry({
+            rootElement: fixture.root,
+            session: null
+        });
+        fixture.root.getBoundingClientRect.mockImplementation(() => ({
+            top: 0,
+            bottom: 900,
+            left: 0,
+            right: 240,
+            width: 240,
+            height: 900
+        }));
+
+        const rebuilt = tree.readDragGeometry({
+            rootElement: fixture.root,
+            session: null
+        });
+
+        expect(rebuilt).not.toBe(first);
+        expect(fixture.root.getBoundingClientRect).toHaveBeenCalledTimes(2);
+        expect(fixture.root.querySelectorAll).toHaveBeenCalledTimes(2);
+        fixture.sources.forEach((source) => {
+            expect(source.getBoundingClientRect).toHaveBeenCalledTimes(2);
+        });
+        expect(rebuilt.rootRect.height).toBe(900);
+    });
+
+    it('does not publish a partial snapshot or clear dirty when a geometry read fails', () => {
+        const fixture = createGeometryFixture(2);
+        const runtime = {};
+        const tree = buildTree({ fixture, runtime });
+        const first = tree.readDragGeometry({ rootElement: fixture.root, session: null });
+
+        tree.invalidateDragGeometry('row_replaced', { schedule: false });
+        fixture.sources[1].getBoundingClientRect = jest.fn(() => {
+            throw new Error('detached during read');
+        });
+        const failed = tree.readDragGeometry({ rootElement: fixture.root, session: null });
+
+        expect(failed).toBeNull();
+        expect(runtime.dragGeometryDirty).toBe(true);
+        expect(runtime.dragGeometrySnapshot).toBe(first);
+    });
+
+    it('fails closed and clears the last applied intent, feedback, and shifts after a geometry read error', () => {
+        const createContentDragReflow = require('../../src/content/content-drag-reflow.js');
+        const fixture = createNestedFixture();
+        const groupState = {
+            id: 'same-key',
+            collapsed: false,
+            children: [{ type: 'source', key: 'same-key' }]
+        };
+        const state = {
+            root: [{ type: 'group', id: 'same-key' }],
+            ungrouped: []
+        };
+        const session = {
+            draggedType: 'source',
+            draggedKeys: new Set(['drag-other']),
+            totalDraggedHeight: 40,
+            currentIntent: null,
+            shiftedItems: new Map(),
+            shiftedSourceItems: new Map(),
+            shiftedGroupItems: new Map()
+        };
+        const runtime = {
+            activeDragContext: {
+                kind: 'source-single',
+                keys: ['drag-other']
+            },
+            dragReflowSession: session
+        };
+        const tree = buildTree({
+            fixture,
+            runtime,
+            state,
+            groupsById: new Map([['same-key', groupState]]),
+            dragReflow: createContentDragReflow()
+        });
+        const validTransfer = { dropEffect: 'none' };
+
+        tree.handleDragOver({
+            preventDefault: jest.fn(),
+            clientX: 180,
+            clientY: 110,
+            dataTransfer: validTransfer
+        });
+
+        expect(session.currentIntent).toMatchObject({
+            kind: 'into-group',
+            targetGroupId: 'same-key'
+        });
+        expect(validTransfer.dropEffect).toBe('move');
+        expect(fixture.group.classList.has('drag-into')).toBe(true);
+        expect(session.shiftedSourceItems.size).toBeGreaterThan(0);
+        expect(fixture.source.style.transform).toBe('translateY(40px)');
+
+        tree.invalidateDragGeometry('transient_geometry_failure', { schedule: false });
+        fixture.resetWritePhase();
+        fixture.source.getBoundingClientRect = jest.fn(() => {
+            throw new Error('row detached while reading');
+        });
+        const failedTransfer = { dropEffect: 'move' };
+        tree.handleDragOver({
+            preventDefault: jest.fn(),
+            clientX: 180,
+            clientY: 110,
+            dataTransfer: failedTransfer
+        });
+
+        expect(session.currentIntent).toBeNull();
+        expect(failedTransfer.dropEffect).toBe('none');
+        expect(fixture.group.classList.has('drag-into')).toBe(false);
+        expect(session.shiftedSourceItems).toEqual(new Map());
+        expect(fixture.source.style.transform).toBe('');
+
+        const beforeDrop = JSON.parse(JSON.stringify(state));
+        tree.handleDrop({
+            preventDefault: jest.fn(),
+            clientX: 180,
+            clientY: 110,
+            dataTransfer: {
+                getData: (type) => (
+                    type === 'application/source-key' ? 'drag-other' : ''
+                )
+            }
+        });
+        expect(state).toEqual(beforeDrop);
+    });
+
+    it('plans shifts only for visible geometry when filtered state entries are absent from the DOM', () => {
+        const createContentDragReflow = require('../../src/content/content-drag-reflow.js');
+        const fixture = createGeometryFixture(2);
+        const session = {
+            draggedType: 'source',
+            draggedKeys: new Set(['drag-other']),
+            totalDraggedHeight: 40,
+            currentIntent: null,
+            shiftedItems: new Map(),
+            shiftedSourceItems: new Map(),
+            shiftedGroupItems: new Map()
+        };
+        const runtime = {
+            activeDragContext: {
+                kind: 'source-single',
+                keys: ['drag-other']
+            },
+            dragReflowSession: session
+        };
+        const state = {
+            root: [
+                { type: 'source', key: 'source-0' },
+                { type: 'source', key: 'filtered-hidden' },
+                { type: 'source', key: 'source-1' }
+            ],
+            ungrouped: []
+        };
+        const tree = buildTree({
+            fixture,
+            runtime,
+            state,
+            dragReflow: createContentDragReflow()
+        });
+        const snapshot = tree.readDragGeometry({
+            rootElement: fixture.root,
+            session
+        });
+        const plan = tree.planDragFrame({
+            pointer: { clientX: 100, clientY: 145 },
+            geometrySnapshot: snapshot,
+            state,
+            groupsById: new Map(),
+            parentMap: new Map(),
+            dragContext: runtime.activeDragContext,
+            previousIntent: null,
+            dataTransfer: { dropEffect: 'none' }
+        });
+
+        expect(plan.intent).toMatchObject({
+            kind: 'before-source',
+            slotKey: 'source-1'
+        });
+        expect(plan.shifts.sources).toEqual(new Map([['source-1', 40]]));
+        expect(plan.shifts.sources.has('filtered-hidden')).toBe(false);
+        tree.applyDragFramePlan(plan);
+        expect(runtime.dragGeometryDirty).toBe(false);
+        expect(session.shiftedSourceItems).toEqual(new Map([['source-1', 40]]));
+        expect(fixture.root.querySelector).not.toHaveBeenCalledWith(
+            expect.stringContaining('filtered-hidden')
+        );
+    });
+
+    it('marks only viewport and one-slot overscan shifts for animation', () => {
+        const fixture = createGeometryFixture(6);
+        fixture.root.getBoundingClientRect.mockReturnValue({
+            top: 0,
+            bottom: 200,
+            left: 0,
+            right: 240,
+            width: 240,
+            height: 200
+        });
+        const session = {
+            draggedType: 'source',
+            draggedKeys: new Set(['drag-other']),
+            totalDraggedHeight: 2000,
+            currentIntent: null,
+            shiftedItems: new Map(),
+            shiftedSourceItems: new Map(),
+            shiftedGroupItems: new Map()
+        };
+        const runtime = {
+            activeDragContext: {
+                kind: 'source-single',
+                keys: ['drag-other']
+            },
+            dragReflowSession: session
+        };
+        const state = {
+            root: fixture.sources.map((source) => ({
+                type: 'source',
+                key: source.dataset.sourceKey
+            })),
+            ungrouped: []
+        };
+        const tree = buildTree({ fixture, runtime, state });
+        const snapshot = tree.readDragGeometry({
+            rootElement: fixture.root,
+            session
+        });
+        const plan = tree.planDragFrame({
+            pointer: { clientX: 100, clientY: 145 },
+            geometrySnapshot: snapshot,
+            state,
+            groupsById: new Map(),
+            parentMap: new Map(),
+            dragContext: runtime.activeDragContext,
+            previousIntent: null,
+            dataTransfer: { dropEffect: 'none' }
+        });
+
+        expect(plan.intent).toMatchObject({
+            kind: 'before-source',
+            slotKey: 'source-1'
+        });
+        expect(Array.from(plan.shifts.sources.keys())).toEqual([
+            'source-1',
+            'source-2',
+            'source-3',
+            'source-4',
+            'source-5'
+        ]);
+        expect(Array.from(
+            plan.shifts._shiftDeltaPlan.animatedKeys.sources
+        )).toEqual([
+            'source-1',
+            'source-2',
+            'source-3'
+        ]);
+    });
+
+    it('preserves heterogeneous DOM order at both root and group-child levels', () => {
+        const rect = (top) => ({
+            top,
+            bottom: top + 20,
+            left: 0,
+            right: 200,
+            width: 200,
+            height: 20
+        });
+        const classList = (...classes) => ({
+            contains: (name) => classes.includes(name)
+        });
+        const root = {
+            getBoundingClientRect: () => ({
+                top: 0, bottom: 500, left: 0, right: 240, width: 240, height: 500
+            })
+        };
+        const group = {
+            dataset: { groupId: 'root-group' },
+            style: {},
+            parentElement: root,
+            classList: classList('group-container'),
+            getBoundingClientRect: () => rect(40)
+        };
+        const header = {
+            dataset: { groupId: 'root-group' },
+            parentElement: group,
+            classList: classList('group-header'),
+            getBoundingClientRect: () => rect(40)
+        };
+        const children = {
+            parentElement: group,
+            classList: classList('group-children'),
+            getBoundingClientRect: () => rect(60)
+        };
+        const nestedGroup = {
+            dataset: { groupId: 'nested-group' },
+            style: {},
+            parentElement: children,
+            classList: classList('group-container'),
+            getBoundingClientRect: () => rect(80)
+        };
+        const nestedHeader = {
+            dataset: { groupId: 'nested-group' },
+            parentElement: nestedGroup,
+            classList: classList('group-header'),
+            getBoundingClientRect: () => rect(80)
+        };
+        const nestedChildren = {
+            parentElement: nestedGroup,
+            classList: classList('group-children'),
+            getBoundingClientRect: () => rect(100)
+        };
+        const source = (key, parentElement, top) => ({
+            dataset: { sourceKey: key },
+            style: {},
+            parentElement,
+            classList: classList('source-item'),
+            getBoundingClientRect: () => rect(top)
+        });
+        const rootBefore = source('root-before', root, 20);
+        const childBefore = source('child-before', children, 60);
+        const childAfter = source('child-after', children, 120);
+        const rootAfter = source('root-after', root, 140);
+        const elements = [
+            rootBefore,
+            group,
+            header,
+            children,
+            childBefore,
+            nestedGroup,
+            nestedHeader,
+            nestedChildren,
+            childAfter,
+            rootAfter
+        ];
+        root.querySelectorAll = jest.fn(() => elements);
+        root.contains = (element) => element === root || elements.includes(element);
+
+        const runtime = {};
+        const fixture = { root, sources: [] };
+        const tree = buildTree({ fixture, runtime, state: { root: [], ungrouped: [] } });
+        const snapshot = tree.readDragGeometry({ rootElement: root, session: null });
+        const identities = (entries) => entries.map((entry) => (
+            entry.identity.type === 'group'
+                ? `group:${entry.identity.id}`
+                : `source:${entry.identity.key}`
+        ));
+
+        expect(identities(snapshot.rootItems)).toEqual([
+            'source:root-before',
+            'group:root-group',
+            'source:root-after'
+        ]);
+        expect(identities(snapshot.groups.get('root-group').items)).toEqual([
+            'source:child-before',
+            'group:nested-group',
+            'source:child-after'
+        ]);
+    });
+
+    it('keeps snapshot-path drop intent computation pure when state arrays are absent', () => {
+        const tree = createContentTreeInteractions({});
+        const group = { id: 'group-1', collapsed: false };
+        const state = {};
+        const geometrySnapshot = {
+            rootRect: {
+                top: 0, bottom: 300, left: 0, right: 200, width: 200, height: 300
+            },
+            bin: null,
+            rootItems: [],
+            groups: new Map([['group-1', {
+                identity: { type: 'group', id: 'group-1' },
+                element: {},
+                parentGroupId: null,
+                layoutRect: {
+                    top: 40, bottom: 120, left: 0, right: 200, width: 200, height: 80
+                },
+                header: {
+                    layoutRect: {
+                        top: 40, bottom: 60, left: 0, right: 200, width: 200, height: 20
+                    }
+                },
+                children: null,
+                items: []
+            }]])
+        };
+
+        const intent = tree.computeDropIntentRaw({
+            clientX: 100,
+            clientY: 50,
+            state,
+            groupsById: new Map([['group-1', group]]),
+            parentMap: new Map(),
+            activeDragContext: { kind: 'source-single', keys: ['source-1'] },
+            geometrySnapshot
+        });
+
+        expect(intent.targetList).toEqual([]);
+        expect(state).toEqual({});
+        expect(group).toEqual({ id: 'group-1', collapsed: false });
+    });
+
+    it('returns a local empty-bin trailing intent without mutating an empty state object', () => {
+        const tree = createContentTreeInteractions({});
+        const state = {};
+        const geometrySnapshot = {
+            rootRect: {
+                top: 0, bottom: 300, left: 0, right: 200, width: 200, height: 300
+            },
+            bin: null,
+            groups: new Map(),
+            rootItems: [{
+                identity: { type: 'source', key: 'visible-source' },
+                visualRect: {
+                    top: 40, bottom: 80, left: 0, right: 200, width: 200, height: 40
+                },
+                element: { classList: { contains: () => false } }
+            }]
+        };
+
+        const intent = tree.computeDropIntentRaw({
+            clientX: 100,
+            clientY: 200,
+            state,
+            groupsById: new Map(),
+            parentMap: new Map(),
+            activeDragContext: { kind: 'source-single', keys: ['dragged-source'] },
+            geometrySnapshot
+        });
+
+        expect(intent).toMatchObject({
+            isEmptyBinTrailing: true,
+            targetList: [],
+            insertIndex: 0
+        });
+        expect(state).toEqual({});
+    });
+
+    it('clears a prior valid intent and rejects drop when the next frame has no intent', () => {
+        const fixture = createGeometryFixture(1);
+        const session = {
+            draggedKeys: new Set(['source-0']),
+            totalDraggedHeight: 40,
+            shiftedItems: new Map(),
+            shiftedSourceItems: new Map([['source-0', 40]]),
+            shiftedGroupItems: new Map(),
+            currentIntent: { kind: 'after-source', slotKey: 'source-0' }
+        };
+        const runtime = {
+            activeDragContext: { kind: 'source-single', keys: ['source-0'] },
+            dragReflowSession: session
+        };
+        const tree = buildTree({ fixture, runtime });
+        const snapshot = tree.readDragGeometry({
+            rootElement: fixture.root,
+            session
+        });
+        const dataTransfer = { dropEffect: 'move' };
+        const plan = tree.planDragFrame({
+            pointer: { clientX: 100, clientY: 1200 },
+            geometrySnapshot: snapshot,
+            state: { root: [{ type: 'source', key: 'source-0' }], ungrouped: [] },
+            groupsById: new Map(),
+            parentMap: new Map(),
+            dragContext: runtime.activeDragContext,
+            previousIntent: session.currentIntent,
+            dataTransfer
+        });
+
+        expect(plan.intent).toBeNull();
+        expect(plan.dropEffect).toBe('none');
+        expect(plan.shifts.sources).toEqual(new Map());
+        expect(plan.shifts._shiftDeltaPlan.deltas.sources).toEqual(
+            new Map([['source-0', -40]])
+        );
+        expect(plan.shifts._shiftDeltaPlan.animatedKeys.sources).toEqual(new Set());
+        tree.applyDragFramePlan(plan);
+        expect(session.currentIntent).toBeNull();
+        expect(dataTransfer.dropEffect).toBe('none');
+    });
+
+    it('invalidates only for actual scoped scroll changes and current ResizeObserver reports', () => {
+        const fixture = createGeometryFixture(2);
+        const runtime = {};
+        const resizeObservers = [];
+        class FakeResizeObserver {
+            constructor(callback) {
+                this.callback = callback;
+                this.observe = jest.fn();
+                this.disconnect = jest.fn();
+                resizeObservers.push(this);
+            }
+        }
+        const tree = buildTree({
+            fixture,
+            runtime,
+            extraDeps: { ResizeObserver: FakeResizeObserver }
+        });
+        const source = fixture.sources[0];
+        tree.handleDragStart({
+            target: {
+                closest: (selector) => (selector === '.source-item' ? source : null)
+            },
+            dataTransfer: {
+                setData: jest.fn(),
+                effectAllowed: ''
+            }
+        });
+        expect(resizeObservers).toHaveLength(0);
+
+        fixture.resetWritePhase();
+        tree.readDragGeometry({ rootElement: fixture.root, session: null });
+        const scrollListener = fixture.listeners.get('scroll');
+        expect(scrollListener).toBeInstanceOf(Function);
+        expect(resizeObservers).toHaveLength(1);
+        expect(runtime.dragGeometryDirty).toBe(false);
+        resizeObservers[0].callback([{
+            target: fixture.root,
+            borderBoxSize: [{ inlineSize: 240, blockSize: 1000 }]
+        }]);
+        expect(runtime.dragGeometryDirty).toBe(false);
+        resizeObservers[0].callback([{
+            target: fixture.root,
+            borderBoxSize: [{ inlineSize: 240, blockSize: 1001 }]
+        }]);
+        expect(runtime.dragGeometryDirty).toBe(true);
+
+        fixture.resetWritePhase();
+        tree.readDragGeometry({ rootElement: fixture.root, session: null });
+        scrollListener({ target: fixture.root });
+        expect(runtime.dragGeometryDirty).toBe(false);
+        fixture.root.scrollTop = 8;
+        scrollListener({ target: fixture.root });
+        expect(runtime.dragGeometryDirty).toBe(true);
+
+        tree.handleDragEnd({ target: { closest: () => null } });
+        expect(resizeObservers[0].disconnect).toHaveBeenCalledTimes(1);
+        runtime.dragGeometryDirty = false;
+        resizeObservers[0].callback([{
+            target: fixture.root,
+            borderBoxSize: [{ inlineSize: 240, blockSize: 1200 }]
+        }]);
+        scrollListener({ target: fixture.root });
+        expect(runtime.dragGeometryDirty).toBe(false);
+    });
+
+    it('rebinds Classic drag ResizeObserver targets after render replaces group children', () => {
+        const fixture = createNestedFixture();
+        const runtime = {};
+        const resizeObservers = [];
+        class FakeResizeObserver {
+            constructor(callback) {
+                this.callback = callback;
+                this.observe = jest.fn();
+                this.unobserve = jest.fn();
+                this.disconnect = jest.fn();
+                resizeObservers.push(this);
+            }
+        }
+        const tree = buildTree({
+            fixture,
+            runtime,
+            state: { root: [{ type: 'group', id: 'same-key' }], ungrouped: [] },
+            groupsById: new Map([['same-key', {
+                id: 'same-key',
+                collapsed: false,
+                children: [{ type: 'source', key: 'same-key' }]
+            }]]),
+            extraDeps: { ResizeObserver: FakeResizeObserver }
+        });
+        tree.handleDragStart({
+            target: {
+                closest: (selector) => (
+                    selector === '.source-item' ? fixture.source : null
+                )
+            },
+            dataTransfer: {
+                setData: jest.fn(),
+                effectAllowed: ''
+            }
+        });
+        expect(resizeObservers).toHaveLength(0);
+        fixture.resetWritePhase();
+        tree.readDragGeometry({ rootElement: fixture.root, session: null });
+        const staleChildren = fixture.children;
+        expect(resizeObservers[0].observe).toHaveBeenCalledWith(staleChildren);
+
+        const freshFixture = createNestedFixture();
+        const rootRectReadsBeforeRender = fixture.root.getBoundingClientRect.mock.calls.length;
+        fixture.root.querySelectorAll.mockImplementation((selector) => {
+            if (
+                selector === '.source-item[data-source-key], .group-container[data-group-id], .group-children'
+            ) {
+                return [
+                    freshFixture.group,
+                    freshFixture.children,
+                    freshFixture.source
+                ];
+            }
+            return freshFixture.root.querySelectorAll(selector);
+        });
+        tree.invalidateDragGeometry('render_rows_replaced', { schedule: false });
+        tree.applyReflowAfterRender();
+        const freshChildren = freshFixture.children;
+        expect(fixture.root.getBoundingClientRect).toHaveBeenCalledTimes(rootRectReadsBeforeRender);
+        expect(freshChildren.getBoundingClientRect).not.toHaveBeenCalled();
+        expect(resizeObservers[0].unobserve).toHaveBeenCalledWith(staleChildren);
+        expect(resizeObservers[0].observe).toHaveBeenCalledWith(freshChildren);
+
+        runtime.dragGeometryDirty = false;
+        resizeObservers[0].callback([{
+            target: staleChildren,
+            borderBoxSize: [{ inlineSize: 200, blockSize: 80 }]
+        }]);
+        expect(runtime.dragGeometryDirty).toBe(false);
+        resizeObservers[0].callback([{
+            target: freshChildren,
+            borderBoxSize: [{ inlineSize: 200, blockSize: 40 }]
+        }]);
+        expect(runtime.dragGeometryDirty).toBe(false);
+        resizeObservers[0].callback([{
+            target: freshChildren,
+            borderBoxSize: [{ inlineSize: 200, blockSize: 41 }]
+        }]);
+        expect(runtime.dragGeometryDirty).toBe(true);
+        tree.handleDragEnd({ target: { closest: () => null } });
+        runtime.dragGeometryDirty = false;
+        resizeObservers[0].callback([{
+            target: freshChildren,
+            borderBoxSize: [{ inlineSize: 200, blockSize: 60 }]
+        }]);
+        expect(runtime.dragGeometryDirty).toBe(false);
+    });
+
+    it('does not reuse a clean Classic snapshot across two drag sessions', () => {
+        const fixture = createGeometryFixture(1);
+        const runtime = {};
+        const tree = buildTree({
+            fixture,
+            runtime,
+            state: {
+                root: [{ type: 'source', key: 'source-0' }],
+                ungrouped: []
+            },
+            extraDeps: { getDragMode: () => 'classic' }
+        });
+        const start = () => tree.handleDragStart({
+            target: {
+                closest: (selector) => (
+                    selector === '.source-item' ? fixture.sources[0] : null
+                )
+            },
+            dataTransfer: {
+                setData: jest.fn(),
+                effectAllowed: ''
+            }
+        });
+
+        start();
+        fixture.resetWritePhase();
+        const first = tree.readDragGeometry({
+            rootElement: fixture.root,
+            session: null
+        });
+        expect(first.sourceEntries.get('source-0').visualRect.top).toBe(100);
+
+        tree.handleDragEnd({ target: { closest: () => null } });
+        expect(runtime.dragGeometrySnapshot).toBeNull();
+        fixture.sources[0].getBoundingClientRect.mockImplementation(() => ({
+            top: 260,
+            bottom: 300,
+            left: 0,
+            right: 200,
+            width: 200,
+            height: 40
+        }));
+
+        start();
+        fixture.resetWritePhase();
+        const second = tree.readDragGeometry({
+            rootElement: fixture.root,
+            session: null
+        });
+
+        expect(second).not.toBe(first);
+        expect(second.sourceEntries.get('source-0').visualRect.top).toBe(260);
+    });
+
+    it.each(['source', 'group'])(
+        'invalidates a snapshot cached before deferred %s folding',
+        (kind) => {
+            const fixture = createGeometryFixture(1);
+            const runtime = {};
+            let foldFrame = null;
+            const previousRequestAnimationFrame = global.requestAnimationFrame;
+            global.requestAnimationFrame = jest.fn((callback) => {
+                foldFrame = callback;
+                return 1;
+            });
+            const session = {
+                draggedKeys: new Set(['drag-key']),
+                totalDraggedHeight: 40,
+                shiftedItems: new Map(),
+                shiftedSourceItems: new Map(),
+                shiftedGroupItems: new Map()
+            };
+            const dragReflow = {
+                prepareDragSession: jest.fn(() => session),
+                foldDraggedItems: jest.fn()
+            };
+            const tree = buildTree({
+                fixture,
+                runtime,
+                dragReflow,
+                state: { root: [], ungrouped: [] }
+            });
+            const sourceTarget = fixture.sources[0];
+            const groupHeader = {
+                dataset: { groupId: 'drag-key' },
+                classList: createTrackedClassList([], () => {})
+            };
+            tree.handleDragStart({
+                target: {
+                    closest: (selector) => {
+                        if (selector === '.source-item') {
+                            return kind === 'source' ? sourceTarget : null;
+                        }
+                        if (selector === '.group-header') {
+                            return kind === 'group' ? groupHeader : null;
+                        }
+                        return null;
+                    }
+                },
+                dataTransfer: {
+                    setData: jest.fn(),
+                    effectAllowed: ''
+                }
+            });
+
+            expect(dragReflow.prepareDragSession).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    draggedType: kind
+                })
+            );
+            fixture.resetWritePhase();
+            tree.readDragGeometry({ rootElement: fixture.root, session });
+            expect(runtime.dragGeometryDirty).toBe(false);
+            expect(foldFrame).toBeInstanceOf(Function);
+            foldFrame();
+            expect(dragReflow.foldDraggedItems).toHaveBeenCalledTimes(1);
+            expect(runtime.dragGeometryDirty).toBe(true);
+            global.requestAnimationFrame = previousRequestAnimationFrame;
+        }
+    );
+
+    it('ignores a deferred fold callback after dragend cancels its session', () => {
+        const fixture = createGeometryFixture(1);
+        const runtime = {};
+        const foldFrames = [];
+        const previousRequestAnimationFrame = global.requestAnimationFrame;
+        const previousCancelAnimationFrame = global.cancelAnimationFrame;
+        global.requestAnimationFrame = jest.fn((callback) => {
+            foldFrames.push(callback);
+            return foldFrames.length;
+        });
+        global.cancelAnimationFrame = jest.fn();
+        try {
+            const session = {
+                draggedType: 'source',
+                draggedKeys: new Set(['source-0']),
+                totalDraggedHeight: 40,
+                shiftedItems: new Map(),
+                shiftedSourceItems: new Map(),
+                shiftedGroupItems: new Map()
+            };
+            const dragReflow = {
+                prepareDragSession: jest.fn(() => session),
+                foldDraggedItems: jest.fn(),
+                clearReflow: jest.fn(),
+                unfoldDraggedItems: jest.fn()
+            };
+            const tree = buildTree({
+                fixture,
+                runtime,
+                dragReflow,
+                state: {
+                    root: [{ type: 'source', key: 'source-0' }],
+                    ungrouped: []
+                }
+            });
+
+            tree.handleDragStart({
+                target: {
+                    closest: (selector) => (
+                        selector === '.source-item' ? fixture.sources[0] : null
+                    )
+                },
+                dataTransfer: {
+                    setData: jest.fn(),
+                    effectAllowed: ''
+                }
+            });
+            expect(foldFrames).toHaveLength(1);
+
+            fixture.resetWritePhase();
+            tree.handleDragEnd({ target: { closest: () => null } });
+            foldFrames[0]();
+
+            expect(dragReflow.foldDraggedItems).not.toHaveBeenCalled();
+        } finally {
+            global.requestAnimationFrame = previousRequestAnimationFrame;
+            global.cancelAnimationFrame = previousCancelAnimationFrame;
+        }
+    });
+
+    it('lets only the newest drag session run its deferred fold callback', () => {
+        const fixture = createGeometryFixture(2);
+        const runtime = {};
+        const foldFrames = [];
+        const sessions = [];
+        const previousRequestAnimationFrame = global.requestAnimationFrame;
+        const previousCancelAnimationFrame = global.cancelAnimationFrame;
+        global.requestAnimationFrame = jest.fn((callback) => {
+            foldFrames.push(callback);
+            return foldFrames.length;
+        });
+        global.cancelAnimationFrame = jest.fn();
+        try {
+            const dragReflow = {
+                prepareDragSession: jest.fn(({ draggedKeys }) => {
+                    const session = {
+                        draggedType: 'source',
+                        draggedKeys: new Set(draggedKeys),
+                        totalDraggedHeight: 40,
+                        shiftedItems: new Map(),
+                        shiftedSourceItems: new Map(),
+                        shiftedGroupItems: new Map()
+                    };
+                    sessions.push(session);
+                    return session;
+                }),
+                foldDraggedItems: jest.fn(),
+                clearReflow: jest.fn(),
+                unfoldDraggedItems: jest.fn()
+            };
+            const tree = buildTree({
+                fixture,
+                runtime,
+                dragReflow,
+                state: {
+                    root: [
+                        { type: 'source', key: 'source-0' },
+                        { type: 'source', key: 'source-1' }
+                    ],
+                    ungrouped: []
+                }
+            });
+            const startSource = (source) => tree.handleDragStart({
+                target: {
+                    closest: (selector) => (
+                        selector === '.source-item' ? source : null
+                    )
+                },
+                dataTransfer: {
+                    setData: jest.fn(),
+                    effectAllowed: ''
+                }
+            });
+
+            startSource(fixture.sources[0]);
+            startSource(fixture.sources[1]);
+            expect(foldFrames).toHaveLength(2);
+
+            foldFrames[0]();
+            expect(dragReflow.foldDraggedItems).not.toHaveBeenCalled();
+            foldFrames[1]();
+
+            expect(dragReflow.foldDraggedItems).toHaveBeenCalledTimes(1);
+            expect(dragReflow.foldDraggedItems).toHaveBeenCalledWith({
+                session: sessions[1],
+                rootElement: fixture.root
+            });
+        } finally {
+            global.requestAnimationFrame = previousRequestAnimationFrame;
+            global.cancelAnimationFrame = previousCancelAnimationFrame;
+        }
+    });
+
+    it('finishes every geometry read before the first feedback/reflow write', () => {
+        const fixture = createGeometryFixture(3);
+        const runtime = {
+            activeDragContext: { kind: 'source-single', keys: ['source-0'] },
+            dragReflowSession: {
+                draggedKeys: new Set(['source-0']),
+                totalDraggedHeight: 40,
+                shiftedItems: new Map(),
+                currentIntent: null
+            }
+        };
+        const tree = buildTree({ fixture, runtime });
+
+        expect(() => tree.handleDragOver({
+            clientX: 20,
+            clientY: 105,
+            preventDefault: jest.fn(),
+            dataTransfer: { dropEffect: 'move' },
+            target: { closest: () => null }
+        })).not.toThrow();
+
+        expect(fixture.didWrite()).toBe(true);
+        fixture.rectReads.forEach((count) => expect(count).toBe(1));
+        expect(fixture.root.querySelectorAll).toHaveBeenCalledTimes(1);
+    });
+
+    it('uses the same snapshot for collapsed-hover resolution without a second group scan', () => {
+        const fixture = createNestedFixture();
+        const groupState = {
+            id: 'same-key',
+            collapsed: true,
+            children: [{ type: 'source', key: 'same-key' }]
+        };
+        const runtime = {
+            activeDragContext: { kind: 'source-single', keys: ['outside'] }
+        };
+        const tree = buildTree({
+            fixture,
+            runtime,
+            state: { root: [{ type: 'group', id: 'same-key' }], ungrouped: [] },
+            groupsById: new Map([['same-key', groupState]])
+        });
+
+        tree.handleDragOver({
+            clientX: 150,
+            clientY: 110,
+            preventDefault: jest.fn(),
+            dataTransfer: { dropEffect: 'move' },
+            target: { closest: () => null }
+        });
+
+        expect(fixture.root.querySelectorAll).toHaveBeenCalledTimes(1);
+        expect(runtime.dragGeometryDirty).toBe(true);
+    });
+
+    it('patches descendant/header/children visual rects for a pure ancestor transform', () => {
+        const fixture = createNestedFixture();
+        const runtime = {
+            activeDragContext: { kind: 'source-single', keys: ['outside'] },
+            dragReflowSession: {
+                draggedKeys: new Set(['outside']),
+                totalDraggedHeight: 24,
+                shiftedItems: new Map(),
+                currentIntent: null
+            }
+        };
+        const tree = buildTree({
+            fixture,
+            runtime,
+            state: { root: [{ type: 'group', id: 'same-key' }], ungrouped: [] },
+            groupsById: new Map([['same-key', {
+                id: 'same-key',
+                collapsed: false,
+                children: [{ type: 'source', key: 'same-key' }]
+            }]]),
+            dragReflow: {
+                applyReflow: jest.fn(() => ({ complete: true }))
+            }
+        });
+        const snapshot = tree.readDragGeometry({ rootElement: fixture.root, session: runtime.dragReflowSession });
+        fixture.resetWritePhase();
+
+        tree.applyDragFramePlan({
+            intent: null,
+            isInvalid: false,
+            dropEffect: 'move',
+            shifts: {
+                sources: new Map(),
+                groups: new Map([['same-key', 24]])
+            },
+            feedback: {},
+            geometrySnapshot: snapshot
+        });
+
+        expect(snapshot.groups.get('same-key').visualRect.top).toBe(124);
+        expect(snapshot.groups.get('same-key').header.visualRect.top).toBe(124);
+        expect(snapshot.groups.get('same-key').children.visualRect.top).toBe(164);
+        expect(snapshot.sourceEntries.get('same-key').visualRect.top).toBe(164);
+        expect(snapshot.sourceEntries.get('same-key').layoutRect.top).toBe(140);
+        expect(runtime.dragGeometryDirty).toBe(false);
+    });
+
+    it('patches only the applied typed deltas returned by the reflow writer', () => {
+        const fixture = createGeometryFixture(2);
+        const runtime = {
+            activeDragContext: { kind: 'source-single', keys: ['source-0'] },
+            dragReflowSession: {
+                draggedKeys: new Set(['source-0']),
+                totalDraggedHeight: 40,
+                shiftedSourceItems: new Map(),
+                shiftedGroupItems: new Map(),
+                currentIntent: null
+            }
+        };
+        const dragReflow = {
+            supportsAppliedShiftDeltas: true,
+            applyReflow: jest.fn(() => ({
+                complete: true,
+                appliedShiftDeltas: {
+                    sources: new Map([['source-1', 40]]),
+                    groups: new Map()
+                }
+            }))
+        };
+        const tree = buildTree({ fixture, runtime, dragReflow });
+        const snapshot = tree.readDragGeometry({
+            rootElement: fixture.root,
+            session: runtime.dragReflowSession
+        });
+        const source0Top = snapshot.sourceEntries.get('source-0').visualRect.top;
+        const source1Top = snapshot.sourceEntries.get('source-1').visualRect.top;
+        fixture.resetWritePhase();
+
+        tree.applyDragFramePlan({
+            intent: null,
+            isInvalid: false,
+            dropEffect: 'move',
+            shifts: {
+                sources: new Map([['source-1', 40]]),
+                groups: new Map()
+            },
+            feedback: {},
+            geometrySnapshot: snapshot
+        });
+
+        expect(snapshot.sourceEntries.get('source-0').visualRect.top).toBe(source0Top);
+        expect(snapshot.sourceEntries.get('source-1').visualRect.top).toBe(source1Top + 40);
+        expect(runtime.dragGeometryDirty).toBe(false);
+    });
+
+    it('leaves the cached snapshot unchanged when the reflow writer throws', () => {
+        const fixture = createGeometryFixture(1);
+        const runtime = {
+            activeDragContext: { kind: 'source-single', keys: ['source-0'] },
+            dragReflowSession: {
+                draggedKeys: new Set(['source-0']),
+                totalDraggedHeight: 40,
+                shiftedSourceItems: new Map(),
+                shiftedGroupItems: new Map(),
+                currentIntent: null
+            }
+        };
+        const dragReflow = {
+            supportsAppliedShiftDeltas: true,
+            applyReflow: jest.fn(() => {
+                throw new Error('write failed');
+            })
+        };
+        const tree = buildTree({ fixture, runtime, dragReflow });
+        const snapshot = tree.readDragGeometry({
+            rootElement: fixture.root,
+            session: runtime.dragReflowSession
+        });
+        const beforeTop = snapshot.sourceEntries.get('source-0').visualRect.top;
+        fixture.resetWritePhase();
+
+        expect(() => tree.applyDragFramePlan({
+            intent: null,
+            isInvalid: false,
+            dropEffect: 'move',
+            shifts: {
+                sources: new Map([['source-0', 40]]),
+                groups: new Map()
+            },
+            feedback: {},
+            geometrySnapshot: snapshot
+        })).toThrow('write failed');
+
+        expect(snapshot.sourceEntries.get('source-0').visualRect.top).toBe(beforeTop);
+    });
+
+    it('marks geometry dirty when a transform plan cannot be patched completely', () => {
+        const fixture = createGeometryFixture(1);
+        const runtime = {
+            activeDragContext: { kind: 'source-single', keys: ['source-0'] },
+            dragReflowSession: {
+                draggedKeys: new Set(['source-0']),
+                totalDraggedHeight: 40,
+                shiftedItems: new Map(),
+                currentIntent: null
+            }
+        };
+        const tree = buildTree({ fixture, runtime });
+        const snapshot = tree.readDragGeometry({ rootElement: fixture.root, session: runtime.dragReflowSession });
+        fixture.resetWritePhase();
+
+        tree.applyDragFramePlan({
+            intent: null,
+            isInvalid: false,
+            dropEffect: 'move',
+            shifts: {
+                sources: new Map([['missing-source', 40]]),
+                groups: new Map()
+            },
+            feedback: {},
+            geometrySnapshot: snapshot
+        });
+
+        expect(runtime.dragGeometryDirty).toBe(true);
     });
 });

@@ -1368,6 +1368,7 @@
                 overflow: visible;
                 margin-bottom: 2px;
                 position: relative;
+                transition: transform var(--sp-motion-base) var(--sp-ease-emphasized);
             }
             .source-item.gated, .group-container.gated > .group-children {
                 opacity: 0.5;
@@ -2628,16 +2629,13 @@
                 transition: none;
             }
 
-            /* All drag-stage transitions share the base motion token
-               (var(--sp-motion-base) + var(--sp-ease-emphasized)) so the origin
-               row's space closes smoothly while sibling reflow opens the new
-               slot in sync, and the timing stays aligned with collapse/expand,
-               list-entry, toast, and modal motion across the rest of the panel.
-               Earlier design used instant fold to avoid sibling-position jitter
-               from fold-height transition fighting reflow-translateY transition,
-               but slot-based geometric detection (which does not depend on
-               layout reflow) eliminates that feedback loop, so the animated
-               fold is now safe and provides a much more coherent UX. */
+            /* The physical fold is deliberately synchronous: height, padding,
+               margin, and border-width reach their terminal zero values in the
+               deferred fold frame before drag geometry is snapshotted. Animating
+               those layout properties produced a stream of ResizeObserver
+               invalidations for grouped rows and could leave fixed-height root
+               lists with stale intermediate geometry. Opacity keeps the visual
+               disappearance soft without moving layout after the fold frame. */
             .sp-drag-folded {
                 overflow: hidden;
                 pointer-events: none;
@@ -2647,17 +2645,19 @@
                 margin-bottom: 0 !important;
                 border-top-width: 0 !important;
                 border-bottom-width: 0 !important;
-                transition:
-                    height var(--sp-motion-base) var(--sp-ease-emphasized),
-                    opacity var(--sp-motion-base) var(--sp-ease-emphasized),
-                    padding var(--sp-motion-base) var(--sp-ease-emphasized),
-                    margin var(--sp-motion-base) var(--sp-ease-emphasized),
-                    border-width var(--sp-motion-base) var(--sp-ease-emphasized);
+                transition: opacity var(--sp-motion-base) var(--sp-ease-emphasized);
             }
 
             .sp-drop-shift {
                 transition: transform var(--sp-motion-base) var(--sp-ease-emphasized);
-                will-change: transform;
+            }
+
+            /* Rows outside the list viewport still receive the same translateY
+               geometry, but suppress transform motion until they enter the
+               viewport overscan. This avoids making hundreds of offscreen
+               transitions participate in every drag-frame layout flush. */
+            .sp-drop-shift-static {
+                transition: none !important;
             }
 
             /* Dragend cancel (esc / drop outside): smoothly grow the dragged item back from
@@ -2715,7 +2715,9 @@
             }
 
             @media (prefers-reduced-motion: reduce) {
+                .sp-drag-folded,
                 .sp-drop-shift,
+                .sp-drop-shift-static,
                 .sp-drag-unfolding {
                     transition: none !important;
                 }

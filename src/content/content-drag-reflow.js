@@ -28,7 +28,9 @@
 
         function createDragSession() {
             return {
+                draggedType: null,
                 draggedKeys: new Set(),
+                preparedElements: new Map(),
                 itemMetrics: new Map(),
                 itemHeights: new Map(),
                 totalDraggedHeight: 0,
@@ -38,7 +40,14 @@
                     prepareCpuMs: 0
                 },
                 currentIntent: null,
-                shiftedItems: new Map()
+                shiftedItems: new Map(),
+                shiftedSourceItems: new Map(),
+                shiftedGroupItems: new Map(),
+                animatedShiftedSourceItems: new Set(),
+                animatedShiftedGroupItems: new Set(),
+                staticShiftClassSourceItems: new Set(),
+                staticShiftClassGroupItems: new Set(),
+                usesScopedShiftClasses: false
             };
         }
 
@@ -55,19 +64,51 @@
             return raw.replace(/(["\\])/g, '\\$1');
         }
 
-        function findItemElement(rootElement, key) {
+        function findItemElement(rootElement, key, draggedType = null) {
             if (!rootElement || typeof rootElement.querySelector !== 'function') return null;
             const safe = cssEscape(key);
+            if (draggedType === 'source') {
+                return rootElement.querySelector(`[data-source-key="${safe}"]`);
+            }
+            if (draggedType === 'group') {
+                return rootElement.querySelector(`[data-group-id="${safe}"]`);
+            }
             return rootElement.querySelector(`[data-source-key="${safe}"]`)
                 || rootElement.querySelector(`[data-group-id="${safe}"]`);
         }
 
-        function findItemElements(rootElement, keys) {
+        function findTypedItemElement(rootElement, type, key, elements) {
+            const attr = type === 'group' ? 'data-group-id' : 'data-source-key';
+            const datasetKey = type === 'group' ? 'groupId' : 'sourceKey';
+            if (elements instanceof Map) {
+                if (!elements.has(key)) return null;
+                const element = elements.get(key) || null;
+                if (!element) return null;
+                if (
+                    rootElement
+                    && typeof rootElement.contains === 'function'
+                    && !rootElement.contains(element)
+                ) {
+                    return null;
+                }
+                const actualKey = typeof element.getAttribute === 'function'
+                    ? element.getAttribute(attr)
+                    : (element.dataset ? element.dataset[datasetKey] : null);
+                return actualKey === key ? element : null;
+            }
+            if (!rootElement || typeof rootElement.querySelector !== 'function') return null;
+            const safe = cssEscape(key);
+            return rootElement.querySelector(`[${attr}="${safe}"]`);
+        }
+
+        function findItemElements(rootElement, keys, draggedType = null) {
             const requestedKeys = Array.isArray(keys) ? keys : [];
             const result = new Map();
             if (!rootElement || requestedKeys.length === 0) return result;
             let sourceElementCache = null;
             if (
+                draggedType !== 'group'
+                &&
                 (typeof rootElement === 'object' || typeof rootElement === 'function')
                 && typeof rootElement.contains === 'function'
             ) {
@@ -101,29 +142,31 @@
                 && typeof rootElement.querySelectorAll === 'function'
             ) {
                 try {
-                    const unresolvedSources = requestedKeys.filter((key) => !result.has(key));
-                    const sourceCandidates = rootElement.querySelectorAll(
-                        unresolvedSources
-                            .map((key) => `[data-source-key="${cssEscape(key)}"]`)
-                            .join(', ')
-                    );
-                    for (const candidate of sourceCandidates) {
-                        if (!candidate || typeof candidate.getAttribute !== 'function') continue;
-                        const sourceKey = candidate.getAttribute('data-source-key');
-                        if (
-                            typeof sourceKey === 'string'
-                            && unresolvedSources.includes(sourceKey)
-                            && !result.has(sourceKey)
-                        ) {
-                            result.set(sourceKey, candidate);
-                            if (sourceElementCache) {
-                                if (sourceElementCache.size >= 512) sourceElementCache.clear();
-                                sourceElementCache.set(sourceKey, candidate);
+                    if (draggedType !== 'group') {
+                        const unresolvedSources = requestedKeys.filter((key) => !result.has(key));
+                        const sourceCandidates = rootElement.querySelectorAll(
+                            unresolvedSources
+                                .map((key) => `[data-source-key="${cssEscape(key)}"]`)
+                                .join(', ')
+                        );
+                        for (const candidate of sourceCandidates) {
+                            if (!candidate || typeof candidate.getAttribute !== 'function') continue;
+                            const sourceKey = candidate.getAttribute('data-source-key');
+                            if (
+                                typeof sourceKey === 'string'
+                                && unresolvedSources.includes(sourceKey)
+                                && !result.has(sourceKey)
+                            ) {
+                                result.set(sourceKey, candidate);
+                                if (sourceElementCache) {
+                                    if (sourceElementCache.size >= 512) sourceElementCache.clear();
+                                    sourceElementCache.set(sourceKey, candidate);
+                                }
                             }
                         }
                     }
                     const unresolved = requestedKeys.filter((key) => !result.has(key));
-                    if (unresolved.length > 0) {
+                    if (draggedType !== 'source' && unresolved.length > 0) {
                         const groupCandidates = rootElement.querySelectorAll(
                             unresolved
                                 .map((key) => `[data-group-id="${cssEscape(key)}"]`)
@@ -146,14 +189,14 @@
                 }
                 for (const key of requestedKeys) {
                     if (!result.has(key)) {
-                        result.set(key, findItemElement(rootElement, key));
+                        result.set(key, findItemElement(rootElement, key, draggedType));
                     }
                 }
                 return result;
             }
 
             for (const key of requestedKeys) {
-                result.set(key, findItemElement(rootElement, key));
+                result.set(key, findItemElement(rootElement, key, draggedType));
             }
             return result;
         }
@@ -173,7 +216,11 @@
             return null;
         }
 
-        function measureVerticalMetrics(element, getComputedStyleFn = resolveGetComputedStyle()) {
+        function measureVerticalMetrics(
+            element,
+            getComputedStyleFn = resolveGetComputedStyle(),
+            { includeVisualRect = true } = {}
+        ) {
             const measuredBorderBox = element ? Number(element.offsetHeight) : 0;
             const borderBoxHeight = Number.isFinite(measuredBorderBox)
                 ? measuredBorderBox
@@ -204,7 +251,11 @@
             let rectBottom = borderBoxHeight;
             let rectWidth = 0;
             let rectHeight = borderBoxHeight;
-            if (element && typeof element.getBoundingClientRect === 'function') {
+            if (
+                includeVisualRect
+                && element
+                && typeof element.getBoundingClientRect === 'function'
+            ) {
                 try {
                     const rect = element.getBoundingClientRect();
                     rectLeft = Number(rect && rect.left) || 0;
@@ -254,25 +305,34 @@
                 && cached.originalInlineOpacityPriority === originalInlineOpacityPriority
                 && cached.originalFoldedClass === originalFoldedClass
                 && cached.originalUnfoldingClass === originalUnfoldingClass
-                && cached.visualRect.left === rectLeft
-                && cached.visualRect.top === rectTop
-                && cached.visualRect.right === rectRight
-                && cached.visualRect.bottom === rectBottom
-                && cached.visualRect.width === rectWidth
-                && cached.visualRect.height === rectHeight
+                && (
+                    (
+                        includeVisualRect
+                        && cached.visualRect
+                        && cached.visualRect.left === rectLeft
+                        && cached.visualRect.top === rectTop
+                        && cached.visualRect.right === rectRight
+                        && cached.visualRect.bottom === rectBottom
+                        && cached.visualRect.width === rectWidth
+                        && cached.visualRect.height === rectHeight
+                    )
+                    || (!includeVisualRect && cached.visualRect === null)
+                )
             ) {
                 return cached;
             }
 
             const metrics = {
-                visualRect: {
-                    left: rectLeft,
-                    top: rectTop,
-                    right: rectRight,
-                    bottom: rectBottom,
-                    width: rectWidth,
-                    height: rectHeight
-                },
+                visualRect: includeVisualRect
+                    ? {
+                        left: rectLeft,
+                        top: rectTop,
+                        right: rectRight,
+                        bottom: rectBottom,
+                        width: rectWidth,
+                        height: rectHeight
+                    }
+                    : null,
                 borderBoxHeight,
                 contentHeight,
                 marginTop,
@@ -917,7 +977,8 @@
             runs,
             hostChildren,
             selectedElements,
-            getComputedStyleFn
+            getComputedStyleFn,
+            originKey
         }) {
             if (!selectedElements.length || !runs.length) return null;
             const probe = createFoldProbeStructure(rootElement, runs, hostChildren);
@@ -931,7 +992,14 @@
                 for (const entry of selectedElements) {
                     itemMetrics.set(
                         entry.key,
-                        measureVerticalMetrics(entry.element, getComputedStyleFn)
+                        measureVerticalMetrics(
+                            entry.element,
+                            getComputedStyleFn,
+                            {
+                                includeVisualRect: !originKey
+                                    || entry.key === originKey
+                            }
+                        )
                     );
                 }
                 const before = readAllProbeAnchors(probe);
@@ -966,8 +1034,57 @@
             };
         }
 
-        function prepareDragSession({ draggedKeys, rootElement }) {
+        function resolveEffectiveOriginKey({
+            originKey,
+            requestedKeys,
+            elementsByKey,
+            rootElement,
+            draggedType
+        }) {
+            if (
+                typeof originKey !== 'string'
+                || !originKey
+                || !requestedKeys.includes(originKey)
+                || !(elementsByKey instanceof Map)
+                || !elementsByKey.has(originKey)
+                || !rootElement
+                || typeof rootElement.contains !== 'function'
+            ) {
+                return null;
+            }
+            const element = elementsByKey.get(originKey) || null;
+            if (
+                !element
+                || !rootElement.contains(element)
+                || typeof element.getAttribute !== 'function'
+            ) {
+                return null;
+            }
+            const matchesIdentity = draggedType === 'source'
+                ? element.getAttribute('data-source-key') === originKey
+                : (
+                    draggedType === 'group'
+                        ? element.getAttribute('data-group-id') === originKey
+                        : (
+                            element.getAttribute('data-source-key') === originKey
+                            || element.getAttribute('data-group-id') === originKey
+                        )
+                );
+            return matchesIdentity
+                ? originKey
+                : null;
+        }
+
+        function prepareDragSession({
+            draggedKeys,
+            originKey,
+            draggedType,
+            rootElement
+        }) {
             const session = createDragSession();
+            session.draggedType = draggedType === 'source' || draggedType === 'group'
+                ? draggedType
+                : null;
             const keys = Array.isArray(draggedKeys) ? draggedKeys : [];
             const now = typeof _ctx.now === 'function'
                 ? _ctx.now
@@ -989,7 +1106,19 @@
                 session.draggedKeys.add(key);
                 requestedKeys.push(key);
             }
-            const elementsByKey = findItemElements(rootElement, requestedKeys);
+            const elementsByKey = findItemElements(
+                rootElement,
+                requestedKeys,
+                session.draggedType
+            );
+            session.preparedElements = elementsByKey;
+            const effectiveOriginKey = resolveEffectiveOriginKey({
+                originKey,
+                requestedKeys,
+                elementsByKey,
+                rootElement,
+                draggedType: session.draggedType
+            });
             for (const key of requestedKeys) {
                 const el = elementsByKey.get(key) || null;
                 const entry = { key, element: el };
@@ -1003,12 +1132,20 @@
                 runs,
                 hostChildren: runStructure.hostChildren,
                 selectedElements,
-                getComputedStyleFn
+                getComputedStyleFn,
+                originKey: effectiveOriginKey
             });
             let fallbackTotal = 0;
             for (const entry of requestedEntries) {
                 const metrics = probeResult?.itemMetrics.get(entry.key)
-                    || measureVerticalMetrics(entry.element, getComputedStyleFn);
+                    || measureVerticalMetrics(
+                        entry.element,
+                        getComputedStyleFn,
+                        {
+                            includeVisualRect: !effectiveOriginKey
+                                || entry.key === effectiveOriginKey
+                        }
+                    );
                 session.itemMetrics.set(entry.key, metrics);
                 session.itemHeights.set(entry.key, metrics.borderBoxHeight);
                 fallbackTotal += metrics.borderBoxHeight;
@@ -1025,7 +1162,7 @@
         function foldDraggedItems({ session, rootElement }) {
             if (!session || !rootElement) return;
             for (const key of session.draggedKeys) {
-                const el = findItemElement(rootElement, key);
+                const el = findItemElement(rootElement, key, session.draggedType);
                 if (!el || !el.style) continue;
                 setInlineStyleProperty(el.style, 'height', '0px');
                 setInlineStyleProperty(el.style, 'opacity', '0');
@@ -1046,7 +1183,7 @@
                 ? globalThis
                 : null;
             for (const key of session.draggedKeys) {
-                const el = findItemElement(rootElement, key);
+                const el = findItemElement(rootElement, key, session.draggedType);
                 if (!el || !el.style) continue;
                 const isFolded = el.classList && typeof el.classList.contains === 'function'
                     && el.classList.contains('sp-drag-folded');
@@ -1132,8 +1269,341 @@
             return shifts;
         }
 
-        function applyReflow({ session, shifts, rootElement }) {
+        function applyTypedReflow({
+            session,
+            shifts,
+            rootElement,
+            sourceElements,
+            groupElements
+        }) {
+            const sourceShifts = shifts.sources instanceof Map ? shifts.sources : new Map();
+            const groupShifts = shifts.groups instanceof Map ? shifts.groups : new Map();
+            if (!(session.shiftedSourceItems instanceof Map)) session.shiftedSourceItems = new Map();
+            if (!(session.shiftedGroupItems instanceof Map)) session.shiftedGroupItems = new Map();
+            if (!(session.animatedShiftedSourceItems instanceof Set)) {
+                session.animatedShiftedSourceItems = new Set();
+            }
+            if (!(session.animatedShiftedGroupItems instanceof Set)) {
+                session.animatedShiftedGroupItems = new Set();
+            }
+            if (!(session.staticShiftClassSourceItems instanceof Set)) {
+                session.staticShiftClassSourceItems = new Set();
+            }
+            if (!(session.staticShiftClassGroupItems instanceof Set)) {
+                session.staticShiftClassGroupItems = new Set();
+            }
+            let complete = true;
+            const appliedShiftDeltas = {
+                sources: new Map(),
+                groups: new Map()
+            };
+            const shiftDeltaPlan = shifts._shiftDeltaPlan;
+            const plannedShiftDeltas = shiftDeltaPlan && shiftDeltaPlan.deltas;
+            const shiftDeltaBases = shiftDeltaPlan && shiftDeltaPlan.bases;
+            const shiftDeltaBaseSizes = shiftDeltaPlan && shiftDeltaPlan.baseSizes;
+            const animatedShiftKeys = shiftDeltaPlan && shiftDeltaPlan.animatedKeys;
+            const usesScopedShiftAnimation = Boolean(
+                animatedShiftKeys
+                && animatedShiftKeys.sources instanceof Set
+                && animatedShiftKeys.groups instanceof Set
+            );
+            const hasValidPlannedDeltaMap = (next, current, planned, base, baseSize) => {
+                if (
+                    !(planned instanceof Map)
+                    || base !== current
+                    || current.size !== baseSize
+                ) {
+                    return false;
+                }
+                for (const [key, expectedDelta] of planned) {
+                    const actualDelta = (Number(next.get(key)) || 0)
+                        - (Number(current.get(key)) || 0);
+                    if (actualDelta !== expectedDelta) return false;
+                }
+                return true;
+            };
+            const canUsePlannedSourceDeltas = Boolean(
+                plannedShiftDeltas
+                && shiftDeltaBases
+                && shiftDeltaBaseSizes
+                && hasValidPlannedDeltaMap(
+                    sourceShifts,
+                    session.shiftedSourceItems,
+                    plannedShiftDeltas.sources,
+                    shiftDeltaBases.sources,
+                    shiftDeltaBaseSizes.sources
+                )
+            );
+            const canUsePlannedGroupDeltas = Boolean(
+                plannedShiftDeltas
+                && shiftDeltaBases
+                && shiftDeltaBaseSizes
+                && hasValidPlannedDeltaMap(
+                    groupShifts,
+                    session.shiftedGroupItems,
+                    plannedShiftDeltas.groups,
+                    shiftDeltaBases.groups,
+                    shiftDeltaBaseSizes.groups
+                )
+            );
+
+            const applyNamespace = (
+                type,
+                next,
+                current,
+                elements,
+                deltas,
+                planned = null,
+                desiredAnimated = null,
+                currentAnimated = null,
+                currentStatic = null
+            ) => {
+                const usesScopedClasses = desiredAnimated instanceof Set
+                    && currentAnimated instanceof Set
+                    && currentStatic instanceof Set;
+                const applyShiftClasses = (el, key) => {
+                    if (!el || !el.classList) return;
+                    if (usesScopedClasses && !desiredAnimated.has(key)) {
+                        if (typeof el.classList.add === 'function') {
+                            el.classList.add('sp-drop-shift-static');
+                        }
+                        if (typeof el.classList.remove === 'function') {
+                            el.classList.remove('sp-drop-shift');
+                        }
+                        currentAnimated.delete(key);
+                        currentStatic.add(key);
+                        return;
+                    }
+                    if (typeof el.classList.add === 'function') {
+                        el.classList.add('sp-drop-shift');
+                    }
+                    if (typeof el.classList.remove === 'function') {
+                        el.classList.remove('sp-drop-shift-static');
+                    }
+                    if (usesScopedClasses) {
+                        currentAnimated.add(key);
+                        currentStatic.delete(key);
+                    }
+                };
+                const applyKey = (key) => {
+                    const previousDelta = current.get(key);
+                    if (!next.has(key)) {
+                        if (!current.has(key)) return;
+                        const el = findTypedItemElement(rootElement, type, key, elements);
+                        if (!el || !el.style) {
+                            complete = false;
+                            current.delete(key);
+                            if (usesScopedClasses) {
+                                currentAnimated.delete(key);
+                                currentStatic.delete(key);
+                            }
+                            return;
+                        }
+                        el.style.transform = '';
+                        if (el.classList && typeof el.classList.remove === 'function') {
+                            el.classList.remove('sp-drop-shift');
+                            if (!usesScopedClasses || !currentStatic.has(key)) {
+                                el.classList.remove('sp-drop-shift-static');
+                            }
+                        }
+                        current.delete(key);
+                        if (usesScopedClasses) currentAnimated.delete(key);
+                        if (!usesScopedClasses) currentStatic?.delete(key);
+                        const appliedDelta = -(Number(previousDelta) || 0);
+                        if (appliedDelta !== 0) deltas.set(key, appliedDelta);
+                        return;
+                    }
+                    const delta = next.get(key);
+                    if (previousDelta === delta) return;
+                    const el = findTypedItemElement(rootElement, type, key, elements);
+                    if (!el || !el.style) {
+                        complete = false;
+                        return;
+                    }
+                    el.style.transform = `translateY(${delta}px)`;
+                    applyShiftClasses(el, key);
+                    current.set(key, delta);
+                    const appliedDelta = (Number(delta) || 0) - (Number(previousDelta) || 0);
+                    if (appliedDelta !== 0) deltas.set(key, appliedDelta);
+                };
+
+                if (planned instanceof Map) {
+                    for (const key of planned.keys()) applyKey(key);
+                    return;
+                }
+                for (const key of Array.from(current.keys())) {
+                    if (!next.has(key)) applyKey(key);
+                }
+                for (const [key, delta] of next) {
+                    if (current.get(key) !== delta) applyKey(key);
+                }
+            };
+
+            const sourceAnimated = usesScopedShiftAnimation
+                ? animatedShiftKeys.sources
+                : null;
+            const groupAnimated = usesScopedShiftAnimation
+                ? animatedShiftKeys.groups
+                : null;
+            applyNamespace(
+                'source',
+                sourceShifts,
+                session.shiftedSourceItems,
+                sourceElements,
+                appliedShiftDeltas.sources,
+                canUsePlannedSourceDeltas ? plannedShiftDeltas.sources : null,
+                sourceAnimated,
+                session.animatedShiftedSourceItems,
+                session.staticShiftClassSourceItems
+            );
+            applyNamespace(
+                'group',
+                groupShifts,
+                session.shiftedGroupItems,
+                groupElements,
+                appliedShiftDeltas.groups,
+                canUsePlannedGroupDeltas ? plannedShiftDeltas.groups : null,
+                groupAnimated,
+                session.animatedShiftedGroupItems,
+                session.staticShiftClassGroupItems
+            );
+            const syncScopedAnimationClasses = (
+                type,
+                next,
+                elements,
+                desired,
+                currentAnimated,
+                currentStatic
+            ) => {
+                for (const key of Array.from(currentAnimated)) {
+                    if (desired.has(key) && next.has(key)) continue;
+                    const el = findTypedItemElement(rootElement, type, key, elements);
+                    if (!el || !el.classList) {
+                        complete = false;
+                        currentAnimated.delete(key);
+                        continue;
+                    }
+                    if (typeof el.classList.add === 'function' && next.has(key)) {
+                        el.classList.add('sp-drop-shift-static');
+                    }
+                    if (typeof el.classList.remove === 'function') {
+                        el.classList.remove('sp-drop-shift');
+                    }
+                    currentAnimated.delete(key);
+                    if (next.has(key)) currentStatic.add(key);
+                }
+                for (const key of desired) {
+                    if (!next.has(key) || currentAnimated.has(key)) continue;
+                    const el = findTypedItemElement(rootElement, type, key, elements);
+                    if (!el || !el.classList) {
+                        complete = false;
+                        continue;
+                    }
+                    if (typeof el.classList.add === 'function') {
+                        el.classList.add('sp-drop-shift');
+                    }
+                    if (typeof el.classList.remove === 'function') {
+                        el.classList.remove('sp-drop-shift-static');
+                    }
+                    currentAnimated.add(key);
+                    currentStatic.delete(key);
+                }
+            };
+            if (usesScopedShiftAnimation) {
+                syncScopedAnimationClasses(
+                    'source',
+                    sourceShifts,
+                    sourceElements,
+                    animatedShiftKeys.sources,
+                    session.animatedShiftedSourceItems,
+                    session.staticShiftClassSourceItems
+                );
+                syncScopedAnimationClasses(
+                    'group',
+                    groupShifts,
+                    groupElements,
+                    animatedShiftKeys.groups,
+                    session.animatedShiftedGroupItems,
+                    session.staticShiftClassGroupItems
+                );
+                session.usesScopedShiftClasses = true;
+            } else {
+                if (session.usesScopedShiftClasses) {
+                    const restoreAnimatedNamespace = (
+                        type,
+                        next,
+                        elements,
+                        currentStatic
+                    ) => {
+                        for (const key of next.keys()) {
+                            const el = findTypedItemElement(rootElement, type, key, elements);
+                            if (!el || !el.classList) {
+                                complete = false;
+                                continue;
+                            }
+                            if (typeof el.classList.add === 'function') {
+                                el.classList.add('sp-drop-shift');
+                            }
+                            if (typeof el.classList.remove === 'function') {
+                                el.classList.remove('sp-drop-shift-static');
+                            }
+                        }
+                        for (const key of currentStatic) {
+                            if (next.has(key)) continue;
+                            const el = findTypedItemElement(rootElement, type, key, elements);
+                            if (
+                                el
+                                && el.classList
+                                && typeof el.classList.remove === 'function'
+                            ) {
+                                el.classList.remove('sp-drop-shift-static');
+                            }
+                        }
+                    };
+                    restoreAnimatedNamespace(
+                        'source',
+                        sourceShifts,
+                        sourceElements,
+                        session.staticShiftClassSourceItems
+                    );
+                    restoreAnimatedNamespace(
+                        'group',
+                        groupShifts,
+                        groupElements,
+                        session.staticShiftClassGroupItems
+                    );
+                }
+                session.usesScopedShiftClasses = false;
+                session.animatedShiftedSourceItems.clear();
+                session.animatedShiftedGroupItems.clear();
+                session.staticShiftClassSourceItems.clear();
+                session.staticShiftClassGroupItems.clear();
+            }
+            return { complete, appliedShiftDeltas };
+        }
+
+        function applyReflow({
+            session,
+            shifts,
+            rootElement,
+            sourceElements,
+            groupElements
+        }) {
             if (!session || !rootElement) return;
+            if (
+                shifts
+                && typeof shifts === 'object'
+                && !(shifts instanceof Map)
+                && (shifts.sources instanceof Map || shifts.groups instanceof Map)
+            ) {
+                return applyTypedReflow({
+                    session,
+                    shifts,
+                    rootElement,
+                    sourceElements,
+                    groupElements
+                });
+            }
             const next = shifts instanceof Map ? shifts : new Map();
 
             for (const key of session.shiftedItems.keys()) {
@@ -1158,18 +1628,61 @@
                 }
                 session.shiftedItems.set(key, delta);
             }
+            return { complete: true };
         }
 
-        function clearReflow({ session, rootElement }) {
+        function clearReflow({
+            session,
+            rootElement,
+            sourceElements,
+            groupElements
+        }) {
             if (!session || !rootElement) return;
+            const clearNamespace = (type, current, staticKeys, elements) => {
+                if (!(current instanceof Map)) return;
+                const keys = new Set(current.keys());
+                if (staticKeys instanceof Set) {
+                    for (const key of staticKeys) keys.add(key);
+                }
+                for (const key of keys) {
+                    const el = findTypedItemElement(rootElement, type, key, elements);
+                    if (el && el.style) el.style.transform = '';
+                    if (el && el.classList && typeof el.classList.remove === 'function') {
+                        el.classList.remove('sp-drop-shift');
+                        el.classList.remove('sp-drop-shift-static');
+                    }
+                }
+                current.clear();
+                if (staticKeys instanceof Set) staticKeys.clear();
+            };
+            clearNamespace(
+                'source',
+                session.shiftedSourceItems,
+                session.staticShiftClassSourceItems,
+                sourceElements
+            );
+            clearNamespace(
+                'group',
+                session.shiftedGroupItems,
+                session.staticShiftClassGroupItems,
+                groupElements
+            );
             for (const key of session.shiftedItems.keys()) {
                 const el = findItemElement(rootElement, key);
                 if (el && el.style) el.style.transform = '';
                 if (el && el.classList && typeof el.classList.remove === 'function') {
                     el.classList.remove('sp-drop-shift');
+                    el.classList.remove('sp-drop-shift-static');
                 }
             }
             session.shiftedItems.clear();
+            if (session.animatedShiftedSourceItems instanceof Set) {
+                session.animatedShiftedSourceItems.clear();
+            }
+            if (session.animatedShiftedGroupItems instanceof Set) {
+                session.animatedShiftedGroupItems.clear();
+            }
+            session.usesScopedShiftClasses = false;
         }
 
         // Extract translateY pixel offset from an inline `transform: translateY(Npx)` value.
@@ -1185,6 +1698,7 @@
 
         return {
             TRANSITION_MS: DEFAULT_TRANSITION_MS,
+            supportsAppliedShiftDeltas: true,
             createDragSession,
             prepareDragSession,
             foldDraggedItems,

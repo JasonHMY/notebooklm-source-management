@@ -441,6 +441,91 @@ describe('prepareDragSession', () => {
         expect(session.totalDraggedHeight).toBe(80);
     });
 
+    test('keeps source and group identities separate when their raw keys collide', () => {
+        const createElement = (attribute, height) => {
+            const classes = new Set();
+            return {
+                offsetHeight: height,
+                style: {
+                    height: '',
+                    opacity: ''
+                },
+                classList: {
+                    add: (name) => classes.add(name),
+                    remove: (name) => classes.delete(name),
+                    contains: (name) => classes.has(name)
+                },
+                getAttribute: (name) => (
+                    name === attribute ? 'collision' : null
+                ),
+                getBoundingClientRect: jest.fn(() => ({
+                    top: 0,
+                    bottom: height,
+                    left: 0,
+                    right: 200,
+                    width: 200,
+                    height
+                }))
+            };
+        };
+        const sourceElement = createElement('data-source-key', 40);
+        const groupElement = createElement('data-group-id', 120);
+        const root = {
+            contains: jest.fn((element) => (
+                element === sourceElement || element === groupElement
+            )),
+            querySelector: jest.fn((selector) => (
+                selector === '[data-source-key="collision"]'
+                    ? sourceElement
+                    : (
+                        selector === '[data-group-id="collision"]'
+                            ? groupElement
+                            : null
+                    )
+            ))
+        };
+
+        const sourceSession = api.prepareDragSession({
+            draggedKeys: ['collision'],
+            originKey: 'collision',
+            draggedType: 'source',
+            rootElement: root
+        });
+        const groupSession = api.prepareDragSession({
+            draggedKeys: ['collision'],
+            originKey: 'collision',
+            draggedType: 'group',
+            rootElement: root
+        });
+
+        expect(sourceSession.draggedType).toBe('source');
+        expect(sourceSession.itemHeights.get('collision')).toBe(40);
+        expect(sourceSession.itemMetrics.get('collision').visualRect.height).toBe(40);
+        expect(groupSession.draggedType).toBe('group');
+        expect(groupSession.itemHeights.get('collision')).toBe(120);
+        expect(groupSession.itemMetrics.get('collision').visualRect.height).toBe(120);
+
+        api.foldDraggedItems({ session: sourceSession, rootElement: root });
+        expect(sourceElement.classList.contains('sp-drag-folded')).toBe(true);
+        expect(groupElement.classList.contains('sp-drag-folded')).toBe(false);
+        api.unfoldDraggedItems({
+            session: sourceSession,
+            rootElement: root,
+            animated: false
+        });
+        expect(sourceElement.classList.contains('sp-drag-folded')).toBe(false);
+
+        api.foldDraggedItems({ session: groupSession, rootElement: root });
+        expect(groupElement.classList.contains('sp-drag-folded')).toBe(true);
+        expect(sourceElement.classList.contains('sp-drag-folded')).toBe(false);
+        api.unfoldDraggedItems({
+            session: groupSession,
+            rootElement: root,
+            animated: false
+        });
+        expect(groupElement.classList.contains('sp-drag-folded')).toBe(false);
+    });
+
     test.each([
         ['content-box', 38],
         ['border-box', 50]
@@ -505,6 +590,125 @@ describe('prepareDragSession', () => {
             } else {
                 globalThis.getComputedStyle = originalGetComputedStyle;
             }
+        }
+    });
+
+    test('reads a fresh visual rect only for the explicit origin and exposes prepared elements', () => {
+        const { root, items } = makeRoot([
+            { key: 'selected-first', attr: 'data-source-key', height: 48 },
+            { key: 'actual-origin', attr: 'data-source-key', height: 52 },
+            { key: 'selected-last', attr: 'data-source-key', height: 56 }
+        ]);
+        Object.entries(items).forEach(([key, element], index) => {
+            element.getBoundingClientRect = jest.fn(() => ({
+                top: index * 60,
+                bottom: index * 60 + element.offsetHeight,
+                left: 10,
+                right: 210,
+                width: 200,
+                height: element.offsetHeight
+            }));
+            element.getAttribute = (name) => (
+                name === 'data-source-key' ? key : null
+            );
+        });
+        root.contains = jest.fn((element) => Object.values(items).includes(element));
+
+        const session = api.prepareDragSession({
+            draggedKeys: ['selected-first', 'actual-origin', 'selected-last'],
+            originKey: 'actual-origin',
+            rootElement: root
+        });
+
+        expect(items['selected-first'].getBoundingClientRect).not.toHaveBeenCalled();
+        expect(items['actual-origin'].getBoundingClientRect).toHaveBeenCalledTimes(1);
+        expect(items['selected-last'].getBoundingClientRect).not.toHaveBeenCalled();
+        expect(session.itemMetrics.get('selected-first').visualRect).toBeNull();
+        expect(session.itemMetrics.get('actual-origin').visualRect).toMatchObject({
+            top: 60,
+            height: 52
+        });
+        expect(session.itemMetrics.get('selected-last').visualRect).toBeNull();
+        expect(session.preparedElements.get('actual-origin')).toBe(items['actual-origin']);
+    });
+
+    test.each([
+        {
+            name: 'is not part of the requested drag keys',
+            originKey: 'not-selected',
+            detachOrigin: false,
+            removeOrigin: false
+        },
+        {
+            name: 'cannot be resolved to an element',
+            originKey: 'actual-origin',
+            detachOrigin: false,
+            removeOrigin: true
+        },
+        {
+            name: 'resolves to an element detached from the root',
+            originKey: 'actual-origin',
+            detachOrigin: true,
+            removeOrigin: false
+        }
+    ])('falls back to reading every available visual rect when origin $name', ({
+        originKey,
+        detachOrigin,
+        removeOrigin
+    }) => {
+        const { root, items } = makeRoot([
+            { key: 'selected-first', attr: 'data-source-key', height: 48 },
+            { key: 'actual-origin', attr: 'data-source-key', height: 52 },
+            { key: 'selected-last', attr: 'data-source-key', height: 56 }
+        ]);
+        Object.entries(items).forEach(([key, element], index) => {
+            element.getBoundingClientRect = jest.fn(() => ({
+                top: index * 60,
+                bottom: index * 60 + element.offsetHeight,
+                left: 10,
+                right: 210,
+                width: 200,
+                height: element.offsetHeight
+            }));
+            element.getAttribute = (name) => (
+                name === 'data-source-key' ? key : null
+            );
+        });
+        root.contains = jest.fn((element) => (
+            Object.values(items).includes(element)
+            && !(detachOrigin && element === items['actual-origin'])
+        ));
+        if (removeOrigin) {
+            const querySelector = root.querySelector.getMockImplementation();
+            root.querySelector.mockImplementation((selector) => (
+                selector.includes('"actual-origin"') ? null : querySelector(selector)
+            ));
+        }
+
+        const session = api.prepareDragSession({
+            draggedKeys: ['selected-first', 'actual-origin', 'selected-last'],
+            originKey,
+            rootElement: root
+        });
+
+        expect(items['selected-first'].getBoundingClientRect).toHaveBeenCalledTimes(1);
+        expect(items['selected-last'].getBoundingClientRect).toHaveBeenCalledTimes(1);
+        if (removeOrigin) {
+            expect(items['actual-origin'].getBoundingClientRect).not.toHaveBeenCalled();
+            expect(session.itemMetrics.get('actual-origin').visualRect).toEqual({
+                top: 0,
+                bottom: 0,
+                left: 0,
+                right: 0,
+                width: 0,
+                height: 0
+            });
+        } else {
+            expect(items['actual-origin'].getBoundingClientRect).toHaveBeenCalledTimes(1);
+            expect(session.itemMetrics.get('actual-origin').visualRect).toMatchObject({
+                top: 60,
+                height: 52
+            });
         }
     });
 
@@ -1279,6 +1483,259 @@ describe('applyReflow / clearReflow', () => {
         expect(items.x.style.transform).toBe('');
         expect(items.x.classList.contains('sp-drop-shift')).toBe(false);
         expect(session.shiftedItems.size).toBe(0);
+    });
+
+    test('typed element maps avoid selector fallback and keep source/group key namespaces separate', () => {
+        const createClassList = (initial) => {
+            const classes = new Set(initial);
+            return {
+                add: (...names) => names.forEach((name) => classes.add(name)),
+                remove: (...names) => names.forEach((name) => classes.delete(name)),
+                contains: (name) => classes.has(name)
+            };
+        };
+        const source = {
+            dataset: { sourceKey: 'same-key' },
+            style: {},
+            classList: createClassList(['source-item']),
+            getAttribute: (name) => (name === 'data-source-key' ? 'same-key' : null)
+        };
+        const group = {
+            dataset: { groupId: 'same-key' },
+            style: {},
+            classList: createClassList(['group-container']),
+            getAttribute: (name) => (name === 'data-group-id' ? 'same-key' : null)
+        };
+        const rootElement = {
+            contains: (element) => element === source || element === group,
+            querySelector: jest.fn(() => {
+                throw new Error('typed map hit must not fall back to a selector');
+            })
+        };
+        const session = api.createDragSession();
+
+        const firstResult = api.applyReflow({
+            session,
+            shifts: {
+                sources: new Map([['same-key', 24]]),
+                groups: new Map([['same-key', 48]])
+            },
+            rootElement,
+            sourceElements: new Map([['same-key', source]]),
+            groupElements: new Map([['same-key', group]])
+        });
+
+        expect(api.supportsAppliedShiftDeltas).toBe(true);
+        expect(Array.from(firstResult.appliedShiftDeltas.sources)).toEqual([
+            ['same-key', 24]
+        ]);
+        expect(Array.from(firstResult.appliedShiftDeltas.groups)).toEqual([
+            ['same-key', 48]
+        ]);
+        expect(rootElement.querySelector).not.toHaveBeenCalled();
+        expect(source.style.transform).toBe('translateY(24px)');
+        expect(group.style.transform).toBe('translateY(48px)');
+        expect(source.classList.contains('sp-drop-shift')).toBe(true);
+        expect(group.classList.contains('sp-drop-shift')).toBe(true);
+
+        const changedResult = api.applyReflow({
+            session,
+            shifts: {
+                sources: new Map(),
+                groups: new Map([['same-key', 64]])
+            },
+            rootElement,
+            sourceElements: new Map([['same-key', source]]),
+            groupElements: new Map([['same-key', group]])
+        });
+
+        expect(Array.from(changedResult.appliedShiftDeltas.sources)).toEqual([
+            ['same-key', -24]
+        ]);
+        expect(Array.from(changedResult.appliedShiftDeltas.groups)).toEqual([
+            ['same-key', 16]
+        ]);
+        expect(source.style.transform).toBe('');
+        expect(group.style.transform).toBe('translateY(64px)');
+
+        api.clearReflow({
+            session,
+            rootElement,
+            sourceElements: new Map([['same-key', source]]),
+            groupElements: new Map([['same-key', group]])
+        });
+
+        expect(rootElement.querySelector).not.toHaveBeenCalled();
+        expect(source.style.transform).toBe('');
+        expect(group.style.transform).toBe('');
+    });
+
+    test('typed reflow animates only scoped rows and keeps offscreen shifts static', () => {
+        const createClassList = (initial) => {
+            const classes = new Set(initial);
+            return {
+                add: (...names) => names.forEach((name) => classes.add(name)),
+                remove: (...names) => names.forEach((name) => classes.delete(name)),
+                contains: (name) => classes.has(name)
+            };
+        };
+        const visible = {
+            dataset: { sourceKey: 'visible' },
+            style: {},
+            classList: createClassList(['source-item']),
+            getAttribute: (name) => (name === 'data-source-key' ? 'visible' : null)
+        };
+        const offscreen = {
+            dataset: { sourceKey: 'offscreen' },
+            style: {},
+            classList: createClassList(['source-item']),
+            getAttribute: (name) => (name === 'data-source-key' ? 'offscreen' : null)
+        };
+        const sourceElements = new Map([
+            ['visible', visible],
+            ['offscreen', offscreen]
+        ]);
+        const rootElement = {
+            contains: (element) => element === visible || element === offscreen,
+            querySelector: jest.fn(() => {
+                throw new Error('typed map hit must not fall back to a selector');
+            })
+        };
+        const session = api.createDragSession();
+        const shifts = {
+            sources: new Map([
+                ['visible', 40],
+                ['offscreen', 40]
+            ]),
+            groups: new Map()
+        };
+        Object.defineProperty(shifts, '_shiftDeltaPlan', {
+            value: {
+                deltas: {
+                    sources: new Map([
+                        ['visible', 40],
+                        ['offscreen', 40]
+                    ]),
+                    groups: new Map()
+                },
+                bases: {
+                    sources: session.shiftedSourceItems,
+                    groups: session.shiftedGroupItems
+                },
+                baseSizes: { sources: 0, groups: 0 },
+                animatedKeys: {
+                    sources: new Set(['visible']),
+                    groups: new Set()
+                }
+            }
+        });
+
+        api.applyReflow({
+            session,
+            shifts,
+            rootElement,
+            sourceElements,
+            groupElements: new Map()
+        });
+
+        expect(visible.style.transform).toBe('translateY(40px)');
+        expect(visible.classList.contains('sp-drop-shift')).toBe(true);
+        expect(visible.classList.contains('sp-drop-shift-static')).toBe(false);
+        expect(offscreen.style.transform).toBe('translateY(40px)');
+        expect(offscreen.classList.contains('sp-drop-shift')).toBe(false);
+        expect(offscreen.classList.contains('sp-drop-shift-static')).toBe(true);
+
+        const nextShifts = {
+            sources: new Map([
+                ['visible', 40],
+                ['offscreen', 40]
+            ]),
+            groups: new Map()
+        };
+        Object.defineProperty(nextShifts, '_shiftDeltaPlan', {
+            value: {
+                deltas: {
+                    sources: new Map(),
+                    groups: new Map()
+                },
+                bases: {
+                    sources: session.shiftedSourceItems,
+                    groups: session.shiftedGroupItems
+                },
+                baseSizes: { sources: 2, groups: 0 },
+                animatedKeys: {
+                    sources: new Set(['offscreen']),
+                    groups: new Set()
+                }
+            }
+        });
+
+        api.applyReflow({
+            session,
+            shifts: nextShifts,
+            rootElement,
+            sourceElements,
+            groupElements: new Map()
+        });
+
+        expect(visible.classList.contains('sp-drop-shift')).toBe(false);
+        expect(visible.classList.contains('sp-drop-shift-static')).toBe(true);
+        expect(offscreen.classList.contains('sp-drop-shift')).toBe(true);
+        expect(offscreen.classList.contains('sp-drop-shift-static')).toBe(false);
+
+        const clearedShifts = {
+            sources: new Map(),
+            groups: new Map()
+        };
+        Object.defineProperty(clearedShifts, '_shiftDeltaPlan', {
+            value: {
+                deltas: {
+                    sources: new Map([
+                        ['visible', -40],
+                        ['offscreen', -40]
+                    ]),
+                    groups: new Map()
+                },
+                bases: {
+                    sources: session.shiftedSourceItems,
+                    groups: session.shiftedGroupItems
+                },
+                baseSizes: { sources: 2, groups: 0 },
+                animatedKeys: {
+                    sources: new Set(),
+                    groups: new Set()
+                }
+            }
+        });
+        api.applyReflow({
+            session,
+            shifts: clearedShifts,
+            rootElement,
+            sourceElements,
+            groupElements: new Map()
+        });
+
+        expect(visible.style.transform).toBe('');
+        expect(visible.classList.contains('sp-drop-shift-static')).toBe(true);
+        expect(offscreen.style.transform).toBe('');
+        expect(offscreen.classList.contains('sp-drop-shift')).toBe(false);
+        expect(session.shiftedSourceItems.size).toBe(0);
+        expect(session.staticShiftClassSourceItems).toEqual(new Set(['visible']));
+
+        api.clearReflow({
+            session,
+            rootElement,
+            sourceElements,
+            groupElements: new Map()
+        });
+
+        expect(visible.style.transform).toBe('');
+        expect(offscreen.style.transform).toBe('');
+        expect(visible.classList.contains('sp-drop-shift-static')).toBe(false);
+        expect(offscreen.classList.contains('sp-drop-shift')).toBe(false);
+        expect(session.animatedShiftedSourceItems.size).toBe(0);
+        expect(session.usesScopedShiftClasses).toBe(false);
+        expect(rootElement.querySelector).not.toHaveBeenCalled();
     });
 });
 

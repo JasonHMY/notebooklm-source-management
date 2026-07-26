@@ -1226,6 +1226,9 @@
             setContainerNativeLabelViewMode(container, isNativeLabelView);
             renderViewStateBar();
             if (isNativeLabelView) {
+                if (typeof deps.onBeforeRowsPatch === 'function') {
+                    try { deps.onBeforeRowsPatch(); } catch (_) { /* ignore hook errors */ }
+                }
                 patchChildren(listContainer, fragment);
                 updateSearchResultCount('', 0);
                 renderSourceActionMenuLayer();
@@ -1537,6 +1540,9 @@
             }
 
             const previousBatchCountSnapshot = collectBatchCountSnapshot(listContainer);
+            if (typeof deps.onBeforeRowsPatch === 'function') {
+                try { deps.onBeforeRowsPatch(); } catch (_) { /* ignore hook errors */ }
+            }
             patchChildren(listContainer, fragment);
             animateBatchCountChanges(listContainer, previousBatchCountSnapshot);
             renderSourceActionMenuLayer();

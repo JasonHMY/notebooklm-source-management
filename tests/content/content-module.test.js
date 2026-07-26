@@ -45,6 +45,24 @@ describe('content module loading', () => {
             expect(global[key]).not.toBe(factory);
         });
     });
+
+    it('wires the row-replacement render seam to drag geometry invalidation', () => {
+        const indexSource = fs.readFileSync(
+            path.join(__dirname, '../../src/content/index.js'),
+            'utf8'
+        );
+        const renderSource = fs.readFileSync(
+            path.join(__dirname, '../../src/content/content-render.js'),
+            'utf8'
+        );
+
+        expect(indexSource).toContain('onBeforeRowsPatch: () => {');
+        expect(indexSource).toContain(
+            "treeInteractionsModule.invalidateDragGeometry('render_rows_replaced');"
+        );
+        expect(renderSource).toContain("typeof deps.onBeforeRowsPatch === 'function'");
+        expect(renderSource).toContain('deps.onBeforeRowsPatch();');
+    });
 });
 
 describe('content stylesheet native source list visibility', () => {

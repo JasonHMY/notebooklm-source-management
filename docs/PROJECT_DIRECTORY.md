@@ -48,7 +48,7 @@ GeminiNotebook-Source-Management
 │   │   ├── content-native-checkbox-sync.js
 │   │   │   └── 原生 checkbox 状态读取、切换判定、detached 行解析 helper
 │   │   ├── content-tree-interactions.js
-│   │   │   └── 分组树、拖拽、checkbox、批量模式交互
+│   │   │   └── 分组树、checkbox、批量模式与拖拽 read → plan → write；维护类型化 geometry snapshot、滚动 delta patch、ResizeObserver/render 失效和 fail-closed 重建
 │   │   ├── content-render.js
 │   │   │   └── Shadow DOM manager 渲染、列表行、批量条、菜单层
 │   │   ├── content-modals.js
@@ -116,7 +116,7 @@ GeminiNotebook-Source-Management
 │   │   ├── content-drag-multi.js
 │   │   │   └── 多源拖拽 selection 解析、单元素 ghost helper、auto-scroll RAF controller、批量 drop 应用
 │   │   ├── content-drag-reflow.js
-│   │   │   └── 拖拽让位 reflow 会话状态：真实 box model/折叠位移测量、被拖项折叠/取消恢复和其他项空槽让位 helper
+│   │   │   └── 拖拽让位 reflow 会话状态：真实 box model/折叠位移测量、类型化 shift delta、可视区动画/离屏静态 transform、被拖项折叠与取消恢复 helper
 │   │   ├── content-source-view-switch-controller.js
 │   │   │   └── 来源视图切换目标归一、状态字段和 attempt 记录 helper
 │   │   ├── content-style-text.js
@@ -161,7 +161,7 @@ GeminiNotebook-Source-Management
 ├── docs/
 │   ├── PROJECT_DIRECTORY.md
 │   ├── DRAG_PERFORMANCE_BASELINE.md
-│   │   └── opt-in 100/500 行 reflow 拖拽基线；记录 Before/After 可比样本，不进入发布包
+│   │   └── opt-in 100/500 行 reflow 拖拽 Before/After 基线、验收门槛与重复稳定性结果；不进入发布包
 │   ├── SECURITY_THREAT_MODEL.md
 │   ├── DEVELOPER_LOGGING.md
 │   ├── STORAGE_SCHEMA.md
@@ -373,6 +373,8 @@ manifest.json
 │   │   ├── 来源/分组拖拽排序
 │   │   ├── 批量模式多源拖拽与边缘自动滚动
 │   │   ├── 两种拖拽模式（偏好 dragMode，无新模块）：经典（默认，蓝色插入线 .drag-over-top/bottom + 散源落底部桶）/ 避让 Beta（按真实混合 box model/折叠位移形成空槽、折叠 + 让位 + 根层级定位、取消时精确恢复）；自定义 ghost = source-item 行克隆（单源单层 + 多源最多 3 层堆叠 + 右上角数字 badge）
+│   │   ├── 避让 dragover 每帧只读一次 geometry snapshot 后纯计算并集中写入；纯滚动按 root/嵌套 children 精确 delta 修补，尺寸/render/混合失效时 fail closed 重建
+│   │   ├── reflow transform 使用 source/group 类型化 map；仅可视区 + 一个真实行高 overscan 动画，离屏位移静态应用并在结束/下次 preflight 清理
 │   │   ├── 批量选择、加入文件夹、添加/移除标签
 │   │   ├── 移到未分组
 │   │   └── 批量删除入口
@@ -391,7 +393,8 @@ manifest.json
 │       ├── tests/content/content-native-checkbox-sync.test.js
 │       ├── tests/content/content-render.test.js
 │       ├── tests/content/content-source-actions.test.js
-│       └── tests/smoke/drag-reflow-layout.smoke.spec.js
+│       ├── tests/smoke/drag-reflow-layout.smoke.spec.js
+│       └── tests/smoke/drag-performance.smoke.spec.js（仅 `npm run benchmark:drag` opt-in）
 ├── 标签系统
 │   ├── 负责
 │   │   ├── tag label/color normalization
@@ -722,7 +725,7 @@ content runtime memory
 ├── 拖拽性能基准（opt-in）
 │   ├── 命令: npm run benchmark:drag
 │   ├── 文件: tests/smoke/drag-performance.smoke.spec.js, docs/DRAG_PERFORMANCE_BASELINE.md
-│   └── 默认: 仅 DRAG_BENCHMARK=1 时执行；100/500 行 × 单项/50 项选择，prepare 计时前在真实 pointerdown 后状态完成 settle/全量计数归零，以 isolated-world logical rAF callback ID 精确绑定目标帧；非默认 smoke/CI timing gate
+│   └── 默认: 仅 DRAG_BENCHMARK=1 时执行；100/500 行 × 单项/50 项选择，prepare 计时前在真实 pointerdown 后状态完成 settle/全量计数归零，以 isolated-world logical rAF callback ID 精确绑定目标帧；After 四组合及重复 500 行稳定性样本已记录，仍非默认 smoke/CI timing gate
 └── 完整发布前验证
     └── 命令: npm run test:unit && npm run test:smoke && npm run package && git diff --check
 ```
