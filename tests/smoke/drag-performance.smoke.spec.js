@@ -56,31 +56,102 @@ function createContentInstrumentationScript() {
         globalThis.__NSM_DRAG_BENCHMARK_INSTALLED__ = true;
         const state = {
             calls: { getBoundingClientRect: 0, querySelector: 0, querySelectorAll: 0 },
+            geometryReads: { getBoundingClientRect: 0, offsetHeight: 0 },
             domWrites: 0,
             geometryReadPendingAfterWrite: false,
             forcedLayoutReadPhases: 0,
             captureManagerFrames: false,
+            expectedFrameCallbackIds: new Set(),
             frameSamples: [],
-            rafScheduled: 0,
-            rafCallbacks: 0,
+            nextRafCallbackId: 1,
+            scheduledCallbackIds: [],
+            completedCallbackIds: [],
             activeRafCallbacks: 0,
             domDeltaRafCallbacks: 0
         };
         const nativeDocumentQuerySelector = Document.prototype.querySelector;
         const nativeShadowRootQuerySelector = ShadowRoot.prototype.querySelector;
+        const copyCalls = () => ({ ...state.calls });
+        const subtractCalls = (after, before) => ({
+            getBoundingClientRect: after.getBoundingClientRect - before.getBoundingClientRect,
+            querySelector: after.querySelector - before.querySelector,
+            querySelectorAll: after.querySelectorAll - before.querySelectorAll
+        });
         const markWrite = () => {
             state.domWrites += 1;
             state.geometryReadPendingAfterWrite = true;
         };
-        const originalRect = Element.prototype.getBoundingClientRect;
-        Element.prototype.getBoundingClientRect = function instrumentedGetBoundingClientRect(...args) {
-            state.calls.getBoundingClientRect += 1;
+        const recordGeometryRead = (kind) => {
+            state.geometryReads[kind] += 1;
             if (state.geometryReadPendingAfterWrite) {
                 state.forcedLayoutReadPhases += 1;
                 state.geometryReadPendingAfterWrite = false;
             }
+        };
+        const sameNodes = (left, right) => left.length === right.length
+            && left.every((node, index) => node === right[index]);
+        const childSnapshot = (node) => Array.from(node?.childNodes || []);
+        const installStructuralNodeMethod = (method) => {
+            const original = Node.prototype[method];
+            if (typeof original !== 'function') return;
+            Node.prototype[method] = function instrumentedStructuralNodeMethod(...args) {
+                const sourceParent = args[0]?.parentNode || null;
+                const targetBefore = childSnapshot(this);
+                const sourceBefore = sourceParent && sourceParent !== this
+                    ? childSnapshot(sourceParent)
+                    : null;
+                const result = original.apply(this, args);
+                const targetChanged = !sameNodes(targetBefore, childSnapshot(this));
+                const sourceChanged = sourceParent && sourceParent !== this && sourceBefore
+                    ? !sameNodes(sourceBefore, childSnapshot(sourceParent))
+                    : false;
+                if (targetChanged || sourceChanged) markWrite();
+                return result;
+            };
+        };
+        for (const method of ['appendChild', 'insertBefore', 'removeChild', 'replaceChild']) {
+            installStructuralNodeMethod(method);
+        }
+        const installStructuralElementMethod = (method) => {
+            const original = Element.prototype[method];
+            if (typeof original !== 'function') return;
+            Element.prototype[method] = function instrumentedStructuralElementMethod(...args) {
+                const before = childSnapshot(this);
+                const result = original.apply(this, args);
+                if (!sameNodes(before, childSnapshot(this))) markWrite();
+                return result;
+            };
+        };
+        for (const method of ['append', 'prepend', 'replaceChildren']) {
+            installStructuralElementMethod(method);
+        }
+        const nativeElementRemove = Element.prototype.remove;
+        if (typeof nativeElementRemove === 'function') {
+            Element.prototype.remove = function instrumentedElementRemove(...args) {
+                const parentBefore = this.parentNode;
+                const result = nativeElementRemove.apply(this, args);
+                if (parentBefore && this.parentNode !== parentBefore) markWrite();
+                return result;
+            };
+        }
+        const originalRect = Element.prototype.getBoundingClientRect;
+        Element.prototype.getBoundingClientRect = function instrumentedGetBoundingClientRect(...args) {
+            state.calls.getBoundingClientRect += 1;
+            recordGeometryRead('getBoundingClientRect');
             return originalRect.apply(this, args);
         };
+        const offsetHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight');
+        if (!offsetHeightDescriptor || typeof offsetHeightDescriptor.get !== 'function') {
+            throw new Error('Benchmark requires HTMLElement.prototype.offsetHeight instrumentation.');
+        }
+        Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+            configurable: offsetHeightDescriptor.configurable,
+            enumerable: offsetHeightDescriptor.enumerable,
+            get: function instrumentedOffsetHeight() {
+                recordGeometryRead('offsetHeight');
+                return offsetHeightDescriptor.get.call(this);
+            }
+        });
         for (const method of ['querySelector', 'querySelectorAll']) {
             const original = Element.prototype[method];
             Element.prototype[method] = function instrumentedQuery(...args) {
@@ -90,28 +161,56 @@ function createContentInstrumentationScript() {
         }
         const nativeSetAttribute = Element.prototype.setAttribute;
         Element.prototype.setAttribute = function instrumentedSetAttribute(...args) {
-            markWrite();
-            return nativeSetAttribute.apply(this, args);
+            const name = args[0];
+            const hadBefore = this.hasAttribute(name);
+            const valueBefore = this.getAttribute(name);
+            const result = nativeSetAttribute.apply(this, args);
+            if (hadBefore !== this.hasAttribute(name) || valueBefore !== this.getAttribute(name)) {
+                markWrite();
+            }
+            return result;
         };
+        const nativeRemoveAttribute = Element.prototype.removeAttribute;
+        Element.prototype.removeAttribute = function instrumentedRemoveAttribute(...args) {
+            const name = args[0];
+            const hadBefore = this.hasAttribute(name);
+            const result = nativeRemoveAttribute.apply(this, args);
+            if (hadBefore && !this.hasAttribute(name)) markWrite();
+            return result;
+        };
+        const nativeToggleAttribute = Element.prototype.toggleAttribute;
+        if (typeof nativeToggleAttribute === 'function') {
+            Element.prototype.toggleAttribute = function instrumentedToggleAttribute(...args) {
+                const name = args[0];
+                const hadBefore = this.hasAttribute(name);
+                const result = nativeToggleAttribute.apply(this, args);
+                if (hadBefore !== this.hasAttribute(name)) markWrite();
+                return result;
+            };
+        }
         for (const method of ['add', 'remove', 'toggle', 'replace']) {
             const original = DOMTokenList.prototype[method];
             DOMTokenList.prototype[method] = function instrumentedClassWrite(...args) {
-                markWrite();
-                return original.apply(this, args);
+                const before = this.value;
+                const result = original.apply(this, args);
+                if (before !== this.value) markWrite();
+                return result;
             };
         }
         for (const method of ['setProperty', 'removeProperty']) {
             const original = CSSStyleDeclaration.prototype[method];
             CSSStyleDeclaration.prototype[method] = function instrumentedStyleWrite(...args) {
-                markWrite();
-                return original.apply(this, args);
+                const before = this.cssText;
+                const result = original.apply(this, args);
+                if (before !== this.cssText) markWrite();
+                return result;
             };
         }
         [
             'transform', 'height', 'transition', 'overflow', 'opacity',
             'margin', 'marginTop', 'marginRight', 'marginBottom', 'marginLeft',
             'padding', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
-            'borderWidth'
+            'borderWidth', 'cssText'
         ].forEach((property) => {
             const descriptor = Object.getOwnPropertyDescriptor(CSSStyleDeclaration.prototype, property);
             if (!descriptor || typeof descriptor.set !== 'function') return;
@@ -120,33 +219,41 @@ function createContentInstrumentationScript() {
                 enumerable: descriptor.enumerable,
                 get: descriptor.get,
                 set(value) {
-                    markWrite();
-                    return descriptor.set.call(this, value);
+                    const before = this.cssText;
+                    const result = descriptor.set.call(this, value);
+                    if (before !== this.cssText) markWrite();
+                    return result;
                 }
             });
         });
         const originalRaf = globalThis.requestAnimationFrame.bind(globalThis);
         globalThis.requestAnimationFrame = (callback) => {
-            state.rafScheduled += 1;
+            const callbackId = state.nextRafCallbackId;
+            state.nextRafCallbackId += 1;
+            state.scheduledCallbackIds.push(callbackId);
             return originalRaf((timestamp) => {
-                state.rafCallbacks += 1;
-                const beforeCalls = { ...state.calls };
+                const beforeCalls = copyCalls();
                 const beforeWrites = state.domWrites;
                 const start = performance.now();
-                callback(timestamp);
-                const duration = performance.now() - start;
-                const domCounterDelta = state.domWrites !== beforeWrites
-                    || state.calls.getBoundingClientRect !== beforeCalls.getBoundingClientRect
-                    || state.calls.querySelector !== beforeCalls.querySelector
-                    || state.calls.querySelectorAll !== beforeCalls.querySelectorAll;
-                const rootHost = nativeDocumentQuerySelector.call(document, '#sources-plus-root');
-                const shadowRoot = rootHost?.shadowRoot || null;
-                const managerActive = Boolean(shadowRoot
-                    && nativeShadowRootQuerySelector.call(shadowRoot, '#sources-list.sp-drag-active'));
-                if (managerActive) state.activeRafCallbacks += 1;
-                if (domCounterDelta) state.domDeltaRafCallbacks += 1;
-                if (state.captureManagerFrames && managerActive && domCounterDelta) {
-                    state.frameSamples.push(duration);
+                try {
+                    callback(timestamp);
+                } finally {
+                    const duration = performance.now() - start;
+                    const callsDelta = subtractCalls(copyCalls(), beforeCalls);
+                    const domCounterDelta = state.domWrites !== beforeWrites
+                        || Object.values(callsDelta).some((count) => count !== 0);
+                    const rootHost = nativeDocumentQuerySelector.call(document, '#sources-plus-root');
+                    const shadowRoot = rootHost?.shadowRoot || null;
+                    const managerActive = Boolean(shadowRoot
+                        && nativeShadowRootQuerySelector.call(shadowRoot, '#sources-list.sp-drag-active'));
+                    state.completedCallbackIds.push(callbackId);
+                    if (managerActive) state.activeRafCallbacks += 1;
+                    if (domCounterDelta) state.domDeltaRafCallbacks += 1;
+                    const isExpected = state.expectedFrameCallbackIds.has(callbackId);
+                    if (isExpected) state.expectedFrameCallbackIds.delete(callbackId);
+                    if (state.captureManagerFrames && isExpected && managerActive && domCounterDelta) {
+                        state.frameSamples.push({ callbackId, duration, callsDelta });
+                    }
                 }
             });
         };
@@ -157,25 +264,43 @@ function createContentInstrumentationScript() {
             const command = host.getAttribute('data-drag-benchmark-command');
             if (command === 'reset') {
                 state.calls = { getBoundingClientRect: 0, querySelector: 0, querySelectorAll: 0 };
+                state.geometryReads = { getBoundingClientRect: 0, offsetHeight: 0 };
                 state.domWrites = 0;
                 state.geometryReadPendingAfterWrite = false;
                 state.forcedLayoutReadPhases = 0;
                 state.frameSamples = [];
-                state.rafScheduled = 0;
-                state.rafCallbacks = 0;
+                state.expectedFrameCallbackIds.clear();
+                state.captureManagerFrames = false;
                 state.activeRafCallbacks = 0;
                 state.domDeltaRafCallbacks = 0;
+            } else if (command === 'reset-layout-phase') {
+                state.geometryReadPendingAfterWrite = false;
+                state.forcedLayoutReadPhases = 0;
             } else if (command === 'reset-frames') {
                 state.frameSamples = [];
+                state.expectedFrameCallbackIds.clear();
+                state.captureManagerFrames = false;
             } else if (command === 'capture-frames') {
                 state.captureManagerFrames = host.getAttribute('data-drag-benchmark-capture') === 'true';
+            } else if (command === 'expect-frame') {
+                const callbackId = Number(host.getAttribute('data-drag-benchmark-callback-id'));
+                if (!Number.isSafeInteger(callbackId)
+                    || !state.scheduledCallbackIds.includes(callbackId)
+                    || state.completedCallbackIds.includes(callbackId)) {
+                    throw new Error(`Invalid benchmark callback id ${callbackId}.`);
+                }
+                state.expectedFrameCallbackIds.add(callbackId);
             }
             nativeSetAttribute.call(host, 'data-drag-benchmark-result', JSON.stringify({
                 calls: state.calls,
+                geometryReads: state.geometryReads,
+                domWrites: state.domWrites,
+                geometryReadPendingAfterWrite: state.geometryReadPendingAfterWrite,
                 forcedLayoutReadPhases: state.forcedLayoutReadPhases,
                 frameSamples: state.frameSamples,
-                rafScheduled: state.rafScheduled,
-                rafCallbacks: state.rafCallbacks,
+                scheduledCallbackIds: state.scheduledCallbackIds,
+                completedCallbackIds: state.completedCallbackIds,
+                expectedFrameCallbackIds: Array.from(state.expectedFrameCallbackIds),
                 activeRafCallbacks: state.activeRafCallbacks,
                 domDeltaRafCallbacks: state.domDeltaRafCallbacks
             }));
@@ -219,11 +344,12 @@ test.describe.serial('drag performance baseline', () => {
 
                 const results = await page.evaluate(async ({ nextRowCount, sources, warmupSessions, measuredSessions, warmupFrames, measuredFrames }) => {
                     const getRoot = () => document.querySelector('#sources-plus-root')?.shadowRoot || null;
-                    const benchmarkBridge = (command, capture = null) => {
+                    const benchmarkBridge = (command, capture = null, callbackId = null) => {
                         const host = document.querySelector('#sources-plus-root');
                         if (!host) throw new Error('Benchmark host missing.');
                         host.setAttribute('data-drag-benchmark-command', command);
                         if (capture !== null) host.setAttribute('data-drag-benchmark-capture', capture ? 'true' : 'false');
+                        if (callbackId !== null) host.setAttribute('data-drag-benchmark-callback-id', String(callbackId));
                         host.dispatchEvent(new Event('sources-plus-drag-benchmark-command', {
                             bubbles: true,
                             composed: true
@@ -245,6 +371,20 @@ test.describe.serial('drag performance baseline', () => {
                         const index = Math.max(0, Math.min(sorted.length - 1, Math.ceil(sorted.length * fraction) - 1));
                         return Number(sorted[index].toFixed(3));
                     };
+                    const subtractCalls = (after, before) => ({
+                        getBoundingClientRect: after.getBoundingClientRect - before.getBoundingClientRect,
+                        querySelector: after.querySelector - before.querySelector,
+                        querySelectorAll: after.querySelectorAll - before.querySelectorAll
+                    });
+                    const addCalls = (totals, delta) => {
+                        totals.getBoundingClientRect += delta.getBoundingClientRect;
+                        totals.querySelector += delta.querySelector;
+                        totals.querySelectorAll += delta.querySelectorAll;
+                    };
+                    const newCallbackIds = (before, after) => {
+                        const previous = new Set(before);
+                        return after.filter((callbackId) => !previous.has(callbackId));
+                    };
                     const waitFor = async (read, message, timeoutMs = 30_000) => {
                         const deadline = performance.now() + timeoutMs;
                         while (performance.now() < deadline) {
@@ -253,6 +393,17 @@ test.describe.serial('drag performance baseline', () => {
                             await wait(25);
                         }
                         throw new Error(message);
+                    };
+                    const waitForCallbackIds = async (callbackIds, message) => {
+                        if (callbackIds.length === 0) return;
+                        const targetIds = new Set(callbackIds);
+                        for (let frame = 0; frame < 60; frame += 1) {
+                            const completed = new Set(benchmarkBridge('snapshot').completedCallbackIds);
+                            if (Array.from(targetIds).every((callbackId) => completed.has(callbackId))) return;
+                            await nextFrame();
+                        }
+                        const diagnostics = benchmarkBridge('snapshot');
+                        throw new Error(`${message}; scheduled ${diagnostics.scheduledCallbackIds.join(',')}; completed ${diagnostics.completedCallbackIds.join(',')}.`);
                     };
                     const rowFor = (key) => getRoot()?.querySelector(`.source-item[data-source-key="${key}"]`) || null;
                     const dispatchDrag = (row, type, extra = {}) => {
@@ -323,29 +474,71 @@ test.describe.serial('drag performance baseline', () => {
                         await nextFrame();
                         await disableBatch();
                     };
-                    const runPrepare = async (originKey, record) => {
+                    const runPrepare = async (originKey, selectionCount, record) => {
                         const origin = rowFor(originKey);
                         if (!origin) throw new Error(`Benchmark origin ${originKey} missing.`);
-                        const startForced = benchmarkBridge('snapshot').forcedLayoutReadPhases;
+                        const beforeReset = benchmarkBridge('snapshot');
+                        const resetSnapshot = benchmarkBridge('reset-layout-phase');
+                        if (resetSnapshot.forcedLayoutReadPhases !== 0
+                            || resetSnapshot.geometryReadPendingAfterWrite
+                            || JSON.stringify(resetSnapshot.calls) !== JSON.stringify(beforeReset.calls)) {
+                            throw new Error('Layout-phase reset changed more than the pending/count phase state.');
+                        }
+                        const before = benchmarkBridge('snapshot');
                         const start = performance.now();
                         const dataTransfer = dispatchDrag(origin, 'dragstart');
                         const cpuMs = performance.now() - start;
-                        await nextFrame();
-                        dispatchDrag(origin, 'dragend', { dataTransfer });
-                        await nextFrame();
-                        await wait(5);
+                        const syncSnapshot = benchmarkBridge('snapshot');
+                        const callsDelta = subtractCalls(syncSnapshot.calls, before.calls);
+                        const geometryReadsDelta = {
+                            getBoundingClientRect: syncSnapshot.geometryReads.getBoundingClientRect
+                                - before.geometryReads.getBoundingClientRect,
+                            offsetHeight: syncSnapshot.geometryReads.offsetHeight
+                                - before.geometryReads.offsetHeight
+                        };
+                        const foldCallbackIds = newCallbackIds(
+                            before.scheduledCallbackIds,
+                            syncSnapshot.scheduledCallbackIds
+                        );
+                        if (syncSnapshot.forcedLayoutReadPhases < 1) {
+                            throw new Error('Synchronous dragstart did not record a write-before-geometry-read phase.');
+                        }
+                        if (geometryReadsDelta.offsetHeight < selectionCount) {
+                            throw new Error(`Synchronous dragstart recorded ${geometryReadsDelta.offsetHeight} offsetHeight reads for ${selectionCount} selected item(s).`);
+                        }
+                        if (foldCallbackIds.length === 0) {
+                            throw new Error('Synchronous dragstart did not schedule its deferred fold callback.');
+                        }
                         if (record) {
                             record.cpu.push(cpuMs);
-                            record.forced.push(benchmarkBridge('snapshot').forcedLayoutReadPhases - startForced);
+                            record.forced.push(syncSnapshot.forcedLayoutReadPhases);
+                            addCalls(record.calls, callsDelta);
                         }
+                        await waitForCallbackIds(foldCallbackIds, 'Deferred dragstart fold did not complete');
+                        const beforeDragEnd = benchmarkBridge('snapshot');
+                        dispatchDrag(origin, 'dragend', { dataTransfer });
+                        const afterDragEnd = benchmarkBridge('snapshot');
+                        await waitForCallbackIds(
+                            newCallbackIds(beforeDragEnd.scheduledCallbackIds, afterDragEnd.scheduledCallbackIds),
+                            'Dragend cleanup callback did not complete'
+                        );
+                        await wait(5);
                     };
                     const runCallbackFrames = async (originKey, frameCount) => {
                         const origin = rowFor(originKey);
                         if (!origin) throw new Error(`Frame benchmark origin ${originKey} missing.`);
+                        const beforeDragStart = benchmarkBridge('snapshot');
                         const dataTransfer = dispatchDrag(origin, 'dragstart');
-                        await nextFrame();
+                        const afterDragStart = benchmarkBridge('snapshot');
+                        const foldCallbackIds = newCallbackIds(
+                            beforeDragStart.scheduledCallbackIds,
+                            afterDragStart.scheduledCallbackIds
+                        );
+                        if (foldCallbackIds.length === 0) {
+                            throw new Error('Frame benchmark dragstart did not synchronously schedule a fold callback.');
+                        }
+                        await waitForCallbackIds(foldCallbackIds, 'Frame benchmark fold callback did not complete');
                         benchmarkBridge('reset-frames');
-                        benchmarkBridge('capture-frames', true);
                         const listRect = getRoot()?.querySelector('#sources-list')?.getBoundingClientRect();
                         const candidates = Array.from(getRoot()?.querySelectorAll('.source-item:not(.selected-for-batch)') || [])
                             .filter((candidate) => {
@@ -354,65 +547,97 @@ test.describe.serial('drag performance baseline', () => {
                             })
                             .slice(0, 12);
                         if (candidates.length < 2) throw new Error('Not enough non-selected benchmark drag targets.');
-                        let captured = 0;
-                        let attempts = 0;
-                        while (captured < frameCount && attempts < frameCount * 3) {
-                            const previousSampleCount = benchmarkBridge('snapshot').frameSamples.length;
-                            const target = candidates[(attempts * 17 + 7) % candidates.length];
+                        benchmarkBridge('capture-frames', true);
+                        const targetCallbackIds = [];
+                        for (let index = 0; index < frameCount; index += 1) {
+                            const target = candidates[(index * 17 + 7) % candidates.length];
                             const rect = target.getBoundingClientRect();
+                            const beforeDragOver = benchmarkBridge('snapshot');
                             dispatchDrag(target, 'dragover', {
                                 dataTransfer,
                                 clientX: Math.floor(rect.left + rect.width / 2),
                                 clientY: Math.floor(rect.top + rect.height / 2)
                             });
-                            // The page and extension isolated worlds have distinct rAF queues.
-                            // Wait for this exact queued content callback to acknowledge itself
-                            // before allowing the next dragover to replace pending args.
-                            let acknowledged = false;
-                            for (let frame = 0; frame < 12; frame += 1) {
-                                await nextFrame();
-                                if (benchmarkBridge('snapshot').frameSamples.length === previousSampleCount + 1) {
-                                    acknowledged = true;
-                                    break;
-                                }
+                            const afterDragOver = benchmarkBridge('snapshot');
+                            const scheduledForDragOver = newCallbackIds(
+                                beforeDragOver.scheduledCallbackIds,
+                                afterDragOver.scheduledCallbackIds
+                            );
+                            if (scheduledForDragOver.length !== 1) {
+                                throw new Error(`Dragover ${index + 1}/${frameCount} scheduled ${scheduledForDragOver.length} callbacks instead of exactly one.`);
                             }
-                            attempts += 1;
-                            if (acknowledged) captured += 1;
+                            const callbackId = scheduledForDragOver[0];
+                            targetCallbackIds.push(callbackId);
+                            benchmarkBridge('expect-frame', null, callbackId);
+                            await waitForCallbackIds([callbackId], `Target dragover callback ${callbackId} did not complete`);
+                            const qualifying = benchmarkBridge('snapshot').frameSamples
+                                .filter((sample) => sample.callbackId === callbackId);
+                            if (qualifying.length !== 1) {
+                                throw new Error(`Target dragover callback ${callbackId} produced ${qualifying.length} qualifying samples instead of exactly one.`);
+                            }
                         }
-                        if (captured !== frameCount) {
-                            const diagnostics = benchmarkBridge('snapshot');
-                            throw new Error(`Expected ${frameCount} qualifying manager-active callbacks, captured ${captured} from ${attempts} target callbacks; rAF ${diagnostics.rafCallbacks}/${diagnostics.rafScheduled}, active ${diagnostics.activeRafCallbacks}, delta ${diagnostics.domDeltaRafCallbacks}.`);
+                        const finalSnapshot = benchmarkBridge('capture-frames', false);
+                        const frames = finalSnapshot.frameSamples;
+                        const sampleIds = frames.map((sample) => sample.callbackId);
+                        const uniqueTargetIds = new Set(targetCallbackIds);
+                        const uniqueSampleIds = new Set(sampleIds);
+                        if (frames.length !== frameCount
+                            || uniqueTargetIds.size !== frameCount
+                            || uniqueSampleIds.size !== frameCount
+                            || targetCallbackIds.some((callbackId, index) => sampleIds[index] !== callbackId)
+                            || finalSnapshot.expectedFrameCallbackIds.length !== 0) {
+                            throw new Error(`Expected exact callback IDs ${targetCallbackIds.join(',')}; sampled ${sampleIds.join(',')}; pending ${finalSnapshot.expectedFrameCallbackIds.join(',')}.`);
                         }
-                        const frames = benchmarkBridge('capture-frames', false).frameSamples;
+                        frames.forEach((sample) => {
+                            if (!Number.isSafeInteger(sample.callbackId)
+                                || typeof sample.duration !== 'number'
+                                || !sample.callsDelta
+                                || Object.values(sample.callsDelta).some((count) => !Number.isInteger(count) || count < 0)) {
+                                throw new Error(`Invalid exact callback sample ${JSON.stringify(sample)}.`);
+                            }
+                        });
+                        const beforeDragEnd = benchmarkBridge('snapshot');
                         dispatchDrag(origin, 'dragend', { dataTransfer });
-                        await nextFrame();
-                        return frames.slice(0, frameCount);
+                        const afterDragEnd = benchmarkBridge('snapshot');
+                        await waitForCallbackIds(
+                            newCallbackIds(beforeDragEnd.scheduledCallbackIds, afterDragEnd.scheduledCallbackIds),
+                            'Frame benchmark dragend cleanup callback did not complete'
+                        );
+                        return { frames, targetCallbackIds };
                     };
                     const benchmarkSelection = async ({ selectionCount, originKey, selectedKeys }) => {
                         if (selectionCount === 50) {
                             await enableBatch();
                             await selectKeys(selectedKeys);
                         }
-                        const prepare = { cpu: [], forced: [] };
-                        for (let index = 0; index < warmupSessions; index += 1) await runPrepare(originKey, null);
+                        const prepare = {
+                            cpu: [],
+                            forced: [],
+                            calls: { getBoundingClientRect: 0, querySelector: 0, querySelectorAll: 0 }
+                        };
+                        for (let index = 0; index < warmupSessions; index += 1) {
+                            await runPrepare(originKey, selectionCount, null);
+                        }
                         benchmarkBridge('reset');
-                        for (let index = 0; index < measuredSessions; index += 1) await runPrepare(originKey, prepare);
-                        const prepareCalls = benchmarkBridge('snapshot').calls;
+                        for (let index = 0; index < measuredSessions; index += 1) {
+                            await runPrepare(originKey, selectionCount, prepare);
+                        }
                         // Earlier synthetic dragend calls schedule the production pseudo-hover
                         // backstop for 1500ms. Let those old sessions finish before timing one
                         // continuous active-drag sequence, otherwise an old cleanup can remove
                         // the current list's manager-active marker mid-sample.
                         await wait(1600);
                         const warmup = await runCallbackFrames(originKey, warmupFrames);
-                        if (warmup.length === 0) throw new Error('Manager-active drag callback warmup was not captured.');
+                        if (warmup.frames.length !== warmupFrames
+                            || warmup.targetCallbackIds.length !== warmupFrames) {
+                            throw new Error('Exact manager-active drag callback warmup was not captured.');
+                        }
                         await wait(1600);
                         benchmarkBridge('reset');
-                        const frames = await runCallbackFrames(originKey, measuredFrames);
-                        const callbackCalls = benchmarkBridge('snapshot').calls;
-                        if (frames.length < measuredFrames) {
-                            const diagnostics = benchmarkBridge('snapshot');
-                            throw new Error(`Expected ${measuredFrames} manager-active callback samples, saw ${frames.length}; rAF ${diagnostics.rafCallbacks}/${diagnostics.rafScheduled}, active ${diagnostics.activeRafCallbacks}, delta ${diagnostics.domDeltaRafCallbacks}.`);
-                        }
+                        const measured = await runCallbackFrames(originKey, measuredFrames);
+                        const callbackCalls = { getBoundingClientRect: 0, querySelector: 0, querySelectorAll: 0 };
+                        measured.frames.forEach((sample) => addCalls(callbackCalls, sample.callsDelta));
+                        const callbackDurations = measured.frames.map((sample) => sample.duration);
                         return {
                             rowCount: nextRowCount,
                             selectionCount,
@@ -426,13 +651,13 @@ test.describe.serial('drag performance baseline', () => {
                             },
                             prepareForcedLayoutReadPhases: { max: Math.max(...prepare.forced) },
                             callbackCpuMs: {
-                                p50: percentile(frames, 0.5),
-                                p95: percentile(frames, 0.95)
+                                p50: percentile(callbackDurations, 0.5),
+                                p95: percentile(callbackDurations, 0.95)
                             },
                             calls: {
-                                getBoundingClientRect: prepareCalls.getBoundingClientRect + callbackCalls.getBoundingClientRect,
-                                querySelector: prepareCalls.querySelector + callbackCalls.querySelector,
-                                querySelectorAll: prepareCalls.querySelectorAll + callbackCalls.querySelectorAll
+                                getBoundingClientRect: prepare.calls.getBoundingClientRect + callbackCalls.getBoundingClientRect,
+                                querySelector: prepare.calls.querySelector + callbackCalls.querySelector,
+                                querySelectorAll: prepare.calls.querySelectorAll + callbackCalls.querySelectorAll
                             }
                         };
                     };
