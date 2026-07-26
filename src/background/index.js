@@ -1137,6 +1137,34 @@ function enqueueStateWrite(request, sendResponse) {
     }));
 }
 
+function loadStateNow(request, sendResponse) {
+    const backupKey = getStateBackupKey(request.key);
+    chrome.storage.local.get([request.key, backupKey], (data) => {
+        if (chrome.runtime.lastError) {
+            console.error('GeminiNotebook-Source-Management background load error:', chrome.runtime.lastError);
+            sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
+            return;
+        }
+
+        const primaryState = data && typeof data === 'object' ? data[request.key] : null;
+        const backupState = data && typeof data === 'object' ? data[backupKey] : null;
+        const storedData = pickPreferredStoredState(primaryState, backupState);
+        sendResponse({ success: true, data: storedData ?? null });
+    });
+}
+
+function loadState(request, sendResponse) {
+    const pendingSave = stateSaveQueueByKey.get(request.key);
+    if (!pendingSave) {
+        loadStateNow(request, sendResponse);
+        return;
+    }
+
+    Promise.resolve(pendingSave)
+        .catch(() => undefined)
+        .then(() => loadStateNow(request, sendResponse));
+}
+
 function loadStateHistory(request, sendResponse) {
     // Wait on the notebook's STATE queue (which serializes SAVE_STATE's history write)
     // so a read never races a pending write of the same sourcesPlusHistory_<id> key.
@@ -1288,19 +1316,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return;
     }
 
-    const backupKey = getStateBackupKey(request.key);
-    chrome.storage.local.get([request.key, backupKey], (data) => {
-        if (chrome.runtime.lastError) {
-            console.error('GeminiNotebook-Source-Management background load error:', chrome.runtime.lastError);
-            sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
-            return;
-        }
-
-        const primaryState = data && typeof data === 'object' ? data[request.key] : null;
-        const backupState = data && typeof data === 'object' ? data[backupKey] : null;
-        const storedData = pickPreferredStoredState(primaryState, backupState);
-        sendResponse({ success: true, data: storedData ?? null });
-    });
+    loadState(request, sendResponse);
     return true;
 });
 

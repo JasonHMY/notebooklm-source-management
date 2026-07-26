@@ -60,7 +60,7 @@ Unauthorized notebook senders return:
 
 ## State save response
 
-`SAVE_STATE` writes are serialized per storage key in the background worker and guarded by save revision metadata.
+`SAVE_STATE` writes are serialized per storage key in the background worker and guarded by save revision metadata. A same-notebook `LOAD_STATE` waits for an already pending `SAVE_STATE` on that key before issuing its storage read, so it returns the persisted revision after the save settles. Loads for different notebook keys remain independent and can proceed in parallel.
 
 Successful saves return:
 

@@ -420,6 +420,96 @@ describe('background.js message listener', () => {
         }));
     });
 
+    it('waits for a pending SAVE_STATE before loading the same notebook state', async () => {
+        const saveRequest = {
+            type: 'SAVE_STATE',
+            key: 'sourcesPlusState_123',
+            baseRevision: 0,
+            data: {
+                groups: ['saved'],
+                groupsById: { saved: { id: 'saved', children: [] } },
+                sourceStateById: {}
+            }
+        };
+        const loadRequest = { type: 'LOAD_STATE', key: 'sourcesPlusState_123' };
+        const pendingGets = [];
+        const pendingSets = [];
+        const loadResponse = jest.fn();
+
+        global.chrome.storage.local.get.mockImplementation((keys, cb) => {
+            pendingGets.push({ keys, cb });
+        });
+        global.chrome.storage.local.set.mockImplementation((payload, cb) => {
+            pendingSets.push({ payload, cb });
+        });
+
+        listener(saveRequest, validSender, jest.fn());
+        listener(loadRequest, validSender, loadResponse);
+
+        // The save's state read is still in flight, so the same-key load cannot begin a read.
+        expect(pendingGets).toHaveLength(1);
+        expect(loadResponse).not.toHaveBeenCalled();
+
+        pendingGets[0].cb({});
+        expect(pendingSets).toHaveLength(1);
+        expect(pendingGets).toHaveLength(1);
+        expect(loadResponse).not.toHaveBeenCalled();
+
+        pendingSets[0].cb();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(pendingGets).toHaveLength(2);
+        expect(pendingGets[1].keys).toEqual([
+            'sourcesPlusState_123',
+            'sourcesPlusState_123__backup'
+        ]);
+        pendingGets[1].cb({
+            sourcesPlusState_123: pendingSets[0].payload.sourcesPlusState_123
+        });
+        expect(loadResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: true,
+            data: expect.objectContaining({ _saveRevision: 1 })
+        }));
+    });
+
+    it('loads a different notebook state immediately while another notebook save is pending', () => {
+        const saveRequest = {
+            type: 'SAVE_STATE',
+            key: 'sourcesPlusState_123',
+            baseRevision: 0,
+            data: {
+                groups: [],
+                groupsById: {},
+                sourceStateById: {}
+            }
+        };
+        const loadRequest = { type: 'LOAD_STATE', key: 'sourcesPlusState_456' };
+        const pendingGets = [];
+        const loadResponse = jest.fn();
+
+        global.chrome.storage.local.get.mockImplementation((keys, cb) => {
+            pendingGets.push({ keys, cb });
+        });
+
+        listener(saveRequest, validSender, jest.fn());
+        listener(loadRequest, senderForNotebook('456'), loadResponse);
+
+        // The unrelated load has its own storage read even though notebook 123 is still saving.
+        expect(pendingGets).toHaveLength(2);
+        expect(pendingGets[1].keys).toEqual([
+            'sourcesPlusState_456',
+            'sourcesPlusState_456__backup'
+        ]);
+        pendingGets[1].cb({
+            sourcesPlusState_456: { _saveRevision: 7, groups: ['other'] }
+        });
+        expect(loadResponse).toHaveBeenCalledWith({
+            success: true,
+            data: { _saveRevision: 7, groups: ['other'] }
+        });
+    });
+
     it('serializes APPEND_STATE_HISTORY behind a pending SAVE_STATE for the same notebook', async () => {
         // SAVE_STATE writes sourcesPlusState_123 AND its history (sourcesPlusHistory_123) in one
         // task; APPEND_STATE_HISTORY mutates the same history key. They must share one per-notebook
