@@ -1796,12 +1796,32 @@
             // the previous drag cleaned up correctly).
             const _preflightList = getSourceListContainer();
             if (_preflightList && typeof _preflightList.querySelectorAll === 'function') {
-                const stale = _preflightList.querySelectorAll(
-                    '.sp-drop-flying, .sp-drop-landing, .sp-drag-unfolding, .sp-pseudo-hover, .sp-hover-expand-pending, .sp-drag-cancelled'
-                );
+                // One tree walk recovers every descendant drag marker. Five
+                // separate selector sweeps scaled dragstart with the full
+                // manager size even though the common path returns no nodes.
+                const stale = _preflightList.querySelectorAll([
+                    '.sp-drop-flying',
+                    '.sp-drop-landing',
+                    '.sp-drag-unfolding',
+                    '.sp-pseudo-hover',
+                    '.sp-hover-expand-pending',
+                    '.sp-drag-cancelled',
+                    '.sp-drag-folded',
+                    '.sp-drop-shift',
+                    '.drag-into',
+                    '.drag-invalid',
+                    '.dragging',
+                    '.sp-drag-guide'
+                ].join(', '));
                 if (stale && typeof stale.forEach === 'function') {
                     stale.forEach((node) => {
                         if (!node || !node.classList || typeof node.classList.remove !== 'function') return;
+                        const hadFolded = typeof node.classList.contains === 'function'
+                            && node.classList.contains('sp-drag-folded');
+                        const hadShift = typeof node.classList.contains === 'function'
+                            && node.classList.contains('sp-drop-shift');
+                        const hadGuide = typeof node.classList.contains === 'function'
+                            && node.classList.contains('sp-drag-guide');
                         node.classList.remove('sp-drop-flying');
                         node.classList.remove('sp-drop-landing');
                         node.classList.remove('sp-drag-unfolding');
@@ -1812,73 +1832,44 @@
                         // doesn't show a stale outline or replay a shake.
                         node.classList.remove('sp-hover-expand-pending');
                         node.classList.remove('sp-drag-cancelled');
-                    });
-                }
-
-                // (B1) .sp-drag-folded: lingering = source stuck invisible + un-draggable.
-                // Clear class + restore inline height/opacity so the row reappears at
-                // its natural size. The new drag's RAF-deferred foldDraggedItems will
-                // re-apply on the right source(s) a frame later if needed.
-                const lingeringFolded = _preflightList.querySelectorAll('.sp-drag-folded');
-                if (lingeringFolded && typeof lingeringFolded.forEach === 'function') {
-                    lingeringFolded.forEach((node) => {
-                        if (!node || !node.classList || typeof node.classList.remove !== 'function') return;
                         node.classList.remove('sp-drag-folded');
-                        if (node.style) {
-                            node.style.height = '';
-                            node.style.opacity = '';
-                        }
-                    });
-                }
-
-                // (B2) .sp-drop-shift: lingering = siblings visually offset by translateY.
-                // Clear class + reset inline transform. New drag's reflow re-applies
-                // shifts on the correct siblings.
-                const lingeringShift = _preflightList.querySelectorAll('.sp-drop-shift');
-                if (lingeringShift && typeof lingeringShift.forEach === 'function') {
-                    lingeringShift.forEach((node) => {
-                        if (!node || !node.classList || typeof node.classList.remove !== 'function') return;
                         node.classList.remove('sp-drop-shift');
-                        if (node.style) {
-                            node.style.transform = '';
-                        }
-                    });
-                }
-
-                // (B3) .drag-into / .drag-invalid / .dragging: stale visual highlights.
-                const lingeringFeedback = _preflightList.querySelectorAll('.drag-into, .drag-invalid, .dragging');
-                if (lingeringFeedback && typeof lingeringFeedback.forEach === 'function') {
-                    lingeringFeedback.forEach((node) => {
-                        if (!node || !node.classList || typeof node.classList.remove !== 'function') return;
                         node.classList.remove('drag-into');
                         node.classList.remove('drag-invalid');
                         node.classList.remove('dragging');
-                    });
-                }
-
-                // (B4) .sp-drag-active lives on #sources-list itself (the host), not a
-                // descendant — it suppresses the frozen native :hover during a drag and
-                // is normally removed by _clearPseudo. If a prior drag ended via
-                // tab-switch / blur before that ran, it lingers; clear it on the host.
-                if (_preflightList.classList && typeof _preflightList.classList.remove === 'function') {
-                    _preflightList.classList.remove('sp-drag-active');
-                }
-
-                // (B5) .sp-drag-guide + --sp-slot-comp: the per-frame folder guide marker
-                // set by _processDragOver on the pointer's current target folder. Normally
-                // cleared each frame + on dragend (clearDragFeedback); strip here too in
-                // case dragend was skipped, so a folder isn't left with a stale blue bar.
-                const lingeringGuide = _preflightList.querySelectorAll('.sp-drag-guide');
-                if (lingeringGuide && typeof lingeringGuide.forEach === 'function') {
-                    lingeringGuide.forEach((node) => {
-                        if (!node || !node.classList || typeof node.classList.remove !== 'function') return;
                         node.classList.remove('sp-drag-guide');
-                        if (node.style && typeof node.style.removeProperty === 'function') {
+                        if (hadFolded && node.style) {
+                            node.style.height = '';
+                            node.style.opacity = '';
+                        }
+                        if (hadShift && node.style) {
+                            node.style.transform = '';
+                        }
+                        if (
+                            hadGuide
+                            && node.style
+                            && typeof node.style.removeProperty === 'function'
+                        ) {
                             node.style.removeProperty('--sp-slot-comp');
                         }
                     });
                 }
+
+                // Keep a lingering host-level .sp-drag-active for this valid
+                // replacement drag. Removing it here and adding it again below
+                // forces every row under its descendant selectors to restyle.
+                // Guarded/cancelled starts clear it before returning.
             }
+
+            const _clearPreflightDragActive = () => {
+                if (
+                    _preflightList
+                    && _preflightList.classList
+                    && typeof _preflightList.classList.remove === 'function'
+                ) {
+                    _preflightList.classList.remove('sp-drag-active');
+                }
+            };
 
             // Reset runtime drag state defensively. A previous drag interrupted
             // before dragend would leave these lingering, and the new drag's own
@@ -1912,6 +1903,7 @@
             if (e.target && typeof e.target.closest === 'function') {
                 const _editable = e.target.closest('input, textarea, [contenteditable=""], [contenteditable="true"]');
                 if (_editable) {
+                    _clearPreflightDragActive();
                     if (typeof e.preventDefault === 'function') e.preventDefault();
                     return;
                 }
@@ -1919,10 +1911,14 @@
 
             if (sourceTarget) {
                 const key = sourceTarget.dataset.sourceKey;
-                if (!key) return;
+                if (!key) {
+                    _clearPreflightDragActive();
+                    return;
+                }
 
                 if (typeof e.target.closest === 'function'
                     && e.target.closest('input[type="checkbox"], .sp-batch-checkbox')) {
+                    _clearPreflightDragActive();
                     if (typeof e.preventDefault === 'function') e.preventDefault();
                     return;
                 }
@@ -1955,6 +1951,23 @@
                 }
                 e.dataTransfer.effectAllowed = 'move';
 
+                // Prepare reflow before building the drag ghost. The footprint probe
+                // owns three batched layout-read phases; running the ghost's pointer
+                // offset read first would create a fourth forced-layout phase in the
+                // same synchronous dragstart. The probe restores the row completely
+                // before returning, so cloning/capturing the native drag image remains
+                // safe. Classic mode keeps its existing no-probe path.
+                let preparedReflowSession = null;
+                let preparedReflowRoot = null;
+                if (getDragMode() !== 'classic' && dragReflow && typeof dragReflow.prepareDragSession === 'function') {
+                    preparedReflowRoot = getSourceListContainer();
+                    preparedReflowSession = dragReflow.prepareDragSession({
+                        draggedKeys: keys,
+                        rootElement: preparedReflowRoot
+                    });
+                    runtime.dragReflowSession = preparedReflowSession;
+                }
+
                 if (dragMulti && typeof dragMulti.createMultiDragGhost === 'function') {
                     const doc = getDocument();
                     const root = doc && doc.body ? doc.body : null;
@@ -1977,9 +1990,16 @@
                         let offsetY = 12;
                         if (sourcesListEl && typeof sourcesListEl.querySelector === 'function') {
                             const originEl = sourcesListEl.querySelector(`[data-source-key="${cssEscape(key)}"]`);
-                            const rect = originEl && typeof originEl.getBoundingClientRect === 'function'
-                                ? originEl.getBoundingClientRect()
-                                : null;
+                            const cachedRect = preparedReflowSession?.itemMetrics?.get(key)?.visualRect;
+                            const rect = cachedRect && Number(cachedRect.width) > 0
+                                ? cachedRect
+                                : (
+                                    !preparedReflowSession
+                                    && originEl
+                                    && typeof originEl.getBoundingClientRect === 'function'
+                                        ? originEl.getBoundingClientRect()
+                                        : null
+                                );
                             if (rect && typeof e.clientX === 'number' && typeof e.clientY === 'number') {
                                 offsetX = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
                                 offsetY = Math.max(0, Math.min(rect.height, e.clientY - rect.top));
@@ -1994,13 +2014,7 @@
 
                 // Classic mode has no avoidance reflow — skip session + fold so the dragged
                 // row stays in place and feedback is the blue insertion line (26.5.26).
-                if (getDragMode() !== 'classic' && dragReflow && typeof dragReflow.prepareDragSession === 'function') {
-                    const rootElement = getSourceListContainer();
-                    const session = dragReflow.prepareDragSession({
-                        draggedKeys: keys,
-                        rootElement
-                    });
-                    runtime.dragReflowSession = session;
+                if (preparedReflowSession) {
                     // Fold MUST be deferred to next frame via RAF (NOT sync) — running fold
                     // inside the dragstart handler turns the drag source into a 0×0 box
                     // (.sp-drag-folded has pointer-events: none + padding/margin/border 0,
@@ -2016,13 +2030,16 @@
                         raf(() => {
                             if (dragReflow.foldDraggedItems) {
                                 dragReflow.foldDraggedItems({
-                                    session,
+                                    session: preparedReflowSession,
                                     rootElement: getSourceListContainer()
                                 });
                             }
                         });
                     } else if (typeof dragReflow.foldDraggedItems === 'function') {
-                        dragReflow.foldDraggedItems({ session, rootElement });
+                        dragReflow.foldDraggedItems({
+                            session: preparedReflowSession,
+                            rootElement: preparedReflowRoot
+                        });
                     }
                 }
                 // Mark the list actively dragging so CSS suppresses Chrome's frozen
@@ -2101,8 +2118,12 @@
                             dragReflow.foldDraggedItems({ session, rootElement });
                         }
                     }
+                } else {
+                    _clearPreflightDragActive();
                 }
+                return;
             }
+            _clearPreflightDragActive();
         }
 
         function computeIsInvalidDrop({ intent, dragContext }) {

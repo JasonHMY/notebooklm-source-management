@@ -1167,12 +1167,25 @@ describe('handleDragStart multi-source branch', () => {
         const dataTransfer = createDataTransfer();
         const preventDefault = jest.fn();
         const fakeInput = { tagName: 'INPUT' };
+        const listClassList = {
+            contains: jest.fn(() => true),
+            add: jest.fn(),
+            remove: jest.fn()
+        };
+        const sourcesListEl = {
+            id: 'sources-list',
+            classList: listClassList,
+            querySelectorAll: jest.fn(() => [])
+        };
+        const shadowRoot = {
+            getElementById: jest.fn((id) => (id === 'sources-list' ? sourcesListEl : null))
+        };
 
         const interactions = createContentTreeInteractions({
             getState: () => state,
             getGroupsById: () => new Map(),
             getPendingBatchKeys: () => pendingBatchKeys,
-            getShadowRoot: () => null,
+            getShadowRoot: () => shadowRoot,
             getSetTimeout: () => () => {},
             dragMulti: createContentDragMulti({})
         });
@@ -1197,6 +1210,101 @@ describe('handleDragStart multi-source branch', () => {
         expect(preventDefault).toHaveBeenCalledTimes(1);
         expect(dataTransfer.setData).not.toHaveBeenCalled();
         expect(dataTransfer.setDragImage).not.toHaveBeenCalled();
+        expect(listClassList.remove).toHaveBeenCalledWith('sp-drag-active');
+    });
+
+    it.each([
+        ['source row without a source key', 'source'],
+        ['group header without a group id', 'group'],
+        ['unrecognized delegated draggable', 'other']
+    ])('clears an active host for %s', (_label, targetKind) => {
+        const listClassList = {
+            contains: jest.fn(() => true),
+            add: jest.fn(),
+            remove: jest.fn()
+        };
+        const sourcesListEl = {
+            id: 'sources-list',
+            classList: listClassList,
+            querySelectorAll: jest.fn(() => [])
+        };
+        const shadowRoot = {
+            getElementById: jest.fn((id) => (id === 'sources-list' ? sourcesListEl : null))
+        };
+        const sourceTarget = {
+            dataset: {},
+            classList: { add: jest.fn(), remove: jest.fn() }
+        };
+        const groupTarget = {
+            dataset: {},
+            classList: { add: jest.fn(), remove: jest.fn() }
+        };
+        const target = {
+            closest: jest.fn((selector) => {
+                if (selector === '.source-item') {
+                    return targetKind === 'source' ? sourceTarget : null;
+                }
+                if (selector === '.group-header') {
+                    return targetKind === 'group' ? groupTarget : null;
+                }
+                return null;
+            })
+        };
+        const dataTransfer = createDataTransfer();
+        const interactions = createContentTreeInteractions({
+            runtime: {},
+            getState: () => ({ isBatchMode: false, ungrouped: [], groups: [] }),
+            getGroupsById: () => new Map(),
+            getPendingBatchKeys: () => new Set(),
+            getShadowRoot: () => shadowRoot,
+            getSetTimeout: () => () => {},
+            dragMulti: createContentDragMulti({})
+        });
+
+        interactions.handleDragStart({ target, dataTransfer });
+
+        expect(listClassList.remove).toHaveBeenCalledWith('sp-drag-active');
+        expect(dataTransfer.setData).not.toHaveBeenCalled();
+    });
+
+    it('clears an active host when dragstart originates from a batch checkbox', () => {
+        const sourceRow = createSourceRow('A');
+        const listClassList = {
+            contains: jest.fn(() => true),
+            add: jest.fn(),
+            remove: jest.fn()
+        };
+        const sourcesListEl = {
+            id: 'sources-list',
+            classList: listClassList,
+            querySelectorAll: jest.fn(() => [])
+        };
+        const shadowRoot = {
+            getElementById: jest.fn((id) => (id === 'sources-list' ? sourcesListEl : null))
+        };
+        const dataTransfer = createDataTransfer();
+        const preventDefault = jest.fn();
+        const interactions = createContentTreeInteractions({
+            runtime: {},
+            getState: () => ({ isBatchMode: true, ungrouped: ['A'], groups: [] }),
+            getGroupsById: () => new Map(),
+            getPendingBatchKeys: () => new Set(['A']),
+            getShadowRoot: () => shadowRoot,
+            getSetTimeout: () => () => {},
+            dragMulti: createContentDragMulti({})
+        });
+
+        interactions.handleDragStart({
+            target: {
+                closest: createTargetClosestStub(sourceRow, { inCheckbox: true })
+            },
+            dataTransfer,
+            preventDefault
+        });
+
+        expect(preventDefault).toHaveBeenCalledTimes(1);
+        expect(listClassList.remove).toHaveBeenCalledWith('sp-drag-active');
+        expect(dataTransfer.setData).not.toHaveBeenCalled();
     });
 });
 
@@ -2575,19 +2683,28 @@ describe('handleDragStart reflow session + unified ghost', () => {
 
         // Stale source B: stuck folded (invisible, un-draggable).
         const staleStyleB = { height: '0px', opacity: '0' };
-        const staleClassListB = { contains: jest.fn(() => false), add: jest.fn(), remove: jest.fn() };
+        const staleClassListB = {
+            contains: jest.fn((name) => name === 'sp-drag-folded'),
+            add: jest.fn(),
+            remove: jest.fn()
+        };
         const staleB = { dataset: { sourceKey: 'B' }, classList: staleClassListB, style: staleStyleB };
 
         // Stale sibling C: lingering translateY offset.
         const staleStyleC = { transform: 'translateY(40px)' };
-        const staleClassListC = { contains: jest.fn(() => false), add: jest.fn(), remove: jest.fn() };
+        const staleClassListC = {
+            contains: jest.fn((name) => name === 'sp-drop-shift'),
+            add: jest.fn(),
+            remove: jest.fn()
+        };
         const staleC = { dataset: { sourceKey: 'C' }, classList: staleClassListC, style: staleStyleC };
 
         const sourcesListEl = {
             id: 'sources-list',
             querySelectorAll: jest.fn((selector) => {
-                if (selector === '.sp-drag-folded') return [staleB];
-                if (selector === '.sp-drop-shift') return [staleC];
+                if (selector.includes('.sp-drag-folded') && selector.includes('.sp-drop-shift')) {
+                    return [staleB, staleC];
+                }
                 return [];
             })
         };
@@ -2631,7 +2748,7 @@ describe('handleDragStart reflow session + unified ghost', () => {
         expect(runtime.dragReflowSession.draggedKeys.has('A')).toBe(true);
     });
 
-    it('preflight strips lingering .sp-drag-active / .sp-hover-expand-pending / .sp-drag-cancelled', () => {
+    it('preflight reuses active host state while clearing stale descendant drag cues', () => {
         const runtime = { dragReflowSession: null };
         const state = { isBatchMode: false, ungrouped: ['A'], groups: [] };
         const pendingBatchKeys = new Set();
@@ -2639,22 +2756,44 @@ describe('handleDragStart reflow session + unified ghost', () => {
 
         // Cues left armed when a prior drag was interrupted by tab-switch / blur:
         // a group-container's hover-expand build-up + a source-item's cancel shake.
-        const stalePending = { classList: { contains: jest.fn(() => false), add: jest.fn(), remove: jest.fn() }, style: {} };
-        const staleCancelled = { classList: { contains: jest.fn(() => false), add: jest.fn(), remove: jest.fn() }, style: {} };
+        const stalePending = {
+            classList: {
+                contains: jest.fn((name) => name === 'sp-hover-expand-pending'),
+                add: jest.fn(),
+                remove: jest.fn()
+            },
+            style: {}
+        };
+        const staleCancelled = {
+            classList: {
+                contains: jest.fn((name) => name === 'sp-drag-cancelled'),
+                add: jest.fn(),
+                remove: jest.fn()
+            },
+            style: {}
+        };
 
         // .sp-drag-active lives on #sources-list itself (the host), not a descendant.
         const listClassList = { contains: jest.fn(() => true), add: jest.fn(), remove: jest.fn() };
         // .sp-drag-guide is a descendant group-children left over from an interrupted drag.
         const staleGuide = {
-            classList: { contains: jest.fn(() => true), add: jest.fn(), remove: jest.fn() },
+            classList: {
+                contains: jest.fn((name) => name === 'sp-drag-guide'),
+                add: jest.fn(),
+                remove: jest.fn()
+            },
             style: { removeProperty: jest.fn() }
         };
         const sourcesListEl = {
             id: 'sources-list',
             classList: listClassList,
             querySelectorAll: jest.fn((selector) => {
-                if (selector.includes('sp-hover-expand-pending')) return [stalePending, staleCancelled];
-                if (selector === '.sp-drag-guide') return [staleGuide];
+                if (
+                    selector.includes('sp-hover-expand-pending')
+                    && selector.includes('.sp-drag-guide')
+                ) {
+                    return [stalePending, staleCancelled, staleGuide];
+                }
                 return [];
             })
         };
@@ -2684,8 +2823,9 @@ describe('handleDragStart reflow session + unified ghost', () => {
         // Descendant cues cleared via the preflight querySelectorAll sweep.
         expect(stalePending.classList.remove).toHaveBeenCalledWith('sp-hover-expand-pending');
         expect(staleCancelled.classList.remove).toHaveBeenCalledWith('sp-drag-cancelled');
-        // Host-level .sp-drag-active cleared directly on #sources-list.
-        expect(listClassList.remove).toHaveBeenCalledWith('sp-drag-active');
+        // A replacement drag keeps the host active instead of restyling the
+        // whole list off and on again.
+        expect(listClassList.remove).not.toHaveBeenCalledWith('sp-drag-active');
         // Descendant .sp-drag-guide left-bar extension cleared + its CSS var removed.
         expect(staleGuide.classList.remove).toHaveBeenCalledWith('sp-drag-guide');
         expect(staleGuide.style.removeProperty).toHaveBeenCalledWith('--sp-slot-comp');

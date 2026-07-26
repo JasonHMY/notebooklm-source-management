@@ -417,6 +417,34 @@ test.describe.serial('drag performance baseline', () => {
                         row.dispatchEvent(event);
                         return event.dataTransfer;
                     };
+                    const normalizePrepareState = () => {
+                        const sourcesList = getRoot()?.querySelector('#sources-list');
+                        if (!sourcesList) throw new Error('Benchmark sources list missing.');
+
+                        // A real next drag starts after a trusted pointerdown, which
+                        // clears dragend's pseudo-hover bridge before dragstart. The
+                        // benchmark dispatches synthetic drag events directly, so
+                        // reproduce that pre-drag state outside the timed interval.
+                        sourcesList.classList.remove('sp-drag-active');
+                        sourcesList.querySelectorAll('.sp-pseudo-hover').forEach((node) => {
+                            node.classList.remove('sp-pseudo-hover');
+                        });
+
+                        const settledHeight = sourcesList.offsetHeight;
+                        if (!Number.isFinite(settledHeight)) {
+                            throw new Error('Benchmark sources list did not settle layout.');
+                        }
+
+                        const resetSnapshot = benchmarkBridge('reset');
+                        if (resetSnapshot.forcedLayoutReadPhases !== 0
+                            || resetSnapshot.geometryReadPendingAfterWrite
+                            || resetSnapshot.domWrites !== 0
+                            || Object.values(resetSnapshot.calls).some((count) => count !== 0)
+                            || Object.values(resetSnapshot.geometryReads).some((count) => count !== 0)) {
+                            throw new Error('Prepare-state normalization did not reset instrumentation.');
+                        }
+                        return resetSnapshot;
+                    };
                     const enableBatch = async () => {
                         const root = getRoot();
                         if (root?.querySelector('.sp-batch-checkbox')) return;
@@ -477,14 +505,7 @@ test.describe.serial('drag performance baseline', () => {
                     const runPrepare = async (originKey, selectionCount, record) => {
                         const origin = rowFor(originKey);
                         if (!origin) throw new Error(`Benchmark origin ${originKey} missing.`);
-                        const beforeReset = benchmarkBridge('snapshot');
-                        const resetSnapshot = benchmarkBridge('reset-layout-phase');
-                        if (resetSnapshot.forcedLayoutReadPhases !== 0
-                            || resetSnapshot.geometryReadPendingAfterWrite
-                            || JSON.stringify(resetSnapshot.calls) !== JSON.stringify(beforeReset.calls)) {
-                            throw new Error('Layout-phase reset changed more than the pending/count phase state.');
-                        }
-                        const before = benchmarkBridge('snapshot');
+                        const before = normalizePrepareState();
                         const start = performance.now();
                         const dataTransfer = dispatchDrag(origin, 'dragstart');
                         const cpuMs = performance.now() - start;

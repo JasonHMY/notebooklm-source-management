@@ -116,7 +116,7 @@ GeminiNotebook-Source-Management
 │   │   ├── content-drag-multi.js
 │   │   │   └── 多源拖拽 selection 解析、单元素 ghost helper、auto-scroll RAF controller、批量 drop 应用
 │   │   ├── content-drag-reflow.js
-│   │   │   └── 拖拽让位 reflow 会话状态：被拖项折叠 + 其他项让位形成跟随鼠标的空槽 helper
+│   │   │   └── 拖拽让位 reflow 会话状态：真实 box model/折叠位移测量、被拖项折叠/取消恢复和其他项空槽让位 helper
 │   │   ├── content-source-view-switch-controller.js
 │   │   │   └── 来源视图切换目标归一、状态字段和 attempt 记录 helper
 │   │   ├── content-style-text.js
@@ -149,7 +149,9 @@ GeminiNotebook-Source-Management
 │   ├── helpers/
 │   │   └── content module loader 和 mock DOM harness
 │   ├── smoke/
-│   │   └── Playwright 真实扩展上下文 smoke，默认 headless
+│   │   ├── drag-reflow-layout.smoke.spec.js
+│   │   │   └── 真实 Chromium 中的混合/fixed box model 占位、跨 host 多选、preview、滚动恢复、reduced-motion 与原生 Esc/dragend
+│   │   └── 其他 Playwright 真实扩展上下文 smoke，默认 headless
 │   ├── background.test.js
 │   ├── popup.test.js
 │   ├── locales.test.js
@@ -370,7 +372,7 @@ manifest.json
 │   │   ├── 嵌套 children 和 parent map
 │   │   ├── 来源/分组拖拽排序
 │   │   ├── 批量模式多源拖拽与边缘自动滚动
-│   │   ├── 两种拖拽模式（偏好 dragMode，无新模块）：经典（默认，蓝色插入线 .drag-over-top/bottom + 散源落底部桶）/ 避让 Beta（折叠 + 让位 + 根层级定位）；自定义 ghost = source-item 行克隆（单源单层 + 多源最多 3 层堆叠 + 右上角数字 badge）
+│   │   ├── 两种拖拽模式（偏好 dragMode，无新模块）：经典（默认，蓝色插入线 .drag-over-top/bottom + 散源落底部桶）/ 避让 Beta（按真实混合 box model/折叠位移形成空槽、折叠 + 让位 + 根层级定位、取消时精确恢复）；自定义 ghost = source-item 行克隆（单源单层 + 多源最多 3 层堆叠 + 右上角数字 badge）
 │   │   ├── 批量选择、加入文件夹、添加/移除标签
 │   │   ├── 移到未分组
 │   │   └── 批量删除入口
@@ -388,7 +390,8 @@ manifest.json
 │       ├── tests/content/content-drag-reflow.test.js
 │       ├── tests/content/content-native-checkbox-sync.test.js
 │       ├── tests/content/content-render.test.js
-│       └── tests/content/content-source-actions.test.js
+│       ├── tests/content/content-source-actions.test.js
+│       └── tests/smoke/drag-reflow-layout.smoke.spec.js
 ├── 标签系统
 │   ├── 负责
 │   │   ├── tag label/color normalization
@@ -714,12 +717,12 @@ content runtime memory
 │   └── 文件: tests/manifest-loader-sync.test.js
 ├── 扩展真实上下文 smoke
 │   ├── 命令: npm run test:smoke
-│   ├── 文件: tests/smoke/extension-smoke.spec.js, tests/smoke/batch-drag.smoke.spec.js
+│   ├── 文件: tests/smoke/extension-smoke.spec.js, tests/smoke/batch-drag.smoke.spec.js, tests/smoke/drag-reflow-layout.smoke.spec.js
 │   └── 默认: headless，不应该弹出可见浏览器窗口
 ├── 拖拽性能基准（opt-in）
 │   ├── 命令: npm run benchmark:drag
 │   ├── 文件: tests/smoke/drag-performance.smoke.spec.js, docs/DRAG_PERFORMANCE_BASELINE.md
-│   └── 默认: 仅 DRAG_BENCHMARK=1 时执行；100/500 行 × 单项/50 项选择，以 isolated-world logical rAF callback ID 精确绑定目标帧，并在同步 dragstart 返回时采样 prepare layout phase；非默认 smoke/CI timing gate
+│   └── 默认: 仅 DRAG_BENCHMARK=1 时执行；100/500 行 × 单项/50 项选择，prepare 计时前在真实 pointerdown 后状态完成 settle/全量计数归零，以 isolated-world logical rAF callback ID 精确绑定目标帧；非默认 smoke/CI timing gate
 └── 完整发布前验证
     └── 命令: npm run test:unit && npm run test:smoke && npm run package && git diff --check
 ```
