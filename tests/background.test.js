@@ -1057,6 +1057,223 @@ describe('background.js message listener', () => {
         });
     });
 
+    it.each([
+        ['APPEND_DEVELOPER_LOG', 'sourcesPlusDeveloperLogs_999'],
+        ['LOAD_DEVELOPER_LOGS', 'sourcesPlusDeveloperLogs_other_123'],
+        ['CLEAR_DEVELOPER_LOGS', 'sourcesPlusDeveloperLogs_1234'],
+        ['APPEND_DEVELOPER_LOG', 'sourcesPlusDeveloperLogs_123_extra']
+    ])('rejects %s when the developer log key is not the sender notebook exact key', (type, key) => {
+        listener({
+            type,
+            key,
+            entry: { event: 'delete_failed' }
+        }, validSender, mockSendResponse);
+
+        expect(global.chrome.storage.local.get).not.toHaveBeenCalled();
+        expect(global.chrome.storage.local.set).not.toHaveBeenCalled();
+        expect(mockSendResponse).toHaveBeenCalledWith({
+            success: false,
+            errorCode: 'unauthorized_sender'
+        });
+    });
+
+    it('rejects all developer log operations from a bare notebook URL before storage access', () => {
+        const bareNotebookSender = {
+            tab: { url: 'https://notebooklm.google.com/notebook/' }
+        };
+
+        for (const type of [
+            'APPEND_DEVELOPER_LOG',
+            'LOAD_DEVELOPER_LOGS',
+            'CLEAR_DEVELOPER_LOGS'
+        ]) {
+            listener({
+                type,
+                key: 'sourcesPlusDeveloperLogs_123',
+                entry: { event: 'delete_failed' }
+            }, bareNotebookSender, mockSendResponse);
+        }
+
+        expect(global.chrome.storage.local.get).not.toHaveBeenCalled();
+        expect(global.chrome.storage.local.set).not.toHaveBeenCalled();
+        expect(mockSendResponse).toHaveBeenCalledTimes(3);
+        expect(mockSendResponse).toHaveBeenCalledWith({
+            success: false,
+            errorCode: 'unauthorized_sender'
+        });
+    });
+
+    it('accepts only the complete developer log key for notebook ids with shared prefixes', () => {
+        const responses = [];
+        global.chrome.storage.local.get.mockImplementation((keys, cb) => {
+            const key = keys[0];
+            cb({ [key]: [{ id: key, event: 'stored' }] });
+        });
+
+        listener({
+            type: 'LOAD_DEVELOPER_LOGS',
+            key: 'sourcesPlusDeveloperLogs_123'
+        }, senderForNotebook('123'), (response) => responses.push(response));
+        listener({
+            type: 'LOAD_DEVELOPER_LOGS',
+            key: 'sourcesPlusDeveloperLogs_1234'
+        }, senderForNotebook('1234'), (response) => responses.push(response));
+
+        expect(global.chrome.storage.local.get).toHaveBeenCalledTimes(2);
+        expect(responses).toEqual([
+            expect.objectContaining({
+                success: true,
+                logs: [expect.objectContaining({ id: 'sourcesPlusDeveloperLogs_123' })]
+            }),
+            expect.objectContaining({
+                success: true,
+                logs: [expect.objectContaining({ id: 'sourcesPlusDeveloperLogs_1234' })]
+            })
+        ]);
+    });
+
+    it('serializes two developer log appends for the same key without losing either entry', async () => {
+        const key = 'sourcesPlusDeveloperLogs_123';
+        const store = { [key]: [] };
+        const pendingGets = [];
+        const pendingSets = [];
+        const firstResponse = jest.fn();
+        const secondResponse = jest.fn();
+        global.chrome.storage.local.get.mockImplementation((keys, cb) => {
+            pendingGets.push(cb);
+        });
+        global.chrome.storage.local.set.mockImplementation((payload, cb) => {
+            pendingSets.push({ payload, cb });
+        });
+
+        listener({
+            type: 'APPEND_DEVELOPER_LOG',
+            key,
+            entry: { id: 'first', event: 'first_event' }
+        }, validSender, firstResponse);
+        listener({
+            type: 'APPEND_DEVELOPER_LOG',
+            key,
+            entry: { id: 'second', event: 'second_event' }
+        }, validSender, secondResponse);
+
+        expect(pendingGets).toHaveLength(1);
+        pendingGets.shift()({ ...store });
+        expect(pendingSets).toHaveLength(1);
+        Object.assign(store, pendingSets[0].payload);
+        pendingSets.shift().cb();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(pendingGets).toHaveLength(1);
+        pendingGets.shift()({ ...store });
+        expect(pendingSets).toHaveLength(1);
+        Object.assign(store, pendingSets[0].payload);
+        pendingSets.shift().cb();
+
+        expect(store[key].map((entry) => entry.id)).toEqual(['first', 'second']);
+        expect(firstResponse).toHaveBeenCalledWith(expect.objectContaining({ success: true }));
+        expect(secondResponse).toHaveBeenCalledWith(expect.objectContaining({ success: true }));
+    });
+
+    it('runs a developer log clear after a pending same-key append', async () => {
+        const key = 'sourcesPlusDeveloperLogs_123';
+        const store = { [key]: [] };
+        const pendingGets = [];
+        const pendingSets = [];
+        const appendResponse = jest.fn();
+        const clearResponse = jest.fn();
+        global.chrome.storage.local.get.mockImplementation((keys, cb) => {
+            pendingGets.push(cb);
+        });
+        global.chrome.storage.local.set.mockImplementation((payload, cb) => {
+            pendingSets.push({ payload, cb });
+        });
+
+        listener({
+            type: 'APPEND_DEVELOPER_LOG',
+            key,
+            entry: { id: 'pending', event: 'pending_event' }
+        }, validSender, appendResponse);
+        listener({ type: 'CLEAR_DEVELOPER_LOGS', key }, validSender, clearResponse);
+
+        expect(pendingGets).toHaveLength(1);
+        expect(pendingSets).toHaveLength(0);
+        pendingGets.shift()({ ...store });
+        Object.assign(store, pendingSets[0].payload);
+        pendingSets.shift().cb();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(pendingSets).toHaveLength(1);
+        Object.assign(store, pendingSets[0].payload);
+        pendingSets.shift().cb();
+
+        expect(store[key]).toEqual([]);
+        expect(appendResponse).toHaveBeenCalledWith(expect.objectContaining({ success: true }));
+        expect(clearResponse).toHaveBeenCalledWith({ success: true, logs: [] });
+    });
+
+    it('waits for a pending same-key developer log append before loading', async () => {
+        const key = 'sourcesPlusDeveloperLogs_123';
+        const store = { [key]: [] };
+        const pendingGets = [];
+        const pendingSets = [];
+        const loadResponse = jest.fn();
+        global.chrome.storage.local.get.mockImplementation((keys, cb) => {
+            pendingGets.push(cb);
+        });
+        global.chrome.storage.local.set.mockImplementation((payload, cb) => {
+            pendingSets.push({ payload, cb });
+        });
+
+        listener({
+            type: 'APPEND_DEVELOPER_LOG',
+            key,
+            entry: { id: 'new-entry', event: 'new_event' }
+        }, validSender, jest.fn());
+        listener({ type: 'LOAD_DEVELOPER_LOGS', key }, validSender, loadResponse);
+
+        expect(pendingGets).toHaveLength(1);
+        expect(loadResponse).not.toHaveBeenCalled();
+        pendingGets.shift()({ ...store });
+        Object.assign(store, pendingSets[0].payload);
+        pendingSets.shift().cb();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(pendingGets).toHaveLength(1);
+        pendingGets.shift()({ ...store });
+        expect(loadResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: true,
+            logs: [expect.objectContaining({ id: 'new-entry' })]
+        }));
+    });
+
+    it('allows developer log appends for different notebook keys to run in parallel', () => {
+        const pendingGets = [];
+        global.chrome.storage.local.get.mockImplementation((keys, cb) => {
+            pendingGets.push({ keys, cb });
+        });
+
+        listener({
+            type: 'APPEND_DEVELOPER_LOG',
+            key: 'sourcesPlusDeveloperLogs_123',
+            entry: { id: 'first', event: 'first_event' }
+        }, senderForNotebook('123'), jest.fn());
+        listener({
+            type: 'APPEND_DEVELOPER_LOG',
+            key: 'sourcesPlusDeveloperLogs_456',
+            entry: { id: 'second', event: 'second_event' }
+        }, senderForNotebook('456'), jest.fn());
+
+        expect(pendingGets).toHaveLength(2);
+        expect(pendingGets.map(({ keys }) => keys)).toEqual([
+            ['sourcesPlusDeveloperLogs_123'],
+            ['sourcesPlusDeveloperLogs_456']
+        ]);
+    });
+
     it('appends developer logs with bounded history', () => {
         const existingLogs = Array.from({ length: 500 }, (_, index) => ({
             id: `old-${index}`,

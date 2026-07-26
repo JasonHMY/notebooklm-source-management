@@ -196,6 +196,17 @@ function getNotebookProjectIdFromSenderUrl(url) {
     return url.slice(NOTEBOOKLM_NOTEBOOK_PREFIX.length).split(/[/?#]/)[0] || '';
 }
 
+function getDeveloperLogKey(projectId) {
+    return projectId
+        ? `${DEVELOPER_LOG_KEY_PREFIX}${projectId}`
+        : '';
+}
+
+function senderOwnsExactDeveloperLogKey(sender, key) {
+    const projectId = getNotebookProjectIdFromSenderUrl(sender?.tab?.url);
+    return Boolean(projectId) && key === getDeveloperLogKey(projectId);
+}
+
 // Bind a notebook-scoped storage key to the sender tab's own notebook so a content script
 // can only read/write its OWN notebook's state/history, not another's. If no project id is
 // resolvable from the sender URL (e.g. a bare /notebook/), don't newly reject — a real
@@ -533,12 +544,7 @@ function trimDeveloperLogs(logs = []) {
     return nextLogs;
 }
 
-function loadDeveloperLogs(request, sendResponse) {
-    if (!isValidDeveloperLogKey(request?.key)) {
-        sendResponse({ success: false, errorCode: ERROR_CODES.INVALID_STORAGE_KEY });
-        return;
-    }
-
+function loadDeveloperLogsNow(request, sendResponse) {
     chrome.storage.local.get([request.key], (data) => {
         if (chrome.runtime.lastError) {
             sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
@@ -552,12 +558,7 @@ function loadDeveloperLogs(request, sendResponse) {
     });
 }
 
-function appendDeveloperLog(request, sendResponse) {
-    if (!isValidDeveloperLogKey(request?.key)) {
-        sendResponse({ success: false, errorCode: ERROR_CODES.INVALID_STORAGE_KEY });
-        return;
-    }
-
+function appendDeveloperLogNow(request, sendResponse) {
     chrome.storage.local.get([request.key], (data) => {
         if (chrome.runtime.lastError) {
             sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
@@ -579,12 +580,7 @@ function appendDeveloperLog(request, sendResponse) {
     });
 }
 
-function clearDeveloperLogs(request, sendResponse) {
-    if (!isValidDeveloperLogKey(request?.key)) {
-        sendResponse({ success: false, errorCode: ERROR_CODES.INVALID_STORAGE_KEY });
-        return;
-    }
-
+function clearDeveloperLogsNow(request, sendResponse) {
     chrome.storage.local.set({ [request.key]: [] }, () => {
         if (chrome.runtime.lastError) {
             sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
@@ -593,6 +589,51 @@ function clearDeveloperLogs(request, sendResponse) {
 
         sendResponse({ success: true, logs: [] });
     });
+}
+
+function appendDeveloperLog(request, sendResponse) {
+    if (!isValidDeveloperLogKey(request?.key)) {
+        sendResponse({ success: false, errorCode: ERROR_CODES.INVALID_STORAGE_KEY });
+        return;
+    }
+
+    enqueueStorageTask(request.key, () => new Promise((resolve) => {
+        appendDeveloperLogNow(request, (response) => {
+            sendResponse(response);
+            resolve(response);
+        });
+    }));
+}
+
+function clearDeveloperLogs(request, sendResponse) {
+    if (!isValidDeveloperLogKey(request?.key)) {
+        sendResponse({ success: false, errorCode: ERROR_CODES.INVALID_STORAGE_KEY });
+        return;
+    }
+
+    enqueueStorageTask(request.key, () => new Promise((resolve) => {
+        clearDeveloperLogsNow(request, (response) => {
+            sendResponse(response);
+            resolve(response);
+        });
+    }));
+}
+
+function loadDeveloperLogs(request, sendResponse) {
+    if (!isValidDeveloperLogKey(request?.key)) {
+        sendResponse({ success: false, errorCode: ERROR_CODES.INVALID_STORAGE_KEY });
+        return;
+    }
+
+    const pendingTask = stateSaveQueueByKey.get(request.key);
+    if (!pendingTask) {
+        loadDeveloperLogsNow(request, sendResponse);
+        return;
+    }
+
+    pendingTask
+        .catch(() => null)
+        .then(() => loadDeveloperLogsNow(request, sendResponse));
 }
 
 function openOrFocusNotebookLm(request, sendResponse) {
@@ -1255,6 +1296,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             sendResponse({ success: false, errorCode: ERROR_CODES.INVALID_STORAGE_KEY });
             return;
         }
+        if (!senderOwnsExactDeveloperLogKey(sender, request.key)) {
+            console.warn(`GeminiNotebook-Source-Management: ${request.type} key does not match sender notebook:`, request.key);
+            sendResponse({ success: false, errorCode: ERROR_CODES.UNAUTHORIZED_SENDER });
+            return;
+        }
         if (request.type === 'LOAD_DEVELOPER_LOGS') {
             loadDeveloperLogs(request, sendResponse);
             return true;
@@ -1375,6 +1421,9 @@ if (typeof module !== 'undefined' && module.exports) {
         isNotebookHomeTab,
         pickPreferredNotebookTab,
         isAuthorizedNotebookSender,
+        getNotebookProjectIdFromSenderUrl,
+        getDeveloperLogKey,
+        senderOwnsExactDeveloperLogKey,
         getManifestWebStoreFeedbackUrl,
         getWebStoreFeedbackUrl,
         openWebStoreFeedback,
@@ -1386,6 +1435,9 @@ if (typeof module !== 'undefined' && module.exports) {
         isValidDeveloperLogKey,
         normalizeDeveloperLogEntry,
         trimDeveloperLogs,
+        loadDeveloperLogsNow,
+        appendDeveloperLogNow,
+        clearDeveloperLogsNow,
         getPreferences,
         setPreferences,
         loadDeveloperLogs,

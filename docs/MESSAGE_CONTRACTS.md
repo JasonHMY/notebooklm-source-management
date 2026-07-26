@@ -21,7 +21,9 @@ Popup/content -> background
 └── CLEAR_DEVELOPER_LOGS
 ```
 
-Notebook-scoped storage messages require a sender tab whose URL starts with `https://notebooklm.google.com/notebook/`. Beyond the URL prefix, `SAVE_STATE` / `LOAD_STATE` / `APPEND_STATE_HISTORY` / `LOAD_STATE_HISTORY` also require the `projectId` embedded in `request.key` (the trailing `_<id>` segment) to match the sender tab's own `/notebook/<id>`; otherwise the worker returns `unauthorized_sender`. When no projectId can be derived from the sender URL (a bare `/notebook/`), no extra rejection is added.
+Notebook-scoped storage messages require a sender tab whose URL starts with `https://notebooklm.google.com/notebook/`. Beyond the URL prefix, `SAVE_STATE` / `LOAD_STATE` / `APPEND_STATE_HISTORY` / `LOAD_STATE_HISTORY` also require the `projectId` embedded in `request.key` (the trailing `_<id>` segment) to match the sender tab's own `/notebook/<id>`; otherwise the worker returns `unauthorized_sender`. For those state/history messages only, a bare `/notebook/` URL does not add an extra project-id rejection.
+
+Developer-log messages use a stricter ownership rule. `APPEND_DEVELOPER_LOG` / `LOAD_DEVELOPER_LOGS` / `CLEAR_DEVELOPER_LOGS` require a non-empty project id parsed from the sender tab URL and require `request.key` to equal `sourcesPlusDeveloperLogs_<projectId>` exactly. Suffix matches, longer shared-prefix ids, extra key segments, cross-notebook keys, and a bare `/notebook/` URL all return `unauthorized_sender` before any storage read or write.
 
 Global messages that are not notebook-state writes, such as extension enable/disable, preferences, tab focus/open, and web store feedback, are not tied to one notebook state key.
 
@@ -41,7 +43,7 @@ LOAD_STATE_HISTORY / APPEND_STATE_HISTORY
 └── key must start with sourcesPlusHistory_
 
 APPEND_DEVELOPER_LOG / LOAD_DEVELOPER_LOGS / CLEAR_DEVELOPER_LOGS
-└── key must start with sourcesPlusDeveloperLogs_
+└── key must equal sourcesPlusDeveloperLogs_<sender projectId>
 ```
 
 `APPEND_STATE_HISTORY` entries may include `label` and `manual` for user-created restore points. The message type is unchanged; the background worker applies the current `historyRetentionLimit` preference when saving or loading history.
@@ -143,3 +145,5 @@ Log payloads are structured and sanitized before storage:
 ```
 
 Developer logs are bounded to 500 entries and approximately 512 KB per notebook.
+
+`APPEND_DEVELOPER_LOG` and `CLEAR_DEVELOPER_LOGS` share one FIFO per exact developer-log key. This prevents two concurrent append read-modify-write operations from dropping an entry and preserves append/clear arrival order. `LOAD_DEVELOPER_LOGS` waits for the pending task on its own key before reading, while operations for different notebook keys remain independent and may run in parallel.

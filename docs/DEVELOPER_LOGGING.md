@@ -60,6 +60,10 @@ Developer logs are stored per notebook under `sourcesPlusDeveloperLogs_<projectI
 
 When either limit is exceeded, oldest entries are discarded first.
 
+All background append, load, and clear messages are bound to the sender tab's current notebook. The sender URL must contain a non-empty `/notebook/<projectId>` segment and its storage key must equal `sourcesPlusDeveloperLogs_<projectId>` exactly. Cross-notebook keys, suffix-only matches, extra key segments, and a bare `/notebook/` URL are rejected before storage access.
+
+Append and clear operations are serialized in arrival order per notebook key. A load waits for any pending append or clear on the same key, preventing lost updates or stale reads. Different notebook keys use independent queues.
+
 ## Writing New Logs
 
 Use the content logger helper instead of writing directly to `console` or `chrome.storage.local`:
