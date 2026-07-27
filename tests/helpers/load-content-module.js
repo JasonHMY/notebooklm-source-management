@@ -42,6 +42,7 @@ function clearContentGlobals() {
     delete globalThis.NSM_CREATE_CONTENT_MODAL_TAG;
     delete globalThis.NSM_CREATE_CONTENT_MODAL_SETTINGS;
     delete globalThis.NSM_CREATE_CONTENT_MODALS;
+    delete globalThis.NSM_CREATE_CONTENT_SEARCH_SEMANTICS;
     delete globalThis.NSM_CREATE_CONTENT_RENDER;
     delete globalThis.NSM_CREATE_CONTENT_VIEW_STATE;
     delete globalThis.NSM_CREATE_CONTENT_NATIVE_CHECKBOX_SYNC;
@@ -93,6 +94,7 @@ function loadContentModule() {
     require('../../src/content/content-modal-tag.js');
     require('../../src/content/content-modal-settings.js');
     require('../../src/content/content-modals.js');
+    require('../../src/content/content-search-semantics.js');
     require('../../src/content/content-render.js');
     require('../../src/content/content-view-state.js');
     require('../../src/content/content-native-checkbox-sync.js');

@@ -52,9 +52,11 @@ GeminiNotebook-Source-Management
 │   │   ├── content-tree-interactions.js
 │   │   │   └── 分组树、checkbox、批量模式与拖拽 read → plan → write；single/batch drag、新增/删除/移出分组及批量移到未分组通过严格语义 target 适配 Tree Placement，批量 payload 必须与可信拖拽会话完全一致，另维护同步 native dropEffect、类型化 geometry snapshot、滚动 delta patch、auto-scroll 静止指针刷新/落下前同步 flush、ResizeObserver/render 失效和 fail-closed 重建
 │   │   ├── content-render.js
-│   │   │   └── Shadow DOM manager 渲染、列表行、批量条、菜单层
+│   │   │   └── Shadow DOM manager 渲染、列表行、批量条、菜单层；将纯搜索分段映射为安全文本节点与高亮 span
 │   │   ├── content-modals.js
 │   │   │   └── 首次欢迎、更新介绍、设置、导入预览、标签、移动文件夹、批量标签 modal
+│   │   ├── content-search-semantics.js
+│   │   │   └── 无 DOM 的统一搜索语义；集中 query 解析、来源上下文、source/group 匹配、高亮词范围及 Unicode 原文索引安全的文本分段
 │   │   ├── content-modal-focus.js
 │   │   │   └── modal 初始聚焦、Tab trap、Escape 关闭和焦点恢复 helper
 │   │   ├── content-modal-welcome.js
@@ -102,7 +104,7 @@ GeminiNotebook-Source-Management
 │   │   ├── content-tags.js
 │   │   │   └── 标签 label/color normalization、usage、增删改
 │   │   ├── content-view-state.js
-│   │   │   └── 搜索、过滤、隔离视图、effective enabled 状态
+│   │   │   └── 搜索 UI/过滤编排、quick view、隔离视图与 effective enabled 状态；搜索语法和匹配委托统一语义模块
 │   │   ├── content-panel-dom.js
 │   │   │   └── Gemini Notebook panel 查找、挂载、生命周期、颜色/布局读取
 │   │   ├── content-developer-logger.js
@@ -284,6 +286,7 @@ manifest.json
     ├── src/content/content-modal-tag.js
     ├── src/content/content-modal-settings.js
     ├── src/content/content-modals.js
+    ├── src/content/content-search-semantics.js
     ├── src/content/content-render.js
     ├── src/content/content-view-state.js
     ├── src/content/content-native-checkbox-sync.js
@@ -429,11 +432,15 @@ manifest.json
 │   │   ├── active isolation group
 │   │   └── effective enabled source 计算
 │   ├── 先看
+│   │   ├── src/content/content-search-semantics.js
 │   │   ├── src/content/content-view-state.js
 │   │   └── src/content/content-render.js
 │   └── 测试
+│       ├── tests/content/content-search-semantics.test.js
 │       ├── tests/content/content-view-state.test.js
-│       └── tests/content/content-render.test.js
+│       ├── tests/content/content-render.test.js
+│       ├── tests/content/content-module.test.js
+│       └── tests/manifest-loader-sync.test.js
 ├── 原生来源操作
 │   ├── 负责
 │   │   ├── 插件三点菜单定位和 submenu
@@ -712,9 +719,9 @@ content runtime memory
 ├── 分组树 / checkbox
 │   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-tree-placement.test.js tests/content/content-tree.test.js
 │   └── 文件: tests/content/content-tree-placement.test.js, tests/content/content-tree.test.js
-├── 渲染 / 批量操作条
-│   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-render.test.js tests/content/content-view-state.test.js
-│   └── 文件: tests/content/content-render.test.js, tests/content/content-view-state.test.js
+├── 搜索语义 / 渲染 / 批量操作条
+│   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-search-semantics.test.js tests/content/content-render.test.js tests/content/content-view-state.test.js tests/content/content-module.test.js tests/manifest-loader-sync.test.js
+│   └── 文件: tests/content/content-search-semantics.test.js, tests/content/content-render.test.js, tests/content/content-view-state.test.js, tests/content/content-module.test.js, tests/manifest-loader-sync.test.js
 ├── 欢迎 / 设置弹窗 / 标签 modal / 命令面板
 │   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-modals-tags.test.js tests/content/content-modal-focus.test.js
 │   └── 文件: tests/content/content-modals-tags.test.js, tests/content/content-modal-focus.test.js, tests/content/content-modal-tag.test.js, tests/content/content-modal-tag-filter.test.js, tests/content/content-modal-move.test.js, tests/content/content-modal-command-palette.test.js, tests/content/content-modal-welcome.test.js, tests/content/content-modal-whats-new.test.js

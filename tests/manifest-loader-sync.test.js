@@ -64,6 +64,23 @@ describe('manifest <-> load-content-module sync', () => {
         });
     });
 
+    it('loads search semantics after modals and before both search consumers', () => {
+        const manifestFiles = getManifestRuntimeJsList();
+        const searchSemanticsPath = 'src/content/content-search-semantics.js';
+        const modalsPath = 'src/content/content-modals.js';
+        const consumers = [
+            'src/content/content-render.js',
+            'src/content/content-view-state.js'
+        ];
+
+        expect(manifestFiles.indexOf(modalsPath))
+            .toBeLessThan(manifestFiles.indexOf(searchSemanticsPath));
+        consumers.forEach((consumer) => {
+            expect(manifestFiles.indexOf(searchSemanticsPath))
+                .toBeLessThan(manifestFiles.indexOf(consumer));
+        });
+    });
+
     it('clearContentGlobals() deletes at least one NSM_* global per helper module', () => {
         const loaderFiles = getLoaderRequireList();
         const clearedGlobals = getLoaderClearGlobalsList();

@@ -725,9 +725,12 @@ git commit -m "refactor: normalize sync and restore placement"
 - Modify: `manifest.json`
 - Modify: `tests/helpers/load-content-module.js`
 - Modify: `tests/helpers/content-test-harness.js`
+- Modify: `tests/content/content-module.test.js`
 - Modify: `tests/content/content-view-state.test.js`
 - Modify: `tests/content/content-render.test.js`
+- Modify: `tests/manifest-loader-sync.test.js`
 - Modify: `docs/PROJECT_DIRECTORY.md`
+- Modify: `docs/superpowers/plans/2026-07-26-architecture-deepening-and-accessibility.md`
 - Modify: `CHANGELOG.md`
 
 **Module:**
@@ -765,7 +768,7 @@ createContentSearchSemantics({
 
 不创建 DOM；render Adapter 将 `matched:true` 映射为 `.sp-search-highlight`。
 
-- [ ] **Step 1: 写语义失败测试**
+- [x] **Step 1: 写语义失败测试**
 
 覆盖：
 
@@ -777,7 +780,7 @@ createContentSearchSemantics({
 - overlapping highlight 选 longest term；
 - matcher 与 highlight 对同 criteria 不漂移。
 
-- [ ] **Step 2: 运行并确认红灯**
+- [x] **Step 2: 运行并确认红灯**
 
 Run:
 
@@ -791,7 +794,7 @@ npm run test:unit -- --runTestsByPath \
 
 Expected: FAIL，新 Module 尚不存在。
 
-- [ ] **Step 3: 实现 Module 与加载顺序**
+- [x] **Step 3: 实现 Module 与加载顺序**
 
 - manifest：`content-modals.js` 后、`content-render.js`/`content-view-state.js` 前；
 - loader/harness 同步 `NSM_CREATE_CONTENT_SEARCH_SEMANTICS`；
@@ -799,7 +802,7 @@ Expected: FAIL，新 Module 尚不存在。
 - render 删除 parser/matcher/highlight normalization，只保留 DOM segmentation mapping；
 - search expand、debounce、result count 保留原 Module，维持 Locality。
 
-- [ ] **Step 4: 检查 duplicate parser**
+- [x] **Step 4: 检查 duplicate parser**
 
 Run:
 
@@ -810,7 +813,7 @@ rg -n "scopedPattern|function parseSearchQuery|function getUniqueSearchTerms" \
 
 Expected: 无输出；唯一语法定义在 `content-search-semantics.js`。
 
-- [ ] **Step 5: 测试并提交**
+- [x] **Step 5: 测试并提交**
 
 Run: 同 Step 2，并加 `tests/manifest-loader-sync.test.js`。
 
@@ -823,9 +826,13 @@ git add src/content/content-search-semantics.js \
   src/content/index.js manifest.json \
   tests/helpers/load-content-module.js \
   tests/helpers/content-test-harness.js \
+  tests/content/content-module.test.js \
   tests/content/content-view-state.test.js \
   tests/content/content-render.test.js \
-  docs/PROJECT_DIRECTORY.md CHANGELOG.md
+  tests/manifest-loader-sync.test.js \
+  docs/PROJECT_DIRECTORY.md \
+  docs/superpowers/plans/2026-07-26-architecture-deepening-and-accessibility.md \
+  CHANGELOG.md
 git commit -m "refactor: unify search semantics"
 ```
 

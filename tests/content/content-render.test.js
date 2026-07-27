@@ -781,6 +781,7 @@ describe('batch count and source menu motion rendering', () => {
     beforeEach(() => {
         jest.resetModules();
         setupGlobalMocks();
+        require('../../src/content/content-search-semantics.js');
         createContentRender = require('../../src/content/content-render.js');
     });
 
@@ -1052,15 +1053,8 @@ describe('batch count and source menu motion rendering', () => {
         expect(renderModule.createBatchCountMessageChildren('ui_batch_add_count', 3, 'batch-add')).toEqual(['Add (3)']);
     });
 
-    it('parses scoped search queries and highlights matching text', () => {
+    it('maps semantic text segments to highlighted DOM spans', () => {
         const renderModule = createContentRender({ el: createRenderTestElement });
-
-        expect(renderModule.parseSearchQuery('alpha tag:paper folder:"Chapter One"')).toMatchObject({
-            textTerms: ['alpha'],
-            tagTerms: ['paper'],
-            folderTerms: ['chapter one'],
-            hasQuery: true
-        });
 
         const highlighted = renderModule.createHighlightedTextChildren('Alpha Paper', ['paper']);
         expect(highlighted.map((child) => (typeof child === 'string' ? child : child.textContent))).toEqual([
@@ -1070,24 +1064,33 @@ describe('batch count and source menu motion rendering', () => {
         expect(highlighted[1].className).toBe('sp-search-highlight');
     });
 
-    it('matches source search against tag labels and folder ancestors', () => {
-        const paperTag = { id: 'tag-paper', label: 'Paper' };
-        const tagsById = new Map([[paperTag.id, paperTag]]);
-        const groupsById = new Map([
-            ['folder1', { id: 'folder1', title: 'Chapter One' }]
-        ]);
-        const parentMap = new Map([['source-1', 'folder1']]);
+    it('shows result counts for scoped queries and clears them for empty queries', () => {
+        const countElement = {
+            hidden: false,
+            textContent: 'stale'
+        };
         const renderModule = createContentRender({
-            getTagsById: () => tagsById,
-            getGroupsById: () => groupsById,
-            getParentMap: () => parentMap,
-            getSourceTagIds: () => [paperTag.id]
+            getShadowRoot: () => ({
+                getElementById: (id) => (id === 'sp-search-count' ? countElement : null)
+            }),
+            getMessage: (key, substitutions = []) => (
+                key === 'ui_search_results_count'
+                    ? `${substitutions[0]} results`
+                    : key
+            )
         });
-        const source = { key: 'source-1', title: 'Notes', lowercaseTitle: 'notes' };
 
-        expect(renderModule.sourceMatchesSearchQuery(source, 'tag:paper')).toBe(true);
-        expect(renderModule.sourceMatchesSearchQuery(source, 'folder:chapter')).toBe(true);
-        expect(renderModule.sourceMatchesSearchQuery(source, 'missing')).toBe(false);
+        renderModule.updateSearchResultCount('', 3);
+        expect(countElement).toEqual({
+            hidden: true,
+            textContent: ''
+        });
+
+        renderModule.updateSearchResultCount('tag:paper', 2);
+        expect(countElement).toEqual({
+            hidden: false,
+            textContent: '2 results'
+        });
     });
 
     it('animates changed batch counts and skips unchanged counts', () => {

@@ -9,7 +9,8 @@
      *   - state getters: getState, getGroupsById, getTagsById, getSourcesByKey, getParentMap,
      *     getPendingBatchKeys, getActiveIsolationGroupId, getIsDeletingSources, getVisibleQuickViewKinds
      *   - DOM 工厂: el (XSS-safe text-node-only element factory from src/utils/index.js)
-     *   - filter predicates: sourceMatchesCurrentFilters, areAllAncestorsEnabled,
+     *   - search/filter: searchSemantics (由 index 注入；独立调用需先加载全局 factory),
+     *     sourceMatchesCurrentFilters, areAllAncestorsEnabled,
      *     isSourceWithinActiveIsolation, isGroupWithinActiveIsolation, isSourceEffectivelyEnabled,
      *     shouldRenderGroup, hasActiveRenderFilters, getSourceTagIds, getTagStyleVars
      *   - interaction callbacks: handleInteraction, canOpenSourceActionMenu, syncSearchUi, getMessage
@@ -86,6 +87,30 @@
         const getSourceTagIds = typeof deps.getSourceTagIds === 'function'
             ? deps.getSourceTagIds
             : () => [];
+        const createSearchSemantics = typeof globalThis.NSM_CREATE_CONTENT_SEARCH_SEMANTICS === 'function'
+            ? globalThis.NSM_CREATE_CONTENT_SEARCH_SEMANTICS
+            : null;
+        const searchSemantics = deps.searchSemantics && typeof deps.searchSemantics === 'object'
+            ? deps.searchSemantics
+            : (createSearchSemantics ? createSearchSemantics({
+                getGroupsById,
+                getTagsById,
+                getParentMap,
+                getSourceTagIds
+            }) : null);
+        if (
+            !searchSemantics
+            || typeof searchSemantics.parseQuery !== 'function'
+            || typeof searchSemantics.matchesSource !== 'function'
+            || typeof searchSemantics.getHighlightTerms !== 'function'
+            || typeof searchSemantics.segmentText !== 'function'
+        ) {
+            throw new Error(
+                'GeminiNotebook-Source-Management: Content search semantics are missing.'
+            );
+        }
+        const parseSearchQuery = searchSemantics.parseQuery;
+        const getSearchHighlightTerms = searchSemantics.getHighlightTerms;
         const getTagStyleVars = typeof deps.getTagStyleVars === 'function'
             ? deps.getTagStyleVars
             : () => '';
@@ -261,153 +286,21 @@
             return String(state?.filterQuery || '').trim().toLowerCase();
         }
 
-        function normalizeSearchTerm(value) {
-            return String(value || '')
-                .trim()
-                .replace(/^["']|["']$/g, '')
-                .replace(/\s+/g, ' ')
-                .toLowerCase();
-        }
-
-        function getUniqueSearchTerms(terms) {
-            const seen = new Set();
-            return (Array.isArray(terms) ? terms : [])
-                .map(normalizeSearchTerm)
-                .filter((term) => {
-                    if (!term || seen.has(term)) return false;
-                    seen.add(term);
-                    return true;
-                });
-        }
-
-        function parseSearchQuery(query) {
-            const raw = String(query || '');
-            const tagTerms = [];
-            const folderTerms = [];
-            const remainingParts = [];
-            let lastIndex = 0;
-            const scopedPattern = /\b(tag|folder):("[^"]+"|'[^']+'|[^\s]+)/gi;
-            let match;
-
-            while ((match = scopedPattern.exec(raw)) !== null) {
-                if (match.index > lastIndex) {
-                    remainingParts.push(raw.slice(lastIndex, match.index));
-                }
-                const scope = String(match[1] || '').toLowerCase();
-                const term = normalizeSearchTerm(match[2]);
-                if (term) {
-                    if (scope === 'tag') tagTerms.push(term);
-                    if (scope === 'folder') folderTerms.push(term);
-                }
-                lastIndex = scopedPattern.lastIndex;
-            }
-
-            if (lastIndex < raw.length) {
-                remainingParts.push(raw.slice(lastIndex));
-            }
-
-            const textTerms = getUniqueSearchTerms(remainingParts.join(' ').split(/\s+/));
-            const parsedTagTerms = getUniqueSearchTerms(tagTerms);
-            const parsedFolderTerms = getUniqueSearchTerms(folderTerms);
-            return {
-                raw,
-                textTerms,
-                tagTerms: parsedTagTerms,
-                folderTerms: parsedFolderTerms,
-                hasQuery: textTerms.length > 0 || parsedTagTerms.length > 0 || parsedFolderTerms.length > 0
-            };
-        }
-
-        function anyTextIncludesTerm(values, term) {
-            return (Array.isArray(values) ? values : [])
-                .some((value) => String(value || '').toLowerCase().includes(term));
-        }
-
-        function allTermsMatchAnyValue(terms, values) {
-            return (Array.isArray(terms) ? terms : []).every((term) => anyTextIncludesTerm(values, term));
-        }
-
-        function getSourceFolderLabels(sourceKey) {
-            const groupsById = getGroupsById();
-            const parentMap = getParentMap();
-            const folderLabels = [];
-            const visitedGroupIds = new Set();
-            let parentId = parentMap.get(sourceKey);
-
-            while (parentId && !visitedGroupIds.has(parentId)) {
-                visitedGroupIds.add(parentId);
-                const group = groupsById.get(parentId);
-                if (group?.title) folderLabels.push(group.title);
-                parentId = parentMap.get(parentId);
-            }
-
-            return folderLabels;
-        }
-
         function sourceMatchesSearchQuery(source, query) {
             const criteria = typeof query === 'string' ? parseSearchQuery(query) : query;
             if (!source || !criteria || !criteria.hasQuery) return false;
-            const tagsById = getTagsById();
-            const tagLabels = getSourceTagIds(source.key)
-                .map((tagId) => tagsById.get(tagId)?.label)
-                .filter(Boolean);
-            const folderLabels = getSourceFolderLabels(source.key);
-            const titleValues = [source.title, source.lowercaseTitle, source.normalizedTitle].filter(Boolean);
-            const allTextValues = [...titleValues, ...tagLabels, ...folderLabels];
-
-            return allTermsMatchAnyValue(criteria.textTerms, allTextValues) &&
-                allTermsMatchAnyValue(criteria.tagTerms, tagLabels) &&
-                allTermsMatchAnyValue(criteria.folderTerms, folderLabels);
-        }
-
-        function getSearchHighlightTerms(query, scope = 'text') {
-            const criteria = typeof query === 'string' ? parseSearchQuery(query) : query;
-            if (!criteria || !criteria.hasQuery) return [];
-            if (scope === 'tag') return getUniqueSearchTerms([...criteria.textTerms, ...criteria.tagTerms]);
-            if (scope === 'folder') return getUniqueSearchTerms([...criteria.textTerms, ...criteria.folderTerms]);
-            return getUniqueSearchTerms(criteria.textTerms);
+            return searchSemantics.matchesSource(source, criteria);
         }
 
         function createHighlightedTextChildren(value, terms) {
             const text = String(value || '');
-            const normalizedTerms = getUniqueSearchTerms(terms)
-                .filter((term) => term.length > 0)
-                .sort((left, right) => right.length - left.length);
-            if (!text || normalizedTerms.length === 0) return [text];
-
-            const children = [];
-            let cursor = 0;
-            const lowercaseText = text.toLowerCase();
-
-            while (cursor < text.length) {
-                let bestMatch = null;
-                normalizedTerms.forEach((term) => {
-                    const index = lowercaseText.indexOf(term, cursor);
-                    if (index === -1) return;
-                    if (
-                        !bestMatch ||
-                        index < bestMatch.index ||
-                        (index === bestMatch.index && term.length > bestMatch.term.length)
-                    ) {
-                        bestMatch = { index, term };
-                    }
-                });
-
-                if (!bestMatch) {
-                    children.push(text.slice(cursor));
-                    break;
-                }
-
-                if (bestMatch.index > cursor) {
-                    children.push(text.slice(cursor, bestMatch.index));
-                }
-                children.push(el('span', { className: 'sp-search-highlight' }, [
-                    text.slice(bestMatch.index, bestMatch.index + bestMatch.term.length)
-                ]));
-                cursor = bestMatch.index + bestMatch.term.length;
-            }
-
-            return children.length > 0 ? children : [text];
+            const segments = searchSemantics.segmentText(text, terms);
+            if (segments.length === 0) return [text];
+            return segments.map((segment) => (
+                segment.matched
+                    ? el('span', { className: 'sp-search-highlight' }, [segment.text])
+                    : segment.text
+            ));
         }
 
         function updateSearchResultCount(query, count) {
@@ -1572,9 +1465,6 @@
             handleSpotlightPointerLeave,
             bindSpotlightPointerTracking,
             getNormalizedSearchQuery,
-            parseSearchQuery,
-            sourceMatchesSearchQuery,
-            getSearchHighlightTerms,
             createHighlightedTextChildren,
             updateSearchResultCount,
             collectSearchExpandedGroupIds,

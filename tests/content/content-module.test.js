@@ -64,6 +64,16 @@ describe('content module loading', () => {
         expect(renderSource).toContain("typeof deps.onBeforeRowsPatch === 'function'");
         expect(renderSource).toContain('deps.onBeforeRowsPatch();');
     });
+
+    it('creates one search semantics instance and injects it into both consumers', () => {
+        const indexSource = fs.readFileSync(
+            path.join(__dirname, '../../src/content/index.js'),
+            'utf8'
+        );
+
+        expect(indexSource.match(/createContentSearchSemantics\(\{/g)).toHaveLength(1);
+        expect(indexSource.match(/searchSemantics: searchSemanticsModule/g)).toHaveLength(2);
+    });
 });
 
 describe('content stylesheet native source list visibility', () => {

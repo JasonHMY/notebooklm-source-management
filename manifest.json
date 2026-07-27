@@ -83,6 +83,7 @@
         "src/content/content-modal-tag.js",
         "src/content/content-modal-settings.js",
         "src/content/content-modals.js",
+        "src/content/content-search-semantics.js",
         "src/content/content-render.js",
         "src/content/content-view-state.js",
         "src/content/content-native-checkbox-sync.js",

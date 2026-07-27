@@ -1,3 +1,4 @@
+require('../../src/content/content-search-semantics.js');
 const createContentViewState = require('../../src/content/content-view-state.js');
 
 describe('content quick view filters', () => {

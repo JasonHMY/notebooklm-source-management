@@ -74,6 +74,7 @@
     const createContentNativeLabelImportController = globalThis.NSM_CREATE_CONTENT_NATIVE_LABEL_IMPORT_CONTROLLER;
     const createContentPersistence = globalThis.NSM_CREATE_CONTENT_PERSISTENCE;
     const createContentModals = globalThis.NSM_CREATE_CONTENT_MODALS;
+    const createContentSearchSemantics = globalThis.NSM_CREATE_CONTENT_SEARCH_SEMANTICS;
     const createContentRender = globalThis.NSM_CREATE_CONTENT_RENDER;
     const createContentViewState = globalThis.NSM_CREATE_CONTENT_VIEW_STATE;
     const createContentTreeInteractions = globalThis.NSM_CREATE_CONTENT_TREE_INTERACTIONS;
@@ -104,6 +105,7 @@
         typeof createContentNativeLabelImportController !== 'function' ||
         typeof createContentPersistence !== 'function' ||
         typeof createContentModals !== 'function' ||
+        typeof createContentSearchSemantics !== 'function' ||
         typeof createContentRender !== 'function' ||
         typeof createContentViewState !== 'function' ||
         typeof createContentTreeInteractions !== 'function' ||
@@ -629,8 +631,16 @@
         resetSourceActionInvokers
     } = sourceActionsModule;
 
+    const searchSemanticsModule = createContentSearchSemantics({
+        getGroupsById: () => groupsById,
+        getTagsById: () => tagsById,
+        getParentMap: () => parentMap,
+        getSourceTagIds
+    });
+
     const viewStateModule = createContentViewState({
         runtime: runtimeContext,
+        searchSemantics: searchSemanticsModule,
         getState: () => state,
         getGroupsById: () => groupsById,
         getSourcesByKey: () => sourcesByKey,
@@ -655,7 +665,6 @@
         isSourceEffectivelyEnabled,
         isGroupWithinActiveIsolation,
         isSourceWithinActiveIsolation,
-        parseSearchQuery,
         sourceMatchesCurrentFilters,
         hasActiveRenderFilters,
         groupHasRenderableDescendant,
@@ -887,6 +896,7 @@
     }
 
     const renderModule = createContentRender({
+        searchSemantics: searchSemanticsModule,
         getDocument: () => document,
         getShadowRoot: () => shadowRoot,
         getState: () => state,
@@ -959,9 +969,6 @@
         handleSpotlightPointerLeave,
         bindSpotlightPointerTracking,
         getNormalizedSearchQuery,
-        parseSearchQuery: parseRenderSearchQuery,
-        sourceMatchesSearchQuery,
-        getSearchHighlightTerms,
         createHighlightedTextChildren,
         collectSearchExpandedGroupIds,
         getRenderedSourceActionMenuItems,
@@ -5124,11 +5131,7 @@
             _handleSpotlightPointerLeaveForTest: handleSpotlightPointerLeave,
             _bindSpotlightPointerTrackingForTest: bindSpotlightPointerTracking,
             _getNormalizedSearchQueryForTest: getNormalizedSearchQuery,
-            _parseSearchQueryForTest: parseSearchQuery,
-            _parseRenderSearchQueryForTest: parseRenderSearchQuery,
-            _sourceMatchesSearchQueryForTest: sourceMatchesSearchQuery,
             _createHighlightedTextChildrenForTest: createHighlightedTextChildren,
-            _getSearchHighlightTermsForTest: getSearchHighlightTerms,
             _collectSearchExpandedGroupIdsForTest: collectSearchExpandedGroupIds,
             _clearDragFeedbackForTest: clearDragFeedback,
             _handleNativeSourceDeleteAcceptedForTest: handleNativeSourceDeleteAccepted,

@@ -9,7 +9,7 @@
      *    `syncSourcesToEffectiveState` 把结果推回 NotebookLM DOM。
      *  - Isolation 视图:`isGroupWithinActiveIsolation` / `isSourceWithinActiveIsolation` —
      *    只渲染 activeIsolationGroupId 的后代。
-     *  - 搜索:`parseSearchQuery` 解析"标题词 + tag:xxx + group:xxx"语法,
+     *  - 搜索:委托 searchSemantics 解析"标题词 + tag:xxx + folder:xxx"语法,
      *    `sourceMatchesSearchCriteria` / `groupMatchesSearchCriteria` 做 predicate。
      *    搜索栏 UI:展开/折叠/外点关闭(handleSearchButtonClick / handleSearchOutsideClick /
      *    handleDocumentOutsideClick)。
@@ -18,7 +18,8 @@
      *  - 综合 predicate:`sourceMatchesCurrentFilters`, `hasActiveRenderFilters`,
      *    `shouldRenderGroup`(含 groupHasRenderableDescendant 递归)。
      *
-     * @param {Object} deps 全部可选(都有 runtime fallback),主要分两类:
+     * @param {Object} deps 由 index 注入；独立调用时须传入 searchSemantics，
+     *   或先加载会注册 NSM_CREATE_CONTENT_SEARCH_SEMANTICS 的无 bundler helper。其余依赖有 runtime fallback，主要分两类:
      *   - state getters:getState, getGroupsById, getSourcesByKey, getTagsById, getParentMap,
      *     getShadowRoot, getActiveIsolationGroupId, getIsSearchExpanded, setIsSearchExpanded,
      *     getExtensionHost, getNow, getSourceTagIds
@@ -28,9 +29,8 @@
      * @returns {Object} 30+ helpers,大致分组:
      *   - Enabled / isolation:getEffectivelyEnabledSources, areAllAncestorsEnabled,
      *     isSourceEffectivelyEnabled, isGroupWithinActiveIsolation, isSourceWithinActiveIsolation
-     *   - Filter / search 解析:parseSearchQuery, sourceMatchesSearchCriteria,
-     *     groupMatchesSearchCriteria, normalizeQuickViewKind, sourceMatchesQuickView,
-     *     isSourceIssue, isSourceRecentlyAdded
+     *   - Filter orchestration:normalizeQuickViewKind, sourceMatchesQuickView,
+     *     isSourceIssue, isSourceRecentlyAdded；query 解析与匹配由 searchSemantics 提供
      *   - 综合 predicate:sourceMatchesCurrentFilters, hasActiveRenderFilters,
      *     groupHasRenderableDescendant, shouldRenderGroup
      *   - 搜索 UI:getSearchUiElements, getCurrentSearchValue, hasCurrentSearchValue,
@@ -102,6 +102,30 @@
         const getSourceTagIds = typeof ctx.getSourceTagIds === 'function'
             ? ctx.getSourceTagIds
             : () => [];
+        const createSearchSemantics = typeof globalThis.NSM_CREATE_CONTENT_SEARCH_SEMANTICS === 'function'
+            ? globalThis.NSM_CREATE_CONTENT_SEARCH_SEMANTICS
+            : null;
+        const searchSemantics = ctx.searchSemantics && typeof ctx.searchSemantics === 'object'
+            ? ctx.searchSemantics
+            : (createSearchSemantics ? createSearchSemantics({
+                getGroupsById,
+                getTagsById,
+                getParentMap,
+                getSourceTagIds
+            }) : null);
+        if (
+            !searchSemantics
+            || typeof searchSemantics.parseQuery !== 'function'
+            || typeof searchSemantics.matchesSource !== 'function'
+            || typeof searchSemantics.matchesGroup !== 'function'
+        ) {
+            throw new Error(
+                'GeminiNotebook-Source-Management: Content search semantics are missing.'
+            );
+        }
+        const parseSearchQuery = searchSemantics.parseQuery;
+        const sourceMatchesSearchCriteria = searchSemantics.matchesSource;
+        const groupMatchesSearchCriteria = searchSemantics.matchesGroup;
         const isDescendant = typeof ctx.isDescendant === 'function'
             ? ctx.isDescendant
             : (typeof globalThis.isDescendant === 'function' ? globalThis.isDescendant : defaultIsDescendant);
@@ -234,134 +258,6 @@
             }
 
             return false;
-        }
-
-        function normalizeSearchTerm(value) {
-            return String(value || '')
-                .trim()
-                .replace(/^["']|["']$/g, '')
-                .replace(/\s+/g, ' ')
-                .toLowerCase();
-        }
-
-        function getUniqueSearchTerms(terms) {
-            const seen = new Set();
-            return (Array.isArray(terms) ? terms : [])
-                .map(normalizeSearchTerm)
-                .filter((term) => {
-                    if (!term || seen.has(term)) return false;
-                    seen.add(term);
-                    return true;
-                });
-        }
-
-        function parseSearchQuery(query) {
-            const raw = String(query || '');
-            const tagTerms = [];
-            const folderTerms = [];
-            const remainingParts = [];
-            let lastIndex = 0;
-            const scopedPattern = /\b(tag|folder):("[^"]+"|'[^']+'|[^\s]+)/gi;
-            let match;
-
-            while ((match = scopedPattern.exec(raw)) !== null) {
-                if (match.index > lastIndex) {
-                    remainingParts.push(raw.slice(lastIndex, match.index));
-                }
-                const scope = String(match[1] || '').toLowerCase();
-                const term = normalizeSearchTerm(match[2]);
-                if (term) {
-                    if (scope === 'tag') tagTerms.push(term);
-                    if (scope === 'folder') folderTerms.push(term);
-                }
-                lastIndex = scopedPattern.lastIndex;
-            }
-
-            if (lastIndex < raw.length) {
-                remainingParts.push(raw.slice(lastIndex));
-            }
-
-            const textTerms = getUniqueSearchTerms(remainingParts.join(' ').split(/\s+/));
-            const parsedTagTerms = getUniqueSearchTerms(tagTerms);
-            const parsedFolderTerms = getUniqueSearchTerms(folderTerms);
-
-            return {
-                raw,
-                textTerms,
-                tagTerms: parsedTagTerms,
-                folderTerms: parsedFolderTerms,
-                hasQuery: textTerms.length > 0 || parsedTagTerms.length > 0 || parsedFolderTerms.length > 0
-            };
-        }
-
-        function textIncludesTerm(value, term) {
-            return String(value || '').toLowerCase().includes(term);
-        }
-
-        function anyTextIncludesTerm(values, term) {
-            return (Array.isArray(values) ? values : []).some((value) => textIncludesTerm(value, term));
-        }
-
-        function allTermsMatchAnyValue(terms, values) {
-            return (Array.isArray(terms) ? terms : []).every((term) => anyTextIncludesTerm(values, term));
-        }
-
-        function getSourceSearchContext(source) {
-            if (!source) {
-                return {
-                    titles: [],
-                    tagLabels: [],
-                    folderLabels: []
-                };
-            }
-
-            const tagsById = getTagsById();
-            const groupsById = getGroupsById();
-            const parentMap = getParentMap();
-            const tagLabels = getSourceTagIds(source.key)
-                .map((tagId) => tagsById.get(tagId)?.label)
-                .filter(Boolean);
-            const folderLabels = [];
-            const visitedGroupIds = new Set();
-            let parentId = parentMap.get(source.key);
-
-            while (parentId && !visitedGroupIds.has(parentId)) {
-                visitedGroupIds.add(parentId);
-                const group = groupsById.get(parentId);
-                if (group?.title) folderLabels.push(group.title);
-                parentId = parentMap.get(parentId);
-            }
-
-            return {
-                titles: [source.title, source.normalizedTitle, source.lowercaseTitle].filter(Boolean),
-                tagLabels,
-                folderLabels
-            };
-        }
-
-        function sourceMatchesSearchCriteria(source, criteria) {
-            const parsedCriteria = typeof criteria === 'string' ? parseSearchQuery(criteria) : criteria;
-            if (!parsedCriteria || !parsedCriteria.hasQuery) return true;
-
-            const context = getSourceSearchContext(source);
-            const allTextValues = [
-                ...context.titles,
-                ...context.tagLabels,
-                ...context.folderLabels
-            ];
-
-            return allTermsMatchAnyValue(parsedCriteria.textTerms, allTextValues) &&
-                allTermsMatchAnyValue(parsedCriteria.tagTerms, context.tagLabels) &&
-                allTermsMatchAnyValue(parsedCriteria.folderTerms, context.folderLabels);
-        }
-
-        function groupMatchesSearchCriteria(group, criteria) {
-            const parsedCriteria = typeof criteria === 'string' ? parseSearchQuery(criteria) : criteria;
-            if (!group || !parsedCriteria || !parsedCriteria.hasQuery) return false;
-            const groupTitleValues = [group.title || ''];
-            return allTermsMatchAnyValue(parsedCriteria.textTerms, groupTitleValues) &&
-                allTermsMatchAnyValue(parsedCriteria.folderTerms, groupTitleValues) &&
-                parsedCriteria.tagTerms.length === 0;
         }
 
         function normalizeQuickViewKind(value) {
@@ -715,9 +611,6 @@
             isSourceEffectivelyEnabled,
             isGroupWithinActiveIsolation,
             isSourceWithinActiveIsolation,
-            parseSearchQuery,
-            sourceMatchesSearchCriteria,
-            groupMatchesSearchCriteria,
             normalizeQuickViewKind,
             sourceMatchesQuickView,
             isSourceIssue,
