@@ -14,6 +14,28 @@ const {
     createTreeEl
 } = require('../helpers/content-test-harness');
 
+function createCompletePreferences(overrides = {}) {
+    return {
+        developerModeEnabled: false,
+        welcomeOnboardingSeenVersion: 0,
+        whatsNewSeenVersion: '',
+        historyRetentionLimit: 20,
+        languageOverride: 'auto',
+        dragMode: 'classic',
+        commandShortcuts: {},
+        visibleQuickViewKinds: [
+            'all',
+            'ungrouped',
+            'disabled',
+            'tag',
+            'recent',
+            'issues'
+        ],
+        appearance: { hoverSpotlightEnabled: true },
+        ...overrides
+    };
+}
+
 describe('content module loading', () => {
     afterEach(teardownGlobalMocks);
 
@@ -73,6 +95,132 @@ describe('content module loading', () => {
 
         expect(indexSource.match(/createContentSearchSemantics\(\{/g)).toHaveLength(1);
         expect(indexSource.match(/searchSemantics: searchSemanticsModule/g)).toHaveLength(2);
+    });
+
+    it('creates one preferences lifecycle and injects its live mode into logging', () => {
+        const indexSource = fs.readFileSync(
+            path.join(__dirname, '../../src/content/index.js'),
+            'utf8'
+        );
+
+        expect(indexSource.match(/createContentPreferences\(\{ chrome \}\)/g))
+            .toHaveLength(1);
+        expect(indexSource).toContain(
+            'isDeveloperModeEnabled: () => getDeveloperModeEnabled()'
+        );
+        expect(indexSource).toContain(
+            'setDeveloperModeEnabled: persistDeveloperModeEnabled'
+        );
+    });
+
+    it.each([
+        [
+            'verified enabled preferences',
+            {
+                success: true,
+                preferences: createCompletePreferences({
+                    developerModeEnabled: true
+                })
+            },
+            true,
+            1
+        ],
+        [
+            'verified disabled preferences',
+            {
+                success: true,
+                preferences: createCompletePreferences()
+            },
+            false,
+            0
+        ],
+        [
+            'failed preferences',
+            {
+                success: false,
+                errorCode: 'runtime_failure'
+            },
+            false,
+            0
+        ]
+    ])('hydrates logs only after %s', async (
+        _label,
+        preferenceResponse,
+        expectedMode,
+        expectedLogLoads
+    ) => {
+        jest.resetModules();
+        setupGlobalMocks();
+        global.chrome.runtime.sendMessage.mockImplementation(
+            (message, callback) => {
+                if (message?.type === 'LOAD_PREFERENCES') {
+                    callback?.(preferenceResponse);
+                    return;
+                }
+                if (message?.type === 'LOAD_DEVELOPER_LOGS') {
+                    callback?.({
+                        success: false,
+                        errorCode: 'runtime_failure'
+                    });
+                    return;
+                }
+                if (message?.type === 'GET_EXTENSION_ENABLED') {
+                    callback?.({ success: true, enabled: true });
+                    return;
+                }
+                callback?.({ success: true });
+            }
+        );
+
+        const mod = loadContentModule();
+
+        await expect(mod._ensureDeveloperPreferencesAppliedForTest())
+            .resolves.toBe(expectedMode);
+        expect(global.chrome.runtime.sendMessage.mock.calls
+            .filter(([message]) => (
+                message?.type === 'LOAD_DEVELOPER_LOGS'
+            ))).toHaveLength(expectedLogLoads);
+    });
+
+    it('invalidates preference-application side effects when test state resets', async () => {
+        let settlePreferenceLoad;
+        jest.resetModules();
+        setupGlobalMocks();
+        const localeSetter = jest.spyOn(
+            globalThis,
+            'NSM_SET_MESSAGE_LOCALE_OVERRIDE'
+        );
+        global.chrome.runtime.sendMessage.mockImplementation(
+            (message, callback) => {
+                if (message?.type === 'LOAD_PREFERENCES') {
+                    settlePreferenceLoad = callback;
+                    return;
+                }
+                if (message?.type === 'GET_EXTENSION_ENABLED') {
+                    callback?.({ success: true, enabled: true });
+                }
+            }
+        );
+
+        const mod = loadContentModule();
+        const staleApplication
+            = mod._ensureDeveloperPreferencesAppliedForTest();
+        mod._resetState();
+        settlePreferenceLoad({
+            success: true,
+            preferences: createCompletePreferences({
+                developerModeEnabled: true,
+                languageOverride: 'zh_CN'
+            })
+        });
+
+        await expect(staleApplication).resolves.toBeNull();
+        expect(localeSetter).not.toHaveBeenCalled();
+        expect(global.chrome.runtime.sendMessage.mock.calls
+            .filter(([message]) => (
+                message?.type === 'LOAD_DEVELOPER_LOGS'
+            ))).toHaveLength(0);
+        localeSetter.mockRestore();
     });
 });
 

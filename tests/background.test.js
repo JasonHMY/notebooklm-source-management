@@ -684,7 +684,7 @@ describe('background.js message listener', () => {
         expect(result).toBe(true);
     });
 
-    it('saves and loads global developer preferences', () => {
+    it('saves and loads global preferences', () => {
         listener({
             type: 'SAVE_PREFERENCES',
             preferences: { developerModeEnabled: true, unknown: 'ignored' }

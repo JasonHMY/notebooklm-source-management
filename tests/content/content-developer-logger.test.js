@@ -1,72 +1,42 @@
-require('../../src/utils/preference-normalizers.js');
-const createContentDeveloperLogger = require('../../src/content/content-developer-logger.js');
+const createContentDeveloperLogger = require(
+    '../../src/content/content-developer-logger.js'
+);
 
-function createRuntimeMock(options = {}) {
+function createRuntimeMock() {
     const storedLogs = new Map();
-    let preferences = {
-        developerModeEnabled: false,
-        welcomeOnboardingSeenVersion: 0,
-        whatsNewSeenVersion: '',
-        historyRetentionLimit: 20,
-        languageOverride: 'auto',
-        commandShortcuts: {},
-        visibleQuickViewKinds: ['all', 'ungrouped', 'disabled', 'tag', 'recent', 'issues']
-    };
-    const savePreferencesResponse = options.savePreferencesResponse || null;
-    const usageState = options.usageState || {
-        hasExistingPluginData: false,
-        hasStoredPreferences: false
-    };
-    const sendMessage = jest.fn((message, cb) => {
-        if (message?.type === 'LOAD_PREFERENCES') {
-            cb?.({ success: true, preferences, usageState });
-            return;
-        }
-        if (message?.type === 'SAVE_PREFERENCES') {
-            if (savePreferencesResponse) {
-                cb?.(savePreferencesResponse);
-                return;
-            }
-            preferences = Object.assign({}, preferences, message.preferences || {});
-            cb?.({ success: true, preferences });
-            return;
-        }
+    const sendMessage = jest.fn((message, callback) => {
         if (message?.type === 'LOAD_DEVELOPER_LOGS') {
-            cb?.({ success: true, logs: storedLogs.get(message.key) || [] });
+            callback?.({
+                success: true,
+                logs: storedLogs.get(message.key) || []
+            });
             return;
         }
         if (message?.type === 'APPEND_DEVELOPER_LOG') {
-            const logs = [...(storedLogs.get(message.key) || []), message.entry];
+            const logs = [
+                ...(storedLogs.get(message.key) || []),
+                message.entry
+            ];
             storedLogs.set(message.key, logs);
-            cb?.({ success: true, logs });
+            callback?.({ success: true, logs });
             return;
         }
         if (message?.type === 'CLEAR_DEVELOPER_LOGS') {
             storedLogs.set(message.key, []);
-            cb?.({ success: true, logs: [] });
+            callback?.({ success: true, logs: [] });
             return;
         }
-        cb?.({ success: false, errorCode: 'unexpected_message' });
+        callback?.({ success: false, errorCode: 'unexpected_message' });
     });
     return {
-        chromeApi: { runtime: { sendMessage, lastError: null } },
+        chromeApi: {
+            runtime: {
+                sendMessage,
+                lastError: null
+            }
+        },
         sendMessage,
-        storedLogs,
-        getPreferences: () => preferences
-    };
-}
-
-function createCompletePreferences(dragMode = 'classic') {
-    return {
-        developerModeEnabled: false,
-        welcomeOnboardingSeenVersion: 0,
-        whatsNewSeenVersion: '',
-        historyRetentionLimit: 20,
-        languageOverride: 'auto',
-        dragMode,
-        commandShortcuts: {},
-        visibleQuickViewKinds: ['all', 'ungrouped', 'disabled', 'tag', 'recent', 'issues'],
-        appearance: { hoverSpotlightEnabled: true }
+        storedLogs
     };
 }
 
@@ -75,39 +45,53 @@ describe('content developer logger', () => {
         const { chromeApi, sendMessage } = createRuntimeMock();
         const logger = createContentDeveloperLogger({
             chrome: chromeApi,
-            getProjectId: () => 'project-dev'
+            getProjectId: () => 'project-dev',
+            isDeveloperModeEnabled: () => false
         });
 
-        expect(logger.developerLog('info', 'ui', 'button_clicked', { sourceKey: 'source-1' })).toBe(false);
+        expect(logger.developerLog(
+            'info',
+            'ui',
+            'button_clicked',
+            { sourceKey: 'source-1' }
+        )).toBe(false);
 
         expect(logger.getDeveloperLogs()).toEqual([]);
-        expect(sendMessage).not.toHaveBeenCalledWith(
-            expect.objectContaining({ type: 'APPEND_DEVELOPER_LOG' }),
-            expect.any(Function)
-        );
+        expect(sendMessage).not.toHaveBeenCalled();
     });
 
-    it('writes structured sanitized logs when developer mode is enabled', async () => {
+    it('reads the injected mode dynamically and writes sanitized logs', () => {
         const { chromeApi, sendMessage } = createRuntimeMock();
+        let developerModeEnabled = false;
         const logger = createContentDeveloperLogger({
             chrome: chromeApi,
             getProjectId: () => 'project-dev',
+            isDeveloperModeEnabled: () => developerModeEnabled,
             now: () => '2026-05-15T00:00:00.000Z'
         });
 
-        await logger.setDeveloperModeEnabled(true);
-        const result = logger.developerLog('info', 'source_action', 'source_updated', {
-            sourceKey: 'source-1',
-            sourceTitle: 'Sensitive Source Title',
-            groupTitle: 'Private Group',
-            tagLabel: 'Secret Tag',
-            importJson: '{"sourceTitle":"Sensitive Source Title"}',
-            stableToken: 'token-value',
-            fingerprint: 'fingerprint-value',
-            reason: 'manual_test'
-        });
+        expect(logger.developerLog(
+            'info',
+            'ui',
+            'disabled_attempt'
+        )).toBe(false);
+        developerModeEnabled = true;
+        expect(logger.developerLog(
+            'info',
+            'source_action',
+            'source_updated',
+            {
+                sourceKey: 'source-1',
+                sourceTitle: 'Sensitive Source Title',
+                groupTitle: 'Private Group',
+                tagLabel: 'Secret Tag',
+                importJson: '{"sourceTitle":"Sensitive Source Title"}',
+                stableToken: 'token-value',
+                fingerprint: 'fingerprint-value',
+                reason: 'manual_test'
+            }
+        )).toBe(true);
 
-        expect(result).toBe(true);
         const [entry] = logger.getDeveloperLogs();
         expect(entry).toMatchObject({
             id: expect.any(String),
@@ -133,38 +117,49 @@ describe('content developer logger', () => {
             expect.objectContaining({
                 type: 'APPEND_DEVELOPER_LOG',
                 key: 'sourcesPlusDeveloperLogs_project-dev',
-                entry: expect.objectContaining({ event: 'source_updated' })
+                entry: expect.objectContaining({
+                    event: 'source_updated'
+                })
             }),
             expect.any(Function)
         );
     });
 
-    it('caps logs by entry count and serialized size', async () => {
+    it('caps logs by entry count and serialized size', () => {
         const { chromeApi } = createRuntimeMock();
         const logger = createContentDeveloperLogger({
             chrome: chromeApi,
-            getProjectId: () => 'project-dev'
+            getProjectId: () => 'project-dev',
+            isDeveloperModeEnabled: () => true
         });
 
-        await logger.setDeveloperModeEnabled(true);
         for (let index = 0; index < 620; index += 1) {
-            logger.developerLog('debug', 'source_sync', 'scan_finished', {
-                index,
-                reason: 'x'.repeat(2000)
-            });
+            logger.developerLog(
+                'debug',
+                'source_sync',
+                'scan_finished',
+                {
+                    index,
+                    reason: 'x'.repeat(2000)
+                }
+            );
         }
 
         const logs = logger.getDeveloperLogs();
         expect(logs.length).toBeLessThanOrEqual(500);
-        expect(Buffer.byteLength(JSON.stringify(logs), 'utf8')).toBeLessThanOrEqual(512 * 1024);
+        expect(Buffer.byteLength(
+            JSON.stringify(logs),
+            'utf8'
+        )).toBeLessThanOrEqual(512 * 1024);
         expect(logs[logs.length - 1]).toMatchObject({
             category: 'source_sync',
             event: 'scan_finished'
         });
     });
 
-    it('builds a developer log export bundle without exposing log internals through diagnostics', async () => {
+    it('builds a private-safe export with the current injected mode', () => {
         const { chromeApi } = createRuntimeMock();
+        let developerModeEnabled = true;
         const logger = createContentDeveloperLogger({
             chrome: chromeApi,
             getProjectId: () => 'project-dev',
@@ -172,18 +167,26 @@ describe('content developer logger', () => {
                 notebookId: 'project-dev',
                 developerLogCount: 1,
                 latestDeveloperLogAt: '2026-05-15T00:00:00.000Z'
-            })
+            }),
+            isDeveloperModeEnabled: () => developerModeEnabled
         });
 
-        await logger.setDeveloperModeEnabled(true);
-        logger.developerLog('warn', 'native_action', 'delete_failed', {
-            reason: 'confirm_dialog_missing',
-            sourceTitle: 'Sensitive Source Title'
-        });
+        logger.developerLog(
+            'warn',
+            'native_action',
+            'delete_failed',
+            {
+                reason: 'confirm_dialog_missing',
+                sourceTitle: 'Sensitive Source Title'
+            }
+        );
+        developerModeEnabled = false;
 
-        const exportPayload = JSON.parse(logger.getDeveloperLogExportText());
+        const exportPayload = JSON.parse(
+            logger.getDeveloperLogExportText()
+        );
         expect(exportPayload).toMatchObject({
-            developerModeEnabled: true,
+            developerModeEnabled: false,
             diagnostics: {
                 notebookId: 'project-dev',
                 developerLogCount: 1
@@ -193,442 +196,210 @@ describe('content developer logger', () => {
                 event: 'delete_failed'
             })]
         });
-        expect(JSON.stringify(exportPayload)).not.toContain('Sensitive Source Title');
+        expect(JSON.stringify(exportPayload))
+            .not.toContain('Sensitive Source Title');
     });
 
-    it('loads and saves the welcome onboarding version through global preferences', async () => {
-        const { chromeApi, sendMessage } = createRuntimeMock();
+    it('loads and clears notebook-scoped developer logs independently', async () => {
+        const { chromeApi, storedLogs, sendMessage } = createRuntimeMock();
+        storedLogs.set('sourcesPlusDeveloperLogs_project-dev', [{
+            id: 'saved-log',
+            timestamp: '2026-05-15T00:00:00.000Z',
+            level: 'info',
+            category: 'ui',
+            event: 'panel_opened',
+            notebookId: 'project-dev',
+            details: { reason: 'saved' }
+        }]);
         const logger = createContentDeveloperLogger({
             chrome: chromeApi,
-            getProjectId: () => 'project-dev'
+            getProjectId: () => 'project-dev',
+            isDeveloperModeEnabled: () => true
         });
 
-        await logger.loadDeveloperPreferences();
-        expect(logger.getWelcomeOnboardingSeenVersion()).toBe(0);
-
-        await logger.setWelcomeOnboardingSeenVersion(1);
-
-        expect(logger.getWelcomeOnboardingSeenVersion()).toBe(1);
-        expect(logger.getDeveloperModeEnabled()).toBe(false);
-        expect(sendMessage).toHaveBeenCalledWith(
-            {
-                type: 'SAVE_PREFERENCES',
-                preferences: { welcomeOnboardingSeenVersion: 1 }
-            },
-            expect.any(Function)
-        );
+        await expect(logger.loadDeveloperLogs()).resolves.toEqual([
+            expect.objectContaining({ id: 'saved-log' })
+        ]);
+        expect(logger.getLatestDeveloperLogAt())
+            .toBe('2026-05-15T00:00:00.000Z');
+        await expect(logger.clearDeveloperLogs()).resolves.toBe(true);
+        expect(logger.getDeveloperLogs()).toEqual([]);
+        expect(sendMessage).toHaveBeenCalledWith({
+            type: 'CLEAR_DEVELOPER_LOGS',
+            key: 'sourcesPlusDeveloperLogs_project-dev'
+        }, expect.any(Function));
     });
 
-    it('loads and saves whats new, history retention, and language preferences', async () => {
-        const { chromeApi, getPreferences } = createRuntimeMock();
-        const logger = createContentDeveloperLogger({
-            chrome: chromeApi,
-            getProjectId: () => 'project-dev'
-        });
-
-        await logger.setWhatsNewSeenVersion('2.7.4');
-        await logger.setHistoryRetentionLimit(50);
-        await logger.setLanguageOverride('zh_CN');
-
-        expect(logger.getWhatsNewSeenVersion()).toBe('2.7.4');
-        expect(logger.getHistoryRetentionLimit()).toBe(50);
-        expect(logger.getLanguageOverride()).toBe('zh_CN');
-        expect(getPreferences()).toMatchObject({
-            whatsNewSeenVersion: '2.7.4',
-            historyRetentionLimit: 50,
-            languageOverride: 'zh_CN'
-        });
-    });
-
-    it('loads preference usage state from the background response', async () => {
-        const { chromeApi } = createRuntimeMock({
-            usageState: {
-                hasExistingPluginData: true,
-                hasStoredPreferences: false
+    it('drops stale load and append responses after the active notebook changes', async () => {
+        let projectId = 'project-a';
+        const loadCallbacks = [];
+        const appendCallbacks = [];
+        const sendMessage = jest.fn((message, callback) => {
+            if (message?.type === 'LOAD_DEVELOPER_LOGS') {
+                loadCallbacks.push(callback);
+                return;
+            }
+            if (message?.type === 'APPEND_DEVELOPER_LOG') {
+                appendCallbacks.push(callback);
             }
         });
         const logger = createContentDeveloperLogger({
-            chrome: chromeApi,
-            getProjectId: () => 'project-dev'
+            chrome: {
+                runtime: {
+                    sendMessage,
+                    lastError: null
+                }
+            },
+            getProjectId: () => projectId,
+            isDeveloperModeEnabled: () => true
         });
 
-        await logger.loadDeveloperPreferences();
-
-        expect(logger.getPreferenceUsageState()).toEqual({
-            hasExistingPluginData: true,
-            hasStoredPreferences: false
+        const projectALoad = logger.loadDeveloperLogs();
+        projectId = 'project-b';
+        expect(logger.getDeveloperLogs()).toEqual([]);
+        loadCallbacks[0]({
+            success: true,
+            logs: [{
+                id: 'project-a-log',
+                notebookId: 'project-a',
+                event: 'loaded_from_a'
+            }]
         });
+        await expect(projectALoad).resolves.toEqual([]);
+        expect(logger.getDeveloperLogs()).toEqual([]);
+
+        logger.developerLog('info', 'ui', 'written_in_b');
+        projectId = 'project-c';
+        logger.developerLog('info', 'ui', 'written_in_c');
+        appendCallbacks[1]({
+            success: true,
+            logs: [{
+                id: 'project-c-log',
+                notebookId: 'project-c',
+                event: 'written_in_c'
+            }]
+        });
+        appendCallbacks[0]({
+            success: true,
+            logs: [{
+                id: 'project-b-log',
+                notebookId: 'project-b',
+                event: 'written_in_b'
+            }]
+        });
+        await Promise.resolve();
+
+        expect(logger.getDeveloperLogs()).toEqual([
+            expect.objectContaining({
+                notebookId: 'project-c',
+                event: 'written_in_c'
+            })
+        ]);
     });
 
-    it('loads, saves, and clears custom command shortcuts', async () => {
-        const { chromeApi, getPreferences } = createRuntimeMock();
+    it('keeps newer same-notebook log mutations when older responses arrive late', async () => {
+        const loadCallbacks = [];
+        const appendCallbacks = [];
+        const sendMessage = jest.fn((message, callback) => {
+            if (message?.type === 'LOAD_DEVELOPER_LOGS') {
+                loadCallbacks.push(callback);
+                return;
+            }
+            if (message?.type === 'APPEND_DEVELOPER_LOG') {
+                appendCallbacks.push(callback);
+            }
+        });
         const logger = createContentDeveloperLogger({
-            chrome: chromeApi,
-            getProjectId: () => 'project-dev'
+            chrome: {
+                runtime: {
+                    sendMessage,
+                    lastError: null
+                }
+            },
+            getProjectId: () => 'project-dev',
+            isDeveloperModeEnabled: () => true
         });
 
-        await logger.loadDeveloperPreferences();
-        expect(logger.getCommandShortcuts()).toEqual({});
-
-        await logger.setCommandShortcut('quick-view-recent', 'Meta+Shift+R');
-        expect(logger.getCommandShortcut('quick-view-recent')).toBe('Meta+Shift+R');
-        expect(getPreferences().commandShortcuts).toEqual({
-            'quick-view-recent': 'Meta+Shift+R'
+        const pendingLoad = logger.loadDeveloperLogs();
+        logger.developerLog('info', 'ui', 'new_event');
+        appendCallbacks[0]({
+            success: true,
+            logs: [{
+                id: 'new-log',
+                notebookId: 'project-dev',
+                event: 'new_event'
+            }]
         });
-
-        await logger.setCommandShortcut('quick-view-recent', '');
-        expect(logger.getCommandShortcut('quick-view-recent')).toBe('');
-        expect(logger.getCommandShortcuts()).toEqual({});
-    });
-
-    it('loads and saves visible quick view button preferences', async () => {
-        const { chromeApi, getPreferences } = createRuntimeMock();
-        const logger = createContentDeveloperLogger({
-            chrome: chromeApi,
-            getProjectId: () => 'project-dev'
+        await Promise.resolve();
+        loadCallbacks[0]({
+            success: true,
+            logs: [{
+                id: 'old-log',
+                notebookId: 'project-dev',
+                event: 'old_event'
+            }]
         });
+        await pendingLoad;
 
-        await logger.loadDeveloperPreferences();
-        expect(logger.getVisibleQuickViewKinds()).toEqual([
-            'all',
-            'ungrouped',
-            'disabled',
-            'tag',
-            'recent',
-            'issues'
+        expect(logger.getDeveloperLogs()).toEqual([
+            expect.objectContaining({ event: 'new_event' })
         ]);
 
-        await logger.setVisibleQuickViewKinds(['issues', 'bad-kind', 'all', 'issues']);
+        logger.developerLog('info', 'ui', 'first_append');
+        logger.developerLog('info', 'ui', 'second_append');
+        appendCallbacks[2]({
+            success: true,
+            logs: [
+                {
+                    id: 'first-log',
+                    notebookId: 'project-dev',
+                    event: 'first_append'
+                },
+                {
+                    id: 'second-log',
+                    notebookId: 'project-dev',
+                    event: 'second_append'
+                }
+            ]
+        });
+        appendCallbacks[1]({
+            success: true,
+            logs: [{
+                id: 'first-log',
+                notebookId: 'project-dev',
+                event: 'first_append'
+            }]
+        });
+        await Promise.resolve();
 
-        expect(logger.getVisibleQuickViewKinds()).toEqual(['all', 'issues']);
-        expect(getPreferences().visibleQuickViewKinds).toEqual(['all', 'issues']);
-
-        await logger.setVisibleQuickViewKinds([]);
-        expect(logger.getVisibleQuickViewKinds()).toEqual([]);
+        expect(logger.getDeveloperLogs().map((entry) => entry.event))
+            .toEqual(['first_append', 'second_append']);
     });
 
-    it('keeps the previous preference value when saving preferences fails', async () => {
-        const { chromeApi } = createRuntimeMock({
-            savePreferencesResponse: { success: false, errorCode: 'runtime_failure' }
-        });
+    it('does not expose preference state or send preference messages', () => {
+        const { chromeApi, sendMessage } = createRuntimeMock();
         const logger = createContentDeveloperLogger({
             chrome: chromeApi,
-            getProjectId: () => 'project-dev'
+            getProjectId: () => 'project-dev',
+            isDeveloperModeEnabled: () => true
         });
 
-        await expect(logger.setLanguageOverride('zh_CN')).rejects.toThrow(/runtime_failure/);
+        expect(Object.keys(logger).sort()).toEqual([
+            '_sanitizeDetailsForTest',
+            '_trimLogsForTest',
+            'clearDeveloperLogs',
+            'developerLog',
+            'getDeveloperLogExportText',
+            'getDeveloperLogs',
+            'getLatestDeveloperLogAt',
+            'loadDeveloperLogs'
+        ]);
 
-        expect(logger.getLanguageOverride()).toBe('auto');
-    });
+        logger.developerLog('info', 'ui', 'boundary_check');
 
-    describe('appearance preferences', () => {
-        it('defaults hoverSpotlightEnabled to true before preferences are loaded', () => {
-            const { chromeApi } = createRuntimeMock();
-            const logger = createContentDeveloperLogger({
-                chrome: chromeApi,
-                getProjectId: () => 'project-dev'
-            });
-            expect(logger.getHoverSpotlightEnabled()).toBe(true);
-        });
-
-        it('loadDeveloperPreferences applies appearance.hoverSpotlightEnabled from background response', async () => {
-            // Mock LOAD_PREFERENCES returning appearance.hoverSpotlightEnabled: false via a custom sendMessage
-            const sendMessage = jest.fn((message, cb) => {
-                if (message?.type === 'LOAD_PREFERENCES') {
-                    cb?.({
-                        success: true,
-                        preferences: { appearance: { hoverSpotlightEnabled: false } },
-                        usageState: { hasExistingPluginData: false, hasStoredPreferences: false }
-                    });
-                    return;
-                }
-                cb?.({ success: false, errorCode: 'unexpected_message' });
-            });
-            const logger = createContentDeveloperLogger({
-                chrome: { runtime: { sendMessage, lastError: null } },
-                getProjectId: () => 'project-dev'
-            });
-            await logger.loadDeveloperPreferences();
-            expect(logger.getHoverSpotlightEnabled()).toBe(false);
-        });
-
-        it('setHoverSpotlightEnabled optimistically updates and persists via SAVE_PREFERENCES', async () => {
-            const sent = [];
-            const sendMessage = jest.fn((message, cb) => {
-                sent.push(message);
-                if (message?.type === 'SAVE_PREFERENCES') {
-                    cb?.({ success: true, preferences: { appearance: { hoverSpotlightEnabled: false } } });
-                    return;
-                }
-                cb?.({ success: false, errorCode: 'unexpected_message' });
-            });
-            const logger = createContentDeveloperLogger({
-                chrome: { runtime: { sendMessage, lastError: null } },
-                getProjectId: () => 'project-dev'
-            });
-            const result = await logger.setHoverSpotlightEnabled(false);
-            expect(result).toBe(false);
-            expect(logger.getHoverSpotlightEnabled()).toBe(false);
-            const saveMessage = sent.find((m) => m?.type === 'SAVE_PREFERENCES');
-            expect(saveMessage?.preferences?.appearance?.hoverSpotlightEnabled).toBe(false);
-        });
-
-        it('setHoverSpotlightEnabled rolls back optimistic update when save fails', async () => {
-            const { chromeApi } = createRuntimeMock({
-                savePreferencesResponse: { success: false, errorCode: 'runtime_failure' }
-            });
-            const logger = createContentDeveloperLogger({
-                chrome: chromeApi,
-                getProjectId: () => 'project-dev'
-            });
-            await expect(logger.setHoverSpotlightEnabled(false)).rejects.toThrow();
-            expect(logger.getHoverSpotlightEnabled()).toBe(true);
-        });
-
-        it('setHoverSpotlightEnabled treats undefined as true (only strict false opts out)', async () => {
-            const { chromeApi } = createRuntimeMock({
-                savePreferencesResponse: {
-                    success: true,
-                    preferences: { appearance: { hoverSpotlightEnabled: true } }
-                }
-            });
-            const logger = createContentDeveloperLogger({
-                chrome: chromeApi,
-                getProjectId: () => 'project-dev'
-            });
-            const result = await logger.setHoverSpotlightEnabled(undefined);
-            expect(result).toBe(true);
-            expect(logger.getHoverSpotlightEnabled()).toBe(true);
-        });
-    });
-
-    describe('dragMode preference', () => {
-        it('tracks preference load status and fails closed when LOAD_PREFERENCES is rejected', async () => {
-            let settleLoad;
-            const sendMessage = jest.fn((message, cb) => {
-                if (message?.type === 'LOAD_PREFERENCES') {
-                    settleLoad = cb;
-                }
-            });
-            const logger = createContentDeveloperLogger({
-                chrome: { runtime: { sendMessage, lastError: null } },
-                getProjectId: () => 'project-dev'
-            });
-
-            expect(logger.getPreferencesLoadStatus()).toBe('idle');
-            const loadPromise = logger.loadDeveloperPreferences();
-            expect(logger.getPreferencesLoadStatus()).toBe('loading');
-
-            settleLoad({ success: false, errorCode: 'runtime_failure' });
-            await loadPromise;
-
-            expect(logger.getPreferencesLoadStatus()).toBe('failed');
-            expect(logger.getDragMode()).toBe('classic');
-        });
-
-        it('ignores an older preference LOAD after a newer complete SAVE succeeds', async () => {
-            let settleLoad;
-            const sendMessage = jest.fn((message, cb) => {
-                if (message?.type === 'LOAD_PREFERENCES') {
-                    settleLoad = cb;
-                    return;
-                }
-                if (message?.type === 'SAVE_PREFERENCES') {
-                    cb?.({
-                        success: true,
-                        preferences: createCompletePreferences('classic')
-                    });
-                }
-            });
-            const logger = createContentDeveloperLogger({
-                chrome: { runtime: { sendMessage, lastError: null } },
-                getProjectId: () => 'project-dev'
-            });
-
-            const pendingLoad = logger.loadDeveloperPreferences();
-            await logger.setDragMode('classic');
-            settleLoad({
-                success: true,
-                preferences: createCompletePreferences('reflow')
-            });
-            await pendingLoad;
-
-            expect(logger.getDragMode()).toBe('classic');
-            expect(logger.getPreferencesLoadStatus()).toBe('loaded');
-        });
-
-        it('lets a partial successful SAVE supersede an older LOAD without marking preferences loaded', async () => {
-            let settleLoad;
-            const sendMessage = jest.fn((message, cb) => {
-                if (message?.type === 'LOAD_PREFERENCES') {
-                    settleLoad = cb;
-                    return;
-                }
-                if (message?.type === 'SAVE_PREFERENCES') {
-                    cb?.({ success: true });
-                }
-            });
-            const logger = createContentDeveloperLogger({
-                chrome: { runtime: { sendMessage, lastError: null } },
-                getProjectId: () => 'project-dev'
-            });
-
-            const pendingLoad = logger.loadDeveloperPreferences();
-            await logger.setDragMode('reflow');
-            settleLoad({
-                success: true,
-                preferences: createCompletePreferences('classic')
-            });
-            await pendingLoad;
-
-            expect(logger.getDragMode()).toBe('reflow');
-            expect(logger.getPreferencesLoadStatus()).toBe('failed');
-        });
-
-        it('does not let a failed SAVE discard an older valid preference LOAD', async () => {
-            let settleLoad;
-            const sendMessage = jest.fn((message, cb) => {
-                if (message?.type === 'LOAD_PREFERENCES') {
-                    settleLoad = cb;
-                    return;
-                }
-                if (message?.type === 'SAVE_PREFERENCES') {
-                    cb?.({ success: false, errorCode: 'runtime_failure' });
-                }
-            });
-            const logger = createContentDeveloperLogger({
-                chrome: { runtime: { sendMessage, lastError: null } },
-                getProjectId: () => 'project-dev'
-            });
-
-            const pendingLoad = logger.loadDeveloperPreferences();
-            await expect(logger.setDragMode('classic')).rejects.toThrow('runtime_failure');
-            settleLoad({
-                success: true,
-                preferences: createCompletePreferences('reflow')
-            });
-            await pendingLoad;
-
-            expect(logger.getDragMode()).toBe('reflow');
-            expect(logger.getPreferencesLoadStatus()).toBe('loaded');
-        });
-
-        it('only recovers a failed preference load after SAVE_PREFERENCES returns a complete normalized response', async () => {
-            let saveCount = 0;
-            const completePreferences = {
-                developerModeEnabled: false,
-                welcomeOnboardingSeenVersion: 0,
-                whatsNewSeenVersion: '',
-                historyRetentionLimit: 20,
-                languageOverride: 'auto',
-                dragMode: 'classic',
-                commandShortcuts: {},
-                visibleQuickViewKinds: ['all', 'ungrouped', 'disabled', 'tag', 'recent', 'issues'],
-                appearance: { hoverSpotlightEnabled: true }
-            };
-            const sendMessage = jest.fn((message, cb) => {
-                if (message?.type === 'LOAD_PREFERENCES') {
-                    cb?.({ success: false, errorCode: 'runtime_failure' });
-                    return;
-                }
-                if (message?.type === 'SAVE_PREFERENCES') {
-                    saveCount += 1;
-                    cb?.({
-                        success: true,
-                        preferences: saveCount === 1
-                            ? { dragMode: 'classic' }
-                            : completePreferences
-                    });
-                }
-            });
-            const logger = createContentDeveloperLogger({
-                chrome: { runtime: { sendMessage, lastError: null } },
-                getProjectId: () => 'project-dev'
-            });
-
-            await logger.loadDeveloperPreferences();
-            expect(logger.getPreferencesLoadStatus()).toBe('failed');
-
-            await logger.setDragMode('classic');
-            expect(logger.getPreferencesLoadStatus()).toBe('failed');
-
-            await logger.setDragMode('classic');
-            expect(logger.getPreferencesLoadStatus()).toBe('loaded');
-        });
-
-        it('defaults dragMode to classic before preferences are loaded', () => {
-            const { chromeApi } = createRuntimeMock();
-            const logger = createContentDeveloperLogger({
-                chrome: chromeApi,
-                getProjectId: () => 'project-dev'
-            });
-            expect(logger.getDragMode()).toBe('classic');
-        });
-
-        it('loadDeveloperPreferences applies dragMode from background response', async () => {
-            const sendMessage = jest.fn((message, cb) => {
-                if (message?.type === 'LOAD_PREFERENCES') {
-                    cb?.({
-                        success: true,
-                        preferences: { dragMode: 'reflow' },
-                        usageState: { hasExistingPluginData: false, hasStoredPreferences: false }
-                    });
-                    return;
-                }
-                cb?.({ success: false, errorCode: 'unexpected_message' });
-            });
-            const logger = createContentDeveloperLogger({
-                chrome: { runtime: { sendMessage, lastError: null } },
-                getProjectId: () => 'project-dev'
-            });
-            await logger.loadDeveloperPreferences();
-            expect(logger.getDragMode()).toBe('reflow');
-        });
-
-        it('setDragMode optimistically updates and persists via SAVE_PREFERENCES', async () => {
-            const sent = [];
-            const sendMessage = jest.fn((message, cb) => {
-                sent.push(message);
-                if (message?.type === 'SAVE_PREFERENCES') {
-                    cb?.({ success: true, preferences: { dragMode: 'reflow' } });
-                    return;
-                }
-                cb?.({ success: false, errorCode: 'unexpected_message' });
-            });
-            const logger = createContentDeveloperLogger({
-                chrome: { runtime: { sendMessage, lastError: null } },
-                getProjectId: () => 'project-dev'
-            });
-            const result = await logger.setDragMode('reflow');
-            expect(result).toBe('reflow');
-            expect(logger.getDragMode()).toBe('reflow');
-            const saveMessage = sent.find((m) => m?.type === 'SAVE_PREFERENCES');
-            expect(saveMessage?.preferences?.dragMode).toBe('reflow');
-        });
-
-        it('setDragMode rolls back optimistic update when save fails', async () => {
-            const { chromeApi } = createRuntimeMock({
-                savePreferencesResponse: { success: false, errorCode: 'runtime_failure' }
-            });
-            const logger = createContentDeveloperLogger({
-                chrome: chromeApi,
-                getProjectId: () => 'project-dev'
-            });
-            await expect(logger.setDragMode('reflow')).rejects.toThrow();
-            expect(logger.getDragMode()).toBe('classic');
-        });
-
-        it('setDragMode normalizes unknown values to classic', async () => {
-            const { chromeApi } = createRuntimeMock({
-                savePreferencesResponse: { success: true, preferences: { dragMode: 'classic' } }
-            });
-            const logger = createContentDeveloperLogger({
-                chrome: chromeApi,
-                getProjectId: () => 'project-dev'
-            });
-            const result = await logger.setDragMode('bogus');
-            expect(result).toBe('classic');
-            expect(logger.getDragMode()).toBe('classic');
-        });
+        const messageTypes = sendMessage.mock.calls
+            .map(([message]) => message?.type);
+        expect(messageTypes).not.toContain('LOAD_PREFERENCES');
+        expect(messageTypes).not.toContain('SAVE_PREFERENCES');
     });
 });

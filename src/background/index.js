@@ -8,9 +8,8 @@
  *   3. chrome.runtime.onMessage 路由 (SAVE_STATE / LOAD_STATE / SAVE_PREFERENCES /
  *      LOAD_PREFERENCES / APPEND_DEVELOPER_LOG / SET_EXTENSION_ENABLED ...);
  *      完整路由见 onMessage listener + docs/MESSAGE_CONTRACTS.md。
- *   4. 偏好归一化 (normalizePreferences + 8 个 normalizeXxx 子函数 line ~263-410)。
- *      ⚠ MIRROR: 这些 normalizer 在 src/content/content-developer-logger.js 中有
- *      verbatim 复制,改动两处必须同步(Phase 3 会抽到 src/utils/preference-normalizers.js)。
+ *   4. 偏好归一化通过 src/utils/preference-normalizers.js 与
+ *      src/content/content-preferences.js 共享，规则只维护一份。
  *   5. 状态历史 / 命名快照 / quota 监控 / sender 校验。
  *
  * SECURITY: 不持有 DOM、不信任 message payload — 必须 sender 校验 + key prefix 校验

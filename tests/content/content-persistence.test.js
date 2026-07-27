@@ -1836,6 +1836,18 @@ describe('saveState', () => {
         expect(mod.getDiagnosticsText()).not.toContain('delete_failed');
         expect(mod.getDiagnosticsText()).not.toContain('Sensitive Source Title');
         expect(mod.getDiagnosticsText()).not.toContain('confirm_dialog_missing');
+        const developerMessageTypes = global.chrome.runtime.sendMessage.mock.calls
+            .map(([message]) => message?.type)
+            .filter((type) => (
+                type === 'SAVE_PREFERENCES'
+                || type === 'LOAD_DEVELOPER_LOGS'
+                || type === 'APPEND_DEVELOPER_LOG'
+            ));
+        expect(developerMessageTypes).toEqual([
+            'SAVE_PREFERENCES',
+            'LOAD_DEVELOPER_LOGS',
+            'APPEND_DEVELOPER_LOG'
+        ]);
     });
 
     it('logs structured background save failures without throwing', () => {

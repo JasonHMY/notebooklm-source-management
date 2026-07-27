@@ -64,6 +64,22 @@ describe('manifest <-> load-content-module sync', () => {
         });
     });
 
+    it('loads preferences after state reconciliation and before developer logging', () => {
+        const manifestFiles = getManifestRuntimeJsList();
+        const loaderFiles = getLoaderRequireList();
+        const stateReconcilePath = 'src/content/content-state-reconcile.js';
+        const preferencesPath = 'src/content/content-preferences.js';
+        const developerLoggerPath = 'src/content/content-developer-logger.js';
+
+        [manifestFiles, loaderFiles].forEach((files) => {
+            expect(files).toContain(preferencesPath);
+            expect(files.indexOf(stateReconcilePath))
+                .toBeLessThan(files.indexOf(preferencesPath));
+            expect(files.indexOf(preferencesPath))
+                .toBeLessThan(files.indexOf(developerLoggerPath));
+        });
+    });
+
     it('loads search semantics after modals and before both search consumers', () => {
         const manifestFiles = getManifestRuntimeJsList();
         const searchSemanticsPath = 'src/content/content-search-semantics.js';

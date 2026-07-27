@@ -10,39 +10,18 @@
     const storageContract = globalThis.NSM_CREATE_STORAGE_CONTRACT();
 
     /**
-     * createContentDeveloperLogger(context) — developer log 流 + 偏好设置存档。
-     * 双职责:
-     *  - 4-arg `developerLog(level, category, event, details)` — sanitize details
-     *    (敏感 key 自动 redacted、超长字段截断、stack 哈希化、循环检测),按 maxEntries +
-     *    maxBytes 滚动裁剪并 persist 到 `sourcesPlusDeveloperLogs_<projectId>`。
-     *  - 偏好状态 holder + getters/setters — developer mode flag、欢迎/whats-new seen versions、
-     *    历史 retention、语言 override、command shortcuts、quick-view 可见 kinds、appearance prefs。
-     *    `loadDeveloperPreferences` 从 chrome.storage 读取并 normalize 一次,offers safe defaults。
-     *
-     * @param {Object} context 命名为 `context`(不是 deps)。所有项可选(都有 fallback):
-     *   - chrome: chrome.* runtime(默认 globalThis.chrome)
-     *   - getProjectId(): 返回当前 notebook id(默认 '')
-     *   - getDiagnosticsInfo(): 拼到 export text 顶部的诊断信息
-     *   - now(): ISO 时间戳工厂
-     *   - maxEntries: 默认 500 条
-     *   - maxBytes: 默认 512KB
-     * @returns {Object} ~25 个 fn —
-     *   - 主入口: `developerLog(level, category, event, details)` 返回 true/false (写入是否成功)
-     *   - 模式 flag: get/setDeveloperModeEnabled, get/setWelcomeOnboardingSeenVersion,
-     *     get/setWhatsNewSeenVersion, setOnboardingModalSeenVersions
-     *   - 偏好: getPreferenceUsageState, get/setHistoryRetentionLimit, get/setLanguageOverride,
-     *     getCommandShortcuts, get/setCommandShortcut, get/setVisibleQuickViewKinds,
-     *     get/setHoverSpotlightEnabled
-     *   - 日志 IO: loadDeveloperPreferences, loadDeveloperLogs, getDeveloperLogs,
-     *     getLatestDeveloperLogAt, getDeveloperLogExportText, clearDeveloperLogs
-     *   - 测试 hook: _trimLogsForTest, _sanitizeDetailsForTest
-     *   完整 return 块见 line 623。
+     * Creates the notebook-scoped developer log stream.
+     * Preference state is owned by content-preferences; this module only reads
+     * the current developer-mode flag through an injected callback.
      */
     function createContentDeveloperLogger(context = {}) {
         const ctx = context && typeof context === 'object' ? context : {};
         const chromeApi = ctx.chrome ?? globalThis.chrome;
         const getProjectId = typeof ctx.getProjectId === 'function' ? ctx.getProjectId : () => '';
         const getDiagnosticsInfo = typeof ctx.getDiagnosticsInfo === 'function' ? ctx.getDiagnosticsInfo : () => ({});
+        const isDeveloperModeEnabled = typeof ctx.isDeveloperModeEnabled === 'function'
+            ? ctx.isDeveloperModeEnabled
+            : () => false;
         const now = typeof ctx.now === 'function' ? ctx.now : () => new Date().toISOString();
         const maxEntries = Number.isFinite(Number(ctx.maxEntries)) ? Number(ctx.maxEntries) : 500;
         const maxBytes = Number.isFinite(Number(ctx.maxBytes)) ? Number(ctx.maxBytes) : 512 * 1024;
@@ -62,48 +41,36 @@
         ]);
         const SENSITIVE_KEY_PATTERN = /(title|label|name|text|content|body|html|json|url|href|dom|clipboard)/i;
         const HASH_SOURCE_KEYS = new Set(['stableToken', 'fingerprint']);
-        const QUICK_VIEW_BUTTON_KINDS = ['all', 'ungrouped', 'disabled', 'tag', 'recent', 'issues'];
 
-        let developerModeEnabled = false;
-        let welcomeOnboardingSeenVersion = 0;
-        let whatsNewSeenVersion = '';
-        let preferenceUsageState = {
-            hasExistingPluginData: false,
-            hasStoredPreferences: false
-        };
-        let historyRetentionLimit = 20;
-        let languageOverride = 'auto';
-        let commandShortcuts = {};
-        let visibleQuickViewKinds = [...QUICK_VIEW_BUTTON_KINDS];
-        let appearancePreferences = { hoverSpotlightEnabled: true };
-        let dragMode = 'classic';
-        let preferencesLoadStatus = 'idle';
-        let nextPreferenceOperationId = 1;
-        let latestAppliedPreferenceOperationId = 0;
-        let latestPreferenceLoadOperationId = 0;
         let developerLogs = [];
+        let activeDeveloperLogKey = '';
+        let developerLogOperationVersion = 0;
         let nextLogSequence = 1;
-
-        // Phase 3: shared preference normalizers — loaded by manifest content_scripts
-        // before this file (or via test harness require). Identical destructuring lives
-        // in src/background/index.js so any normalize rule change touches only utils.
-        // normalizeCommandShortcutKey is used internally by normalizeCommandShortcutCombo
-        // (within the utils file itself), so it's intentionally omitted from this destructure.
-        const {
-            normalizePreferenceVersion,
-            normalizeWhatsNewSeenVersion,
-            normalizeHistoryRetentionLimit,
-            normalizeLanguageOverride,
-            normalizeDragMode,
-            normalizeCommandShortcutId,
-            normalizeCommandShortcutCombo,
-            normalizeCommandShortcuts,
-            normalizeVisibleQuickViewKinds,
-            normalizeAppearancePreferences
-        } = globalThis.NSM_PREFERENCE_NORMALIZERS;
 
         function getNotebookId() {
             return String(getProjectId() || '');
+        }
+
+        function getCurrentDeveloperLogKey() {
+            return storageContract.getDeveloperLogKey(getNotebookId());
+        }
+
+        function activateCurrentDeveloperLogKey() {
+            const key = getCurrentDeveloperLogKey();
+            if (key !== activeDeveloperLogKey) {
+                activeDeveloperLogKey = key;
+                developerLogs = [];
+                developerLogOperationVersion += 1;
+            }
+            return key;
+        }
+
+        function isActiveDeveloperLogKey(key) {
+            return Boolean(
+                key
+                && key === activeDeveloperLogKey
+                && key === getCurrentDeveloperLogKey()
+            );
         }
 
         function getSerializedByteLength(value) {
@@ -229,367 +196,25 @@
             });
         }
 
-        async function loadDeveloperPreferences() {
-            const operationId = nextPreferenceOperationId++;
-            const statusBeforeLoad = preferencesLoadStatus;
-            latestPreferenceLoadOperationId = operationId;
-            preferencesLoadStatus = 'loading';
-            try {
-                const response = await sendRuntimeMessage({ type: 'LOAD_PREFERENCES' });
-                if (operationId < latestAppliedPreferenceOperationId) {
-                    if (
-                        latestPreferenceLoadOperationId === operationId
-                        && preferencesLoadStatus === 'loading'
-                    ) {
-                        preferencesLoadStatus = statusBeforeLoad === 'loaded' ? 'loaded' : 'failed';
-                    }
-                    return developerModeEnabled;
-                }
-                if (!response?.success || !response.preferences || typeof response.preferences !== 'object') {
-                    if (latestPreferenceLoadOperationId === operationId) {
-                        preferencesLoadStatus = 'failed';
-                    }
-                    return developerModeEnabled;
-                }
-                applyLoadedPreferences(response.preferences);
-                applyLoadedPreferenceUsageState(response.usageState);
-                latestAppliedPreferenceOperationId = operationId;
-                if (latestPreferenceLoadOperationId === operationId) {
-                    preferencesLoadStatus = 'loaded';
-                }
-                if (developerModeEnabled) {
-                    try {
-                        await loadDeveloperLogs();
-                    } catch (error) {
-                        // Preference verification remains valid when only optional log hydration fails.
-                    }
-                }
-            } catch (error) {
-                if (
-                    operationId >= latestAppliedPreferenceOperationId
-                    && latestPreferenceLoadOperationId === operationId
-                ) {
-                    preferencesLoadStatus = 'failed';
-                }
-            }
-            return developerModeEnabled;
-        }
-
-        function applyLoadedPreferences(preferences = {}) {
-            developerModeEnabled = Boolean(preferences?.developerModeEnabled);
-            welcomeOnboardingSeenVersion = normalizePreferenceVersion(preferences?.welcomeOnboardingSeenVersion);
-            whatsNewSeenVersion = normalizeWhatsNewSeenVersion(preferences?.whatsNewSeenVersion);
-            historyRetentionLimit = normalizeHistoryRetentionLimit(preferences?.historyRetentionLimit);
-            languageOverride = normalizeLanguageOverride(preferences?.languageOverride);
-            commandShortcuts = normalizeCommandShortcuts(preferences?.commandShortcuts);
-            visibleQuickViewKinds = normalizeVisibleQuickViewKinds(preferences?.visibleQuickViewKinds);
-            appearancePreferences = normalizeAppearancePreferences(preferences?.appearance);
-            dragMode = normalizeDragMode(preferences?.dragMode);
-        }
-
-        function applyLoadedPreferenceUsageState(usageState = {}) {
-            preferenceUsageState = {
-                hasExistingPluginData: Boolean(usageState?.hasExistingPluginData),
-                hasStoredPreferences: Boolean(usageState?.hasStoredPreferences)
-            };
-        }
-
-        function hasCompleteNormalizedPreferences(preferences) {
-            if (!preferences || typeof preferences !== 'object' || Array.isArray(preferences)) {
-                return false;
-            }
-            const hasAllFields = [
-                'developerModeEnabled',
-                'welcomeOnboardingSeenVersion',
-                'whatsNewSeenVersion',
-                'historyRetentionLimit',
-                'languageOverride',
-                'dragMode',
-                'commandShortcuts',
-                'visibleQuickViewKinds',
-                'appearance'
-            ].every((key) => Object.prototype.hasOwnProperty.call(preferences, key));
-            if (!hasAllFields) return false;
-
-            return (
-                typeof preferences.developerModeEnabled === 'boolean'
-                && preferences.welcomeOnboardingSeenVersion === normalizePreferenceVersion(preferences.welcomeOnboardingSeenVersion)
-                && preferences.whatsNewSeenVersion === normalizeWhatsNewSeenVersion(preferences.whatsNewSeenVersion)
-                && preferences.historyRetentionLimit === normalizeHistoryRetentionLimit(preferences.historyRetentionLimit)
-                && preferences.languageOverride === normalizeLanguageOverride(preferences.languageOverride)
-                && preferences.dragMode === normalizeDragMode(preferences.dragMode)
-                && JSON.stringify(preferences.commandShortcuts) === JSON.stringify(normalizeCommandShortcuts(preferences.commandShortcuts))
-                && JSON.stringify(preferences.visibleQuickViewKinds) === JSON.stringify(normalizeVisibleQuickViewKinds(preferences.visibleQuickViewKinds))
-                && JSON.stringify(preferences.appearance) === JSON.stringify(normalizeAppearancePreferences(preferences.appearance))
-            );
-        }
-
-        async function savePreferences(nextPreferences = {}) {
-            const operationId = nextPreferenceOperationId++;
-            const response = await sendRuntimeMessage({
-                type: 'SAVE_PREFERENCES',
-                preferences: nextPreferences
-            });
-            if (!response || response.success === false) {
-                throw new Error(response?.errorCode || 'runtime_failure');
-            }
-            if (response.success !== true || operationId < latestAppliedPreferenceOperationId) {
-                return response;
-            }
-
-            // Only an explicitly successful SAVE supersedes older preference requests.
-            // A partial response blocks those stale loads but does not verify the full schema.
-            latestAppliedPreferenceOperationId = operationId;
-            if (response.preferences) {
-                applyLoadedPreferences(response.preferences);
-                if (hasCompleteNormalizedPreferences(response.preferences)) {
-                    preferencesLoadStatus = 'loaded';
-                }
-            }
-            if (response.usageState) {
-                applyLoadedPreferenceUsageState(response.usageState);
-            } else {
-                preferenceUsageState = {
-                    hasExistingPluginData: true,
-                    hasStoredPreferences: true
-                };
-            }
-            return response;
-        }
-
-        async function setDeveloperModeEnabled(enabled) {
-            const previousValue = developerModeEnabled;
-            const nextValue = Boolean(enabled);
-            developerModeEnabled = nextValue;
-            try {
-                await savePreferences({ developerModeEnabled: nextValue });
-            } catch (error) {
-                developerModeEnabled = previousValue;
-                throw error;
-            }
-            if (developerModeEnabled) {
-                await loadDeveloperLogs();
-            }
-            return developerModeEnabled;
-        }
-
-        async function setWelcomeOnboardingSeenVersion(version) {
-            const previousValue = welcomeOnboardingSeenVersion;
-            const nextValue = normalizePreferenceVersion(version);
-            welcomeOnboardingSeenVersion = nextValue;
-            try {
-                await savePreferences({ welcomeOnboardingSeenVersion: nextValue });
-            } catch (error) {
-                welcomeOnboardingSeenVersion = previousValue;
-                throw error;
-            }
-            return welcomeOnboardingSeenVersion;
-        }
-
-        async function setWhatsNewSeenVersion(version) {
-            const previousValue = whatsNewSeenVersion;
-            const nextValue = normalizeWhatsNewSeenVersion(version);
-            whatsNewSeenVersion = nextValue;
-            try {
-                await savePreferences({ whatsNewSeenVersion: nextValue });
-            } catch (error) {
-                whatsNewSeenVersion = previousValue;
-                throw error;
-            }
-            return whatsNewSeenVersion;
-        }
-
-        async function setOnboardingModalSeenVersions(nextVersions = {}) {
-            const previousWelcomeValue = welcomeOnboardingSeenVersion;
-            const previousWhatsNewValue = whatsNewSeenVersion;
-            const nextPreferences = {};
-
-            if (Object.prototype.hasOwnProperty.call(nextVersions || {}, 'welcomeOnboardingSeenVersion')) {
-                nextPreferences.welcomeOnboardingSeenVersion = normalizePreferenceVersion(nextVersions.welcomeOnboardingSeenVersion);
-            }
-            if (Object.prototype.hasOwnProperty.call(nextVersions || {}, 'whatsNewSeenVersion')) {
-                nextPreferences.whatsNewSeenVersion = normalizeWhatsNewSeenVersion(nextVersions.whatsNewSeenVersion);
-            }
-
-            if (Object.prototype.hasOwnProperty.call(nextPreferences, 'welcomeOnboardingSeenVersion')) {
-                welcomeOnboardingSeenVersion = nextPreferences.welcomeOnboardingSeenVersion;
-            }
-            if (Object.prototype.hasOwnProperty.call(nextPreferences, 'whatsNewSeenVersion')) {
-                whatsNewSeenVersion = nextPreferences.whatsNewSeenVersion;
-            }
-
-            try {
-                await savePreferences(nextPreferences);
-            } catch (error) {
-                welcomeOnboardingSeenVersion = previousWelcomeValue;
-                whatsNewSeenVersion = previousWhatsNewValue;
-                throw error;
-            }
-
-            return {
-                welcomeOnboardingSeenVersion,
-                whatsNewSeenVersion
-            };
-        }
-
-        async function setHistoryRetentionLimit(limit) {
-            const previousValue = historyRetentionLimit;
-            const nextValue = normalizeHistoryRetentionLimit(limit);
-            historyRetentionLimit = nextValue;
-            try {
-                await savePreferences({ historyRetentionLimit: nextValue });
-            } catch (error) {
-                historyRetentionLimit = previousValue;
-                throw error;
-            }
-            return historyRetentionLimit;
-        }
-
-        async function setLanguageOverride(locale) {
-            const previousValue = languageOverride;
-            const nextValue = normalizeLanguageOverride(locale);
-            languageOverride = nextValue;
-            try {
-                await savePreferences({ languageOverride: nextValue });
-            } catch (error) {
-                languageOverride = previousValue;
-                throw error;
-            }
-            return languageOverride;
-        }
-
-        async function setCommandShortcut(commandId, shortcut) {
-            const id = normalizeCommandShortcutId(commandId);
-            if (!id) return '';
-            const previousShortcuts = cloneCommandShortcuts(commandShortcuts);
-            const nextShortcuts = cloneCommandShortcuts(commandShortcuts);
-            const normalizedShortcut = normalizeCommandShortcutCombo(shortcut);
-            if (!normalizedShortcut) {
-                delete nextShortcuts[id];
-            } else {
-                Object.keys(nextShortcuts).forEach((existingId) => {
-                    if (nextShortcuts[existingId] === normalizedShortcut && existingId !== id) {
-                        delete nextShortcuts[existingId];
-                    }
-                });
-                nextShortcuts[id] = normalizedShortcut;
-            }
-            commandShortcuts = nextShortcuts;
-            try {
-                await savePreferences({ commandShortcuts: { [id]: normalizedShortcut } });
-            } catch (error) {
-                commandShortcuts = previousShortcuts;
-                throw error;
-            }
-            return getCommandShortcut(id);
-        }
-
-        async function setVisibleQuickViewKinds(kinds) {
-            const previousKinds = getVisibleQuickViewKinds();
-            const nextKinds = normalizeVisibleQuickViewKinds(kinds);
-            visibleQuickViewKinds = nextKinds;
-            try {
-                await savePreferences({ visibleQuickViewKinds: nextKinds });
-            } catch (error) {
-                visibleQuickViewKinds = previousKinds;
-                throw error;
-            }
-            return getVisibleQuickViewKinds();
-        }
-
-        async function setHoverSpotlightEnabled(enabled) {
-            const previousValue = appearancePreferences.hoverSpotlightEnabled;
-            const nextValue = enabled !== false;
-            appearancePreferences = { ...appearancePreferences, hoverSpotlightEnabled: nextValue };
-            try {
-                await savePreferences({ appearance: { hoverSpotlightEnabled: nextValue } });
-            } catch (error) {
-                appearancePreferences = { ...appearancePreferences, hoverSpotlightEnabled: previousValue };
-                throw error;
-            }
-            return appearancePreferences.hoverSpotlightEnabled;
-        }
-
-        function getHoverSpotlightEnabled() {
-            return appearancePreferences.hoverSpotlightEnabled;
-        }
-
-        async function setDragMode(mode) {
-            const previousValue = dragMode;
-            const nextValue = normalizeDragMode(mode);
-            dragMode = nextValue;
-            try {
-                await savePreferences({ dragMode: nextValue });
-            } catch (error) {
-                dragMode = previousValue;
-                throw error;
-            }
-            return dragMode;
-        }
-
-        function getDragMode() {
-            return dragMode;
-        }
-
-        function getPreferencesLoadStatus() {
-            return preferencesLoadStatus;
-        }
-
         async function loadDeveloperLogs() {
-            const key = storageContract.getDeveloperLogKey(getNotebookId());
+            const key = activateCurrentDeveloperLogKey();
             if (!key) {
-                developerLogs = [];
                 return developerLogs;
             }
+            const operationVersion = ++developerLogOperationVersion;
             const response = await sendRuntimeMessage({ type: 'LOAD_DEVELOPER_LOGS', key });
-            if (response?.success) {
+            if (
+                response?.success
+                && isActiveDeveloperLogKey(key)
+                && operationVersion === developerLogOperationVersion
+            ) {
                 developerLogs = trimLogs(response.logs || []);
             }
             return getDeveloperLogs();
         }
 
-        function getDeveloperModeEnabled() {
-            return developerModeEnabled;
-        }
-
-        function getWelcomeOnboardingSeenVersion() {
-            return welcomeOnboardingSeenVersion;
-        }
-
-        function getWhatsNewSeenVersion() {
-            return whatsNewSeenVersion;
-        }
-
-        function getPreferenceUsageState() {
-            return Object.assign({}, preferenceUsageState);
-        }
-
-        function cloneCommandShortcuts(shortcuts = commandShortcuts) {
-            return Object.assign({}, normalizeCommandShortcuts(shortcuts));
-        }
-
-        function getHistoryRetentionLimit() {
-            return historyRetentionLimit;
-        }
-
-        function getLanguageOverride() {
-            return languageOverride;
-        }
-
-        function getCommandShortcuts() {
-            return cloneCommandShortcuts(commandShortcuts);
-        }
-
-        function getCommandShortcut(commandId) {
-            const id = normalizeCommandShortcutId(commandId);
-            return id ? commandShortcuts[id] || '' : '';
-        }
-
-        function getVisibleQuickViewKinds() {
-            return [...visibleQuickViewKinds];
-        }
-
         function getDeveloperLogs() {
+            activateCurrentDeveloperLogKey();
             return developerLogs.map((entry) => {
                 if (typeof globalThis.structuredClone === 'function') {
                     try {
@@ -603,11 +228,14 @@
         }
 
         function getLatestDeveloperLogAt() {
+            activateCurrentDeveloperLogKey();
             return developerLogs.length > 0 ? developerLogs[developerLogs.length - 1].timestamp || '' : '';
         }
 
         function developerLog(level, category, event, details = {}) {
-            if (!developerModeEnabled) return false;
+            if (!isDeveloperModeEnabled()) return false;
+            const key = activateCurrentDeveloperLogKey();
+            const operationVersion = ++developerLogOperationVersion;
             const entry = normalizeEntry({
                 level,
                 category,
@@ -616,14 +244,18 @@
                 notebookId: getNotebookId()
             });
             developerLogs = trimLogs([...developerLogs, entry]);
-            const key = storageContract.getDeveloperLogKey(getNotebookId());
             if (key) {
                 sendRuntimeMessage({
                     type: 'APPEND_DEVELOPER_LOG',
                     key,
                     entry
                 }).then((response) => {
-                    if (response?.success && Array.isArray(response.logs)) {
+                    if (
+                        response?.success
+                        && Array.isArray(response.logs)
+                        && isActiveDeveloperLogKey(key)
+                        && operationVersion === developerLogOperationVersion
+                    ) {
                         developerLogs = trimLogs(response.logs);
                     }
                 });
@@ -632,21 +264,26 @@
         }
 
         async function clearDeveloperLogs() {
+            const key = activateCurrentDeveloperLogKey();
+            const operationVersion = ++developerLogOperationVersion;
             developerLogs = [];
-            const key = storageContract.getDeveloperLogKey(getNotebookId());
             if (!key) return true;
             const response = await sendRuntimeMessage({ type: 'CLEAR_DEVELOPER_LOGS', key });
-            if (response?.success) {
+            if (
+                response?.success
+                && isActiveDeveloperLogKey(key)
+                && operationVersion === developerLogOperationVersion
+            ) {
                 developerLogs = [];
                 return true;
             }
-            return false;
+            return response?.success === true;
         }
 
         function getDeveloperLogExportText() {
             return JSON.stringify({
                 exportedAt: now(),
-                developerModeEnabled,
+                developerModeEnabled: Boolean(isDeveloperModeEnabled()),
                 diagnostics: getDiagnosticsInfo() || {},
                 logs: getDeveloperLogs()
             }, null, 2);
@@ -654,29 +291,6 @@
 
         return {
             developerLog,
-            getDeveloperModeEnabled,
-            setDeveloperModeEnabled,
-            getWelcomeOnboardingSeenVersion,
-            setWelcomeOnboardingSeenVersion,
-            getWhatsNewSeenVersion,
-            setWhatsNewSeenVersion,
-            setOnboardingModalSeenVersions,
-            getPreferenceUsageState,
-            getHistoryRetentionLimit,
-            setHistoryRetentionLimit,
-            getLanguageOverride,
-            setLanguageOverride,
-            getCommandShortcuts,
-            getCommandShortcut,
-            setCommandShortcut,
-            getVisibleQuickViewKinds,
-            setVisibleQuickViewKinds,
-            getHoverSpotlightEnabled,
-            setHoverSpotlightEnabled,
-            getDragMode,
-            setDragMode,
-            getPreferencesLoadStatus,
-            loadDeveloperPreferences,
             loadDeveloperLogs,
             getDeveloperLogs,
             getLatestDeveloperLogAt,

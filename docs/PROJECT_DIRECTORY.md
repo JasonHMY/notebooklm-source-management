@@ -107,8 +107,10 @@ GeminiNotebook-Source-Management
 │   │   │   └── 搜索 UI/过滤编排、quick view、隔离视图与 effective enabled 状态；搜索语法和匹配委托统一语义模块
 │   │   ├── content-panel-dom.js
 │   │   │   └── Gemini Notebook panel 查找、挂载、生命周期、颜色/布局读取
+│   │   ├── content-preferences.js
+│   │   │   └── 全局偏好 lifecycle Module；默认值/归一化、LOAD/SAVE、单次 load Promise 缓存、四态验证、竞态顺序、乐观更新和失败回滚
 │   │   ├── content-developer-logger.js
-│   │   │   └── 开发者模式偏好、脱敏日志、导出、清空
+│   │   │   └── notebook-scoped 脱敏日志、裁剪、加载、追加、导出与清空；仅消费注入的实时 Developer Mode 状态
 │   │   ├── content-runtime-state.js
 │   │   │   └── runtimeContext getter/setter 绑定 helper
 │   │   ├── content-message-router.js
@@ -143,7 +145,7 @@ GeminiNotebook-Source-Management
 │   │   ├── storage-contract.js
 │   │   │   └── storage schema/import format 常量、per-notebook key builders、精确 key ownership 与 schema compatibility 的纯共享契约
 │   │   └── preference-normalizers.js
-│   │       └── 偏好归一化 (10 个 normalizeXxx)；content + background SW 共享，挂 `globalThis.NSM_PREFERENCE_NORMALIZERS`
+│   │       └── 偏好归一化 (11 个 normalizeXxx)；content + background SW 共享，挂 `globalThis.NSM_PREFERENCE_NORMALIZERS`
 │   └── assets/
 │       ├── icons/
 │       └── fonts/
@@ -258,6 +260,7 @@ manifest.json
     ├── src/content/content-tags.js
     ├── src/content/content-tree-placement.js
     ├── src/content/content-state-reconcile.js
+    ├── src/content/content-preferences.js
     ├── src/content/content-developer-logger.js
     ├── src/content/content-runtime-state.js
     ├── src/content/content-message-router.js
@@ -378,7 +381,7 @@ manifest.json
 │   │   ├── 嵌套 children 和 parent map
 │   │   ├── 来源/分组拖拽排序
 │   │   ├── 批量模式多源拖拽与边缘自动滚动
-│   │   ├── 两种拖拽模式（偏好 dragMode，无新模块）：经典（默认，蓝色插入线 .drag-over-top/bottom + 散源落底部桶）/ 避让 Beta（按真实混合 box model/折叠位移形成空槽、折叠 + 让位 + 根层级定位、取消时精确恢复）；自定义 ghost = source-item 行克隆（单源单层 + 多源最多 3 层堆叠 + 右上角数字 badge）
+│   │   ├── 两种拖拽模式（`content-preferences` 的全局 dragMode）：经典（默认，蓝色插入线 .drag-over-top/bottom + 散源落底部桶）/ 避让 Beta（按真实混合 box model/折叠位移形成空槽、折叠 + 让位 + 根层级定位、取消时精确恢复）；自定义 ghost = source-item 行克隆（单源单层 + 多源最多 3 层堆叠 + 右上角数字 badge）
 │   │   ├── 避让 dragover 每帧只读一次 geometry snapshot 后纯计算并集中写入；纯滚动按 root/嵌套 children 精确 delta 修补，auto-scroll 无新 dragover 时仍按静止指针合并刷新，drop 前同步消费 dirty geometry，尺寸/render/混合失效时 fail closed 重建
 │   │   ├── native dropEffect 只在原始 dragover 事件内由 clean snapshot 同步解析；dirty/missing snapshot 保守 move，未知 payload 为 none，异步 drag frame 不保留 DataTransfer
 │   │   ├── reflow transform 使用 source/group 类型化 map；仅可视区 + 一个真实行高 overscan 动画，离屏位移静态应用并在结束/下次 preflight 清理
@@ -511,7 +514,7 @@ manifest.json
 │   │   └── appearance 偏好持久化与深合并
 │   ├── 先看
 │   │   ├── src/content/content-modal-settings.js（section 渲染）
-│   │   ├── src/content/content-developer-logger.js（runtime state + setter）
+│   │   ├── src/content/content-preferences.js（runtime state + setter + rollback）
 │   │   ├── src/content/content-style-text.js（`:host(.sp-appearance-no-spotlight)` 规则）
 │   │   └── src/content/index.js（`applyAppearancePreferencesToHost()`）
 │   ├── storage 字段
@@ -551,7 +554,7 @@ manifest.json
 │       └── tests/background.test.js
 ├── 开发者日志
 │   ├── 负责
-│   │   ├── Developer Mode 偏好和已开启免密码解锁
+│   │   ├── Developer Mode 偏好由 `content-preferences` 持有，index 在启用后显式加载日志
 │   │   ├── 脱敏结构化日志
 │   │   ├── 500 条 / 约 512 KB 裁剪
 │   │   ├── 设置页底部密码入口
@@ -559,6 +562,7 @@ manifest.json
 │   │   ├── 清空日志
 │   │   └── 从开发者功能区测试欢迎弹窗
 │   ├── 先看
+│   │   ├── src/content/content-preferences.js
 │   │   ├── src/content/content-developer-logger.js
 │   │   ├── src/background/index.js
 │   │   ├── src/content/content-modals.js
@@ -636,10 +640,10 @@ chrome.storage.local
 │   ├── 写入: background SAVE_STATE / APPEND_STATE_HISTORY
 │   └── 排障: src/background/index.js, src/content/content-persistence.js
 ├── sourcesPlusPreferences
-│   ├── 用途: 全局偏好，包含 developerModeEnabled、welcomeOnboardingSeenVersion、whatsNewSeenVersion、historyRetentionLimit、languageOverride、commandShortcuts、visibleQuickViewKinds
+│   ├── 用途: 全局偏好，包含 developerModeEnabled、welcomeOnboardingSeenVersion、whatsNewSeenVersion、historyRetentionLimit、languageOverride、dragMode、commandShortcuts、visibleQuickViewKinds、appearance
 │   ├── 写入: settings / welcome onboarding / manifest-version what’s new / command palette shortcuts / quick view button visibility -> background SAVE_PREFERENCES
 │   ├── 读取: LOAD_PREFERENCES 同时返回从 preferences/state/history/log keys 派生的 usageState，用于区分新用户和升级用户
-│   └── 排障: src/content/content-developer-logger.js, src/background/index.js
+│   └── 排障: src/content/content-preferences.js, src/content/index.js, src/background/index.js
 └── sourcesPlusDeveloperLogs_<projectId>
     ├── 用途: 每个 notebook 的脱敏开发者日志
     ├── 限制: 最多 500 条，约 512 KB
@@ -738,9 +742,12 @@ content runtime memory
 ├── content runtime helper
 │   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-toast-status.test.js tests/content/content-diagnostics.test.js tests/content/content-source-view-switch-controller.test.js
 │   └── 文件: tests/content/content-toast-status.test.js, tests/content/content-diagnostics.test.js, tests/content/content-source-view-switch-controller.test.js
+├── 全局偏好 lifecycle
+│   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-preferences.test.js tests/content/content-lifecycle.test.js tests/background.test.js
+│   └── 文件: tests/content/content-preferences.test.js, tests/content/content-lifecycle.test.js, tests/content/content-modal-settings.test.js, tests/content/content-modal-welcome.test.js, tests/content/content-modal-whats-new.test.js, tests/content/content-modal-command-palette.test.js, tests/background.test.js
 ├── 开发者日志
-│   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-developer-logger.test.js tests/background.test.js
-│   └── 文件: tests/content/content-developer-logger.test.js, tests/background.test.js
+│   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-developer-logger.test.js tests/content/content-persistence.test.js tests/background.test.js
+│   └── 文件: tests/content/content-developer-logger.test.js, tests/content/content-persistence.test.js, tests/background.test.js
 ├── popup launcher
 │   ├── 命令: npm run test:unit -- --runTestsByPath tests/popup.test.js
 │   └── 文件: tests/popup.test.js
@@ -904,9 +911,9 @@ CI: .github/workflows/ci.yml
 │   ├── 测试: storage-contract.test.js, content-persistence.test.js, background.test.js
 │   └── 注意: 正常读写都先走 background FIFO；直接 storage 读取仅用于 runtime-unavailable 回退，直接写入仅用于允许降级的非 import/lifecycle 保存
 ├── 开发者日志没记录
-│   ├── 先看: src/content/content-developer-logger.js
-│   ├── 然后看: src/content/content-diagnostics.js, src/background/index.js, src/content/content-modals.js
-│   ├── 测试: content-developer-logger.test.js, content-diagnostics.test.js
+│   ├── 先看: src/content/content-preferences.js, src/content/content-developer-logger.js
+│   ├── 然后看: src/content/index.js, src/content/content-diagnostics.js, src/background/index.js, src/content/content-modals.js
+│   ├── 测试: content-preferences.test.js, content-developer-logger.test.js, content-persistence.test.js, content-diagnostics.test.js
 │   └── 注意: 开关是全局 preference，日志是 per-notebook key
 ├── popup 按钮行为不对
 │   ├── 先看: src/popup/index.js

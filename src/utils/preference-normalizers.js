@@ -3,22 +3,22 @@
  * content script 两个运行时共享。
  *
  * 设计目的:
- *   消除 background/index.js 与 content/content-developer-logger.js 之间逐字重复的
- *   10 个 normalize* 函数(~130 行)。两端任何 normalize 规则变化(新增语言、改
+ *   消除 background/index.js 与 content/content-preferences.js 之间逐字重复的
+ *   11 个 normalize* 函数(~130 行)。两端任何 normalize 规则变化(新增语言、改
  *   shortcut 别名、扩展 quick view kinds 等)只在此文件维护一份。
  *
  * 加载方式:
  *   - Content script: 通过 manifest.json content_scripts 在 src/utils/index.js 之后
- *     立即加载(必须早于 content-developer-logger.js)。IIFE 执行后挂在
+ *     立即加载(必须早于 content-preferences.js)。IIFE 执行后挂在
  *     globalThis.NSM_PREFERENCE_NORMALIZERS。
  *   - Background SW: 在 src/background/index.js 顶部用 importScripts 加载;test
  *     环境(Node)走 module.exports 同样初始化 globalThis。
  *
- * 自包含:不依赖外部常量。`QUICK_VIEW_BUTTON_KINDS` / `HISTORY_RETENTION_LIMIT_OPTIONS`
- * / `STATE_HISTORY_LIMIT` 在本文件内定义,与 background/index.js 顶部声明的同名
- * 常量保持值相同(语义契约);若未来扩展 quick view 或 history 选项,两处必须同步。
+ * 自包含:不依赖外部常量。`QUICK_VIEW_BUTTON_KINDS` 是本模块内的 canonical 列表；
+ * `HISTORY_RETENTION_LIMIT_OPTIONS` / `STATE_HISTORY_LIMIT` 与 background/index.js
+ * 顶部同名常量保持值相同(语义契约)，扩展 history 选项时两处必须同步。
  *
- * 测试: tests/background.test.js 与 tests/content/content-developer-logger.test.js
+ * 测试: tests/background.test.js 与 tests/content/content-preferences.test.js
  * 覆盖所有 normalize* 行为;改本文件即可影响两侧测试。
  */
 

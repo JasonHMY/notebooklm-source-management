@@ -232,6 +232,59 @@ describe('manager launcher messaging', () => {
         }
     });
 
+    it('waits for the stored language preference before rendering onboarding', async () => {
+        const originalRequestAnimationFrame = global.requestAnimationFrame;
+        const { shadowRoot } = createOnboardingShadowRoot();
+        let settleLanguageApplication;
+        const localeSetter = jest.spyOn(
+            globalThis,
+            'NSM_SET_MESSAGE_LOCALE_OVERRIDE'
+        ).mockImplementation(() => new Promise((resolve) => {
+            settleLanguageApplication = resolve;
+        }));
+
+        global.requestAnimationFrame = jest.fn((callback) => {
+            callback?.();
+            return 1;
+        });
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'LOAD_PREFERENCES' && typeof cb === 'function') {
+                cb({
+                    success: true,
+                    preferences: {
+                        ...createCompletePreferences(),
+                        languageOverride: 'zh_CN'
+                    },
+                    usageState: {
+                        hasExistingPluginData: false,
+                        hasStoredPreferences: true
+                    }
+                });
+            }
+        });
+
+        try {
+            mod._setShadowRootForTest(shadowRoot);
+
+            const pendingRender = mod.maybeRenderWelcomeOnboarding();
+            await flushUntil(() => Boolean(settleLanguageApplication));
+
+            expect(localeSetter).toHaveBeenCalledWith('zh_CN');
+            expect(shadowRoot.getElementById('sp-welcome-modal')).toBeFalsy();
+
+            settleLanguageApplication('zh_CN');
+            await expect(pendingRender).resolves.toBe(true);
+            expect(shadowRoot.getElementById('sp-welcome-modal')).toBeTruthy();
+        } finally {
+            localeSetter.mockRestore();
+            if (originalRequestAnimationFrame) {
+                global.requestAnimationFrame = originalRequestAnimationFrame;
+            } else {
+                delete global.requestAnimationFrame;
+            }
+        }
+    });
+
     it('shows only the welcome modal for a brand-new user and marks the current whats new version as seen', async () => {
         const originalRequestAnimationFrame = global.requestAnimationFrame;
         const { shadowRoot } = createOnboardingShadowRoot();
@@ -3242,6 +3295,20 @@ describe('manager launcher messaging', () => {
         mod.handleRouteChanged();
 
         expect(global.window.location.reload).not.toHaveBeenCalled();
+    });
+
+    it('reloads notebook-scoped developer logs after an enabled route switch', async () => {
+        mod._setProjectId('old-project');
+        await mod.setDeveloperModeEnabled(true);
+        global.chrome.runtime.sendMessage.mockClear();
+        global.window.location.pathname = '/notebook/new-project';
+
+        mod.handleRouteChanged();
+
+        expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith({
+            type: 'LOAD_DEVELOPER_LOGS',
+            key: 'sourcesPlusDeveloperLogs_new-project'
+        }, expect.any(Function));
     });
 
     it('falls back to reload only after repeated route recovery failures', async () => {

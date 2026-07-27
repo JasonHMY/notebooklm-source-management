@@ -17,6 +17,7 @@ const CONTENT_HELPER_GLOBALS = [
     'NSM_CREATE_CONTENT_TAGS',
     'NSM_CREATE_CONTENT_TREE_PLACEMENT',
     'NSM_CREATE_CONTENT_STATE_RECONCILE',
+    'NSM_CREATE_CONTENT_PREFERENCES',
     'NSM_CREATE_CONTENT_DEVELOPER_LOGGER',
     'NSM_CREATE_CONTENT_RUNTIME_STATE',
     'NSM_CREATE_CONTENT_MESSAGE_ROUTER',
@@ -276,8 +277,10 @@ const setupGlobalMocks = () => {
                             whatsNewSeenVersion: '',
                             historyRetentionLimit: 20,
                             languageOverride: 'auto',
+                            dragMode: 'classic',
                             commandShortcuts: {},
-                            visibleQuickViewKinds: ['all', 'ungrouped', 'disabled', 'tag', 'recent', 'issues']
+                            visibleQuickViewKinds: ['all', 'ungrouped', 'disabled', 'tag', 'recent', 'issues'],
+                            appearance: { hoverSpotlightEnabled: true }
                         },
                         usageState: {
                             hasExistingPluginData: false,
@@ -295,8 +298,10 @@ const setupGlobalMocks = () => {
                             whatsNewSeenVersion: '',
                             historyRetentionLimit: 20,
                             languageOverride: 'auto',
+                            dragMode: 'classic',
                             commandShortcuts: {},
-                            visibleQuickViewKinds: ['all', 'ungrouped', 'disabled', 'tag', 'recent', 'issues']
+                            visibleQuickViewKinds: ['all', 'ungrouped', 'disabled', 'tag', 'recent', 'issues'],
+                            appearance: { hoverSpotlightEnabled: true }
                         }, message.preferences || {})
                     });
                     return;

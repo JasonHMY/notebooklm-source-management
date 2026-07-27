@@ -12,6 +12,7 @@ function clearContentGlobals() {
     delete globalThis.NSM_CREATE_CONTENT_TAGS;
     delete globalThis.NSM_CREATE_CONTENT_TREE_PLACEMENT;
     delete globalThis.NSM_CREATE_CONTENT_STATE_RECONCILE;
+    delete globalThis.NSM_CREATE_CONTENT_PREFERENCES;
     delete globalThis.NSM_CREATE_CONTENT_DEVELOPER_LOGGER;
     delete globalThis.NSM_CREATE_CONTENT_RUNTIME_STATE;
     delete globalThis.NSM_CREATE_CONTENT_MESSAGE_ROUTER;
@@ -66,6 +67,7 @@ function loadContentModule() {
     require('../../src/content/content-tags.js');
     require('../../src/content/content-tree-placement.js');
     require('../../src/content/content-state-reconcile.js');
+    require('../../src/content/content-preferences.js');
     require('../../src/content/content-developer-logger.js');
     require('../../src/content/content-runtime-state.js');
     require('../../src/content/content-message-router.js');

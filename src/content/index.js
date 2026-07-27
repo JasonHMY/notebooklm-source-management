@@ -60,6 +60,7 @@
     const createContentTags = globalThis.NSM_CREATE_CONTENT_TAGS;
     const createContentTreePlacement = globalThis.NSM_CREATE_CONTENT_TREE_PLACEMENT;
     const createContentStateReconcile = globalThis.NSM_CREATE_CONTENT_STATE_RECONCILE;
+    const createContentPreferences = globalThis.NSM_CREATE_CONTENT_PREFERENCES;
     const createContentDeveloperLogger = globalThis.NSM_CREATE_CONTENT_DEVELOPER_LOGGER;
     const createContentRuntimeState = globalThis.NSM_CREATE_CONTENT_RUNTIME_STATE;
     const createContentMessageRouter = globalThis.NSM_CREATE_CONTENT_MESSAGE_ROUTER;
@@ -91,6 +92,7 @@
         typeof createContentTags !== 'function' ||
         typeof createContentTreePlacement !== 'function' ||
         typeof createContentStateReconcile !== 'function' ||
+        typeof createContentPreferences !== 'function' ||
         typeof createContentDeveloperLogger !== 'function' ||
         typeof createContentRuntimeState !== 'function' ||
         typeof createContentMessageRouter !== 'function' ||
@@ -209,7 +211,8 @@
     let lastSkippedStructuralSourceSync = null;
     let pendingStructuralStateRepair = null;
     let lastStructuralStateRepair = null;
-    let developerPreferencesLoadPromise = null;
+    let appliedDeveloperPreferencesLoadPromise = null;
+    let developerPreferencesApplicationGeneration = 0;
     let pendingInitialStateApplyWaiters = [];
     let welcomeOnboardingPromptedThisSession = false;
     let whatsNewPromptedThisSession = false;
@@ -461,15 +464,10 @@
         reconcilePersistedTree
     } = stateReconcileModule;
 
-    const developerLoggerModule = createContentDeveloperLogger({
-        chrome,
-        getProjectId: () => projectId || '',
-        getDiagnosticsInfo: () => getDiagnosticsInfo()
-    });
+    const preferencesModule = createContentPreferences({ chrome });
     const {
-        developerLog,
         getDeveloperModeEnabled,
-        setDeveloperModeEnabled,
+        setDeveloperModeEnabled: persistDeveloperModeEnabled,
         getHoverSpotlightEnabled,
         setHoverSpotlightEnabled,
         getDragMode,
@@ -491,12 +489,36 @@
         getVisibleQuickViewKinds,
         setVisibleQuickViewKinds,
         loadDeveloperPreferences,
+        ensureDeveloperPreferencesLoaded,
+        _resetForTest: resetPreferencesForTest
+    } = preferencesModule;
+
+    const developerLoggerModule = createContentDeveloperLogger({
+        chrome,
+        getProjectId: () => projectId || '',
+        getDiagnosticsInfo: () => getDiagnosticsInfo(),
+        isDeveloperModeEnabled: () => getDeveloperModeEnabled()
+    });
+    const {
+        developerLog,
         loadDeveloperLogs,
         getDeveloperLogs,
         getLatestDeveloperLogAt,
         getDeveloperLogExportText,
         clearDeveloperLogs
     } = developerLoggerModule;
+
+    async function setDeveloperModeEnabled(enabled) {
+        const result = await persistDeveloperModeEnabled(enabled);
+        if (result) {
+            try {
+                await loadDeveloperLogs();
+            } catch (error) {
+                // Preference persistence remains valid when optional log hydration fails.
+            }
+        }
+        return result;
+    }
 
     const sourceActionsModule = createContentSourceActions({
         getDocument: () => document,
@@ -2116,18 +2138,50 @@
         render();
     }
 
-    function ensureDeveloperPreferencesLoaded() {
-        if (!developerPreferencesLoadPromise) {
-            developerPreferencesLoadPromise = Promise.resolve(loadDeveloperPreferences())
-                .then(() => applyLanguageOverrideFromPreferences())
-                .then(() => { applyAppearancePreferencesToHost(); })
-                .then(() => {
+    function ensureDeveloperPreferencesApplied() {
+        if (!appliedDeveloperPreferencesLoadPromise) {
+            const applicationGeneration
+                = developerPreferencesApplicationGeneration;
+            appliedDeveloperPreferencesLoadPromise = Promise.resolve(
+                ensureDeveloperPreferencesLoaded()
+            )
+                .then(async () => {
+                    if (
+                        applicationGeneration
+                        !== developerPreferencesApplicationGeneration
+                    ) {
+                        return null;
+                    }
+                    if (
+                        getPreferencesLoadStatus() === 'loaded'
+                        && getDeveloperModeEnabled()
+                    ) {
+                        try {
+                            await loadDeveloperLogs();
+                        } catch (error) {
+                            // Log hydration does not invalidate verified preferences.
+                        }
+                    }
+                    if (
+                        applicationGeneration
+                        !== developerPreferencesApplicationGeneration
+                    ) {
+                        return null;
+                    }
+                    await applyLanguageOverrideFromPreferences();
+                    if (
+                        applicationGeneration
+                        !== developerPreferencesApplicationGeneration
+                    ) {
+                        return null;
+                    }
+                    applyAppearancePreferencesToHost();
                     refreshLocalizedStaticUi();
                     return getDeveloperModeEnabled();
                 })
                 .catch(() => null);
         }
-        return developerPreferencesLoadPromise;
+        return appliedDeveloperPreferencesLoadPromise;
     }
 
     function normalizeDottedVersion(value) {
@@ -2199,7 +2253,7 @@
             return Promise.resolve(false);
         }
 
-        return ensureDeveloperPreferencesLoaded().then(() => {
+        return ensureDeveloperPreferencesApplied().then(() => {
             const usageState = typeof getPreferenceUsageState === 'function' ? getPreferenceUsageState() : {};
             if (
                 whatsNewPromptedThisSession ||
@@ -2218,7 +2272,7 @@
             return Promise.resolve(false);
         }
 
-        return ensureDeveloperPreferencesLoaded().then(() => {
+        return ensureDeveloperPreferencesApplied().then(() => {
             const usageState = typeof getPreferenceUsageState === 'function' ? getPreferenceUsageState() : {};
             if (
                 welcomeOnboardingPromptedThisSession ||
@@ -4574,6 +4628,9 @@
             console.log(`GeminiNotebook-Source-Management: Route changed from ${projectId} to ${newProjectId}. Reinitializing manager.`);
             activeRouteRecoveryToken += 1;
             projectId = newProjectId;
+            if (getDeveloperModeEnabled()) {
+                loadDeveloperLogs().catch(() => {});
+            }
             managerStatusReason = 'manager_not_ready';
             teardown('route_switch');
             recoverManagerForRoute(newProjectId, 0, activeRouteRecoveryToken);
@@ -4829,7 +4886,7 @@
     if (chrome.runtime && chrome.runtime.onMessage && typeof chrome.runtime.onMessage.addListener === 'function') {
         chrome.runtime.onMessage.addListener(handleManagerMessage);
     }
-    ensureDeveloperPreferencesLoaded().catch(() => {});
+    ensureDeveloperPreferencesApplied().catch(() => {});
     window.addEventListener('error', handleContentErrorLog);
     window.addEventListener('unhandledrejection', handleUnhandledRejectionLog);
 
@@ -5242,6 +5299,7 @@
             _enforceClassicPlacementInvariantForTest: enforceClassicPlacementInvariant,
             _finalizePanelReattachPersistenceForTest: finalizePanelReattachPersistence,
             _ensureDeveloperPreferencesLoadedForTest: ensureDeveloperPreferencesLoaded,
+            _ensureDeveloperPreferencesAppliedForTest: ensureDeveloperPreferencesApplied,
             _applyDragModeChangeForTest: applyDragModeChange,
             _getDragModeForTest: getDragMode,
             _rollbackImportSnapshotForTest: rollbackImportSnapshot,
@@ -5360,7 +5418,11 @@
                 pendingInitialLoadedState = null;
                 isAwaitingInitialStateLoad = false;
                 resolvePendingInitialStateApplyWaiters();
-                developerPreferencesLoadPromise = null;
+                developerPreferencesApplicationGeneration += 1;
+                appliedDeveloperPreferencesLoadPromise = null;
+                if (typeof resetPreferencesForTest === 'function') {
+                    resetPreferencesForTest();
+                }
                 welcomeOnboardingPromptedThisSession = false;
                 whatsNewPromptedThisSession = false;
                 sourceDetailViewRequested = false;

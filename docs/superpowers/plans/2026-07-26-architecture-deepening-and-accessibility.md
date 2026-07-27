@@ -586,7 +586,7 @@ Expected: FAIL；两个 consumer 仍调用各自 mutation helpers。
 - Adapter 在 changed 后清 batch、render、save、close；
 - empty/invalid/no-op 返回稳定 result，不 throw。
 
-- [ ] **Step 4: 测试并提交**
+- [x] **Step 4: 测试并提交**
 
 Run: 同 Step 2。
 
@@ -982,6 +982,8 @@ git commit -m "feat: add keyboard tree ordering controls"
 - Modify: `src/content/content-modal-welcome.js`
 - Modify: `src/content/content-modal-whats-new.js`
 - Modify: `src/content/index.js`
+- Modify: `src/utils/preference-normalizers.js`
+- Modify: `src/background/index.js`
 - Modify: `manifest.json`
 - Modify: `tests/helpers/load-content-module.js`
 - Modify: `tests/helpers/content-test-harness.js`
@@ -993,6 +995,8 @@ git commit -m "feat: add keyboard tree ordering controls"
 - Modify: `tests/content/content-lifecycle.test.js`
 - Modify: `tests/content/content-persistence.test.js`
 - Modify: `tests/content/content-modal-command-palette.test.js`
+- Modify: `tests/content/content-module.test.js`
+- Modify: `tests/manifest-loader-sync.test.js`
 - Modify: `tests/background.test.js`
 - Modify: `docs/PROJECT_DIRECTORY.md`
 - Modify: `CHANGELOG.md`
@@ -1031,7 +1035,8 @@ createContentPreferences({
 ```
 
 `loadDeveloperPreferences()` 保持现有返回值与 payload contract，但不再加载日志；
-`ensureDeveloperPreferencesLoaded()` 缓存同一 in-flight load Promise；
+`ensureDeveloperPreferencesLoaded()` 缓存同一单次 load Promise，settled 后也在当前
+lifecycle 内复用；
 `getPreferencesLoadStatus()` 固定返回 `'idle'|'loading'|'loaded'|'failed'`。Drag Task 3 的
 Classic invariant 必须从本 Module 注入这两个 lifecycle API，不能在 Logger 保留镜像状态。
 successful `SAVE_PREFERENCES` 只有在 response 携带完整 normalized preferences 时才把
@@ -1058,7 +1063,7 @@ Logger 只依赖 `isDeveloperModeEnabled()`，不持有 preference state。
 `index.js` 负责 composition：preference load/set developer mode 成功且 mode enabled 时，
 显式调用 `logger.loadDeveloperLogs()`；Preferences Module 不反向依赖 Logger。
 
-- [ ] **Step 1: 写 separation 失败测试**
+- [x] **Step 1: 写 separation 失败测试**
 
 `content-preferences.test.js` 独立覆盖 load、in-flight dedupe、四态 load status、
 failed-load→successful-full-save→loaded、normalize、optimistic update、save failure
@@ -1067,7 +1072,7 @@ palette tests 覆盖原 consumer 的 public behavior 与 payload 不变；lifecy
 tests 证明 Classic invariant 仍等待 verified preferences；logger test 在不构造完整
 preferences 的情况下覆盖 sanitize/append/export。
 
-- [ ] **Step 2: 运行并确认红灯**
+- [x] **Step 2: 运行并确认红灯**
 
 Run:
 
@@ -1088,7 +1093,7 @@ npm run test:unit -- --runTestsByPath \
 
 Expected: FAIL，preference factory 尚不存在。
 
-- [ ] **Step 3: 实现完整 lifecycle Module**
+- [x] **Step 3: 实现完整 lifecycle Module**
 
 - manifest 在 `content-state-reconcile.js` 后、developer logger 前加载；
 - loader/harness 加 `NSM_CREATE_CONTENT_PREFERENCES`；
@@ -1103,7 +1108,7 @@ Expected: FAIL，preference factory 尚不存在。
 policy，settings/onboarding/logger 仅消费注入 Interface。若实现只剩 getter/setter 转发，
 Task 8 判定失败并停止，不得删除本 task、跳过 full gate 或提交 shallow Module。
 
-- [ ] **Step 4: 测试并提交**
+- [x] **Step 4: 测试并提交**
 
 Run: 同 Step 2，加 `tests/manifest-loader-sync.test.js`。
 
