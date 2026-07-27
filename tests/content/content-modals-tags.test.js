@@ -181,8 +181,18 @@ const createModalMotionTestRuntime = ({
     setSourceTagIds = jest.fn(),
     saveState = jest.fn(),
     render = jest.fn(),
-    buildParentMap = jest.fn(),
-    removeSourceFromTree = jest.fn(),
+    getParentMap = jest.fn(() => new Map()),
+    treePlacement = {
+        applyBatchPlacement: jest.fn(() => ({
+            ok: false,
+            changed: false,
+            reason: 'invalid_target',
+            moved: [],
+            skipped: []
+        })),
+        rebuildParentMap: jest.fn()
+    },
+    createContentModalMove,
     closeSourceActionMenu = jest.fn(),
     createTag = jest.fn(() => null),
     showToast = jest.fn(),
@@ -251,6 +261,8 @@ const createModalMotionTestRuntime = ({
         getSourceTagsById: () => sourceTagsById,
         getSourcesByKey: () => sourcesByKey,
         getPendingBatchKeys: () => pendingBatchKeys,
+        getParentMap,
+        treePlacement,
         getMessage: (key, substitutions = []) => (
             substitutions.length > 0 ? `${key}:${substitutions.join(',')}` : key
         ),
@@ -260,8 +272,7 @@ const createModalMotionTestRuntime = ({
         setSourceTagIds,
         saveState,
         render,
-        buildParentMap,
-        removeSourceFromTree,
+        createContentModalMove,
         createTag,
         getExportConfigText,
         previewImportConfig,
@@ -334,7 +345,10 @@ describe('move-to-folder options', () => {
     });
 
     it('collects top-level, second-level, and third-level folders in tree order', () => {
-        mod.state.groups = ['root', 'sibling'];
+        mod.state.root = [
+            { type: 'group', id: 'root' },
+            { type: 'group', id: 'sibling' }
+        ];
         mod.groupsById.set('root', {
             id: 'root',
             title: 'Root',
@@ -359,7 +373,8 @@ describe('move-to-folder options', () => {
             children: []
         });
 
-        expect(mod.collectMoveFolderOptions(mod.state.groups).map(({ group, level }) => ({
+        const rootGroupIds = mod.state.root.map((entry) => entry.id);
+        expect(mod.collectMoveFolderOptions(rootGroupIds).map(({ group, level }) => ({
             id: group.id,
             level
         }))).toEqual([
@@ -419,38 +434,93 @@ describe('move-to-folder options', () => {
         expect(shadowRoot.querySelector('#sp-move-modal')).toBeNull();
     });
 
-    it('moves sources into folders whose children array is missing', () => {
-        const state = { groups: ['target'], ungrouped: ['source-1'] };
+    it('forwards tree placement dependencies and applies effects only after a changed move', () => {
+        const state = {
+            root: [
+                { type: 'source', key: 'source-1' },
+                { type: 'group', id: 'target' }
+            ]
+        };
         const groupsById = new Map([
-            ['target', { id: 'target', title: 'Target' }]
+            ['target', { id: 'target', title: 'Target', children: [] }]
         ]);
-        const sourcesByKey = new Map([
-            ['source-1', { key: 'source-1', title: 'Source 1' }]
-        ]);
-        const removeSourceFromTree = jest.fn();
+        const parentMap = new Map([['target', null]]);
+        const getParentMap = jest.fn(() => parentMap);
+        const moveItem = { kind: 'source', key: 'source-1' };
+        const unchangedResult = {
+            ok: true,
+            changed: false,
+            reason: 'no_change',
+            moved: [],
+            skipped: [{ item: moveItem, reason: 'no_change' }]
+        };
+        const changedResult = {
+            ok: true,
+            changed: true,
+            reason: 'moved',
+            moved: [moveItem],
+            skipped: []
+        };
+        const treePlacement = {
+            applyBatchPlacement: jest.fn()
+                .mockReturnValueOnce(unchangedResult)
+                .mockReturnValueOnce(changedResult),
+            rebuildParentMap: jest.fn()
+        };
+        let moveModalDeps;
+        const createContentModalMove = jest.fn((deps) => {
+            moveModalDeps = deps;
+            return require('../../src/content/content-modal-move.js')(deps);
+        });
         const saveState = jest.fn();
         const render = jest.fn();
-        const buildParentMap = jest.fn();
         const closeSourceActionMenu = jest.fn();
         const { modals } = createModalMotionTestRuntime({
             state,
             groupsById,
-            sourcesByKey,
-            removeSourceFromTree,
+            sourcesByKey: new Map([['source-1', { key: 'source-1' }]]),
+            getParentMap,
+            treePlacement,
+            createContentModalMove,
             saveState,
             render,
-            buildParentMap,
             closeSourceActionMenu
         });
 
-        expect(() => modals.executeMoveToFolder(['source-1'], 'target')).not.toThrow();
+        expect(moveModalDeps.treePlacement).toBe(treePlacement);
+        expect(moveModalDeps.getParentMap).toBe(getParentMap);
+        expect(moveModalDeps.getSourcesByKey().has('source-1')).toBe(true);
 
-        expect(groupsById.get('target').children).toEqual([{ type: 'source', key: 'source-1' }]);
-        expect(removeSourceFromTree).toHaveBeenCalledWith('source-1');
-        expect(buildParentMap).toHaveBeenCalled();
+        expect(modals.executeMoveToFolder(['source-1'], 'target')).toBe(unchangedResult);
+        expect(treePlacement.applyBatchPlacement).toHaveBeenNthCalledWith(1, {
+            items: [moveItem],
+            target: {
+                container: 'group',
+                groupId: 'target',
+                index: 0
+            }
+        });
+        expect(treePlacement.rebuildParentMap).not.toHaveBeenCalled();
+        expect(saveState).not.toHaveBeenCalled();
+        expect(render).not.toHaveBeenCalled();
+        expect(closeSourceActionMenu).not.toHaveBeenCalled();
+
+        expect(modals.executeMoveToFolder(['source-1'], 'target')).toBe(changedResult);
+        expect(treePlacement.applyBatchPlacement).toHaveBeenNthCalledWith(2, {
+            items: [moveItem],
+            target: {
+                container: 'group',
+                groupId: 'target',
+                index: 0
+            }
+        });
+        expect(getParentMap).toHaveBeenCalledTimes(2);
+        expect(treePlacement.rebuildParentMap).toHaveBeenCalledTimes(1);
+        expect(treePlacement.rebuildParentMap).toHaveBeenCalledWith(parentMap);
+        expect(saveState).toHaveBeenCalledTimes(1);
         expect(saveState).toHaveBeenCalledWith({ immediate: true, critical: true });
-        expect(render).toHaveBeenCalled();
-        expect(closeSourceActionMenu).toHaveBeenCalled();
+        expect(render).toHaveBeenCalledTimes(1);
+        expect(closeSourceActionMenu).toHaveBeenCalledTimes(1);
     });
 });
 

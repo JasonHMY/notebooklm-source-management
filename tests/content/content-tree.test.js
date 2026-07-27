@@ -1080,11 +1080,9 @@ describe('drag and drop ordering guards', () => {
         const groupsById = new Map([
             ['g1', { id: 'g1', children: [] }]
         ]);
-        const dragMulti = {
-            applyMultiSourceDrop: jest.fn()
-        };
         const treePlacement = {
             applyPlacement: jest.fn(),
+            applyBatchPlacement: jest.fn(),
             rebuildParentMap: jest.fn()
         };
         const saveState = jest.fn();
@@ -1110,7 +1108,6 @@ describe('drag and drop ordering guards', () => {
         };
         const interactions = createContentTreeInteractions({
             runtime,
-            dragMulti,
             treePlacement,
             getState: () => state,
             getGroupsById: () => groupsById,
@@ -1131,7 +1128,7 @@ describe('drag and drop ordering guards', () => {
             groupId: 'g1'
         }));
 
-        expect(dragMulti.applyMultiSourceDrop).not.toHaveBeenCalled();
+        expect(treePlacement.applyBatchPlacement).not.toHaveBeenCalled();
         expect(treePlacement.applyPlacement).not.toHaveBeenCalled();
         expect(treePlacement.rebuildParentMap).not.toHaveBeenCalled();
         expect(state).toEqual({
@@ -1140,6 +1137,474 @@ describe('drag and drop ordering guards', () => {
         });
         expect(render).not.toHaveBeenCalled();
         expect(saveState).not.toHaveBeenCalled();
+    });
+
+    it('routes a multi-source drop through semantic batch placement and gates effects on change', () => {
+        const state = {
+            root: [{ type: 'group', id: 'g1' }],
+            ungrouped: ['A', 'B'],
+            isBatchMode: true
+        };
+        const targetGroup = { id: 'g1', children: [] };
+        const groupsById = new Map([['g1', targetGroup]]);
+        const movedItems = [
+            { kind: 'source', key: 'A' },
+            { kind: 'source', key: 'B' }
+        ];
+        const treePlacement = {
+            applyBatchPlacement: jest.fn(() => ({
+                ok: true,
+                changed: true,
+                reason: 'moved',
+                moved: movedItems,
+                skipped: []
+            })),
+            applyPlacement: jest.fn(),
+            rebuildParentMap: jest.fn()
+        };
+        const pendingBatchKeys = new Set(['A', 'B']);
+        const parentMap = new Map();
+        const saveState = jest.fn();
+        const render = jest.fn();
+        const buildParentMap = jest.fn();
+        const runtime = {
+            activeDragContext: {
+                kind: 'source-multi',
+                keys: ['A', 'B']
+            },
+            dragReflowSession: {
+                draggedKeys: new Set(['A', 'B']),
+                currentIntent: {
+                    kind: 'into-group',
+                    targetList: targetGroup.children,
+                    insertIndex: 0,
+                    targetGroup,
+                    targetGroupId: 'g1',
+                    target: {
+                        container: 'group',
+                        groupId: 'g1',
+                        index: 0
+                    },
+                    slotKey: null
+                },
+                shiftedItems: new Map()
+            }
+        };
+        const interactions = createContentTreeInteractions({
+            runtime,
+            treePlacement,
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getSourcesByKey: () => new Map([
+                ['A', { key: 'A' }],
+                ['B', { key: 'B' }]
+            ]),
+            getPendingBatchKeys: () => pendingBatchKeys,
+            getParentMap: () => parentMap,
+            getShadowRoot: () => ({ querySelectorAll: jest.fn(() => []) }),
+            buildParentMap,
+            saveState,
+            render
+        });
+
+        interactions.handleDrop(createDropEvent({
+            dropTarget: null,
+            sourceKey: 'A',
+            sourceKeys: ['A', 'B']
+        }));
+
+        expect(treePlacement.applyBatchPlacement).toHaveBeenCalledWith({
+            items: movedItems,
+            target: {
+                container: 'group',
+                groupId: 'g1',
+                index: 0
+            }
+        });
+        expect(treePlacement.rebuildParentMap).toHaveBeenCalledWith(parentMap);
+        expect(buildParentMap).not.toHaveBeenCalled();
+        expect(state.isBatchMode).toBe(false);
+        expect(pendingBatchKeys.size).toBe(0);
+        expect(render).toHaveBeenCalledTimes(1);
+        expect(saveState).toHaveBeenCalledWith({ immediate: true, critical: true });
+    });
+
+    it('keeps batch selection and effects untouched when placement reports no change', () => {
+        const state = {
+            root: [],
+            ungrouped: ['A', 'B'],
+            isBatchMode: true
+        };
+        const items = [
+            { kind: 'source', key: 'A' },
+            { kind: 'source', key: 'B' }
+        ];
+        const treePlacement = {
+            applyBatchPlacement: jest.fn(() => ({
+                ok: true,
+                changed: false,
+                reason: 'no_change',
+                moved: [],
+                skipped: items.map((item) => ({ item, reason: 'no_change' }))
+            })),
+            applyPlacement: jest.fn(),
+            rebuildParentMap: jest.fn()
+        };
+        const pendingBatchKeys = new Set(['A', 'B']);
+        const saveState = jest.fn();
+        const render = jest.fn();
+        const runtime = {
+            activeDragContext: {
+                kind: 'source-multi',
+                keys: ['A', 'B']
+            },
+            dragReflowSession: {
+                draggedKeys: new Set(['A', 'B']),
+                currentIntent: {
+                    kind: 'before-source',
+                    targetList: state.ungrouped,
+                    insertIndex: 0,
+                    targetGroup: null,
+                    targetGroupId: null,
+                    isUngroupedBin: true,
+                    target: {
+                        container: 'ungrouped',
+                        index: 0
+                    },
+                    slotKey: 'A'
+                },
+                shiftedItems: new Map()
+            }
+        };
+        const interactions = createContentTreeInteractions({
+            runtime,
+            treePlacement,
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getSourcesByKey: () => new Map([
+                ['A', { key: 'A' }],
+                ['B', { key: 'B' }]
+            ]),
+            getPendingBatchKeys: () => pendingBatchKeys,
+            getParentMap: () => new Map(),
+            getShadowRoot: () => ({ querySelectorAll: jest.fn(() => []) }),
+            saveState,
+            render
+        });
+
+        interactions.handleDrop(createDropEvent({
+            dropTarget: null,
+            sourceKey: 'A',
+            sourceKeys: ['A', 'B']
+        }));
+
+        expect(treePlacement.applyBatchPlacement).toHaveBeenCalledWith({
+            items,
+            target: { container: 'ungrouped', index: 0 }
+        });
+        expect(treePlacement.rebuildParentMap).not.toHaveBeenCalled();
+        expect(state.isBatchMode).toBe(true);
+        expect(Array.from(pendingBatchKeys)).toEqual(['A', 'B']);
+        expect(render).not.toHaveBeenCalled();
+        expect(saveState).not.toHaveBeenCalled();
+    });
+
+    it('preserves same-container batch order through the shared placement module', () => {
+        const state = {
+            root: [],
+            ungrouped: ['A', 'B', 'C', 'D'],
+            isBatchMode: true
+        };
+        const groupsById = new Map();
+        const parentMap = new Map();
+        const createContentTreePlacement = require('../../src/content/content-tree-placement.js');
+        const treePlacement = createContentTreePlacement({
+            getState: () => state,
+            getGroupsById: () => groupsById
+        });
+        jest.spyOn(treePlacement, 'applyBatchPlacement');
+        const pendingBatchKeys = new Set(['B', 'C']);
+        const runtime = {
+            activeDragContext: {
+                kind: 'source-multi',
+                keys: ['B', 'C']
+            },
+            dragReflowSession: {
+                draggedKeys: new Set(['B', 'C']),
+                currentIntent: {
+                    kind: 'after-source',
+                    targetList: state.ungrouped,
+                    insertIndex: 4,
+                    targetGroup: null,
+                    targetGroupId: null,
+                    isUngroupedBin: true,
+                    target: {
+                        container: 'ungrouped',
+                        index: 4
+                    },
+                    slotKey: 'D'
+                },
+                shiftedItems: new Map()
+            }
+        };
+        const interactions = createContentTreeInteractions({
+            runtime,
+            treePlacement,
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getSourcesByKey: () => new Map([
+                ['A', { key: 'A' }],
+                ['B', { key: 'B' }],
+                ['C', { key: 'C' }],
+                ['D', { key: 'D' }]
+            ]),
+            getPendingBatchKeys: () => pendingBatchKeys,
+            getParentMap: () => parentMap,
+            getShadowRoot: () => ({ querySelectorAll: jest.fn(() => []) }),
+            saveState: jest.fn(),
+            render: jest.fn()
+        });
+
+        interactions.handleDrop(createDropEvent({
+            dropTarget: null,
+            sourceKey: 'B',
+            sourceKeys: ['B', 'C']
+        }));
+
+        expect(treePlacement.applyBatchPlacement).toHaveBeenCalledWith({
+            items: [
+                { kind: 'source', key: 'B' },
+                { kind: 'source', key: 'C' }
+            ],
+            target: { container: 'ungrouped', index: 4 }
+        });
+        expect(state.ungrouped).toEqual(['A', 'D', 'B', 'C']);
+    });
+
+    it.each([
+        ['missing payload', '', { kind: 'source-multi', keys: ['A', 'B'] }],
+        ['malformed JSON', '{bad', { kind: 'source-multi', keys: ['A', 'B'] }],
+        ['non-array payload', '{"keys":["A","B"]}', { kind: 'source-multi', keys: ['A', 'B'] }],
+        ['single-item payload', ['A'], { kind: 'source-multi', keys: ['A', 'B'] }],
+        ['reordered payload', ['B', 'A'], { kind: 'source-multi', keys: ['A', 'B'] }],
+        ['duplicate payload', ['A', 'A'], { kind: 'source-multi', keys: ['A', 'B'] }],
+        ['non-string payload', ['A', 1], { kind: 'source-multi', keys: ['A', 'B'] }],
+        ['mismatched payload', ['A', 'C'], { kind: 'source-multi', keys: ['A', 'B'] }],
+        ['missing drag context', ['A', 'B'], null]
+    ])('fails closed for an untrusted multi-source %s', (_label, sourceKeys, activeDragContext) => {
+        const state = {
+            root: [{ type: 'group', id: 'g1' }],
+            ungrouped: ['A', 'B'],
+            isBatchMode: true
+        };
+        const targetGroup = { id: 'g1', children: [] };
+        const treePlacement = {
+            applyPlacement: jest.fn(),
+            applyBatchPlacement: jest.fn(),
+            rebuildParentMap: jest.fn()
+        };
+        const pendingBatchKeys = new Set(['A', 'B']);
+        const saveState = jest.fn();
+        const render = jest.fn();
+        const runtime = {
+            activeDragContext,
+            dragReflowSession: {
+                draggedKeys: new Set(['A', 'B']),
+                currentIntent: {
+                    kind: 'into-group',
+                    targetList: targetGroup.children,
+                    insertIndex: 0,
+                    targetGroup,
+                    targetGroupId: 'g1',
+                    target: {
+                        container: 'group',
+                        groupId: 'g1',
+                        index: 0
+                    },
+                    slotKey: null
+                },
+                shiftedItems: new Map()
+            }
+        };
+        const interactions = createContentTreeInteractions({
+            runtime,
+            treePlacement,
+            getState: () => state,
+            getGroupsById: () => new Map([['g1', targetGroup]]),
+            getPendingBatchKeys: () => pendingBatchKeys,
+            getParentMap: () => new Map(),
+            getShadowRoot: () => ({ querySelectorAll: jest.fn(() => []) }),
+            saveState,
+            render
+        });
+
+        interactions.handleDrop(createDropEvent({
+            dropTarget: null,
+            sourceKey: 'A',
+            sourceKeys
+        }));
+
+        expect(treePlacement.applyBatchPlacement).not.toHaveBeenCalled();
+        expect(treePlacement.applyPlacement).not.toHaveBeenCalled();
+        expect(treePlacement.rebuildParentMap).not.toHaveBeenCalled();
+        expect(state.isBatchMode).toBe(true);
+        expect(Array.from(pendingBatchKeys)).toEqual(['A', 'B']);
+        expect(targetGroup.children).toEqual([]);
+        expect(saveState).not.toHaveBeenCalled();
+        expect(render).not.toHaveBeenCalled();
+    });
+
+    it('uses only moved batch items for success counts and landing feedback', () => {
+        const state = {
+            root: [{ type: 'group', id: 'g1' }],
+            ungrouped: ['A'],
+            isBatchMode: true
+        };
+        const targetGroup = { id: 'g1', children: [] };
+        const treePlacement = {
+            applyPlacement: jest.fn(),
+            applyBatchPlacement: jest.fn(() => ({
+                ok: true,
+                changed: true,
+                reason: 'partial',
+                moved: [{ kind: 'source', key: 'A' }],
+                skipped: [{
+                    item: { kind: 'source', key: 'GHOST' },
+                    reason: 'not_found'
+                }]
+            })),
+            rebuildParentMap: jest.fn()
+        };
+        const pendingBatchKeys = new Set(['A', 'GHOST']);
+        const showToast = jest.fn();
+        const developerLog = jest.fn();
+        const sourceList = {
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const shadowRoot = {
+            getElementById: jest.fn((id) => (id === 'sources-list' ? sourceList : null)),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const runtime = {
+            activeDragContext: {
+                kind: 'source-multi',
+                keys: ['A', 'GHOST']
+            },
+            dragReflowSession: {
+                draggedKeys: new Set(['A', 'GHOST']),
+                currentIntent: {
+                    kind: 'into-group',
+                    targetList: targetGroup.children,
+                    insertIndex: 0,
+                    targetGroup,
+                    targetGroupId: 'g1',
+                    target: {
+                        container: 'group',
+                        groupId: 'g1',
+                        index: 0
+                    },
+                    slotKey: null
+                },
+                shiftedItems: new Map()
+            }
+        };
+        const interactions = createContentTreeInteractions({
+            runtime,
+            treePlacement,
+            getState: () => state,
+            getGroupsById: () => new Map([['g1', targetGroup]]),
+            getPendingBatchKeys: () => pendingBatchKeys,
+            getParentMap: () => new Map(),
+            getShadowRoot: () => shadowRoot,
+            showToast,
+            developerLog,
+            saveState: jest.fn(),
+            render: jest.fn(),
+            getDragMode: () => 'reflow',
+            getMessage: (key, args = []) => `${key}:${args.join(',')}`
+        });
+
+        interactions.handleDrop(createDropEvent({
+            dropTarget: null,
+            sourceKey: 'A',
+            sourceKeys: ['A', 'GHOST']
+        }));
+
+        expect(showToast).toHaveBeenCalledWith('ui_batch_moved_sources_toast:1');
+        expect(developerLog).toHaveBeenCalledWith(
+            'info',
+            'source_action',
+            'batch_drag_move',
+            { count: 1, intent: 'into-group' }
+        );
+        expect(sourceList.querySelector).toHaveBeenCalledWith('[data-source-key="A"]');
+        expect(sourceList.querySelector).not.toHaveBeenCalledWith(
+            '[data-source-key="GHOST"]'
+        );
+    });
+
+    it('rejects conflicting semantic group markers for a multi-source drop', () => {
+        const state = {
+            root: [
+                { type: 'group', id: 'g1' },
+                { type: 'group', id: 'g2' }
+            ],
+            ungrouped: ['A', 'B'],
+            isBatchMode: true
+        };
+        const g1 = { id: 'g1', children: [] };
+        const g2 = { id: 'g2', children: [] };
+        const treePlacement = {
+            applyPlacement: jest.fn(),
+            applyBatchPlacement: jest.fn(),
+            rebuildParentMap: jest.fn()
+        };
+        const runtime = {
+            activeDragContext: {
+                kind: 'source-multi',
+                keys: ['A', 'B']
+            },
+            dragReflowSession: {
+                draggedKeys: new Set(['A', 'B']),
+                currentIntent: {
+                    kind: 'into-group',
+                    targetList: g1.children,
+                    insertIndex: 0,
+                    targetGroup: g2,
+                    targetGroupId: 'g1',
+                    target: {
+                        container: 'group',
+                        groupId: 'g1',
+                        index: 0
+                    },
+                    slotKey: null
+                },
+                shiftedItems: new Map()
+            }
+        };
+        const interactions = createContentTreeInteractions({
+            runtime,
+            treePlacement,
+            getState: () => state,
+            getGroupsById: () => new Map([['g1', g1], ['g2', g2]]),
+            getPendingBatchKeys: () => new Set(['A', 'B']),
+            getParentMap: () => new Map(),
+            getShadowRoot: () => ({ querySelectorAll: jest.fn(() => []) }),
+            saveState: jest.fn(),
+            render: jest.fn()
+        });
+
+        interactions.handleDrop(createDropEvent({
+            dropTarget: null,
+            sourceKey: 'A',
+            sourceKeys: ['A', 'B']
+        }));
+
+        expect(treePlacement.applyBatchPlacement).not.toHaveBeenCalled();
+        expect(treePlacement.applyPlacement).not.toHaveBeenCalled();
+        expect(g1.children).toEqual([]);
+        expect(g2.children).toEqual([]);
     });
 
     it('delegates group-cycle rejection to placement without partially removing the group', () => {
@@ -1822,8 +2287,15 @@ describe('drag and drop ordering guards', () => {
         expect(renderBatchTagModal).toHaveBeenNthCalledWith(2, 'remove', pendingBatchKeys);
     });
 
-    it('moves selected grouped sources to ungrouped in visible tree order', () => {
-        const state = { root: [{ type: 'group', id: 'root' }], ungrouped: ['source-3'], isBatchMode: true };
+    it('moves grouped and positioned-root sources to ungrouped through batch placement', () => {
+        const state = {
+            root: [
+                { type: 'group', id: 'root' },
+                { type: 'source', key: 'root-source' }
+            ],
+            ungrouped: ['source-3'],
+            isBatchMode: true
+        };
         const root = {
             id: 'root',
             children: [
@@ -1842,19 +2314,33 @@ describe('drag and drop ordering guards', () => {
         const sourcesByKey = new Map([
             ['source-1', { key: 'source-1', enabled: true }],
             ['source-2', { key: 'source-2', enabled: true }],
-            ['source-3', { key: 'source-3', enabled: true }]
+            ['source-3', { key: 'source-3', enabled: true }],
+            ['root-source', { key: 'root-source', enabled: true }]
         ]);
         const parentMap = new Map([
             ['source-1', 'root'],
             ['child', 'root'],
             ['source-2', 'child']
         ]);
-        const pendingBatchKeys = new Set(['source-2', 'source-1', 'source-3']);
+        const pendingBatchKeys = new Set([
+            'source-2',
+            'root-source',
+            'source-1',
+            'source-3'
+        ]);
         const saveState = jest.fn();
         const render = jest.fn();
         const showToast = jest.fn();
         const buildParentMap = jest.fn();
+        const createContentTreePlacement = require('../../src/content/content-tree-placement.js');
+        const treePlacement = createContentTreePlacement({
+            getState: () => state,
+            getGroupsById: () => groupsById
+        });
+        jest.spyOn(treePlacement, 'applyBatchPlacement');
+        jest.spyOn(treePlacement, 'rebuildParentMap');
         const interactions = createContentTreeInteractions({
+            treePlacement,
             getState: () => state,
             getGroupsById: () => groupsById,
             getSourcesByKey: () => sourcesByKey,
@@ -1872,13 +2358,77 @@ describe('drag and drop ordering guards', () => {
 
         expect(root.children).toEqual([{ type: 'group', id: 'child' }]);
         expect(child.children).toEqual([]);
-        expect(state.ungrouped).toEqual(['source-3', 'source-1', 'source-2']);
-        expect(buildParentMap).toHaveBeenCalled();
+        expect(state.root).toEqual([{ type: 'group', id: 'root' }]);
+        expect(state.ungrouped).toEqual([
+            'source-3',
+            'source-1',
+            'source-2',
+            'root-source'
+        ]);
+        expect(treePlacement.applyBatchPlacement).toHaveBeenCalledWith({
+            items: [
+                { kind: 'source', key: 'source-1' },
+                { kind: 'source', key: 'source-2' },
+                { kind: 'source', key: 'root-source' }
+            ],
+            target: {
+                container: 'ungrouped',
+                index: 1
+            }
+        });
+        expect(treePlacement.rebuildParentMap).toHaveBeenCalledWith(parentMap);
+        expect(buildParentMap).not.toHaveBeenCalled();
         expect(saveState).toHaveBeenCalledWith({ immediate: true, critical: true });
         expect(render).toHaveBeenCalled();
         expect(pendingBatchKeys.size).toBe(0);
         expect(state.isBatchMode).toBe(false);
-        expect(showToast).toHaveBeenCalledWith('ui_batch_ungrouped_toast:2', { variant: 'success' });
+        expect(showToast).toHaveBeenCalledWith('ui_batch_ungrouped_toast:3', { variant: 'success' });
+    });
+
+    it('preserves batch state when every selected source is already ungrouped', () => {
+        const state = {
+            root: [],
+            ungrouped: ['source-1', 'source-2'],
+            isBatchMode: true
+        };
+        const pendingBatchKeys = new Set(['source-1', 'source-2']);
+        const treePlacement = {
+            locateItem: jest.fn((item) => ({
+                container: 'ungrouped',
+                index: item.key === 'source-1' ? 0 : 1
+            })),
+            applyBatchPlacement: jest.fn(),
+            rebuildParentMap: jest.fn()
+        };
+        const saveState = jest.fn();
+        const render = jest.fn();
+        const showToast = jest.fn();
+        const interactions = createContentTreeInteractions({
+            treePlacement,
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getSourcesByKey: () => new Map([
+                ['source-1', { key: 'source-1', enabled: true }],
+                ['source-2', { key: 'source-2', enabled: true }]
+            ]),
+            getPendingBatchKeys: () => pendingBatchKeys,
+            getParentMap: () => new Map(),
+            saveState,
+            render,
+            showToast,
+            getMessage: (key) => key
+        });
+
+        expect(interactions.executeBatchMoveToUngrouped()).toBe(false);
+        expect(treePlacement.applyBatchPlacement).not.toHaveBeenCalled();
+        expect(treePlacement.rebuildParentMap).not.toHaveBeenCalled();
+        expect(state.isBatchMode).toBe(true);
+        expect(Array.from(pendingBatchKeys)).toEqual(['source-1', 'source-2']);
+        expect(saveState).not.toHaveBeenCalled();
+        expect(render).not.toHaveBeenCalled();
+        expect(showToast).toHaveBeenCalledWith('ui_batch_no_sources_changed', {
+            variant: 'info'
+        });
     });
 
     it('moves grouped sources to ungrouped through source menu helpers', () => {
@@ -2295,9 +2845,13 @@ describe('drop routes multi vs single source', () => {
         };
     }
 
-    it('routes multi-key drops through applyMultiSourceDrop, exits batch mode, saves, renders, and toasts', () => {
+    it('routes multi-key drops through batch placement, exits batch mode, saves, renders, and toasts', () => {
         const group = { id: 'g1', children: [] };
-        const state = { isBatchMode: true, ungrouped: ['A', 'B', 'C', 'D'], groups: ['g1'] };
+        const state = {
+            isBatchMode: true,
+            ungrouped: ['A', 'B', 'C', 'D'],
+            root: [{ type: 'group', id: 'g1' }]
+        };
         const groupsById = new Map([['g1', group]]);
         const sourcesByKey = new Map([
             ['A', { key: 'A' }],
@@ -2316,14 +2870,23 @@ describe('drop routes multi vs single source', () => {
             classList: createClassList(['group-container', 'drag-into'])
         };
         const runtime = {
+            activeDragContext: {
+                kind: 'source-multi',
+                keys: ['A', 'B', 'C']
+            },
             dragReflowSession: {
                 draggedKeys: new Set(['A', 'B', 'C']),
                 currentIntent: {
                     kind: 'into-group',
                     targetGroup: group,
                     targetList: group.children,
-                    insertIndex: -1,
+                    insertIndex: 0,
                     targetGroupId: 'g1',
+                    target: {
+                        container: 'group',
+                        groupId: 'g1',
+                        index: 0
+                    },
                     slotKey: null
                 },
                 shiftedItems: new Map()
@@ -2384,6 +2947,10 @@ describe('drop routes multi vs single source', () => {
         const buildParentMap = jest.fn();
         const developerLog = jest.fn();
         const runtime = {
+            activeDragContext: {
+                kind: 'source-multi',
+                keys: ['A', 'B']
+            },
             dragReflowSession: {
                 draggedKeys: new Set(['A', 'B']),
                 // Drop between root groups g1 and g2 → before-group g2 against state.root.
@@ -2393,6 +2960,10 @@ describe('drop routes multi vs single source', () => {
                     targetList: state.root,
                     insertIndex: 1,
                     isRootList: true,
+                    target: {
+                        container: 'root',
+                        index: 1
+                    },
                     slotKey: 'g2'
                 },
                 shiftedItems: new Map()
@@ -2435,7 +3006,7 @@ describe('drop routes multi vs single source', () => {
     });
 
     it('does not exit batch mode or toast on a no-op multi-drop', () => {
-        const state = { isBatchMode: true, ungrouped: ['A', 'B'], groups: [] };
+        const state = { isBatchMode: true, ungrouped: ['A', 'B'], root: [] };
         const groupsById = new Map();
         const sourcesByKey = new Map([
             ['A', { key: 'A' }],
@@ -2452,6 +3023,10 @@ describe('drop routes multi vs single source', () => {
             classList: createClassList(['source-item'])
         };
         const runtime = {
+            activeDragContext: {
+                kind: 'source-multi',
+                keys: ['A', 'B']
+            },
             dragReflowSession: {
                 draggedKeys: new Set(['A', 'B']),
                 currentIntent: {
@@ -2460,6 +3035,11 @@ describe('drop routes multi vs single source', () => {
                     targetList: state.ungrouped,
                     insertIndex: 0,
                     targetGroupId: null,
+                    isUngroupedBin: true,
+                    target: {
+                        container: 'ungrouped',
+                        index: 0
+                    },
                     slotKey: 'A'
                 },
                 shiftedItems: new Map()
@@ -2769,7 +3349,11 @@ describe('drop routes multi vs single source', () => {
 
     it('logs batch_drag_move with count and intent.kind on successful multi-drop', () => {
         const group = { id: 'g1', children: [] };
-        const state = { isBatchMode: true, ungrouped: ['A', 'B', 'C', 'D'], groups: ['g1'] };
+        const state = {
+            isBatchMode: true,
+            ungrouped: ['A', 'B', 'C', 'D'],
+            root: [{ type: 'group', id: 'g1' }]
+        };
         const groupsById = new Map([['g1', group]]);
         const sourcesByKey = new Map([
             ['A', { key: 'A' }],
@@ -2784,14 +3368,23 @@ describe('drop routes multi vs single source', () => {
             classList: createClassList(['group-container', 'drag-into'])
         };
         const runtime = {
+            activeDragContext: {
+                kind: 'source-multi',
+                keys: ['A', 'B', 'C']
+            },
             dragReflowSession: {
                 draggedKeys: new Set(['A', 'B', 'C']),
                 currentIntent: {
                     kind: 'into-group',
                     targetGroup: group,
                     targetList: group.children,
-                    insertIndex: -1,
+                    insertIndex: 0,
                     targetGroupId: 'g1',
+                    target: {
+                        container: 'group',
+                        groupId: 'g1',
+                        index: 0
+                    },
                     slotKey: null
                 },
                 shiftedItems: new Map()
@@ -2916,7 +3509,11 @@ describe('drop routes multi vs single source', () => {
         // Batch of three sources dropped into a folder with one existing child.
         // Expected: A, B, C all land at the TOP (before X), preserving A→B→C order.
         const group = { id: 'g1', children: [{ type: 'source', key: 'X' }] };
-        const state = { isBatchMode: true, ungrouped: ['A', 'B', 'C'], groups: ['g1'] };
+        const state = {
+            isBatchMode: true,
+            ungrouped: ['A', 'B', 'C'],
+            root: [{ type: 'group', id: 'g1' }]
+        };
         const groupsById = new Map([['g1', group]]);
         const sourcesByKey = new Map([
             ['A', { key: 'A' }],
@@ -2932,6 +3529,10 @@ describe('drop routes multi vs single source', () => {
             classList: createClassList(['group-container', 'drag-into'])
         };
         const runtime = {
+            activeDragContext: {
+                kind: 'source-multi',
+                keys: ['A', 'B', 'C']
+            },
             dragReflowSession: {
                 draggedKeys: new Set(['A', 'B', 'C']),
                 currentIntent: {
@@ -2940,6 +3541,11 @@ describe('drop routes multi vs single source', () => {
                     targetList: group.children,
                     insertIndex: 0,
                     targetGroupId: 'g1',
+                    target: {
+                        container: 'group',
+                        groupId: 'g1',
+                        index: 0
+                    },
                     slotKey: null
                 },
                 shiftedItems: new Map()

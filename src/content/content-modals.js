@@ -11,7 +11,7 @@
      * @param {Object} deps 60+ 项依赖,主要分五类(完整 deps 见 line 5+ destructuring 块):
      *   - state getter: getState, getGroupsById, getTagsById, getSourceTagsById,
      *     getSourcesByKey, getPendingBatchKeys, getShadowRoot, getDocument, getWindow
-     *   - 行为 callback: render, saveState, buildParentMap, removeSourceFromTree,
+     *   - 行为 callback: render, saveState, treePlacement, getParentMap,
      *     closeSourceActionMenu, showToast, showUndoableToast
      *   - tag CRUD: createTag, updateTag, deleteTag, getTagUsageCounts,
      *     getSourceTagIds, setSourceTagIds
@@ -61,6 +61,10 @@
         const getPendingBatchKeys = typeof deps.getPendingBatchKeys === 'function'
             ? deps.getPendingBatchKeys
             : () => (deps.pendingBatchKeys || new Set());
+        const getParentMap = typeof deps.getParentMap === 'function'
+            ? deps.getParentMap
+            : () => (deps.parentMap || new Map());
+        const treePlacement = deps.treePlacement || null;
         const getMessage = typeof deps.getMessage === 'function'
             ? deps.getMessage
             : (key) => key;
@@ -101,12 +105,6 @@
             : () => {};
         const saveState = typeof deps.saveState === 'function'
             ? deps.saveState
-            : () => {};
-        const buildParentMap = typeof deps.buildParentMap === 'function'
-            ? deps.buildParentMap
-            : () => {};
-        const removeSourceFromTree = typeof deps.removeSourceFromTree === 'function'
-            ? deps.removeSourceFromTree
             : () => {};
         const createTag = typeof deps.createTag === 'function'
             ? deps.createTag
@@ -458,17 +456,17 @@
                 getShadowRoot,
                 getState,
                 getGroupsById,
-                getPendingBatchKeys,
                 getSourcesByKey,
+                getPendingBatchKeys,
+                getParentMap,
+                treePlacement,
                 prepareModalOpen,
                 closeManagedModal,
                 bindModalKeyboardNavigation,
                 createModalItemStaggerStyle,
                 closeSourceActionMenu,
-                buildParentMap,
                 saveState,
-                render,
-                removeSourceFromTree
+                render
             })
             : null;
         const renderMoveToFolderModal = moveModalModule?.renderMoveToFolderModal || (() => {});

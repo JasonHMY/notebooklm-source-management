@@ -14,7 +14,7 @@
      *   - 环境: getShadowRoot / getDocument / getWindow / getSetTimeout / getDEPS /
      *     getSourceCheckboxSelector
      *   - i18n / 通知 / 渲染: getMessage, showToast, showUndoableToast, render, saveState
-     *   - 派发到其他子系统: buildParentMap, isSourceEffectivelyEnabled,
+     *   - 派发到其他子系统: isSourceEffectivelyEnabled,
      *     collectEffectiveSourceStates, syncSourcesToEffectiveState,
      *     executeBatchDelete, renderMoveToFolderModal
      *   - 拖拽配套: 一组 drag feedback / reflow helpers 在内部组装,
@@ -114,9 +114,6 @@
         const saveState = typeof deps.saveState === 'function'
             ? deps.saveState
             : (typeof runtime.saveState === 'function' ? runtime.saveState : () => {});
-        const buildParentMap = typeof deps.buildParentMap === 'function'
-            ? deps.buildParentMap
-            : (typeof runtime.buildParentMap === 'function' ? runtime.buildParentMap : () => {});
         const isSourceEffectivelyEnabled = typeof deps.isSourceEffectivelyEnabled === 'function'
             ? deps.isSourceEffectivelyEnabled
             : (typeof runtime.isSourceEffectivelyEnabled === 'function' ? runtime.isSourceEffectivelyEnabled : () => true);
@@ -2108,27 +2105,65 @@
             const sourcesByKey = getSourcesByKey();
             const pendingBatchKeys = getPendingBatchKeys();
             const selectedKeys = new Set(pendingBatchKeys);
-            const movableKeys = collectSourceKeysInTreeOrder().filter((sourceKey) => {
-                const source = sourcesByKey.get(sourceKey);
-                return selectedKeys.has(sourceKey) &&
-                    isBatchOperableSource(source) &&
-                    Boolean(findParentGroupOfSource(sourceKey));
-            });
-
-            if (movableKeys.length === 0) {
+            const parentMap = getParentMap();
+            if (
+                !(parentMap instanceof Map)
+                || !treePlacement
+                || typeof treePlacement.locateItem !== 'function'
+                || typeof treePlacement.applyBatchPlacement !== 'function'
+                || typeof treePlacement.rebuildParentMap !== 'function'
+            ) {
                 showToast(getMessage('ui_batch_no_sources_changed'), { variant: 'info' });
                 return false;
             }
 
-            state.ungrouped = Array.isArray(state.ungrouped) ? state.ungrouped : [];
-            movableKeys.forEach((sourceKey) => {
-                removeSourceFromTree(sourceKey);
-                if (!state.ungrouped.includes(sourceKey)) {
-                    state.ungrouped.push(sourceKey);
-                }
-            });
-            buildParentMap();
-            finishSuccessfulBatchOperation('ui_batch_ungrouped_toast', movableKeys.length);
+            const items = [];
+            try {
+                collectSourceKeysInTreeOrder().forEach((sourceKey) => {
+                    const source = sourcesByKey.get(sourceKey);
+                    if (!selectedKeys.has(sourceKey) || !isBatchOperableSource(source)) return;
+                    const location = treePlacement.locateItem({
+                        kind: 'source',
+                        key: sourceKey
+                    });
+                    if (location && location.container !== 'ungrouped') {
+                        items.push({ kind: 'source', key: sourceKey });
+                    }
+                });
+            } catch (error) {
+                showToast(getMessage('ui_batch_no_sources_changed'), { variant: 'info' });
+                return false;
+            }
+
+            if (items.length === 0) {
+                showToast(getMessage('ui_batch_no_sources_changed'), { variant: 'info' });
+                return false;
+            }
+
+            let result;
+            try {
+                result = treePlacement.applyBatchPlacement({
+                    items,
+                    target: {
+                        container: 'ungrouped',
+                        index: Array.isArray(state.ungrouped) ? state.ungrouped.length : 0
+                    }
+                });
+            } catch (error) {
+                result = null;
+            }
+            const movedKeys = Array.isArray(result?.moved)
+                ? result.moved
+                    .filter((item) => item?.kind === 'source' && item.key)
+                    .map((item) => item.key)
+                : [];
+            if (!result?.ok || !result.changed || movedKeys.length === 0) {
+                showToast(getMessage('ui_batch_no_sources_changed'), { variant: 'info' });
+                return false;
+            }
+
+            treePlacement.rebuildParentMap(parentMap);
+            finishSuccessfulBatchOperation('ui_batch_ungrouped_toast', movedKeys.length);
             return true;
         }
 
@@ -2997,7 +3032,7 @@
                     return draggedSet.has(intent.slotKey);
                 }
                 // v5: a positioned root drop before/after a root group is valid for multi-source
-                // too — applyMultiSourceDrop splices object entries into state.root.
+                // too — Tree Placement emits canonical object entries into state.root.
                 return false;
             }
 
@@ -3449,6 +3484,35 @@
                 );
             }
             return false;
+        }
+
+        function multiSourcePayloadMatchesDragContext(sourceKey, keys) {
+            const dragContext = runtime.activeDragContext;
+            if (
+                !sourceKey
+                || !Array.isArray(keys)
+                || keys.length < 2
+                || !isSupportedDragContext(dragContext)
+                || dragContext.kind !== 'source-multi'
+                || sourceKey !== keys[0]
+                || dragContext.keys.length !== keys.length
+            ) {
+                return false;
+            }
+            const uniqueKeys = new Set();
+            for (let index = 0; index < keys.length; index += 1) {
+                const key = keys[index];
+                if (
+                    typeof key !== 'string'
+                    || !key
+                    || uniqueKeys.has(key)
+                    || dragContext.keys[index] !== key
+                ) {
+                    return false;
+                }
+                uniqueKeys.add(key);
+            }
+            return true;
         }
 
         function resolveSynchronousDropEffect({
@@ -4526,7 +4590,6 @@
                 cancelAllHoverTimers();
                 const state = getState();
                 const groupsById = getGroupsById();
-                const sourcesByKey = getSourcesByKey();
                 const pendingBatchKeys = getPendingBatchKeys();
                 e.preventDefault();
 
@@ -4579,14 +4642,36 @@
                     clearDragFeedback();
                     return;
                 }
+                const semanticTarget = resolveSemanticDropTarget(intent);
 
-                if (sourceKeysRaw && dragMulti && typeof dragMulti.applyMultiSourceDrop === 'function') {
+                if (
+                    runtime.activeDragContext?.kind === 'source-multi'
+                    && !sourceKeysRaw
+                ) {
+                    clearDragFeedback();
+                    return;
+                }
+
+                if (sourceKeysRaw) {
+                    const dragContext = runtime.activeDragContext;
+                    if (
+                        !isSupportedDragContext(dragContext)
+                        || dragContext.kind !== 'source-multi'
+                        || sourceKeysRaw !== JSON.stringify(dragContext.keys)
+                    ) {
+                        clearDragFeedback();
+                        return;
+                    }
                     let keys = null;
                     try { keys = JSON.parse(sourceKeysRaw); } catch (err) { keys = null; }
-                    if (Array.isArray(keys) && keys.length >= 2) {
+                    if (!multiSourcePayloadMatchesDragContext(sourceKey, keys)) {
+                        clearDragFeedback();
+                        return;
+                    }
+                    {
                         // v5: a multi-source drop may also position between root entries
-                        // (before/after a root group), which applyMultiSourceDrop splices
-                        // into state.root — keep this in sync with computeIsInvalidDrop, which
+                        // (before/after a root group), which Tree Placement commits into
+                        // state.root — keep this in sync with computeIsInvalidDrop, which
                         // no longer rejects top-level before-group/after-group source drops.
                         const allowedMultiIntents = new Set([
                             'into-group', 'before-source', 'after-source', 'before-group', 'after-group'
@@ -4595,38 +4680,53 @@
                             clearDragFeedback();
                             return;
                         }
+                        if (
+                            !semanticTarget
+                            || !treePlacement
+                            || typeof treePlacement.applyBatchPlacement !== 'function'
+                            || typeof treePlacement.rebuildParentMap !== 'function'
+                        ) {
+                            clearDragFeedback();
+                            return;
+                        }
                         const augmentedIntent = {
                             kind: intentKind,
                             targetList: intent.targetList,
                             insertIndex: intent.insertIndex,
                             targetGroup: intent.targetGroup,
-                            targetGroupId: intent.targetGroup ? intent.targetGroup.id : null,
-                            // Carry isRootList so applyMultiSourceDrop splices object entries
-                            // into state.root (not the ungrouped bin) for positioned root drops.
-                            isRootList: Boolean(intent.isRootList)
+                            targetGroupId: intent.targetGroupId || intent.targetGroup?.id || null,
+                            isRootList: Boolean(intent.isRootList),
+                            target: semanticTarget
                         };
                         clearReflowBeforeMutation();
-                        const result = dragMulti.applyMultiSourceDrop({
-                            keys,
-                            intent: augmentedIntent,
-                            state,
-                            helpers: {
-                                sourceExists: (key) => sourcesByKey.has(key),
-                                getGroupById: (id) => groupsById.get(id) || null,
-                                removeSourceFromParent: (key) => removeSourceFromTree(key)
-                            }
-                        });
-                        if (result && result.moved > 0) {
-                            developerLog('info', 'source_action', 'batch_drag_move', { count: result.moved, intent: intentKind });
+                        let result = null;
+                        try {
+                            result = treePlacement.applyBatchPlacement({
+                                items: keys.map((key) => ({ kind: 'source', key })),
+                                target: semanticTarget
+                            });
+                        } catch (error) {
+                            result = null;
+                        }
+                        const movedKeys = Array.isArray(result?.moved)
+                            ? result.moved
+                                .filter((item) => item?.kind === 'source' && item.key)
+                                .map((item) => item.key)
+                            : [];
+                        if (result?.ok && result.changed && movedKeys.length > 0) {
+                            developerLog('info', 'source_action', 'batch_drag_move', {
+                                count: movedKeys.length,
+                                intent: intentKind
+                            });
                             state.isBatchMode = false;
                             pendingBatchKeys.clear();
-                            buildParentMap();
+                            rebuildPlacementParentMap();
                             saveState({ immediate: true, critical: true });
                             render();
-                            showToast(getMessage('ui_batch_moved_sources_toast', [String(result.moved)]));
+                            showToast(getMessage('ui_batch_moved_sources_toast', [String(movedKeys.length)]));
                             disposeHoverOpenedGroupsAfterDrop(intent, augmentedIntent);
                             applyDropLandingAndFlash(
-                                Array.isArray(keys) ? keys : [],
+                                movedKeys,
                                 e.clientX,
                                 e.clientY,
                                 _preDropRects,
@@ -4638,7 +4738,6 @@
                     }
                 }
 
-                const semanticTarget = resolveSemanticDropTarget(intent);
                 const augmentedIntent = {
                     kind: intentKind,
                     targetList: intent.targetList,

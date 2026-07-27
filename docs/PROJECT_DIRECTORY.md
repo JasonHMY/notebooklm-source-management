@@ -50,7 +50,7 @@ GeminiNotebook-Source-Management
 │   │   ├── content-tree-placement.js
 │   │   │   └── 纯分组树放置 Module；集中 validate → plan → commit、entry shape、source XOR、文件夹唯一父级、reachable group 优先级、循环/索引/no-op、批量事务与迭代式原子归一化不变量
 │   │   ├── content-tree-interactions.js
-│   │   │   └── 分组树、checkbox、批量模式与拖拽 read → plan → write；single drag/新增/删除/移出分组通过严格语义 target 适配 Tree Placement，拒绝冲突 target marker 与混合类型 payload，另维护同步 native dropEffect、类型化 geometry snapshot、滚动 delta patch、auto-scroll 静止指针刷新/落下前同步 flush、ResizeObserver/render 失效和 fail-closed 重建
+│   │   │   └── 分组树、checkbox、批量模式与拖拽 read → plan → write；single/batch drag、新增/删除/移出分组及批量移到未分组通过严格语义 target 适配 Tree Placement，批量 payload 必须与可信拖拽会话完全一致，另维护同步 native dropEffect、类型化 geometry snapshot、滚动 delta patch、auto-scroll 静止指针刷新/落下前同步 flush、ResizeObserver/render 失效和 fail-closed 重建
 │   │   ├── content-render.js
 │   │   │   └── Shadow DOM manager 渲染、列表行、批量条、菜单层
 │   │   ├── content-modals.js
@@ -64,7 +64,7 @@ GeminiNotebook-Source-Management
 │   │   ├── content-modal-tag-filter.js
 │   │   │   └── tag filter modal：标签列表、选中状态、过滤回调 helper
 │   │   ├── content-modal-move.js
-│   │   │   └── 移动到分组 modal：候选分组列表、确认/取消 helper
+│   │   │   └── 移动到分组 modal：候选分组列表、实时来源索引预检、通过 Tree Placement 批量追加到目标分组尾部，仅 changed result 后保存/重绘/关闭
 │   │   ├── content-modal-command-palette.js
 │   │   │   └── 命令面板 modal：命令搜索、快捷键展示、触发执行 helper
 │   │   ├── content-modal-tag.js
@@ -116,7 +116,7 @@ GeminiNotebook-Source-Management
 │   │   ├── content-diagnostics.js
 │   │   │   └── diagnostics JSON 序列化、Error/unhandled rejection 脱敏摘要 helper
 │   │   ├── content-drag-multi.js
-│   │   │   └── 多源拖拽 selection 解析、单元素 ghost helper、带实际滚动 callback 的 auto-scroll RAF controller、批量 drop 应用
+│   │   │   └── 多源拖拽 presentation helper：selection 解析、单元素 ghost、带实际滚动 callback 的 auto-scroll RAF controller；不拥有树 mutation
 │   │   ├── content-drag-reflow.js
 │   │   │   └── 拖拽让位 reflow 会话状态：真实 box model/折叠位移测量、类型化 shift delta、可视区动画/离屏静态 transform、被拖项折叠与取消恢复 helper
 │   │   ├── content-source-view-switch-controller.js
@@ -380,7 +380,7 @@ manifest.json
 │   │   ├── native dropEffect 只在原始 dragover 事件内由 clean snapshot 同步解析；dirty/missing snapshot 保守 move，未知 payload 为 none，异步 drag frame 不保留 DataTransfer
 │   │   ├── reflow transform 使用 source/group 类型化 map；仅可视区 + 一个真实行高 overscan 动画，离屏位移静态应用并在结束/下次 preflight 清理
 │   │   ├── 批量选择、加入文件夹、添加/移除标签
-│   │   ├── 纯 Tree Placement Interface 集中 entry shape、source XOR、循环拒绝、索引修正、no-op、批量/事务原子提交与 import normalization；single drag、分组新增/删除、来源移出分组、原生来源删除与 Classic sweep 已迁移且旧 single 数组定位 Interface 已移除，batch drag/modal/restore consumers 待后续迁移
+│   │   ├── 纯 Tree Placement Interface 集中 entry shape、source XOR、循环拒绝、索引修正、no-op、批量/事务原子提交与 import normalization；single/batch drag、移动到分组、批量/单项移出分组、分组新增/删除、原生来源删除与 Classic sweep 已迁移，旧 single/batch 数组 mutation Interface 已移除，restore/reconcile consumers 待后续迁移
 │   │   ├── 移到未分组
 │   │   └── 批量删除入口
 │   ├── 先看
@@ -846,7 +846,7 @@ CI: .github/workflows/ci.yml
 │   └── 注意: 不要让隐藏三点按钮改变 grid 列宽
 ├── 分组树数据损坏
 │   ├── 先看: src/content/content-tree-interactions.js
-│   ├── 然后看: src/content/content-tree-placement.js（single consumer 已迁移，原生删除失败时按剩余 live 来源归一化；batch/modal/restore 迁移中）, src/content/content-state-reconcile.js, src/content/content-persistence.js
+│   ├── 然后看: src/content/content-tree-placement.js（single/batch drag、移动弹窗、移出分组与原生删除已迁移；restore/reconcile 迁移中）, src/content/content-state-reconcile.js, src/content/content-persistence.js
 │   ├── 测试: content-tree-placement.test.js, content-tree.test.js, content-persistence.test.js
 │   └── 注意: children 必须容错为数组，避免孤儿 group
 ├── 标签创建/颜色/排序错

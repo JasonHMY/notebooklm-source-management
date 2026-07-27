@@ -307,6 +307,213 @@ describe('content-tree-placement factory', () => {
         expect(state.ungrouped).toEqual([]);
     });
 
+    it.each([
+        {
+            label: 'bin to root',
+            origin: 'ungrouped',
+            target: { container: 'root', index: 1 }
+        },
+        {
+            label: 'bin to group',
+            origin: 'ungrouped',
+            target: { container: 'group', groupId: 'group-a', index: 0 }
+        },
+        {
+            label: 'root to ungrouped',
+            origin: 'root',
+            target: { container: 'ungrouped', index: 0 }
+        },
+        {
+            label: 'group to ungrouped',
+            origin: 'group',
+            target: { container: 'ungrouped', index: 0 }
+        }
+    ])('one-item batch matches single placement from $label', ({
+        origin,
+        target
+    }) => {
+        const createScenarioHarness = () => {
+            const group = { id: 'group-a', children: [] };
+            const state = {
+                root: [{ type: 'group', id: 'group-a' }],
+                ungrouped: []
+            };
+            if (origin === 'root') {
+                state.root.push({ type: 'source', key: 'A' });
+            } else if (origin === 'group') {
+                group.children.push({ type: 'source', key: 'A' });
+            } else {
+                state.ungrouped.push('A');
+            }
+            return createHarness({
+                state,
+                groupsById: new Map([['group-a', group]])
+            });
+        };
+        const singleHarness = createScenarioHarness();
+        const batchHarness = createScenarioHarness();
+        const item = { kind: 'source', key: 'A' };
+
+        const singleResult = singleHarness.treePlacement.applyPlacement({
+            item,
+            target
+        });
+        const batchResult = batchHarness.treePlacement.applyBatchPlacement({
+            items: [item],
+            target
+        });
+
+        expect(singleResult).toEqual(expect.objectContaining({
+            ok: true,
+            changed: true,
+            reason: 'moved'
+        }));
+        expect(batchResult).toEqual(expect.objectContaining({
+            ok: true,
+            changed: true,
+            reason: 'moved',
+            moved: [item],
+            skipped: []
+        }));
+
+        const singleSnapshot = snapshotLiveModel(
+            singleHarness.state,
+            singleHarness.groupsById
+        );
+        const batchSnapshot = snapshotLiveModel(
+            batchHarness.state,
+            batchHarness.groupsById
+        );
+        expect(batchSnapshot).toEqual(singleSnapshot);
+        expect(batchHarness.treePlacement.locateItem(item)).toEqual(target);
+
+        [singleHarness, batchHarness].forEach((harness) => {
+            expect(harness.treePlacement.validatePlacementState({
+                state: harness.state,
+                groupsById: harness.groupsById,
+                liveSourceKeys: new Set(['A'])
+            })).toEqual({
+                ok: true,
+                errors: []
+            });
+        });
+    });
+
+    it('applyBatchPlacement matches sequential single placements for A and B', () => {
+        const initialState = {
+            root: [{ type: 'group', id: 'target' }],
+            ungrouped: ['A', 'B']
+        };
+        const initialGroups = new Map([[
+            'target',
+            {
+                id: 'target',
+                children: [{ type: 'source', key: 'existing' }]
+            }
+        ]]);
+        const createScenarioHarness = () => createHarness({
+            state: cloneSerializable(initialState),
+            groupsById: new Map(snapshotGroups(initialGroups))
+        });
+        const batchHarness = createScenarioHarness();
+        const singleHarness = createScenarioHarness();
+        const items = [
+            { kind: 'source', key: 'A' },
+            { kind: 'source', key: 'B' }
+        ];
+
+        const batchResult = batchHarness.treePlacement.applyBatchPlacement({
+            items,
+            target: { container: 'group', groupId: 'target', index: 1 }
+        });
+        const singleResults = items.map((item, index) => (
+            singleHarness.treePlacement.applyPlacement({
+                item,
+                target: {
+                    container: 'group',
+                    groupId: 'target',
+                    index: index + 1
+                }
+            })
+        ));
+
+        expect(batchResult).toEqual(expect.objectContaining({
+            ok: true,
+            changed: true,
+            reason: 'moved',
+            moved: items,
+            skipped: []
+        }));
+        expect(singleResults).toEqual([
+            expect.objectContaining({ ok: true, changed: true, reason: 'moved' }),
+            expect.objectContaining({ ok: true, changed: true, reason: 'moved' })
+        ]);
+        expect(snapshotLiveModel(batchHarness.state, batchHarness.groupsById)).toEqual(
+            snapshotLiveModel(singleHarness.state, singleHarness.groupsById)
+        );
+        expect(batchHarness.groupsById.get('target').children).toEqual([
+            { type: 'source', key: 'existing' },
+            { type: 'source', key: 'A' },
+            { type: 'source', key: 'B' }
+        ]);
+    });
+
+    it('applyBatchPlacement moves non-contiguous items to the end in input order', () => {
+        const { state, treePlacement } = createHarness({
+            state: {
+                root: [],
+                ungrouped: ['A', 'B', 'C', 'D', 'E']
+            }
+        });
+        const items = [
+            { kind: 'source', key: 'B' },
+            { kind: 'source', key: 'D' }
+        ];
+
+        const result = treePlacement.applyBatchPlacement({
+            items,
+            target: { container: 'ungrouped', index: 5 }
+        });
+
+        expect(result).toEqual(expect.objectContaining({
+            ok: true,
+            changed: true,
+            reason: 'moved',
+            moved: items,
+            skipped: []
+        }));
+        expect(state.ungrouped).toEqual(['A', 'C', 'E', 'B', 'D']);
+    });
+
+    it('applyBatchPlacement reports partial when a valid item moves with a missing item', () => {
+        const { state, treePlacement } = createHarness({
+            state: {
+                root: [],
+                ungrouped: ['A']
+            }
+        });
+        const movedItem = { kind: 'source', key: 'A' };
+        const missingItem = { kind: 'source', key: 'GHOST' };
+
+        const result = treePlacement.applyBatchPlacement({
+            items: [movedItem, missingItem],
+            target: { container: 'root', index: 0 }
+        });
+
+        expect(result).toEqual({
+            ok: true,
+            changed: true,
+            reason: 'partial',
+            moved: [movedItem],
+            skipped: [{
+                item: missingItem,
+                reason: 'not_found'
+            }]
+        });
+        expect(state.root).toEqual([{ type: 'source', key: 'A' }]);
+        expect(state.ungrouped).toEqual([]);
+    });
+
     it('applyBatchPlacement corrects a same-container block index and preserves no-op references', () => {
         const { state, groupsById, treePlacement } = createHarness({
             state: {

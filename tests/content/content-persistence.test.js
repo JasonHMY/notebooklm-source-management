@@ -1795,6 +1795,7 @@ describe('saveState', () => {
             getElementById: jest.fn(() => null),
             appendChild: jest.fn()
         });
+        mod.state.root = [{ type: 'group', id: 'group1' }];
         mod.state.ungrouped = ['source1'];
         mod.groupsById.set('group1', { id: 'group1', title: 'Pinned', children: [] });
         mod.sourcesByKey.set('source1', {
@@ -1821,7 +1822,7 @@ describe('saveState', () => {
             getElementById: jest.fn(() => null),
             appendChild: jest.fn()
         });
-        mod.state.groups = ['root'];
+        mod.state.root = [{ type: 'group', id: 'root' }];
         mod.state.ungrouped = ['source1'];
         mod.groupsById.set('root', {
             id: 'root',
@@ -1856,7 +1857,7 @@ describe('saveState', () => {
             querySelector: jest.fn(() => null),
             getElementById: jest.fn(() => null)
         });
-        mod.state.groups = ['root'];
+        mod.state.root = [{ type: 'group', id: 'root' }];
         mod.state.ungrouped = ['source1', 'source2'];
         mod.state.isBatchMode = true;
         mod.pendingBatchKeys.add('source1');
@@ -2773,6 +2774,7 @@ describe('undo recent operations', () => {
 
     it('restores the previous persisted snapshot when Command+Z is pressed', () => {
         addUndoSource();
+        mod.state.root = [{ type: 'group', id: 'group1' }];
         mod.state.ungrouped = ['source1'];
         mod.groupsById.set('group1', { id: 'group1', title: 'Pinned', children: [] });
         mod._resetUndoHistoryBaselineForTest();

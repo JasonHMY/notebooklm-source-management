@@ -7,14 +7,14 @@
      * 从原位置移除并插入到目标 group.children。
      *
      * @param {Object} deps Required: el, getMessage, getShadowRoot (缺一抛错).
-     *   Required for execute: getState, getGroupsById, getPendingBatchKeys, getSourcesByKey,
-     *   saveState, render, removeSourceFromTree, buildParentMap.
+     *   Required for execute: getState, getGroupsById, getSourcesByKey,
+     *   getPendingBatchKeys, treePlacement, getParentMap, saveState, render.
      *   Optional: prepareModalOpen, closeManagedModal, bindModalKeyboardNavigation,
      *   createModalItemStaggerStyle, closeSourceActionMenu, requestAnimationFrame.
      * @returns {{ renderMoveToFolderModal, closeMoveToFolderModal,
      *   collectMoveFolderOptions, executeMoveToFolder }}
      *   collectMoveFolderOptions 是 pure helper(给 modal item stagger 渲染用),
-     *   executeMoveToFolder 落 state 后 saveState + render。
+     *   executeMoveToFolder 通过 Tree Placement 事务提交后 saveState + render。
      */
     function createContentModalMove(deps = {}) {
         const {
@@ -23,17 +23,17 @@
             getShadowRoot,
             getState,
             getGroupsById,
-            getPendingBatchKeys,
             getSourcesByKey,
+            getPendingBatchKeys,
+            getParentMap,
+            treePlacement,
             prepareModalOpen,
             closeManagedModal,
             bindModalKeyboardNavigation,
             createModalItemStaggerStyle,
             closeSourceActionMenu,
-            buildParentMap,
             saveState,
             render,
-            removeSourceFromTree,
             requestAnimationFrame: rafFn = globalThis.requestAnimationFrame
         } = deps;
 
@@ -67,34 +67,130 @@
             return options;
         }
 
+        function normalizeMoveItems(sourceKeys) {
+            let keys;
+            try {
+                keys = Array.isArray(sourceKeys)
+                    ? sourceKeys
+                    : (
+                        typeof sourceKeys === 'string'
+                            ? [sourceKeys]
+                            : Array.from(sourceKeys || [])
+                    );
+            } catch (error) {
+                keys = [];
+            }
+            return keys.map((key) => ({ kind: 'source', key }));
+        }
+
+        function createMoveFailure(items, reason = 'invalid_target') {
+            return {
+                ok: false,
+                changed: false,
+                reason,
+                moved: [],
+                skipped: items.map((item) => ({ item, reason }))
+            };
+        }
+
+        function mergePreflightSkipped(result, preflightSkipped) {
+            if (!Array.isArray(preflightSkipped) || preflightSkipped.length === 0) {
+                return result;
+            }
+            if (!result || typeof result !== 'object') {
+                return {
+                    ok: false,
+                    changed: false,
+                    reason: 'invalid_target',
+                    moved: [],
+                    skipped: preflightSkipped
+                };
+            }
+            const placementSkipped = Array.isArray(result?.skipped) ? result.skipped : [];
+            if (result?.ok && result.changed) {
+                return {
+                    ok: true,
+                    changed: true,
+                    reason: 'partial',
+                    moved: Array.isArray(result.moved) ? result.moved : [],
+                    skipped: [...placementSkipped, ...preflightSkipped]
+                };
+            }
+            if (result?.ok && !result.changed) {
+                return {
+                    ok: false,
+                    changed: false,
+                    reason: 'not_found',
+                    moved: [],
+                    skipped: [...placementSkipped, ...preflightSkipped]
+                };
+            }
+            return Object.assign({}, result, {
+                skipped: [...placementSkipped, ...preflightSkipped]
+            });
+        }
+
         function executeMoveToFolder(sourceKeys, targetGroupId) {
             const state = (typeof getState === 'function' ? getState() : null) || {};
             const groupsById = typeof getGroupsById === 'function' ? getGroupsById() : new Map();
+            const sourcesByKey = typeof getSourcesByKey === 'function' ? getSourcesByKey() : null;
             const pendingBatchKeys = typeof getPendingBatchKeys === 'function' ? getPendingBatchKeys() : new Set();
-            const sourcesByKey = typeof getSourcesByKey === 'function' ? getSourcesByKey() : new Map();
+            const items = normalizeMoveItems(sourceKeys);
             const targetGroup = groupsById.get(targetGroupId);
-            if (!targetGroup) {
-                closeMoveToFolderModal();
-                return;
+            const parentMap = typeof getParentMap === 'function' ? getParentMap() : null;
+            if (
+                items.length === 0
+                || !targetGroup
+                || !(sourcesByKey instanceof Map)
+                || !(parentMap instanceof Map)
+                || !treePlacement
+                || typeof treePlacement.applyBatchPlacement !== 'function'
+                || typeof treePlacement.rebuildParentMap !== 'function'
+            ) {
+                return createMoveFailure(items);
             }
-            targetGroup.children = Array.isArray(targetGroup.children) ? targetGroup.children : [];
-
-            const keys = Array.isArray(sourceKeys)
-                ? sourceKeys
-                : (typeof sourceKeys === 'string' ? [sourceKeys] : Array.from(sourceKeys || []));
-
-            keys.forEach((sourceKey) => {
-                const sourceData = sourcesByKey.get(sourceKey);
-                if (sourceData) {
-                    if (typeof removeSourceFromTree === 'function') {
-                        removeSourceFromTree(sourceKey);
-                    }
-                    targetGroup.children.push({
-                        type: 'source',
-                        key: sourceKey
-                    });
+            const liveItems = [];
+            const preflightSkipped = [];
+            items.forEach((item) => {
+                if (
+                    item?.kind === 'source'
+                    && typeof item.key === 'string'
+                    && item.key
+                    && sourcesByKey.has(item.key)
+                ) {
+                    liveItems.push(item);
+                    return;
                 }
+                preflightSkipped.push({
+                    item,
+                    reason: 'not_found'
+                });
             });
+            if (liveItems.length === 0) {
+                return {
+                    ok: false,
+                    changed: false,
+                    reason: 'not_found',
+                    moved: [],
+                    skipped: preflightSkipped
+                };
+            }
+            const target = {
+                container: 'group',
+                groupId: targetGroupId,
+                index: Array.isArray(targetGroup.children) ? targetGroup.children.length : 0
+            };
+            let result;
+            try {
+                result = treePlacement.applyBatchPlacement({
+                    items: liveItems,
+                    target
+                });
+            } catch (error) {
+                result = createMoveFailure(liveItems);
+            }
+            result = mergePreflightSkipped(result, preflightSkipped);
+            if (!result?.ok || !result.changed) return result || createMoveFailure(items);
 
             if (state.isBatchMode && pendingBatchKeys.size > 0) {
                 state.isBatchMode = false;
@@ -102,10 +198,11 @@
             }
 
             if (typeof closeSourceActionMenu === 'function') closeSourceActionMenu();
-            if (typeof buildParentMap === 'function') buildParentMap();
-            if (typeof saveState === 'function') saveState({ immediate: true, critical: true });
+            treePlacement.rebuildParentMap(parentMap);
             if (typeof render === 'function') render();
+            if (typeof saveState === 'function') saveState({ immediate: true, critical: true });
             closeMoveToFolderModal();
+            return result;
         }
 
         function renderMoveToFolderModal(sourceKeys) {
