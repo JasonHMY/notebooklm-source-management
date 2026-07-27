@@ -70,7 +70,7 @@ Depth test：
 在 characterization 前，把本计划开始时 `git rev-parse HEAD` 的原始 40 位输出写入 baseline
 report 的 `Architecture Plan Start SHA:` 唯一字段；该 report 与本 task 一起提交。
 
-- [ ] **Step 1: 增加 characterization cases**
+- [x] **Step 1: 增加 characterization cases**
 
 锁定：
 
@@ -87,7 +87,7 @@ report 的 `Architecture Plan Start SHA:` 唯一字段；该 report 与本 task 
 11. 删除 non-empty nested group 时 direct sources 进 bin、child groups 按原顺序提升到
     root，而不是原 parent。
 
-- [ ] **Step 2: 运行 behavior baseline**
+- [x] **Step 2: 运行 behavior baseline**
 
 Run:
 
@@ -103,7 +103,7 @@ npm run test:unit -- --runTestsByPath \
 Expected: PASS。该 task 是 characterization exception，不改 production；若某 case 失败，
 先核对测试是否准确描述现有/已批准行为，不在本 task 顺手修 runtime。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests/content/content-tree.test.js \
@@ -307,7 +307,7 @@ transaction。
   `commitPatch`，禁止先改 group record 再改 tree edge；
 - 完整 validation 成功前不 mutate。
 
-- [ ] **Step 1: 写 factory/Interface 失败测试**
+- [x] **Step 1: 写 factory/Interface 失败测试**
 
 新增：
 
@@ -327,7 +327,7 @@ transaction。
   model without live state/Map mutation`
 - `sweepPositionedRootSourcesToBin is stable and idempotent`
 
-- [ ] **Step 2: 运行并确认红灯**
+- [x] **Step 2: 运行并确认红灯**
 
 Run:
 
@@ -339,7 +339,7 @@ npm run test:unit -- --runTestsByPath \
 
 Expected: FAIL，factory/global 尚不存在。
 
-- [ ] **Step 3: 实现纯 Module**
+- [x] **Step 3: 实现纯 Module**
 
 `previewPlacement` clone 需要改变的 list，完成 locate/target/cycle/no-op 验证后返回上文
 `PlacementPreview`；失败/no-op 时 `patch:null`。`applyPlacement` 只 commit 完整
@@ -391,14 +391,14 @@ critical section 替换 live `state.root`、`state.ungrouped` 与 `groupsById` �
 不改任一 live container，并返回完整 `CommitResult` + failed `ValidationResult`；
 success 返回 `CommitResult`，reason 为 `committed` 或 `no_change`。
 
-- [ ] **Step 4: 接入无 bundler load order**
+- [x] **Step 4: 接入无 bundler load order**
 
 - manifest：在 `content-tags.js` 后、`content-state-reconcile.js` 前加载；
 - Node loader 同位置 require；
 - harness 加/清 `NSM_CREATE_CONTENT_TREE_PLACEMENT`；
 - `index.js` 在组装 drag/sync/restore consumer 前 instantiate。
 
-- [ ] **Step 5: 运行 tests + loader guard**
+- [x] **Step 5: 运行 tests + loader guard**
 
 Run:
 
@@ -411,7 +411,7 @@ npm run test:unit -- --runTestsByPath \
 
 Expected: PASS；Module 无 DOM/Chrome/save/render/toast dependency。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/content/content-tree-placement.js \
@@ -456,7 +456,7 @@ treePlacement.applyPlacement({
 });
 ```
 
-- [ ] **Step 1: 写 Adapter 失败测试**
+- [x] **Step 1: 写 Adapter 失败测试**
 
 覆盖：
 
@@ -466,7 +466,7 @@ treePlacement.applyPlacement({
 - group cycle → state byte-for-byte 不变；
 - delete non-empty group 后 sources 进 bin、child groups 提升 root 且顺序不变。
 
-- [ ] **Step 2: 运行并确认红灯**
+- [x] **Step 2: 运行并确认红灯**
 
 Run:
 
@@ -478,7 +478,7 @@ npm run test:unit -- --runTestsByPath \
 
 Expected: FAIL；现有 handleDrop/树操作仍直接 mutate arrays。
 
-- [ ] **Step 3: 迁移 mutation Seam**
+- [x] **Step 3: 迁移 mutation Seam**
 
 `computeDropIntentRaw` 保留 geometry 与 visual slot；`handleDrop` 只把 intent 翻译成 semantic
 target。仅 `result.changed === true` 时：
@@ -493,7 +493,7 @@ saveState();
 Classic sweep 委托 Module。group create 调 `addGroup`；source delete 调 `removeSource`；
 group delete/promote 调 `removeGroup`；move-to-ungrouped 调 `applyPlacement`。
 
-- [ ] **Step 4: 证明 Adapter 不再拥有 storage shape**
+- [x] **Step 4: 证明 Adapter 不再拥有 storage shape**
 
 Run:
 
@@ -505,7 +505,7 @@ rg -n "targetList === state\\.ungrouped|\\{ type: 'source'|\\{ type: 'group'" \
 Expected: intent rendering 所需的只读 entry 可以保留；drop mutation 分支无这些 shape 构造或
 array-identity routing。
 
-- [ ] **Step 5: 测试并提交**
+- [x] **Step 5: 测试并提交**
 
 Run: 同 Step 2。
 
@@ -553,7 +553,7 @@ Move modal target：
 }
 ```
 
-- [ ] **Step 1: 写 batch/modal Adapter 失败测试**
+- [x] **Step 1: 写 batch/modal Adapter 失败测试**
 
 覆盖：
 
@@ -563,7 +563,7 @@ Move modal target：
 - modal no-op 不 save；
 - batch/single 对同目标产生相同 entry shape。
 
-- [ ] **Step 2: 运行并确认红灯**
+- [x] **Step 2: 运行并确认红灯**
 
 Run:
 
@@ -578,7 +578,7 @@ npm run test:unit -- --runTestsByPath \
 
 Expected: FAIL；两个 consumer 仍调用各自 mutation helpers。
 
-- [ ] **Step 3: 迁移并删除重复 Implementation**
+- [x] **Step 3: 迁移并删除重复 Implementation**
 
 - 删除 `content-drag-multi.js` 的 state mutation `applyMultiSourceDrop`；
 - drag-multi 只保留 selection/ghost/auto-scroll；
@@ -1139,7 +1139,7 @@ git commit -m "refactor: separate preferences from developer logging"
 
 ## Full Verification Gate
 
-- [ ] **Step 1: Focused architecture matrix**
+- [x] **Step 1: Focused architecture matrix**
 
 Run:
 
@@ -1169,7 +1169,7 @@ npm run test:unit -- --runTestsByPath \
 
 Expected: PASS。
 
-- [ ] **Step 2: Full runtime/package matrix**
+- [x] **Step 2: Full runtime/package matrix**
 
 Run:
 
@@ -1187,7 +1187,7 @@ git diff --check "$ARCH_PLAN_START_SHA"..HEAD
 
 Expected: PASS；SHA 从持久 report 重新读取并验证为 commit。
 
-- [ ] **Step 3: Structural proof**
+- [x] **Step 3: Structural proof**
 
 Run:
 
@@ -1204,7 +1204,7 @@ Expected:
 - view-state/render 无重复 query parser/matcher；
 - manifest/loader/harness module globals 双向一致。
 
-- [ ] **Step 4: Rollback boundaries**
+- [x] **Step 4: Rollback boundaries**
 
 - Tasks 3–5 按 consumer 独立回滚；Tree Placement Module 在最后一个 consumer 完成前保留；
 - Task 6 Search Module 可整体回滚，不影响 tree work；

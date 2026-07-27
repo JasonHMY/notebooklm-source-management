@@ -62,7 +62,17 @@ and 1,058, all below their respective Before baselines.
 - Drag final independent review found no P0/P1 issue. Its clean-snapshot positive-path, Classic normalization, snapshot-staleness, and `DataTransfer` lifetime P2 coverage gaps were added before the final commit.
 - Drag rollback checks passed: Classic migration writes a restorable `before_classic_mode_sweep` history snapshot before its critical save and retains recovery on save failure; fold/unfold remains reflow-only, shared intent/auto-scroll/`dropEffect` implementations remain outside that Beta gate, Classic and Reflow intent/`dropEffect` paths have explicit coverage, and stationary-pointer auto-scroll refresh has its own regression tests.
 
+## Architecture Final Verification
+
+- Completed Architecture & Accessibility Tasks 1–8 through verified implementation commit `606ef1eb5148c829b375f0915ec09b234b68d46d` (Architecture plan start: `73197d760ab1001f7440a1094e9688fcb97799f2`).
+- The focused architecture matrix passed 20 of 20 suites and 980 of 980 tests.
+- The approved full `npm run verify:full` gate passed lint, 50 of 50 unit suites with 1,563 of 1,563 tests, and the headless Playwright suite with 25 tests passed and 1 opt-in performance benchmark skipped.
+- Packaging produced `release/gemininotebook-source-management-26.6.16.zip` with 68 runtime files; `unzip -t` reported no compressed-data errors.
+- The persisted Architecture plan start SHA resolves to a commit; both working-tree and `73197d760ab1001f7440a1094e9688fcb97799f2..HEAD` diff checks passed.
+- Structural proof found tree-container writes only in the Tree Placement Module and documented state-reconciliation snapshot construction; the other `children.push` matches are local render/toast arrays. `content-view-state.js` and `content-render.js` contain no duplicate search parser, and the manifest/loader/harness synchronization test passed.
+- Rollback boundaries remain task-scoped: placement consumers can be reverted in reverse dependency order, unified search and keyboard controls can be reverted independently, and Preferences/Developer Logger separation can be reverted as one unit without restoring distributed mutation or duplicated parser logic.
+- Three independent Task 8 audits and the final branch audit found no remaining P0, P1, or P2 issue after the documented concurrency and evidence fixes.
+
 ## Deferred Non-Blocking Observations
 
-- Architecture & Accessibility characterization has started from the recorded Architecture Plan Start SHA; the planned deep Modules and Adapters have not yet been implemented.
 - No source titles, notebook identifiers, private URLs, or other notebook data were captured.
