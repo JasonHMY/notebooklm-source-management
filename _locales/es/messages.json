@@ -612,16 +612,16 @@
         "message": "Un vistazo rápido a las novedades principales de esta versión."
     },
     "ui_whats_new_drag_title": {
-        "message": "Coloca fuentes en cualquier lugar del nivel raíz (Beta)"
+        "message": "Arrastre con reflujo más fluido y fiable (Beta)"
     },
     "ui_whats_new_drag_body": {
-        "message": "Beta opcional: al arrastrar, las demás fuentes se apartan y puedes soltar una fuente en cualquier punto del nivel superior: entre dos carpetas, o encima y debajo de ellas. Desactivado por defecto (línea azul clásica). Actívalo abajo o en Ajustes."
+        "message": "El arrastre con reflujo ahora abre huecos precisos en filas mixtas y anidadas, mantiene actualizado el destino durante el desplazamiento automático y restaura la disposición original al pulsar Esc o cancelar. Sigue siendo opcional; actívalo abajo o en Ajustes."
     },
     "ui_whats_new_stability_title": {
-        "message": "Correcciones y accesibilidad"
+        "message": "Orden preciso y recuperación más segura"
     },
     "ui_whats_new_stability_body": {
-        "message": "Insertar en una carpeta justo después de que se expande ahora deja hueco correctamente, además de corregir el temblor del punto de soltado en subcarpetas anidadas y una zona sin respuesta al arrastrar sobre carpetas contraídas. Añade compatibilidad con teclado y lector de pantalla y protecciones de almacenamiento más estrictas."
+        "message": "Las fuentes y carpetas ahora incluyen controles de teclado para moverlas. Arrastrar, mover, importar, sincronizar y restaurar usan las mismas reglas de colocación, y los cambios rápidos de preferencias conservan el último valor confirmado."
     },
     "ui_whats_new_primary": {
         "message": "Entendido"

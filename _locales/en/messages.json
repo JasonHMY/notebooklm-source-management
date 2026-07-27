@@ -612,16 +612,16 @@
         "message": "A quick look at this release's main updates."
     },
     "ui_whats_new_drag_title": {
-        "message": "Place sources anywhere at root (Beta)"
+        "message": "Smoother, more reliable reflow drag (Beta)"
     },
     "ui_whats_new_drag_body": {
-        "message": "New opt-in Beta: while dragging, other sources move aside and you can drop a source anywhere at the top level — between two folders, or above and below them. Off by default (classic blue insertion line). Turn it on below or in Settings."
+        "message": "Reflow drag now opens accurate gaps across mixed and nested rows, keeps the drop target current during auto-scroll, and restores the original layout after Escape or cancellation. It remains opt-in; enable it below or in Settings."
     },
     "ui_whats_new_stability_title": {
-        "message": "Fixes and accessibility"
+        "message": "Precise ordering and safer recovery"
     },
     "ui_whats_new_stability_body": {
-        "message": "Inserting into a folder right after it auto-expands now makes way correctly, plus fixes for drop-position jitter in nested subfolders and a no-feedback dead zone over collapsed folders. Adds keyboard and screen-reader support and tighter storage safeguards."
+        "message": "Sources and folders now have keyboard move controls. Drag, move, import, sync, and restore share the same placement rules, while rapid preference changes keep the latest confirmed value."
     },
     "ui_whats_new_primary": {
         "message": "Got it"

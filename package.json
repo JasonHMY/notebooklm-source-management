@@ -1,6 +1,6 @@
 {
   "name": "gemininotebook-source-management",
-  "version": "26.6.16",
+  "version": "26.7.27",
   "description": "Chrome extension that adds folder grouping, drag-and-drop, and batch controls to Gemini Notebook's source panel.\nChrome 扩展：为 Gemini Notebook 来源面板补充文件夹、拖拽与批量操作。",
   "main": "src/background/index.js",
   "scripts": {
