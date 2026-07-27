@@ -148,7 +148,11 @@
             const state = getLiveState();
             const groupsById = getLiveGroups();
             if (!state || !groupsById) return null;
-            return createModel(state, groupsById);
+            try {
+                return createModel(state, groupsById);
+            } catch (error) {
+                return null;
+            }
         }
 
         function normalizeItem(item) {
@@ -992,7 +996,7 @@
             return {
                 ok: changed,
                 changed,
-                reason: changed ? 'removed' : 'no_change',
+                reason: changed ? 'removed' : 'invalid_target',
                 from: cloneLocation(locations[0]),
                 to: null
             };
@@ -1056,7 +1060,7 @@
             return {
                 ok: changed,
                 changed,
-                reason: changed ? 'removed' : 'no_change',
+                reason: changed ? 'removed' : 'invalid_target',
                 from: cloneLocation(locations[0] || null),
                 to: null
             };
@@ -1093,6 +1097,14 @@
             liveSourceKeys.forEach((sourceKey) => {
                 if (!isValidSourceKey(sourceKey)) {
                     errors.push(createValidationError('invalid_entry'));
+                }
+            });
+            groupsById.forEach((group, groupId) => {
+                if (liveSourceKeys.has(groupId)) {
+                    errors.push(createValidationError('invalid_entry', {
+                        kind: 'group',
+                        id: groupId
+                    }));
                 }
             });
 
@@ -1268,9 +1280,18 @@
             for (const sourceKey of inputLiveSourceKeys) {
                 if (!isValidSourceKey(sourceKey)) return invalidNormalizedModel();
             }
+            for (const groupId of inputGroups.keys()) {
+                if (inputLiveSourceKeys.has(groupId)) return invalidNormalizedModel();
+            }
 
-            const nextState = clonePlacementState(inputState);
-            const nextGroups = cloneGroupsMap(inputGroups);
+            let nextState;
+            let nextGroups;
+            try {
+                nextState = clonePlacementState(inputState);
+                nextGroups = cloneGroupsMap(inputGroups);
+            } catch (error) {
+                return invalidNormalizedModel();
+            }
             const liveSourceKeys = new Set(inputLiveSourceKeys);
             let removedDuplicates = 0;
             let removedCycles = 0;
@@ -1430,12 +1451,17 @@
             const validation = validatePlacementState(normalizedModel);
             if (!validation.ok) return invalidNormalizedModel();
 
-            const originalModel = createModel(inputState, inputGroups);
-            const structurallyChanged = (
-                !treeEntriesEqual(originalModel.state.root, nextState.root)
-                || !stringArraysEqual(originalModel.state.ungrouped, nextState.ungrouped)
-                || !groupsEqual(originalModel.groupsById, nextGroups)
-            );
+            let structurallyChanged;
+            try {
+                const originalModel = createModel(inputState, inputGroups);
+                structurallyChanged = (
+                    !treeEntriesEqual(originalModel.state.root, nextState.root)
+                    || !stringArraysEqual(originalModel.state.ungrouped, nextState.ungrouped)
+                    || !groupsEqual(originalModel.groupsById, nextGroups)
+                );
+            } catch (error) {
+                return invalidNormalizedModel();
+            }
 
             return {
                 ok: true,
@@ -1477,19 +1503,39 @@
                 };
             }
 
-            const candidateModel = createModel(
-                normalizedModel.state,
-                normalizedModel.groupsById
-            );
-            const liveModel = createModel(liveState, liveGroups);
-            const changed = (
-                !treeEntriesEqual(liveModel.state.root, candidateModel.state.root)
-                || !stringArraysEqual(
-                    liveModel.state.ungrouped,
-                    candidateModel.state.ungrouped
-                )
-                || !groupsEqual(liveModel.groupsById, candidateModel.groupsById)
-            );
+            let candidateModel;
+            let changed;
+            let nextRoot;
+            let nextUngrouped;
+            let nextGroups;
+            try {
+                candidateModel = createModel(
+                    normalizedModel.state,
+                    normalizedModel.groupsById
+                );
+                const liveModel = createModel(liveState, liveGroups);
+                changed = (
+                    !treeEntriesEqual(liveModel.state.root, candidateModel.state.root)
+                    || !stringArraysEqual(
+                        liveModel.state.ungrouped,
+                        candidateModel.state.ungrouped
+                    )
+                    || !groupsEqual(liveModel.groupsById, candidateModel.groupsById)
+                );
+                nextRoot = cloneTreeEntries(candidateModel.state.root);
+                nextUngrouped = [...candidateModel.state.ungrouped];
+                nextGroups = cloneGroupsMap(candidateModel.groupsById);
+            } catch (error) {
+                return {
+                    ok: false,
+                    changed: false,
+                    reason: 'invalid_model',
+                    validation: {
+                        ok: false,
+                        errors: [createValidationError('invalid_entry')]
+                    }
+                };
+            }
             if (!changed) {
                 return {
                     ok: true,
@@ -1499,9 +1545,6 @@
                 };
             }
 
-            const nextRoot = cloneTreeEntries(candidateModel.state.root);
-            const nextUngrouped = [...candidateModel.state.ungrouped];
-            const nextGroups = cloneGroupsMap(candidateModel.groupsById);
             const previous = {
                 root: liveState.root,
                 ungrouped: liveState.ungrouped,

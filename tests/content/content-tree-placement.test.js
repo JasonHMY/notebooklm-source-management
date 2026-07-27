@@ -32,6 +32,14 @@ function countSourcePlacements(sourceKey, state, groupsById) {
     return count;
 }
 
+function createDeepMetadata(depth) {
+    let value = { leaf: true };
+    for (let index = 0; index < depth; index += 1) {
+        value = { nested: value };
+    }
+    return value;
+}
+
 describe('content-tree-placement factory', () => {
     let createContentTreePlacement;
 
@@ -774,6 +782,33 @@ describe('content-tree-placement factory', () => {
         expect(countSourcePlacements('duplicate', state, groupsById)).toBe(0);
     });
 
+    it('removeSource reports invalid_target and rolls back when its atomic commit fails', () => {
+        const frozenGroup = Object.freeze({
+            id: 'group-a',
+            children: [{ type: 'source', key: 'source-a' }]
+        });
+        const { state, groupsById, treePlacement } = createHarness({
+            state: {
+                root: [{ type: 'group', id: 'group-a' }],
+                ungrouped: []
+            },
+            groupsById: new Map([['group-a', frozenGroup]])
+        });
+        const before = snapshotLiveModel(state, groupsById);
+
+        const result = treePlacement.removeSource({
+            item: { kind: 'source', key: 'source-a' }
+        });
+
+        expect(result).toEqual(expect.objectContaining({
+            ok: false,
+            changed: false,
+            reason: 'invalid_target'
+        }));
+        expect(snapshotLiveModel(state, groupsById)).toEqual(before);
+        expect(groupsById.get('group-a')).toBe(frozenGroup);
+    });
+
     it('removeGroup sends direct sources to the bin and promotes child groups to root in order', () => {
         const parent = {
             id: 'parent',
@@ -839,6 +874,41 @@ describe('content-tree-placement factory', () => {
         expect(groupsById.has('doomed')).toBe(false);
         expect(groupsById.get('child-a')).toEqual(childA);
         expect(groupsById.get('child-b')).toEqual(childB);
+    });
+
+    it('removeGroup reports invalid_target and rolls back when its parent edge cannot commit', () => {
+        const frozenParent = Object.freeze({
+            id: 'parent',
+            children: [{ type: 'group', id: 'doomed' }]
+        });
+        const doomed = {
+            id: 'doomed',
+            children: [{ type: 'source', key: 'source-a' }]
+        };
+        const { state, groupsById, treePlacement } = createHarness({
+            state: {
+                root: [{ type: 'group', id: 'parent' }],
+                ungrouped: []
+            },
+            groupsById: new Map([
+                ['parent', frozenParent],
+                ['doomed', doomed]
+            ])
+        });
+        const before = snapshotLiveModel(state, groupsById);
+
+        const result = treePlacement.removeGroup({
+            item: { kind: 'group', id: 'doomed' }
+        });
+
+        expect(result).toEqual(expect.objectContaining({
+            ok: false,
+            changed: false,
+            reason: 'invalid_target'
+        }));
+        expect(snapshotLiveModel(state, groupsById)).toEqual(before);
+        expect(groupsById.get('parent')).toBe(frozenParent);
+        expect(groupsById.get('doomed')).toBe(doomed);
     });
 
     it('normalizePlacementState applies group-root-bin precedence', () => {
@@ -1218,6 +1288,35 @@ describe('content-tree-placement factory', () => {
         }));
     });
 
+    it('validation and normalization reject a source key that collides with a group id', () => {
+        const { treePlacement } = createHarness();
+        const model = {
+            state: {
+                root: [{ type: 'group', id: 'shared-id' }],
+                ungrouped: ['shared-id']
+            },
+            groupsById: new Map([[
+                'shared-id',
+                { id: 'shared-id', children: [] }
+            ]]),
+            liveSourceKeys: new Set(['shared-id'])
+        };
+
+        expect(treePlacement.validatePlacementState(model)).toEqual(expect.objectContaining({
+            ok: false,
+            errors: expect.arrayContaining([
+                expect.objectContaining({
+                    code: 'invalid_entry'
+                })
+            ])
+        }));
+        expect(treePlacement.normalizePlacementState(model)).toEqual(expect.objectContaining({
+            ok: false,
+            changed: false,
+            reason: 'invalid_model'
+        }));
+    });
+
     it('normalizePlacementState removes only the closing cycle edge and preserves legal siblings', () => {
         const { treePlacement } = createHarness();
         const result = treePlacement.normalizePlacementState({
@@ -1308,6 +1407,104 @@ describe('content-tree-placement factory', () => {
         expect(() => treePlacement.rebuildParentMap(parentMap)).not.toThrow();
         expect(parentMap.size).toBe(groupCount - 1);
         expect(parentMap.get(`g-${groupCount - 1}`)).toBe(`g-${groupCount - 2}`);
+    });
+
+    it('normalizePlacementState fails closed for metadata deeper than the clone stack', () => {
+        const { treePlacement } = createHarness();
+        const model = {
+            state: {
+                root: [{ type: 'group', id: 'deep' }],
+                ungrouped: []
+            },
+            groupsById: new Map([[
+                'deep',
+                {
+                    id: 'deep',
+                    children: [],
+                    metadata: createDeepMetadata(12_000)
+                }
+            ]]),
+            liveSourceKeys: new Set()
+        };
+        let result;
+
+        expect(() => {
+            result = treePlacement.normalizePlacementState(model);
+        }).not.toThrow();
+        expect(result).toEqual(expect.objectContaining({
+            ok: false,
+            changed: false,
+            reason: 'invalid_model'
+        }));
+    });
+
+    it('all live-model placement APIs fail closed for metadata deeper than the clone stack', () => {
+        const deepGroup = {
+            id: 'deep',
+            children: [{ type: 'source', key: 'source-a' }],
+            metadata: createDeepMetadata(12_000)
+        };
+        const { state, groupsById, treePlacement } = createHarness({
+            state: {
+                root: [{ type: 'group', id: 'deep' }],
+                ungrouped: []
+            },
+            groupsById: new Map([['deep', deepGroup]])
+        });
+        const rootRef = state.root;
+        const ungroupedRef = state.ungrouped;
+        const groupRef = groupsById.get('deep');
+        const childrenRef = groupRef.children;
+        const operations = [
+            () => treePlacement.locateItem({ kind: 'source', key: 'source-a' }),
+            () => treePlacement.previewPlacement({
+                item: { kind: 'source', key: 'source-a' },
+                target: { container: 'root', index: 1 }
+            }),
+            () => treePlacement.applyPlacement({
+                item: { kind: 'source', key: 'source-a' },
+                target: { container: 'root', index: 1 }
+            }),
+            () => treePlacement.applyPlacementTransaction([{
+                item: { kind: 'source', key: 'source-a' },
+                target: { container: 'root', index: 1 }
+            }]),
+            () => treePlacement.applyBatchPlacement({
+                items: [{ kind: 'source', key: 'source-a' }],
+                target: { container: 'root', index: 1 }
+            }),
+            () => treePlacement.addGroup({
+                group: { id: 'new-group', children: [] },
+                target: { container: 'root', index: 1 }
+            }),
+            () => treePlacement.removeSource({
+                item: { kind: 'source', key: 'source-a' }
+            }),
+            () => treePlacement.removeGroup({
+                item: { kind: 'group', id: 'deep' }
+            }),
+            () => treePlacement.sweepPositionedRootSourcesToBin()
+        ];
+        const outcomes = [];
+
+        operations.forEach((operation) => {
+            expect(() => {
+                outcomes.push(operation());
+            }).not.toThrow();
+        });
+
+        expect(outcomes[0]).toBeNull();
+        outcomes.slice(1, -1).forEach((result) => {
+            expect(result).toEqual(expect.objectContaining({
+                ok: false,
+                changed: false
+            }));
+        });
+        expect(outcomes.at(-1)).toBe(false);
+        expect(state.root).toBe(rootRef);
+        expect(state.ungrouped).toBe(ungroupedRef);
+        expect(groupsById.get('deep')).toBe(groupRef);
+        expect(groupRef.children).toBe(childrenRef);
     });
 
     it('commitPlacementModel revalidates its carried liveSourceKeys and rejects a tampered normalized model without live state/Map mutation', () => {
@@ -1458,6 +1655,40 @@ describe('content-tree-placement factory', () => {
             root: [{ type: 'source', key: 'live-current' }],
             ungrouped: []
         });
+    });
+
+    it('commitPlacementModel fails closed when a valid result is tampered with deep metadata', () => {
+        const { state, groupsById, treePlacement } = createHarness();
+        const normalized = treePlacement.normalizePlacementState({
+            state: {
+                root: [{ type: 'group', id: 'deep' }],
+                ungrouped: []
+            },
+            groupsById: new Map([[
+                'deep',
+                { id: 'deep', children: [] }
+            ]]),
+            liveSourceKeys: new Set()
+        });
+        expect(normalized.ok).toBe(true);
+        normalized.groupsById.get('deep').metadata = createDeepMetadata(12_000);
+        const rootRef = state.root;
+        const ungroupedRef = state.ungrouped;
+        const groupsMapRef = groupsById;
+        let result;
+
+        expect(() => {
+            result = treePlacement.commitPlacementModel(normalized);
+        }).not.toThrow();
+        expect(result).toEqual(expect.objectContaining({
+            ok: false,
+            changed: false,
+            reason: 'invalid_model'
+        }));
+        expect(state.root).toBe(rootRef);
+        expect(state.ungrouped).toBe(ungroupedRef);
+        expect(groupsById).toBe(groupsMapRef);
+        expect(state).toEqual({ root: [], ungrouped: [] });
     });
 
     it('commitPlacementModel clones a valid normalized model into live state without aliases', () => {
