@@ -50,7 +50,7 @@ GeminiNotebook-Source-Management
 │   │   ├── content-tree-placement.js
 │   │   │   └── 纯分组树放置 Module；集中 validate → plan → commit、entry shape、source XOR、文件夹唯一父级、reachable group 优先级、循环/索引/no-op、批量事务与迭代式原子归一化不变量
 │   │   ├── content-tree-interactions.js
-│   │   │   └── 分组树、checkbox、批量模式与拖拽 read → plan → write；维护同步 native dropEffect、类型化 geometry snapshot、滚动 delta patch、auto-scroll 静止指针刷新/落下前同步 flush、ResizeObserver/render 失效和 fail-closed 重建
+│   │   │   └── 分组树、checkbox、批量模式与拖拽 read → plan → write；single drag/新增/删除/移出分组通过严格语义 target 适配 Tree Placement，拒绝冲突 target marker 与混合类型 payload，另维护同步 native dropEffect、类型化 geometry snapshot、滚动 delta patch、auto-scroll 静止指针刷新/落下前同步 flush、ResizeObserver/render 失效和 fail-closed 重建
 │   │   ├── content-render.js
 │   │   │   └── Shadow DOM manager 渲染、列表行、批量条、菜单层
 │   │   ├── content-modals.js
@@ -380,7 +380,7 @@ manifest.json
 │   │   ├── native dropEffect 只在原始 dragover 事件内由 clean snapshot 同步解析；dirty/missing snapshot 保守 move，未知 payload 为 none，异步 drag frame 不保留 DataTransfer
 │   │   ├── reflow transform 使用 source/group 类型化 map；仅可视区 + 一个真实行高 overscan 动画，离屏位移静态应用并在结束/下次 preflight 清理
 │   │   ├── 批量选择、加入文件夹、添加/移除标签
-│   │   ├── 已提供待迁移的纯 Tree Placement Interface，集中 entry shape、source XOR、循环拒绝、索引修正、no-op、批量/事务原子提交与 import normalization；当前 drag/batch/modal/restore consumers 尚未迁移
+│   │   ├── 纯 Tree Placement Interface 集中 entry shape、source XOR、循环拒绝、索引修正、no-op、批量/事务原子提交与 import normalization；single drag、分组新增/删除、来源移出分组、原生来源删除与 Classic sweep 已迁移且旧 single 数组定位 Interface 已移除，batch drag/modal/restore consumers 待后续迁移
 │   │   ├── 移到未分组
 │   │   └── 批量删除入口
 │   ├── 先看
@@ -846,7 +846,7 @@ CI: .github/workflows/ci.yml
 │   └── 注意: 不要让隐藏三点按钮改变 grid 列宽
 ├── 分组树数据损坏
 │   ├── 先看: src/content/content-tree-interactions.js
-│   ├── 然后看: src/content/content-tree-placement.js（新 Interface，consumer 迁移中）, src/content/content-state-reconcile.js, src/content/content-persistence.js
+│   ├── 然后看: src/content/content-tree-placement.js（single consumer 已迁移，原生删除失败时按剩余 live 来源归一化；batch/modal/restore 迁移中）, src/content/content-state-reconcile.js, src/content/content-persistence.js
 │   ├── 测试: content-tree-placement.test.js, content-tree.test.js, content-persistence.test.js
 │   └── 注意: children 必须容错为数组，避免孤儿 group
 ├── 标签创建/颜色/排序错

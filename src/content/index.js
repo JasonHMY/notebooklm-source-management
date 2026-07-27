@@ -547,7 +547,43 @@
         if (!sourceKey || !sourcesByKey.has(sourceKey)) return false;
 
         const source = sourcesByKey.get(sourceKey);
-        removeSourceFromTree(sourceKey);
+        let placementResult;
+        try {
+            placementResult = _treePlacementModule.removeSource({
+                item: { kind: 'source', key: sourceKey }
+            });
+        } catch (error) {
+            placementResult = {
+                ok: false,
+                changed: false,
+                reason: 'invalid_target'
+            };
+        }
+        if (!placementResult.ok && placementResult.reason !== 'not_found') {
+            developerLog('warn', 'source_action', 'native_source_delete_placement_rejected', {
+                reason: placementResult.reason || 'invalid_target'
+            });
+            const liveSourceKeys = new Set(sourcesByKey.keys());
+            liveSourceKeys.delete(sourceKey);
+            let repairResult = null;
+            try {
+                const normalized = _treePlacementModule.normalizePlacementState({
+                    state,
+                    groupsById,
+                    liveSourceKeys
+                });
+                if (normalized.ok) {
+                    repairResult = _treePlacementModule.commitPlacementModel(normalized);
+                }
+            } catch (error) {
+                repairResult = null;
+            }
+            if (!repairResult?.ok) {
+                developerLog('warn', 'source_action', 'native_source_delete_tree_repair_rejected', {
+                    reason: repairResult?.reason || 'invalid_model'
+                });
+            }
+        }
         sourcesByKey.delete(sourceKey);
         sourceTagsById.delete(sourceKey);
         pendingBatchKeys.delete(sourceKey);
@@ -556,7 +592,8 @@
             runtimeContext.keyByElement.delete(source.element);
         }
 
-        buildParentMap();
+        _treePlacementModule.rebuildParentMap(parentMap);
+        parentMap.delete(sourceKey);
         saveState({ immediate: true, critical: true });
         return true;
     }
@@ -1094,6 +1131,7 @@
 
     const treeInteractionsModule = createContentTreeInteractions({
         runtime: runtimeContext,
+        treePlacement: _treePlacementModule,
         getState: () => state,
         getGroupsById: () => groupsById,
         getSourcesByKey: () => sourcesByKey,
@@ -1178,10 +1216,7 @@
         handleDragLeave,
         handleDrop,
         handleDragEnd,
-        clearDragFeedback,
-        getSourceTreePosition,
-        getGroupTreePosition,
-        isNoopTreeMove
+        clearDragFeedback
     } = treeInteractionsModule;
 
     const nativeLabelImportModule = createContentNativeLabelImport({
@@ -3737,12 +3772,7 @@
     });
 
     function buildParentMap() {
-        parentMap.clear();
-        groupsById.forEach(group => {
-            (Array.isArray(group.children) ? group.children : []).forEach(child => {
-                parentMap.set(child.id || child.key, group.id);
-            });
-        });
+        return _treePlacementModule.rebuildParentMap(parentMap);
     }
 
     // --- Batch Delete Deletion Engine ---
@@ -5021,9 +5051,7 @@
             _getSearchHighlightTermsForTest: getSearchHighlightTerms,
             _collectSearchExpandedGroupIdsForTest: collectSearchExpandedGroupIds,
             _clearDragFeedbackForTest: clearDragFeedback,
-            _getSourceTreePositionForTest: getSourceTreePosition,
-            _getGroupTreePositionForTest: getGroupTreePosition,
-            _isNoopTreeMoveForTest: isNoopTreeMove,
+            _handleNativeSourceDeleteAcceptedForTest: handleNativeSourceDeleteAccepted,
             _getRenderedSourceActionMenuItemsForTest: getRenderedSourceActionMenuItems,
             _findRenderedSourceActionMenuForTest: findRenderedSourceActionMenu,
             _focusSourceActionMenuItemForTest: focusSourceActionMenuItem,

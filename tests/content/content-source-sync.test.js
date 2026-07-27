@@ -37,6 +37,56 @@ function seedMockSource(mod, mockSourceRow, overrides = {}) {
     return descriptor.key;
 }
 
+describe('accepted native source deletion reconciliation', () => {
+    let mod;
+
+    beforeEach(() => {
+        jest.resetModules();
+        setupGlobalMocks();
+        mod = loadContentModule();
+        mod._resetState();
+    });
+
+    afterEach(teardownGlobalMocks);
+
+    it('repairs unrelated tree corruption after native deletion already succeeded', () => {
+        mod.state.root = [
+            { type: 'source', key: 'A' },
+            { type: 'source', key: 'B' }
+        ];
+        mod.state.ungrouped = ['B'];
+        mod.sourcesByKey.set('A', { key: 'A' });
+        mod.sourcesByKey.set('B', { key: 'B' });
+        mod.sourceTagsById.set('A', new Set(['tag-1']));
+        mod.pendingBatchKeys.add('A');
+        mod.parentMap.set('A', 'stale-parent');
+
+        expect(mod._handleNativeSourceDeleteAcceptedForTest('A')).toBe(true);
+
+        expect(mod.sourcesByKey.has('A')).toBe(false);
+        expect(mod.sourceTagsById.has('A')).toBe(false);
+        expect(mod.pendingBatchKeys.has('A')).toBe(false);
+        expect(mod.parentMap.has('A')).toBe(false);
+        expect(mod.state.root).toEqual([{ type: 'source', key: 'B' }]);
+        expect(mod.state.ungrouped).toEqual([]);
+    });
+
+    it('clears stale parent-map entries when the deleted source was already absent from the tree', () => {
+        mod.state.root = [{ type: 'source', key: 'B' }];
+        mod.state.ungrouped = [];
+        mod.sourcesByKey.set('A', { key: 'A' });
+        mod.sourcesByKey.set('B', { key: 'B' });
+        mod.parentMap.set('A', 'stale-parent');
+
+        expect(mod._handleNativeSourceDeleteAcceptedForTest('A')).toBe(true);
+
+        expect(mod.sourcesByKey.has('A')).toBe(false);
+        expect(mod.parentMap.has('A')).toBe(false);
+        expect(mod.state.root).toEqual([{ type: 'source', key: 'B' }]);
+        expect(mod.state.ungrouped).toEqual([]);
+    });
+});
+
 describe('scanAndSyncSources', () => {
     let mod;
 
@@ -2554,7 +2604,7 @@ describe('scanAndSyncSources', () => {
             enabled: true,
             collapsed: false
         });
-        mod.state.groups = ['user-folder'];
+        mod.state.root = [{ type: 'group', id: 'user-folder' }];
         mod.state.ungrouped = [ungroupedDescriptor.key];
         mod.sourcesByKey.set(groupedDescriptor.key, groupedDescriptor);
         mod.sourcesByKey.set(ungroupedDescriptor.key, ungroupedDescriptor);

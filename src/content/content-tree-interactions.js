@@ -27,8 +27,7 @@
      *   handleOriginalCheckboxChange / triggerRename / processClickQueue),
      *   完整拖拽生命周期 (handleDragStart / handleDragOver / handleDragLeave /
      *   handleDrop / handleDragEnd / clearDragFeedback / computeDropIntent /
-     *   applyReflowAfterRender),以及树形位置 (getSourceTreePosition /
-     *   getGroupTreePosition / isNoopTreeMove / getGroupAncestorChain /
+     *   applyReflowAfterRender),以及树形位置 (getGroupAncestorChain /
      *   resolveSiblingKeys / resolveVisibleAnchorInsertIndex)。完整 return 块见文件末尾。
      */
     function createContentTreeInteractions(deps = {}) {
@@ -50,6 +49,22 @@
         const getParentMap = typeof deps.getParentMap === 'function'
             ? deps.getParentMap
             : () => (deps.parentMap || runtime.parentMap || new Map());
+        const createContentTreePlacementFactory = globalThis.NSM_CREATE_CONTENT_TREE_PLACEMENT
+            || (
+                typeof require === 'function'
+                    ? require('./content-tree-placement.js')
+                    : null
+            );
+        const treePlacement = deps.treePlacement
+            || runtime.treePlacement
+            || (
+                typeof createContentTreePlacementFactory === 'function'
+                    ? createContentTreePlacementFactory({
+                        getState,
+                        getGroupsById
+                    })
+                    : null
+            );
         const getClickQueue = typeof deps.getClickQueue === 'function'
             ? deps.getClickQueue
             : () => (deps.clickQueue || runtime.clickQueue || []);
@@ -337,6 +352,156 @@
         // resolver below is unchanged; this wrapper applies the mode gate at the single
         // exit so both single- and multi-source drops (which reuse one intent) are covered.
         // Group reorder at root and source-into-folder are NOT demoted.
+        function normalizeSemanticDropTarget(target) {
+            if (
+                !target
+                || typeof target !== 'object'
+                || !Number.isInteger(target.index)
+                || target.index < 0
+            ) {
+                return null;
+            }
+            if (target.container === 'root' || target.container === 'ungrouped') {
+                return {
+                    container: target.container,
+                    index: target.index
+                };
+            }
+            if (
+                target.container === 'group'
+                && typeof target.groupId === 'string'
+                && target.groupId
+            ) {
+                return {
+                    container: 'group',
+                    groupId: target.groupId,
+                    index: target.index
+                };
+            }
+            return null;
+        }
+
+        function getSemanticDropTargetFromMarkers(intent) {
+            if (!intent || !Number.isInteger(intent.insertIndex) || intent.insertIndex < 0) {
+                return null;
+            }
+            const groupId = (
+                typeof intent.targetGroupId === 'string'
+                && intent.targetGroupId
+            )
+                ? intent.targetGroupId
+                : (
+                    typeof intent.targetGroup?.id === 'string'
+                    && intent.targetGroup.id
+                        ? intent.targetGroup.id
+                        : ''
+                );
+            if (groupId) {
+                if (intent.isRootList || intent.isUngroupedBin) return null;
+                return {
+                    container: 'group',
+                    groupId,
+                    index: intent.insertIndex
+                };
+            }
+            if (intent.isRootList && intent.isUngroupedBin) return null;
+            if (intent.isUngroupedBin) {
+                return {
+                    container: 'ungrouped',
+                    index: intent.insertIndex
+                };
+            }
+            if (intent.isRootList) {
+                return {
+                    container: 'root',
+                    index: intent.insertIndex
+                };
+            }
+            return null;
+        }
+
+        function semanticDropTargetsEqual(left, right) {
+            if (!left || !right || left.container !== right.container) return false;
+            if (left.index !== right.index) return false;
+            if (left.container !== 'group') return true;
+            return left.groupId === right.groupId;
+        }
+
+        function resolveSemanticDropTarget(intent) {
+            if (!intent || typeof intent !== 'object') return null;
+            const declaredGroupId = (
+                typeof intent.targetGroupId === 'string'
+                && intent.targetGroupId
+            )
+                ? intent.targetGroupId
+                : '';
+            const objectGroupId = (
+                typeof intent.targetGroup?.id === 'string'
+                && intent.targetGroup.id
+            )
+                ? intent.targetGroup.id
+                : '';
+            if (
+                declaredGroupId
+                && objectGroupId
+                && declaredGroupId !== objectGroupId
+            ) {
+                return null;
+            }
+            const hasExplicitTarget = Object.prototype.hasOwnProperty.call(intent, 'target');
+            const explicitTarget = normalizeSemanticDropTarget(intent.target);
+            const markerTarget = getSemanticDropTargetFromMarkers(intent);
+            if (hasExplicitTarget && !explicitTarget) return null;
+            if (!explicitTarget) return markerTarget;
+            if (
+                Number.isInteger(intent.insertIndex)
+                && intent.insertIndex !== explicitTarget.index
+            ) {
+                return null;
+            }
+            if (markerTarget && !semanticDropTargetsEqual(explicitTarget, markerTarget)) {
+                return null;
+            }
+            if (
+                explicitTarget.container === 'group'
+                && (intent.isRootList || intent.isUngroupedBin)
+            ) {
+                return null;
+            }
+            if (
+                explicitTarget.container === 'root'
+                && intent.isUngroupedBin
+            ) {
+                return null;
+            }
+            if (
+                explicitTarget.container === 'ungrouped'
+                && intent.isRootList
+            ) {
+                return null;
+            }
+            return explicitTarget;
+        }
+
+        function attachSemanticDropTarget(intent) {
+            if (!intent) return null;
+            const target = resolveSemanticDropTarget(intent);
+            return target
+                ? {
+                    ...intent,
+                    target
+                }
+                : null;
+        }
+
+        function rebuildPlacementParentMap() {
+            if (!treePlacement || typeof treePlacement.rebuildParentMap !== 'function') {
+                return false;
+            }
+            treePlacement.rebuildParentMap(getParentMap());
+            return true;
+        }
+
         function computeDropIntent(args) {
             const geometrySnapshot = args && args.geometrySnapshot
                 ? args.geometrySnapshot
@@ -348,11 +513,12 @@
                 ...(args || {}),
                 geometrySnapshot
             });
-            if (getDragMode() !== 'classic') return intent;
-            if (!intent || !intent.isRootList) return intent;
+            const semanticIntent = attachSemanticDropTarget(intent);
+            if (getDragMode() !== 'classic') return semanticIntent;
+            if (!semanticIntent || !semanticIntent.isRootList) return semanticIntent;
             const ctx = args && args.activeDragContext;
             const isSourceDrag = !!ctx && (ctx.kind === 'source-single' || ctx.kind === 'source-multi');
-            if (!isSourceDrag) return intent;
+            if (!isSourceDrag) return semanticIntent;
             const ungrouped = args && args.state && Array.isArray(args.state.ungrouped) ? args.state.ungrouped : [];
             return {
                 kind: 'after-source',
@@ -362,7 +528,11 @@
                 targetGroupId: null,
                 hostGroupContainerEl: null,
                 slotKey: null,
-                isUngroupedBin: true
+                isUngroupedBin: true,
+                target: {
+                    container: 'ungrouped',
+                    index: ungrouped.length
+                }
             };
         }
 
@@ -1082,7 +1252,8 @@
                     targetGroupId: null,
                     hostGroupContainerEl: null,
                     slotKey: null,
-                    isEmptyBinTrailing: true
+                    isEmptyBinTrailing: true,
+                    isUngroupedBin: true
                 };
             }
 
@@ -1713,7 +1884,12 @@
             const state = getState();
             const groupsById = getGroupsById();
             const parent = parentGroupId ? groupsById.get(parentGroupId) : null;
-            if (parentGroupId && !parent) {
+            if (
+                (parentGroupId && !parent)
+                || !treePlacement
+                || typeof treePlacement.addGroup !== 'function'
+                || typeof treePlacement.rebuildParentMap !== 'function'
+            ) {
                 return false;
             }
 
@@ -1726,16 +1902,23 @@
                 isNewlyCreated: true
             };
 
-            groupsById.set(newGroup.id, newGroup);
-            if (parentGroupId) {
-                parent.children.push({ type: 'group', id: newGroup.id });
-            } else {
-                // v5: a new root folder is a { type:'group', id } entry in state.root.
-                state.root = Array.isArray(state.root) ? state.root : [];
-                state.root.push({ type: 'group', id: newGroup.id });
-            }
+            const target = parentGroupId
+                ? {
+                    container: 'group',
+                    groupId: parentGroupId,
+                    index: Array.isArray(parent.children) ? parent.children.length : 0
+                }
+                : {
+                    container: 'root',
+                    index: Array.isArray(state.root) ? state.root.length : 0
+                };
+            const result = treePlacement.addGroup({
+                group: newGroup,
+                target
+            });
+            if (!result?.ok || !result.changed) return false;
 
-            buildParentMap();
+            rebuildPlacementParentMap();
             render();
             saveState({ immediate: true, critical: true });
             return true;
@@ -1951,7 +2134,7 @@
 
         function finishKeyboardTreeMove(messageKey) {
             closeSourceActionMenu();
-            buildParentMap();
+            rebuildPlacementParentMap();
             render();
             saveState({ immediate: true, critical: true });
             showUndoableToast(getMessage(messageKey), { variant: 'success' });
@@ -1964,16 +2147,25 @@
 
         function moveSourceToUngrouped(sourceKey) {
             const state = getState();
-            if (!canMoveSourceToUngrouped(sourceKey)) {
+            if (
+                !canMoveSourceToUngrouped(sourceKey)
+                || !treePlacement
+                || typeof treePlacement.applyPlacement !== 'function'
+                || typeof treePlacement.rebuildParentMap !== 'function'
+            ) {
                 showToast(getMessage('ui_keyboard_move_unavailable'), { variant: 'info' });
                 return false;
             }
 
-            state.ungrouped = Array.isArray(state.ungrouped) ? state.ungrouped : [];
-            removeSourceFromTree(sourceKey);
-            if (!state.ungrouped.includes(sourceKey)) {
-                state.ungrouped.push(sourceKey);
-            }
+            const result = treePlacement.applyPlacement({
+                item: { kind: 'source', key: sourceKey },
+                target: {
+                    container: 'ungrouped',
+                    index: Array.isArray(state.ungrouped) ? state.ungrouped.length : 0
+                }
+            });
+            if (!result?.ok || !result.changed) return false;
+
             finishKeyboardTreeMove('ui_keyboard_moved_ungrouped_toast');
             return true;
         }
@@ -2265,44 +2457,33 @@
             const deleteButton = target.closest('.sp-delete-button');
             if (deleteButton) {
                 const group = groupsById.get(groupId);
-                if (!group) return;
+                if (
+                    !group
+                    || !treePlacement
+                    || typeof treePlacement.removeGroup !== 'function'
+                    || typeof treePlacement.rebuildParentMap !== 'function'
+                ) {
+                    return;
+                }
                 const groupChildren = Array.isArray(group.children) ? group.children : [];
 
-                if (groupChildren.length === 0) {
-                    removeGroupFromTree(groupId);
-                    groupsById.delete(groupId);
-                } else {
+                if (groupChildren.length > 0) {
                     const windowObj = getWindow();
                     const deleteContents = windowObj?.confirm?.(
                         getMessage('ui_delete_group_confirm_non_empty', [group.title, getMessage('ui_ungrouped')])
                     );
-
-                    if (deleteContents) {
-                        const extractChildren = (g) => {
-                            (Array.isArray(g.children) ? g.children : []).forEach((c) => {
-                                if (c.type === 'source') {
-                                    state.ungrouped = Array.isArray(state.ungrouped) ? state.ungrouped : [];
-                                    state.ungrouped.push(c.key);
-                                } else {
-                                    // v5: a nested folder promoted to root becomes a
-                                    // { type:'group', id } entry in state.root.
-                                    state.root = Array.isArray(state.root) ? state.root : [];
-                                    state.root.push({ type: 'group', id: c.id });
-                                }
-                            });
-                        };
-                        extractChildren(group);
-                        removeGroupFromTree(groupId);
-                        groupsById.delete(groupId);
-                    } else {
-                        return;
-                    }
+                    if (!deleteContents) return;
                 }
+
+                const result = treePlacement.removeGroup({
+                    item: { kind: 'group', id: groupId }
+                });
+                if (!result?.ok || !result.changed) return;
 
                 if (getActiveIsolationGroupId() === groupId) {
                     setActiveIsolationGroupId(null);
                 }
-                buildParentMap();
+                rebuildPlacementParentMap();
                 saveState({ immediate: true, critical: true });
                 render();
             }
@@ -4221,74 +4402,6 @@
             cancelAllHoverTimers();
         }
 
-        function getSourceTreePosition(sourceKey) {
-            const state = getState();
-            const parentGroup = findParentGroupOfSource(sourceKey);
-            if (parentGroup) {
-                return {
-                    list: parentGroup.children,
-                    index: parentGroup.children.findIndex((child) => child.type === 'source' && child.key === sourceKey),
-                    parentGroup
-                };
-            }
-
-            // Root-level source: positioned in state.root (object entry) wins over the
-            // ungrouped bin (bare key) — they are mutually exclusive, but check root first
-            // so a positioned source reports the state.root array as its home (required for
-            // isNoopTreeMove to detect a drop back into the same root slot).
-            state.root = Array.isArray(state.root) ? state.root : [];
-            const rootIndex = state.root.findIndex((entry) => entry && entry.type === 'source' && entry.key === sourceKey);
-            if (rootIndex >= 0) {
-                return { list: state.root, index: rootIndex, parentGroup: null };
-            }
-
-            state.ungrouped = Array.isArray(state.ungrouped) ? state.ungrouped : [];
-            return {
-                list: state.ungrouped,
-                index: state.ungrouped.indexOf(sourceKey),
-                parentGroup: null
-            };
-        }
-
-        function getGroupTreePosition(groupId) {
-            const state = getState();
-            const groupsById = getGroupsById();
-            const parentId = getParentMap().get(groupId);
-            if (parentId) {
-                const parentGroup = groupsById.get(parentId);
-                return {
-                    list: parentGroup?.children || [],
-                    index: parentGroup?.children?.findIndex((child) => child.type === 'group' && child.id === groupId) ?? -1,
-                    parentGroup: parentGroup || null
-                };
-            }
-
-            state.root = Array.isArray(state.root) ? state.root : [];
-            return {
-                list: state.root,
-                index: state.root.findIndex((entry) => entry && entry.type === 'group' && entry.id === groupId),
-                parentGroup: null
-            };
-        }
-
-        function getNormalizedInsertionIndex(targetList, insertIndex, originalPosition = null) {
-            const list = Array.isArray(targetList) ? targetList : [];
-            let nextIndex = Number.isInteger(insertIndex) && insertIndex >= 0 ? insertIndex : list.length;
-            if (originalPosition && originalPosition.list === list && nextIndex > originalPosition.index) {
-                nextIndex -= 1;
-            }
-            const maxIndex = originalPosition && originalPosition.list === list
-                ? Math.max(0, list.length - 1)
-                : list.length;
-            return Math.max(0, Math.min(nextIndex, maxIndex));
-        }
-
-        function isNoopTreeMove(originalPosition, targetList, insertIndex) {
-            if (!originalPosition || originalPosition.index < 0) return true;
-            const nextIndex = getNormalizedInsertionIndex(targetList, insertIndex, originalPosition);
-            return originalPosition.list === targetList && originalPosition.index === nextIndex;
-        }
-
         function cleanupReflowSession() {
             if (dragReflow && runtime.dragReflowSession) {
                 if (typeof dragReflow.clearReflow === 'function') {
@@ -4462,6 +4575,10 @@
                 const sourceKey = e.dataTransfer.getData('application/source-key');
                 const sourceKeysRaw = e.dataTransfer.getData('application/source-keys');
                 const draggedGroupId = e.dataTransfer.getData('application/group-id');
+                if (draggedGroupId && (sourceKey || sourceKeysRaw)) {
+                    clearDragFeedback();
+                    return;
+                }
 
                 if (sourceKeysRaw && dragMulti && typeof dragMulti.applyMultiSourceDrop === 'function') {
                     let keys = null;
@@ -4521,71 +4638,48 @@
                     }
                 }
 
-                let didMove = false;
+                const semanticTarget = resolveSemanticDropTarget(intent);
                 const augmentedIntent = {
                     kind: intentKind,
                     targetList: intent.targetList,
                     insertIndex: intent.insertIndex,
-                    targetGroup: intent.targetGroup
+                    targetGroup: intent.targetGroup,
+                    target: semanticTarget
                 };
-
-                if (sourceKey) {
-                    const originalPosition = getSourceTreePosition(sourceKey);
-                    if (isNoopTreeMove(originalPosition, intent.targetList, intent.insertIndex)) {
-                        clearDragFeedback();
-                        return;
-                    }
-                    const insertionIndex = getNormalizedInsertionIndex(intent.targetList, intent.insertIndex, originalPosition);
-                    // Capture the bin-vs-root discriminator BEFORE removeSourceFromTree
-                    // runs — it reassigns state.ungrouped to a new filtered array, which
-                    // would break the targetList === state.ungrouped identity check.
-                    const droppedIntoBin = intent.targetList === state.ungrouped;
-                    clearReflowBeforeMutation();
-                    removeSourceFromTree(sourceKey);
-                    if (intent.targetGroup) {
-                        intent.targetGroup.children.splice(insertionIndex, 0, { type: 'source', key: sourceKey });
-                    } else if (droppedIntoBin) {
-                        // Dropped into the bottom ungrouped bin → store a bare key.
-                        state.ungrouped.splice(insertionIndex, 0, sourceKey);
-                    } else {
-                        // Positioned at root → store an object entry in state.root.
-                        state.root = Array.isArray(state.root) ? state.root : [];
-                        state.root.splice(insertionIndex, 0, { type: 'source', key: sourceKey });
-                    }
-                    didMove = true;
-                } else if (draggedGroupId) {
-                    const draggedGroupObj = groupsById.get(draggedGroupId);
-                    if (!draggedGroupObj) {
-                        clearDragFeedback();
-                        return;
-                    }
-                    if (intent.targetGroup && isDescendant(intent.targetGroup, draggedGroupObj, groupsById)) {
-                        clearDragFeedback();
-                        return;
-                    }
-                    const originalPosition = getGroupTreePosition(draggedGroupId);
-                    if (isNoopTreeMove(originalPosition, intent.targetList, intent.insertIndex)) {
-                        clearDragFeedback();
-                        return;
-                    }
-                    const insertionIndex = getNormalizedInsertionIndex(intent.targetList, intent.insertIndex, originalPosition);
-                    clearReflowBeforeMutation();
-                    removeGroupFromTree(draggedGroupId);
-                    if (intent.targetGroup) {
-                        intent.targetGroup.children.splice(insertionIndex, 0, { type: 'group', id: draggedGroupId });
-                    } else {
-                        // Root group → object entry in state.root (groups never go to the bin).
-                        state.root = Array.isArray(state.root) ? state.root : [];
-                        state.root.splice(insertionIndex, 0, { type: 'group', id: draggedGroupId });
-                    }
-                    didMove = true;
-                }
-
-                if (!didMove) {
+                const item = sourceKey
+                    ? { kind: 'source', key: sourceKey }
+                    : (
+                        draggedGroupId
+                            ? { kind: 'group', id: draggedGroupId }
+                            : null
+                    );
+                if (
+                    !item
+                    || !semanticTarget
+                    || !treePlacement
+                    || typeof treePlacement.applyPlacement !== 'function'
+                    || typeof treePlacement.rebuildParentMap !== 'function'
+                ) {
                     clearDragFeedback();
                     return;
                 }
-                buildParentMap();
+                clearReflowBeforeMutation();
+                let result;
+                try {
+                    result = treePlacement.applyPlacement({
+                        item,
+                        target: semanticTarget
+                    });
+                } catch (error) {
+                    clearDragFeedback();
+                    return;
+                }
+                if (!result?.ok || !result.changed) {
+                    clearDragFeedback();
+                    return;
+                }
+
+                rebuildPlacementParentMap();
                 render();
                 saveState({ immediate: true, critical: true });
                 disposeHoverOpenedGroupsAfterDrop(intent, augmentedIntent);
@@ -4603,7 +4697,11 @@
                 // ungrouped header into view so the user can find their source. An empty-root
                 // positioned drop also has slotKey null but carries isRootList, so it is
                 // excluded here (the source stays at root, not the bin).
-                if (sourceKey && intent && !intent.isRootList && intent.targetGroup == null && intent.slotKey == null) {
+                if (
+                    sourceKey
+                    && result.to?.container === 'ungrouped'
+                    && intent.slotKey == null
+                ) {
                     try { showToast(getMessage('ui_keyboard_moved_ungrouped_toast')); } catch (_) {}
                     const _listAfter = getSourceListContainer();
                     if (_listAfter && typeof _listAfter.querySelector === 'function') {
@@ -5100,21 +5198,24 @@
 
         // Classic mode cannot represent positioned root sources, so switching to classic
         // sweeps any { type:'source' } entries out of state.root into the bottom ungrouped
-        // bin (preserving relative order). Pure + idempotent; returns true iff it changed
-        // state. Called by the setDragMode wrapper and on load when mode is classic.
+        // bin (preserving relative order). This Adapter delegates the idempotent transaction
+        // to Tree Placement and returns true iff live state changed. Called by the setDragMode
+        // wrapper and on load when mode is classic.
         function sweepPositionedRootSourcesToBin(state) {
-            if (!state || !Array.isArray(state.root)) return false;
-            const moved = [];
-            const nextRoot = [];
-            state.root.forEach((entry) => {
-                if (entry && entry.type === 'source') moved.push(entry.key);
-                else nextRoot.push(entry);
+            if (!state || typeof state !== 'object') return false;
+            if (state === getState()) {
+                return Boolean(
+                    treePlacement
+                    && typeof treePlacement.sweepPositionedRootSourcesToBin === 'function'
+                    && treePlacement.sweepPositionedRootSourcesToBin()
+                );
+            }
+            if (typeof createContentTreePlacementFactory !== 'function') return false;
+            const placementForState = createContentTreePlacementFactory({
+                getState: () => state,
+                getGroupsById
             });
-            if (moved.length === 0) return false;
-            state.root = nextRoot;
-            if (!Array.isArray(state.ungrouped)) state.ungrouped = [];
-            state.ungrouped.push(...moved);
-            return true;
+            return Boolean(placementForState.sweepPositionedRootSourcesToBin());
         }
 
         return {
@@ -5139,9 +5240,6 @@
             handleDrop,
             handleDragEnd,
             clearDragFeedback,
-            getSourceTreePosition,
-            getGroupTreePosition,
-            isNoopTreeMove,
             getGroupAncestorChain,
             resolveSiblingKeys,
             resolveVisibleAnchorInsertIndex,
