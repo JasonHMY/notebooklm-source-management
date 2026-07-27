@@ -38,7 +38,7 @@ GeminiNotebook-Source-Management
 │   │   ├── source-descriptor-helpers.js
 │   │   │   └── 来源标题/key/token/fingerprint/icon/loading/failed 状态识别
 │   │   ├── content-source-sync.js
-│   │   │   └── 来源扫描、列表/标签视图识别、折叠标签组、MutationObserver 同步
+│   │   │   └── 来源扫描、列表/标签视图识别、折叠标签组、MutationObserver 同步；首次扫描先解析全部 persisted refs，虚拟化/加载中 DOM 返回 structured partial result，staging 后以当前 ready 行 + 未显示持久化占位构造身份并集，完整候选树统一归一化并原子提交后才清 pending、消费 native-delete 标记、重建 parent map/同步 checkbox
 │   │   ├── content-native-label-detector.js
 │   │   │   └── 原生标签标题清理、可比较归一、label/view-switch 控件识别 helper
 │   │   ├── content-source-actions.js
@@ -48,7 +48,7 @@ GeminiNotebook-Source-Management
 │   │   ├── content-native-checkbox-sync.js
 │   │   │   └── 原生 checkbox 状态读取、切换判定、detached 行解析 helper
 │   │   ├── content-tree-placement.js
-│   │   │   └── 纯分组树放置 Module；集中 validate → plan → commit、entry shape、source XOR、文件夹唯一父级、reachable group 优先级、循环/索引/no-op、批量事务与迭代式原子归一化不变量
+│   │   │   └── 纯分组树放置 Module；集中 validate → plan → commit、entry shape、source XOR、文件夹唯一父级、reachable group 优先级、循环/索引/no-op、批量事务、跨 realm 安全克隆与迭代式原子归一化不变量
 │   │   ├── content-tree-interactions.js
 │   │   │   └── 分组树、checkbox、批量模式与拖拽 read → plan → write；single/batch drag、新增/删除/移出分组及批量移到未分组通过严格语义 target 适配 Tree Placement，批量 payload 必须与可信拖拽会话完全一致，另维护同步 native dropEffect、类型化 geometry snapshot、滚动 delta patch、auto-scroll 静止指针刷新/落下前同步 flush、ResizeObserver/render 失效和 fail-closed 重建
 │   │   ├── content-render.js
@@ -76,13 +76,13 @@ GeminiNotebook-Source-Management
 │   │   ├── content-state-repair.js
 │   │   │   └── 受损分组树结构修复候选筛选、合并和 grouped-source-key 扫描 helper
 │   │   ├── content-persistence.js
-│   │   │   └── runtime-first LOAD_STATE、raw primary/backup 选择、save/history/import-owned recovery 持久化 helper
+│   │   │   └── runtime-first LOAD_STATE、raw primary/backup 选择、save/history/import-owned recovery；无 DOM 恢复汇总 snapshot sourceStateById、legacy enabled map、root、group children 与 ungrouped 的持久化来源引用；首次虚拟化 partial 先 staging，再以 ready DOM + 持久化占位确定性合并，只有原子提交成功才清 pending，其余同步/placement 失败保留待恢复快照
 │   │   ├── content-import-export.js
-│   │   │   └── 配置 JSON 导出/导入、size/depth/cycle 校验、preview diff helper
+│   │   │   └── 配置 JSON 导出/导入、size/depth/entry/cycle 校验、source-key remap；preview/apply 共用 canonical placement 与 diff，并在 history/preview/save await 前后校验上下文和运行时指纹，失败回滚不得覆盖并发新状态
 │   │   ├── content-undo-history.js
 │   │   │   └── 撤销/重做栈、容量限制、apply/clear helper
 │   │   ├── content-state-apply.js
-│   │   │   └── 持久化快照应用到 runtime state 的归一化 helper
+│   │   │   └── undo/redo、配置导入/回滚、手动历史/恢复快照与来源修复共用的快照应用 Adapter；先归一化并原子提交树，再更新标签/来源状态、parent map 与原生 checkbox
 │   │   ├── content-toast.js
 │   │   │   └── toast 容器与提示渲染 helper
 │   │   ├── content-source-list-scan.js
@@ -98,7 +98,7 @@ GeminiNotebook-Source-Management
 │   │   ├── content-source-partial-sync-guard.js
 │   │   │   └── partial sync 旧来源保护和 raw URL loading 标记 helper
 │   │   ├── content-state-reconcile.js
-│   │   │   └── 旧状态到当前来源的 remap、repair、tree reconcile
+│   │   │   └── 旧状态到当前来源的 source-key remap、标签修复与树候选构造；只读取 source/tag record 自有字段，以迭代遍历收集 root/group/bin refs 与深层优先级，最终委托 Tree Placement normalization
 │   │   ├── content-tags.js
 │   │   │   └── 标签 label/color normalization、usage、增删改
 │   │   ├── content-view-state.js
@@ -380,12 +380,15 @@ manifest.json
 │   │   ├── native dropEffect 只在原始 dragover 事件内由 clean snapshot 同步解析；dirty/missing snapshot 保守 move，未知 payload 为 none，异步 drag frame 不保留 DataTransfer
 │   │   ├── reflow transform 使用 source/group 类型化 map；仅可视区 + 一个真实行高 overscan 动画，离屏位移静态应用并在结束/下次 preflight 清理
 │   │   ├── 批量选择、加入文件夹、添加/移除标签
-│   │   ├── 纯 Tree Placement Interface 集中 entry shape、source XOR、循环拒绝、索引修正、no-op、批量/事务原子提交与 import normalization；single/batch drag、移动到分组、批量/单项移出分组、分组新增/删除、原生来源删除与 Classic sweep 已迁移，旧 single/batch 数组 mutation Interface 已移除，restore/reconcile consumers 待后续迁移
+│   │   ├── 纯 Tree Placement Interface 集中 entry shape、source XOR、循环拒绝、索引修正、no-op、批量/事务原子提交与 import normalization；single/batch drag、移动到分组、批量/单项移出分组、分组新增/删除、原生来源删除、Classic sweep、来源同步、restore/reconcile、state apply、配置/原生标签导入均已迁移，业务路径不再直接修改放置数组
 │   │   ├── 移到未分组
 │   │   └── 批量删除入口
 │   ├── 先看
 │   │   ├── src/content/content-tree-placement.js
 │   │   ├── src/content/content-tree-interactions.js
+│   │   ├── src/content/content-source-sync.js
+│   │   ├── src/content/content-state-reconcile.js
+│   │   ├── src/content/content-state-apply.js
 │   │   ├── src/content/content-drag-multi.js
 │   │   ├── src/content/content-drag-reflow.js
 │   │   ├── src/content/content-native-checkbox-sync.js
@@ -451,8 +454,9 @@ manifest.json
 │   │   ├── 设置 modal；按“备份与恢复”“偏好设置”“帮助与反馈”组织，保存状态在标题栏显示
 │   │   ├── export/import config JSON 与版本历史恢复入口
 │   │   ├── import diff preview；说明替换语义、来源启用变化、文件夹/tag 差异和设置变化
-│   │   ├── import size/count/depth/cycle 校验
-│   │   ├── source remap preview
+│   │   ├── import size/count/depth 与 Tree Placement entry/missing-group/cycle 严格校验；非法 entry、缺失分组或循环直接拒绝，不按内部恢复规则修剪；group/tag/source 可选字段、children 及 tree entry type/key/id 只读取对象自有属性，remap 用安全 own-field define 写回
+│   │   ├── source remap preview；preview/apply 消费同一 canonical placement，重复来源与 live orphan 按 group → root → 未分组归一化
+│   │   ├── apply 前等待 history 后重新核对 preview、来源集合、persistable runtime 与 transient selection/batch 指纹；save 无论成功失败都再次核对 notebook/manager/runtime/transient 上下文，失败只在导入结果仍是当前状态时回滚
 │   │   ├── 设置页命令面板入口和 command palette modal；复用现有搜索、视图、设置、标签和批量操作入口，并允许用户为每个命令自定义快捷键；重复触发可收起搜索、退出快速视图或关闭对应 modal
 │   │   ├── 仅在检测到来源匹配问题时独立突出显示 Source Repair，否则收进帮助/排查区域
 │   │   ├── 原生 Gemini Notebook 标签导入 preview
@@ -480,6 +484,9 @@ manifest.json
 │       ├── tests/content/content-native-label-import-controller.test.js
 │       ├── tests/content/content-native-label-import-modal.test.js
 │       ├── tests/content/content-persistence.test.js
+│       ├── tests/content/content-import-export.test.js
+│       ├── tests/content/content-state-apply.test.js
+│       ├── tests/content/content-tree-placement.test.js
 │       ├── tests/content/content-state-reconcile.test.js
 │       └── tests/content/content-source-sync.test.js
 ├── 外观偏好（appearance customization）
@@ -507,7 +514,9 @@ manifest.json
 │   │   ├── backup/history
 │   │   ├── lifecycle critical save、import-owned session recovery 与 A→B import completion 隔离
 │   │   ├── deferred initial load
-│   │   └── 旧状态 remap/repair
+│   │   ├── 旧状态 source-key remap 后统一 normalize；first/later sync 保留完整候选到 Tree Placement，再按 reachable group → root → bin 修剪重复与循环边
+│   │   ├── scan 返回 `{ ok, shouldUpgradeStorage, reason }`；首次虚拟化/加载中 partial 会安全 staging 完整持久化树，再将当前 ready DOM 与未显示持久化占位合并，成功提交后清 pending；普通 partial/reconcile/placement 失败保持现状，partial 初始扫描仍传递旧 schema upgrade 标记
+│   │   └── undo/redo、配置导入/回滚、手动历史/恢复快照与来源修复共用 state-apply Adapter；初始 LOAD_STATE 的无 DOM restore 使用独立 staging，汇总 snapshot sourceStateById、sourceTagsById、legacy enabled map、root、group children 与 ungrouped 的持久化来源引用，兼容只有旧树或 tag assignment 引用的快照，再经 Tree Placement 原子提交；外部 snapshot 的可选字段、group children 与 tree entry type/key/id 只按 own-property 读取，输出以 safe own write 避开原型 setter/只读字段
 │   ├── 先看
 │   │   ├── src/content/content-persistence.js
 │   │   ├── src/content/content-snapshot-signature.js
@@ -522,6 +531,8 @@ manifest.json
 │       ├── tests/content/content-persistence.test.js
 │       ├── tests/content/content-snapshot-signature.test.js
 │       ├── tests/content/content-state-repair.test.js
+│       ├── tests/content/content-state-apply.test.js
+│       ├── tests/content/content-tree-placement.test.js
 │       ├── tests/content/content-state-reconcile.test.js
 │       └── tests/background.test.js
 ├── 开发者日志
@@ -692,9 +703,12 @@ content runtime memory
 ├── 持久化 / history / import-export / background storage
 │   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-persistence.test.js tests/content/content-import-export.test.js tests/background.test.js
 │   └── 文件: tests/content/content-persistence.test.js, tests/background.test.js, tests/content/content-import-export.test.js, tests/content/content-state-apply.test.js, tests/content/content-undo-history.test.js
+├── Tree Placement consumers / sync / restore / import normalization
+│   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-tree-placement.test.js tests/content/content-state-reconcile.test.js tests/content/content-state-apply.test.js tests/content/content-source-sync.test.js tests/content/content-import-export.test.js tests/content/content-persistence.test.js
+│   └── 文件: 上述 6 个测试；覆盖 first/later sync、source remap、cycle/duplicate/orphan、second normalize 幂等、preview/apply 一致、legacy/sourceTags-only 无 DOM persisted-ref source universe、own-property children/entry 读取、non-writable prototype 安全写回、跨 realm group 与原子 commit
 ├── 原生删除 / 重命名 / 详情
 │   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-source-actions.test.js tests/content/content-source-action-menu.test.js
-│   └── 文件: tests/content/content-source-actions.test.js, tests/content/content-source-action-menu.test.js
+│   └── 文件: tests/content/content-source-actions.test.js, tests/content/content-source-action-menu.test.js, tests/content/content-source-sync.test.js；删除 marker 覆盖 stale raw DOM、ready-panel disappearance、placement failure/retry 与同身份重新添加
 ├── 分组树 / checkbox
 │   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-tree-placement.test.js tests/content/content-tree.test.js
 │   └── 文件: tests/content/content-tree-placement.test.js, tests/content/content-tree.test.js
@@ -845,20 +859,20 @@ CI: .github/workflows/ci.yml
 │   ├── 测试: content-render.test.js
 │   └── 注意: 不要让隐藏三点按钮改变 grid 列宽
 ├── 分组树数据损坏
-│   ├── 先看: src/content/content-tree-interactions.js
-│   ├── 然后看: src/content/content-tree-placement.js（single/batch drag、移动弹窗、移出分组与原生删除已迁移；restore/reconcile 迁移中）, src/content/content-state-reconcile.js, src/content/content-persistence.js
-│   ├── 测试: content-tree-placement.test.js, content-tree.test.js, content-persistence.test.js
-│   └── 注意: children 必须容错为数组，避免孤儿 group
+│   ├── 先看: src/content/content-tree-placement.js
+│   ├── 然后看: src/content/content-tree-interactions.js, src/content/content-source-sync.js, src/content/content-state-reconcile.js, src/content/content-state-apply.js, src/content/content-persistence.js
+│   ├── 测试: content-tree-placement.test.js, content-tree.test.js, content-state-reconcile.test.js, content-state-apply.test.js, content-source-sync.test.js, content-persistence.test.js
+│   └── 注意: 内部 sync/restore consumer 应构造完整候选后调用 normalize/commit，由 Tree Placement 修剪重复与循环；首次来源扫描必须先解析全部 persisted refs，structured partial/failure 不得清空现有树，partial-initial staging 后要把 ready DOM 与持久化占位按身份合并。原生删除 marker 的“授权本地删除”与“允许清理 marker”必须分离：仅 ready panel 的过滤前 raw DOM 已不再观察到对应 key/identity，且 replacement tree 成功提交后才能消费；stale raw row、loading/partial 或 placement failure 都必须保留。配置导入遇到非法 entry、缺失分组或循环必须直接拒绝。仅 snapshot construction 与 Tree Placement 可直接写 placement 数组
 ├── 标签创建/颜色/排序错
 │   ├── 先看: src/content/content-tags.js
 │   ├── 然后看: src/content/content-modals.js, src/content/content-render.js
 │   ├── 测试: content-modals-tags.test.js
 │   └── 注意: tag label/color 都要 normalize
 ├── 导入 JSON 报错或状态丢失
-│   ├── 先看: src/content/content-persistence.js
-│   ├── 然后看: src/content/index.js, src/content/content-state-reconcile.js
-│   ├── 测试: content-persistence.test.js
-│   └── 注意: 先看 size/count/depth/cycle 限制，再看 source remap
+│   ├── 先看: src/content/content-import-export.js
+│   ├── 然后看: src/content/content-state-apply.js, src/content/content-tree-placement.js, src/content/content-persistence.js, src/content/index.js
+│   ├── 测试: content-import-export.test.js, content-state-apply.test.js, content-tree-placement.test.js, content-persistence.test.js
+│   └── 注意: 先看 size/count/depth 与 entry/missing-group/cycle 校验，再核对 source remap 后 preview/apply 是否使用同一 canonical state；外部 group/tag/source 字段、children 与 tree entry type/key/id 只读 own-property，remap 不得用会触发原型 setter/只读字段的普通赋值；history/save await 前后须同时核对 persistable snapshot、transient selection/batch 和 notebook/manager 上下文，save 成功响应也不能跳过复核，失败回滚不得覆盖较新的运行时状态
 ├── 原生标签导入不完整
 │   ├── 先看: src/content/content-native-label-import.js
 │   ├── 然后看: src/content/content-native-label-import-controller.js, src/content/content-source-sync.js

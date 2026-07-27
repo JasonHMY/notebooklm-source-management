@@ -440,7 +440,8 @@
         runtime: runtimeContext,
         normalizeSourceText,
         normalizeTagLabel,
-        normalizeTagColor
+        normalizeTagColor,
+        treePlacement: _treePlacementModule
     });
     const {
         buildSourceLookup,
@@ -448,14 +449,14 @@
         resolveStoredSourceKeyWithReason,
         buildSourceMatchReport,
         applySourceRemapsToSnapshot,
+        collectPersistedSourceRefs,
         snapshotExistingSourceRecords,
         buildSingleSourcePositionalRemap,
         remapExistingStateToCurrentSources,
         buildResolvedSourceStateById,
         buildNormalizedTagState,
         buildResolvedSourceTagsById,
-        reconcilePersistedTree,
-        appendGroupChildIfAcyclic
+        reconcilePersistedTree
     } = stateReconcileModule;
 
     const developerLoggerModule = createContentDeveloperLogger({
@@ -547,42 +548,26 @@
         if (!sourceKey || !sourcesByKey.has(sourceKey)) return false;
 
         const source = sourcesByKey.get(sourceKey);
-        let placementResult;
+        const liveSourceKeys = new Set(sourcesByKey.keys());
+        liveSourceKeys.delete(sourceKey);
+        let placementResult = null;
         try {
-            placementResult = _treePlacementModule.removeSource({
-                item: { kind: 'source', key: sourceKey }
+            const normalized = _treePlacementModule.normalizePlacementState({
+                state,
+                groupsById,
+                liveSourceKeys
             });
+            if (normalized.ok) {
+                placementResult = _treePlacementModule.commitPlacementModel(normalized);
+            }
         } catch (error) {
-            placementResult = {
-                ok: false,
-                changed: false,
-                reason: 'invalid_target'
-            };
+            placementResult = null;
         }
-        if (!placementResult.ok && placementResult.reason !== 'not_found') {
+        if (!placementResult?.ok) {
             developerLog('warn', 'source_action', 'native_source_delete_placement_rejected', {
-                reason: placementResult.reason || 'invalid_target'
+                reason: placementResult?.reason || 'invalid_model'
             });
-            const liveSourceKeys = new Set(sourcesByKey.keys());
-            liveSourceKeys.delete(sourceKey);
-            let repairResult = null;
-            try {
-                const normalized = _treePlacementModule.normalizePlacementState({
-                    state,
-                    groupsById,
-                    liveSourceKeys
-                });
-                if (normalized.ok) {
-                    repairResult = _treePlacementModule.commitPlacementModel(normalized);
-                }
-            } catch (error) {
-                repairResult = null;
-            }
-            if (!repairResult?.ok) {
-                developerLog('warn', 'source_action', 'native_source_delete_tree_repair_rejected', {
-                    reason: repairResult?.reason || 'invalid_model'
-                });
-            }
+            return false;
         }
         sourcesByKey.delete(sourceKey);
         sourceTagsById.delete(sourceKey);
@@ -801,7 +786,9 @@
         isSourceEffectivelyEnabled: (...args) => isSourceEffectivelyEnabled(...args),
         createSourceDescriptor,
         extractSourceIdentitySnapshot,
+        normalizeSourceText,
         buildSourceLookup,
+        collectPersistedSourceRefs,
         resolveStoredSourceKeyWithReason,
         buildResolvedSourceStateById,
         buildNormalizedTagState,
@@ -812,6 +799,7 @@
         setSourceTagIds,
         syncSourceToPage: (...args) => syncSourceToPage(...args),
         buildParentMap: (...args) => buildParentMap(...args),
+        treePlacement: _treePlacementModule,
         buildPersistableState: (...args) => buildPersistableState(...args),
         saveState: (options = {}) => saveState(Object.assign({}, options, { recordUndo: false })),
         developerLog: (...args) => developerLog(...args),
@@ -832,7 +820,6 @@
         expandCollapsedNativeLabelGroups,
         restoreNativeLabelExpansionControls,
         getSourceElements,
-        getManageableSourceElements,
         hasRenderableSourceRows,
         getSourcePanelState,
         isSourcePanelManageable,
@@ -1002,16 +989,14 @@
         getSourceTagIds,
         getSerializedTag,
         buildNormalizedTagState,
-        appendGroupChildIfAcyclic,
+        treePlacement: _treePlacementModule,
         scanAndSyncSources: (...args) => scanAndSyncSources(...args),
         findSourcePanel: (...args) => findSourcePanel(...args),
         isSourcePanelRenderable: (...args) => isSourcePanelRenderable(...args),
         getSourcePanelState: (...args) => getSourcePanelState(...args),
         hasRenderableSourceRows: (...args) => hasRenderableSourceRows(...args),
         render: (...args) => render(...args),
-        cloneSerializableData,
-        getSourceElements: (...args) => getSourceElements(...args),
-        getManageableSourceElements: (...args) => getManageableSourceElements(...args)
+        cloneSerializableData
     }));
     const {
         getStateHistoryKey,
@@ -1059,7 +1044,8 @@
         normalizeSourceText,
         buildParentMap: (...args) => buildParentMap(...args),
         syncSourceToPage: (...args) => syncSourceToPage(...args),
-        isSourceEffectivelyEnabled: (...args) => isSourceEffectivelyEnabled(...args)
+        isSourceEffectivelyEnabled: (...args) => isSourceEffectivelyEnabled(...args),
+        treePlacement: _treePlacementModule
     });
     const { applyPersistableSnapshotToRuntime } = stateApplyModule;
 
@@ -1203,11 +1189,9 @@
         handleAddNewGroup,
         syncSourceToPage,
         processClickQueue,
-        removeSourceFromTree,
         executeBatchMoveToUngrouped,
         canMoveSourceToUngrouped,
         moveSourceToUngrouped,
-        removeGroupFromTree,
         handleInteraction,
         handleOriginalCheckboxChange,
         handleDragStart,
@@ -1236,14 +1220,6 @@
 
     function createNativeLabelPreviewSourceRecord(descriptor, nativeLabelTitle, sourceKey) {
         return createNativeLabelPreviewSourceRecordRecord(descriptor, nativeLabelTitle, sourceKey);
-    }
-
-    function ensureNativeLabelPreviewSources(label) {
-        return ensureNativeLabelPreviewSourcesRecord(label, {
-            sourcesByKey,
-            sourceTagsById,
-            keyByElement
-        });
     }
 
     function getNativeLabelImportPreview(options = {}) {
@@ -1328,33 +1304,98 @@
             showToast(getMessage('ui_import_native_labels_unavailable'), { variant: 'info' });
             return false;
         }
+        const rejectImport = (reason) => {
+            developerLog('warn', 'import_export', 'native_label_import_rejected', {
+                reason: reason || 'invalid_candidate'
+            });
+            showToast(getMessage('ui_import_native_labels_unavailable'), { variant: 'error' });
+            return false;
+        };
 
-        buildParentMap();
-        const usedGroupIds = new Set(groupsById.keys());
         const previewLabels = Array.isArray(preview.labels) ? preview.labels : [];
+        const stagedState = {
+            ...state,
+            root: cloneSerializableData(Array.isArray(state.root) ? state.root : []),
+            ungrouped: Array.isArray(state.ungrouped) ? [...state.ungrouped] : [],
+            tagOrder: Array.isArray(state.tagOrder) ? [...state.tagOrder] : []
+        };
+        const stagedGroupsById = new Map(Array.from(groupsById.entries(), ([groupId, group]) => [
+            groupId,
+            {
+                ...group,
+                id: groupId,
+                children: cloneSerializableData(Array.isArray(group?.children) ? group.children : [])
+            }
+        ]));
+        const stagedSourcesByKey = new Map(Array.from(sourcesByKey.entries(), ([sourceKey, source]) => [
+            sourceKey,
+            source && typeof source === 'object' ? { ...source } : source
+        ]));
+        const stagedSourceTagsById = new Map(Array.from(
+            sourceTagsById.entries(),
+            ([sourceKey, tagIds]) => [
+                sourceKey,
+                tagIds instanceof Set
+                    ? new Set(tagIds)
+                    : (Array.isArray(tagIds) ? [...tagIds] : tagIds)
+            ]
+        ));
+        const stagedKeyByElement = new WeakMap();
+        stagedSourcesByKey.forEach((source, sourceKey) => {
+            if (source?.element) stagedKeyByElement.set(source.element, sourceKey);
+        });
+        const stagedParentMap = new Map();
+        const stagedTreePlacement = createContentTreePlacement({
+            getState: () => stagedState,
+            getGroupsById: () => stagedGroupsById
+        });
+        const usedGroupIds = new Set(stagedGroupsById.keys());
         const importedLabels = [];
         let importedSourceCount = 0;
         let skippedExistingAssignmentCount = 0;
         let previewSourceAddedCount = 0;
+
         previewLabels.forEach((label) => {
+            previewSourceAddedCount += ensureNativeLabelPreviewSourcesRecord(label, {
+                sourcesByKey: stagedSourcesByKey,
+                sourceTagsById: stagedSourceTagsById,
+                keyByElement: stagedKeyByElement
+            });
+        });
+        const normalizedPreviewPlacement = stagedTreePlacement.normalizePlacementState({
+            state: stagedState,
+            groupsById: stagedGroupsById,
+            liveSourceKeys: new Set(stagedSourcesByKey.keys())
+        });
+        if (!normalizedPreviewPlacement.ok) {
+            return rejectImport(normalizedPreviewPlacement.reason || 'invalid_preview_placement');
+        }
+        const previewPlacementCommit = stagedTreePlacement.commitPlacementModel(
+            normalizedPreviewPlacement
+        );
+        if (!previewPlacementCommit.ok) {
+            return rejectImport(previewPlacementCommit.reason || 'preview_placement_commit_failed');
+        }
+        stagedTreePlacement.rebuildParentMap(stagedParentMap);
+
+        for (const label of previewLabels) {
             const sourceKeys = Array.isArray(label?.sourceKeys) ? label.sourceKeys : [];
-            let group = label.existingGroupId ? groupsById.get(label.existingGroupId) : null;
+            let group = label.existingGroupId ? stagedGroupsById.get(label.existingGroupId) : null;
             const targetGroupId = group?.id || null;
-            previewSourceAddedCount += ensureNativeLabelPreviewSources(label);
             const importableSourceKeys = sourceKeys.filter((sourceKey) => {
-                if (!sourcesByKey.has(sourceKey)) return false;
-                const currentParentId = parentMap.get(sourceKey);
+                if (!stagedSourcesByKey.has(sourceKey)) return false;
+                const currentParentId = stagedParentMap.get(sourceKey);
                 if (currentParentId && currentParentId !== targetGroupId) {
                     skippedExistingAssignmentCount += 1;
                     return false;
                 }
                 return true;
             });
-            if (importableSourceKeys.length === 0) return;
+            if (importableSourceKeys.length === 0) continue;
 
             const labelAction = group ? 'reuse' : 'create';
             if (!group) {
-                group = {
+                const nextGroup = {
                     id: createImportedNativeLabelGroupId(label.title, usedGroupIds),
                     title: label.title,
                     nativeLabelTitle: label.title || '',
@@ -1363,32 +1404,73 @@
                     collapsed: false,
                     isNewlyCreated: true
                 };
-                groupsById.set(group.id, group);
-                // v5: root folders live in state.root as { type:'group', id } entries
-                // (state.groups was removed). Folders never go into the ungrouped bin.
-                state.root = Array.isArray(state.root) ? state.root : [];
-                if (!state.root.some((entry) => entry?.type === 'group' && entry.id === group.id)) {
-                    state.root.push({ type: 'group', id: group.id });
+                const addGroupResult = stagedTreePlacement.addGroup({
+                    group: nextGroup,
+                    target: {
+                        container: 'root',
+                        index: Array.isArray(stagedState.root) ? stagedState.root.length : 0
+                    }
+                });
+                if (!addGroupResult.ok || !addGroupResult.changed) {
+                    return rejectImport(addGroupResult.reason || 'group_create_failed');
                 }
+                group = stagedGroupsById.get(nextGroup.id);
             }
+            if (!group) return rejectImport('group_missing_after_create');
             if (label.title) {
                 group.nativeLabelTitle = label.title;
             }
 
-            importableSourceKeys.forEach((sourceKey) => {
-                removeSourceFromTree(sourceKey);
-                if (!group.children.some((child) => child?.type === 'source' && child.key === sourceKey)) {
-                    group.children.push({ type: 'source', key: sourceKey });
+            const placementResult = stagedTreePlacement.applyBatchPlacement({
+                items: importableSourceKeys.map((sourceKey) => ({
+                    kind: 'source',
+                    key: sourceKey
+                })),
+                target: {
+                    container: 'group',
+                    groupId: group.id,
+                    index: Array.isArray(group.children) ? group.children.length : 0
                 }
             });
+            if (!placementResult.ok) {
+                return rejectImport(placementResult.reason || 'source_placement_failed');
+            }
+            stagedTreePlacement.rebuildParentMap(stagedParentMap);
             importedSourceCount += importableSourceKeys.length;
             importedLabels.push({
                 title: label.title || '',
                 sourceCount: importableSourceKeys.length,
                 action: labelAction
             });
-        });
+        }
 
+        const finalPlacement = _treePlacementModule.normalizePlacementState({
+            state: stagedState,
+            groupsById: stagedGroupsById,
+            liveSourceKeys: new Set(stagedSourcesByKey.keys())
+        });
+        if (!finalPlacement.ok) {
+            return rejectImport(finalPlacement.reason || 'invalid_final_placement');
+        }
+        const finalPlacementCommit = _treePlacementModule.commitPlacementModel(finalPlacement);
+        if (!finalPlacementCommit.ok) {
+            return rejectImport(finalPlacementCommit.reason || 'final_placement_commit_failed');
+        }
+
+        stagedSourcesByKey.forEach((source, sourceKey) => {
+            const existingSource = sourcesByKey.get(sourceKey);
+            if (existingSource && typeof existingSource === 'object') {
+                existingSource.nativeLabelTitle = source?.nativeLabelTitle || '';
+                return;
+            }
+            sourcesByKey.set(sourceKey, source);
+            if (source?.element) keyByElement.set(source.element, sourceKey);
+        });
+        stagedSourceTagsById.forEach((tagIds, sourceKey) => {
+            if (!sourceTagsById.has(sourceKey)) {
+                sourceTagsById.set(sourceKey, tagIds);
+            }
+        });
         buildParentMap();
         lastNativeLabelImportSummary = {
             labelCount: importedLabels.length,
@@ -3864,13 +3946,13 @@
         hasPersistableManagerState,
         buildPersistableState: (...args) => buildPersistableState(...args),
         applyPersistableSnapshotToRuntime,
+        treePlacement: _treePlacementModule,
         buildSourceLookup,
         resolveStoredSourceKey,
         buildNormalizedTagState,
         normalizeSourceViewSwitchTarget,
         appendStateHistorySnapshot: (...args) => appendStateHistorySnapshot(...args),
         writeImportBackupSnapshot: (...args) => writeImportBackupSnapshot(...args),
-        restoreInitialLoadedState: (...args) => restoreInitialLoadedState(...args),
         rollbackImportSnapshot,
         restoreImportBackupSnapshotFromUi: (...args) => restoreImportBackupSnapshotFromUi(...args),
         saveState: (...args) => saveState(...args),
@@ -4884,7 +4966,6 @@
             buildSourceMatchReport,
             applySourceRemapsToSnapshot,
             buildSingleSourcePositionalRemap,
-            removeGroupFromTree,
             scanAndSyncSources,
             setSourceTagIds,
             shouldRenderGroup,
@@ -5051,6 +5132,40 @@
             _collectSearchExpandedGroupIdsForTest: collectSearchExpandedGroupIds,
             _clearDragFeedbackForTest: clearDragFeedback,
             _handleNativeSourceDeleteAcceptedForTest: handleNativeSourceDeleteAccepted,
+            _setRecentNativeDeleteMarkersForTest: (sourceKey, source = {}) => {
+                if (!(runtimeContext.recentNativeDeletedSourceKeys instanceof Set)) {
+                    runtimeContext.recentNativeDeletedSourceKeys = new Set();
+                }
+                if (!(runtimeContext.recentNativeDeletedSourceIdentityKeys instanceof Set)) {
+                    runtimeContext.recentNativeDeletedSourceIdentityKeys = new Set();
+                }
+                runtimeContext.recentNativeDeletedSourceKeys.add(sourceKey);
+                if (source?.key) {
+                    runtimeContext.recentNativeDeletedSourceKeys.add(source.key);
+                }
+                if (source?.stableToken) {
+                    runtimeContext.recentNativeDeletedSourceIdentityKeys.add(
+                        `stable:${source.stableToken}`
+                    );
+                }
+                if (source?.fingerprint) {
+                    runtimeContext.recentNativeDeletedSourceIdentityKeys.add(
+                        `fingerprint:${source.fingerprint}`
+                    );
+                }
+            },
+            _getRecentNativeDeleteMarkersForTest: () => ({
+                sourceKeys: new Set(
+                    runtimeContext.recentNativeDeletedSourceKeys instanceof Set
+                        ? runtimeContext.recentNativeDeletedSourceKeys
+                        : []
+                ),
+                identityKeys: new Set(
+                    runtimeContext.recentNativeDeletedSourceIdentityKeys instanceof Set
+                        ? runtimeContext.recentNativeDeletedSourceIdentityKeys
+                        : []
+                )
+            }),
             _getRenderedSourceActionMenuItemsForTest: getRenderedSourceActionMenuItems,
             _findRenderedSourceActionMenuForTest: findRenderedSourceActionMenu,
             _focusSourceActionMenuItemForTest: focusSourceActionMenuItem,

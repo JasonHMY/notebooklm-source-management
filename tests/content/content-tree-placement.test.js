@@ -1,4 +1,5 @@
 const TREE_PLACEMENT_MODULE_PATH = '../../src/content/content-tree-placement.js';
+const vm = require('vm');
 
 const cloneSerializable = (value) => JSON.parse(JSON.stringify(value));
 
@@ -1186,6 +1187,51 @@ describe('content-tree-placement factory', () => {
         expect(result.liveSourceKeys).not.toBe(liveSourceKeys);
     });
 
+    it('normalizePlacementState is idempotent after the first canonicalization', () => {
+        const { treePlacement } = createHarness();
+        const first = treePlacement.normalizePlacementState({
+            state: {
+                root: [
+                    { type: 'group', id: 'group-a' },
+                    { type: 'source', key: 'duplicate' }
+                ],
+                ungrouped: ['duplicate', 'bin-only']
+            },
+            groupsById: new Map([[
+                'group-a',
+                {
+                    id: 'group-a',
+                    children: [{ type: 'source', key: 'duplicate' }]
+                }
+            ]]),
+            liveSourceKeys: new Set(['duplicate', 'bin-only', 'orphan'])
+        });
+
+        expect(first).toEqual(expect.objectContaining({
+            ok: true,
+            changed: true
+        }));
+
+        const second = treePlacement.normalizePlacementState({
+            state: first.state,
+            groupsById: first.groupsById,
+            liveSourceKeys: first.liveSourceKeys
+        });
+
+        expect(second).toEqual(expect.objectContaining({
+            ok: true,
+            changed: false,
+            removedDuplicates: 0,
+            removedCycles: 0,
+            movedOrphans: 0
+        }));
+        expect(second.state).toEqual(first.state);
+        expect(Array.from(second.groupsById.entries())).toEqual(
+            Array.from(first.groupsById.entries())
+        );
+        expect(second.liveSourceKeys).toEqual(first.liveSourceKeys);
+    });
+
     it('normalizePlacementState returns a new Map and never mutates import input', () => {
         const inputState = {
             root: [
@@ -1224,6 +1270,162 @@ describe('content-tree-placement factory', () => {
         expect(inputState).toEqual(beforeState);
         expect(inputGroups).toEqual(beforeGroups);
         expect(liveSourceKeys).toEqual(beforeLiveSourceKeys);
+    });
+
+    it('normalizes and commits cross-realm group records without deleting children', () => {
+        const foreignModel = vm.runInNewContext(`({
+            state: {
+                root: [{ type: 'group', id: 'foreign-group' }],
+                ungrouped: []
+            },
+            groupsById: {
+                'foreign-group': {
+                    id: 'foreign-group',
+                    title: 'Foreign group',
+                    children: []
+                }
+            }
+        })`);
+        const beforeModel = cloneSerializable(foreignModel);
+        const { state, groupsById, treePlacement } = createHarness();
+
+        const normalized = treePlacement.normalizePlacementState({
+            ...foreignModel,
+            liveSourceKeys: new Set()
+        });
+
+        expect(normalized.ok).toBe(true);
+        expect(normalized.groupsById.get('foreign-group').children).toEqual([]);
+        expect(foreignModel).toEqual(beforeModel);
+
+        const committed = treePlacement.commitPlacementModel(normalized);
+
+        expect(committed).toEqual(expect.objectContaining({
+            ok: true,
+            changed: true
+        }));
+        expect(state.root).toEqual([{ type: 'group', id: 'foreign-group' }]);
+        expect(groupsById.get('foreign-group')).toEqual({
+            id: 'foreign-group',
+            title: 'Foreign group',
+            children: []
+        });
+    });
+
+    it('rejects group children inherited through Object.prototype at public boundaries', () => {
+        const priorChildrenDescriptor = Object.getOwnPropertyDescriptor(
+            Object.prototype,
+            'children'
+        );
+        Object.defineProperty(Object.prototype, 'children', {
+            configurable: true,
+            value: [{ type: 'group', id: 'inherited-child' }]
+        });
+        try {
+            const { treePlacement } = createHarness();
+            const model = {
+                state: {
+                    root: [{ type: 'group', id: 'group-a' }],
+                    ungrouped: []
+                },
+                groupsById: new Map([
+                    ['group-a', { id: 'group-a' }],
+                    ['inherited-child', {
+                        id: 'inherited-child',
+                        children: []
+                    }]
+                ]),
+                liveSourceKeys: new Set()
+            };
+
+            expect(treePlacement.validatePlacementState(model)).toEqual(
+                expect.objectContaining({
+                    ok: false,
+                    errors: expect.arrayContaining([
+                        expect.objectContaining({ code: 'invalid_entry' })
+                    ])
+                })
+            );
+            expect(treePlacement.normalizePlacementState(model)).toEqual(
+                expect.objectContaining({
+                    ok: false,
+                    changed: false,
+                    reason: 'invalid_model'
+                })
+            );
+            expect(Object.prototype.hasOwnProperty.call(
+                model.groupsById.get('group-a'),
+                'children'
+            )).toBe(false);
+        } finally {
+            if (priorChildrenDescriptor) {
+                Object.defineProperty(
+                    Object.prototype,
+                    'children',
+                    priorChildrenDescriptor
+                );
+            } else {
+                delete Object.prototype.children;
+            }
+        }
+    });
+
+    it('rejects tree entry fields inherited through Object.prototype', () => {
+        const { treePlacement } = createHarness();
+        const model = {
+            state: {
+                root: [{}],
+                ungrouped: []
+            },
+            groupsById: new Map(),
+            liveSourceKeys: new Set(['inherited-source'])
+        };
+        const priorTypeDescriptor = Object.getOwnPropertyDescriptor(
+            Object.prototype,
+            'type'
+        );
+        const priorKeyDescriptor = Object.getOwnPropertyDescriptor(
+            Object.prototype,
+            'key'
+        );
+        let validation;
+        let normalized;
+        Object.defineProperty(Object.prototype, 'type', {
+            configurable: true,
+            value: 'source'
+        });
+        Object.defineProperty(Object.prototype, 'key', {
+            configurable: true,
+            value: 'inherited-source'
+        });
+        try {
+            validation = treePlacement.validatePlacementState(model);
+            normalized = treePlacement.normalizePlacementState(model);
+        } finally {
+            if (priorTypeDescriptor) {
+                Object.defineProperty(Object.prototype, 'type', priorTypeDescriptor);
+            } else {
+                delete Object.prototype.type;
+            }
+            if (priorKeyDescriptor) {
+                Object.defineProperty(Object.prototype, 'key', priorKeyDescriptor);
+            } else {
+                delete Object.prototype.key;
+            }
+        }
+
+        expect(validation).toEqual(expect.objectContaining({
+            ok: false,
+            errors: expect.arrayContaining([
+                expect.objectContaining({ code: 'invalid_entry' })
+            ])
+        }));
+        expect(normalized).toEqual(expect.objectContaining({
+            ok: true,
+            changed: true
+        }));
+        expect(normalized.state.root).toEqual([]);
+        expect(normalized.state.ungrouped).toEqual(['inherited-source']);
     });
 
     it('normalizePlacementState gives only reachable groups precedence and rescues hidden sources', () => {

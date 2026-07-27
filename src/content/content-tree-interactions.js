@@ -19,9 +19,9 @@
      *     executeBatchDelete, renderMoveToFolderModal
      *   - 拖拽配套: 一组 drag feedback / reflow helpers 在内部组装,
      *     依赖 runtime.activeDragGhost 等运行时句柄
-     * @returns {Object} tree and drag helpers。group 操作 (handleAddNewGroup / removeGroupFromTree /
+     * @returns {Object} tree and drag helpers。group 操作 (handleAddNewGroup /
      *   toggleGroupCollapse),source 操作 (syncSourceToPage / findParentGroupOfSource /
-     *   removeSourceFromTree / canMoveSourceToUngrouped / moveSourceToUngrouped),
+     *   canMoveSourceToUngrouped / moveSourceToUngrouped),
      *   batch 操作 (collectSourceKeysInTreeOrder / executeBatchMoveToUngrouped /
      *   isBatchOperableSource),交互入口 (handleInteraction /
      *   handleOriginalCheckboxChange / triggerRename / processClickQueue),
@@ -2037,22 +2037,6 @@
             return parentId ? (groupsById.get(parentId) || null) : null;
         }
 
-        function removeSourceFromTree(key) {
-            const state = getState();
-            const parentGroup = findParentGroupOfSource(key);
-            if (parentGroup) {
-                parentGroup.children = (Array.isArray(parentGroup.children) ? parentGroup.children : [])
-                    .filter((c) => c.type === 'group' || c.key !== key);
-                return;
-            }
-            // Root-level source: either positioned in state.root (object entry) or in the
-            // bottom ungrouped bin (bare key). The two are mutually exclusive but scrub
-            // both defensively so a stale duplicate never survives a move.
-            state.root = (Array.isArray(state.root) ? state.root : [])
-                .filter((entry) => !(entry && entry.type === 'source' && entry.key === key));
-            state.ungrouped = (Array.isArray(state.ungrouped) ? state.ungrouped : []).filter((k) => k !== key);
-        }
-
         function isBatchOperableSource(source) {
             return Boolean(source && !source.isDisabled && !source.isLoading);
         }
@@ -2203,16 +2187,6 @@
 
             finishKeyboardTreeMove('ui_keyboard_moved_ungrouped_toast');
             return true;
-        }
-
-        function removeGroupFromTree(id) {
-            const state = getState();
-            const groupsById = getGroupsById();
-            state.root = (Array.isArray(state.root) ? state.root : [])
-                .filter((entry) => !(entry && entry.type === 'group' && entry.id === id));
-            groupsById.forEach((group) => {
-                group.children = (Array.isArray(group.children) ? group.children : []).filter((c) => c.id !== id);
-            });
         }
 
         function toggleGroupCollapse(group, groupContainer) {
@@ -5322,13 +5296,11 @@
             syncSourceToPage,
             processClickQueue,
             findParentGroupOfSource,
-            removeSourceFromTree,
             isBatchOperableSource,
             collectSourceKeysInTreeOrder,
             executeBatchMoveToUngrouped,
             canMoveSourceToUngrouped,
             moveSourceToUngrouped,
-            removeGroupFromTree,
             toggleGroupCollapse,
             handleInteraction,
             handleOriginalCheckboxChange,

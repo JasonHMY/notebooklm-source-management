@@ -7,7 +7,7 @@
      * 扫描成 source descriptor,再 reconcile 进 state.root + state.ungrouped + sourcesByKey,
      * 处理 SPA 切换 + 半截扫描 + native delete/rename 后的事后同步。MutationObserver 入口。
      *
-     * @param {Object} deps 60+ 项依赖,大致四类(完整 destructuring 见 line 4+):
+     * @param {Object} deps 60+ 项依赖,大致四类(factory 起始处有完整 destructuring):
      *   - 环境: runtime, getDocument / getWindow / getDEPS, findElement, findSourcePanel,
      *     isSourcePanelRenderable
      *   - 扫描/识别: createSourceDescriptor, extractSourceIdentitySnapshot,
@@ -16,16 +16,16 @@
      *   - state reconcile: reconcilePersistedTree, snapshotExistingSourceRecords,
      *     remapExistingStateToCurrentSources, buildSourceLookup,
      *     resolveStoredSourceKeyWithReason, buildResolvedSourceStateById,
-     *     buildNormalizedTagState, buildResolvedSourceTagsById, buildParentMap,
+     *     buildNormalizedTagState, buildResolvedSourceTagsById, treePlacement,
      *     buildPersistableState, setSourceTagIds, syncSourceToPage, saveState
      *   - 日志/i18n: developerLog
-     * @returns {Object} 30+ helpers。主要入口 `scanAndSyncSources` / `handleDomChanges` /
+     * @returns {Object} 30+ helpers。主要入口 `scanAndSyncSources` 返回
+     *   `{ ok, shouldUpgradeStorage, reason }`，另有 `handleDomChanges` /
      *   `debouncedScanAndSync`;此外暴露 fresh-row cache (findFreshCheckbox /
      *   resolveFreshRowEntry / getFreshRowCache / setFreshRowCache / clearFreshRowCache),
      *   source-view 检测 (detectSourceView / getSourceViewInfo),
      *   折叠 label group 控制 (getCollapsedNativeLabel* / expandCollapsedNativeLabelGroups /
      *   restoreNativeLabelExpansionControls),以及 panel 状态判定与 signature 比对。
-     *   完整 return 块见 line 2599。
      */
     function createContentSourceSync(deps = {}) {
         const runtime = deps.runtime && typeof deps.runtime === 'object' ? deps.runtime : deps;
@@ -71,9 +71,15 @@
         const extractSourceIdentitySnapshot = typeof deps.extractSourceIdentitySnapshot === 'function'
             ? deps.extractSourceIdentitySnapshot
             : () => null;
+        const normalizeSourceText = typeof deps.normalizeSourceText === 'function'
+            ? deps.normalizeSourceText
+            : (value) => String(value || '').trim().toLowerCase();
         const buildSourceLookup = typeof deps.buildSourceLookup === 'function'
             ? deps.buildSourceLookup
             : () => ({});
+        const collectPersistedSourceRefs = typeof deps.collectPersistedSourceRefs === 'function'
+            ? deps.collectPersistedSourceRefs
+            : () => new Set();
         const resolveStoredSourceKeyWithReason = typeof deps.resolveStoredSourceKeyWithReason === 'function'
             ? deps.resolveStoredSourceKeyWithReason
             : () => ({ key: null, reason: 'unresolved' });
@@ -116,6 +122,13 @@
         const buildParentMap = typeof deps.buildParentMap === 'function'
             ? deps.buildParentMap
             : () => {};
+        const treePlacement = deps.treePlacement;
+        if (
+            typeof treePlacement?.normalizePlacementState !== 'function'
+            || typeof treePlacement?.commitPlacementModel !== 'function'
+        ) {
+            throw new Error('GeminiNotebook-Source-Management: createContentSourceSync requires Tree Placement.');
+        }
         const buildPersistableState = typeof deps.buildPersistableState === 'function'
             ? deps.buildPersistableState
             : null;
@@ -239,6 +252,43 @@
         const getExtensionHost = () => runtime.extensionHost || null;
         const getShadowRoot = () => runtime.shadowRoot || null;
         const getScrollObserver = () => runtime.scrollObserver || null;
+
+        function normalizeAndCommitPlacement(candidateState, candidateGroupsById, liveSourceKeys, reason) {
+            const normalized = treePlacement.normalizePlacementState({
+                state: candidateState,
+                groupsById: candidateGroupsById,
+                liveSourceKeys
+            });
+            if (!normalized?.ok) {
+                developerLog('warn', 'source_sync', 'placement_normalization_failed', {
+                    reason: reason || 'source_sync',
+                    resultCode: normalized?.reason || 'invalid_model'
+                });
+                return {
+                    ok: false,
+                    changed: false,
+                    reason: normalized?.reason || 'invalid_model'
+                };
+            }
+
+            const commitResult = treePlacement.commitPlacementModel(normalized);
+            if (!commitResult?.ok) {
+                developerLog('warn', 'source_sync', 'placement_commit_failed', {
+                    reason: reason || 'source_sync',
+                    resultCode: commitResult?.reason || 'invalid_model'
+                });
+                return {
+                    ok: false,
+                    changed: false,
+                    reason: commitResult?.reason || 'invalid_model'
+                };
+            }
+
+            return {
+                ...commitResult,
+                normalized
+            };
+        }
 
         function getStableComparableValue(value, seenValues = new WeakSet()) {
             if (value == null || typeof value !== 'object') {
@@ -1460,31 +1510,54 @@
             return selections;
         }
 
-        function collectSourceKeysFromGroup(group, groupsById, result = new Set()) {
-            if (!group || !Array.isArray(group.children)) return result;
-            group.children.forEach((child) => {
-                if (!child) return;
-                if (child.type === 'source' && child.key) {
-                    result.add(child.key);
-                    return;
+        function collectSourceKeysFromGroup(
+            group,
+            groupsById,
+            result = new Set(),
+            visitedGroups = new Set()
+        ) {
+            const pendingGroups = [group];
+            while (pendingGroups.length > 0) {
+                const currentGroup = pendingGroups.pop();
+                if (
+                    !currentGroup
+                    || visitedGroups.has(currentGroup)
+                    || !Array.isArray(currentGroup.children)
+                ) {
+                    continue;
                 }
-                if (child.type === 'group' && child.id && groupsById.has(child.id)) {
-                    collectSourceKeysFromGroup(groupsById.get(child.id), groupsById, result);
+                visitedGroups.add(currentGroup);
+                for (let index = currentGroup.children.length - 1; index >= 0; index -= 1) {
+                    const child = currentGroup.children[index];
+                    if (!child) continue;
+                    if (child.type === 'source' && child.key) {
+                        result.add(child.key);
+                        continue;
+                    }
+                    if (child.type === 'group' && child.id && groupsById.has(child.id)) {
+                        pendingGroups.push(groupsById.get(child.id));
+                    }
                 }
-            });
+            }
             return result;
         }
 
         function collectGroupedSourceRefs(groupsById) {
             const refs = new Set();
             if (!groupsById || typeof groupsById.forEach !== 'function') return refs;
+            const visitedGroups = new Set();
             groupsById.forEach((group) => {
-                collectSourceKeysFromGroup(group, groupsById, refs);
+                collectSourceKeysFromGroup(group, groupsById, refs, visitedGroups);
             });
             return refs;
         }
 
-        function shouldPreserveExistingTreeDuringUnsafeRemap(remappedState, previousSourceRecordsByKey, sourceLookup) {
+        function shouldPreserveExistingTreeDuringUnsafeRemap(
+            remappedState,
+            previousSourceRecordsByKey,
+            sourceLookup,
+            authorizedNativeDeleteKeys
+        ) {
             const currentGroupsById = getGroupsById();
             const previousGroupedRefs = collectGroupedSourceRefs(currentGroupsById);
             if (previousGroupedRefs.size === 0) return false;
@@ -1518,7 +1591,7 @@
                 recentNativeDeletedSourceKeys &&
                 lostGroupedRefs.every((key) => recentNativeDeletedSourceKeys.has(key))
             ) {
-                lostGroupedRefs.forEach((key) => recentNativeDeletedSourceKeys.delete(key));
+                lostGroupedRefs.forEach((key) => authorizedNativeDeleteKeys?.add?.(key));
                 return false;
             }
 
@@ -1982,10 +2055,34 @@
             return getSourcePanelState(panel).state === 'detail';
         }
 
-        function shouldPreserveExistingSourcesDuringPartialSync(currentSources, sourceLookup, previousSourceRecordsByKey) {
-            return partialSyncShouldPreserveExistingSources(currentSources, sourceLookup, previousSourceRecordsByKey, {
-                recentNativeDeletedSourceKeys: runtime.recentNativeDeletedSourceKeys
-            });
+        function shouldPreserveExistingSourcesDuringPartialSync(
+            currentSources,
+            sourceLookup,
+            previousSourceRecordsByKey,
+            authorizedNativeDeleteKeys
+        ) {
+            const recentNativeDeletedSourceKeys = runtime.recentNativeDeletedSourceKeys instanceof Set
+                ? runtime.recentNativeDeletedSourceKeys
+                : null;
+            const probeDeletedSourceKeys = recentNativeDeletedSourceKeys
+                ? new Set(recentNativeDeletedSourceKeys)
+                : null;
+            const shouldPreserve = partialSyncShouldPreserveExistingSources(
+                currentSources,
+                sourceLookup,
+                previousSourceRecordsByKey,
+                {
+                    recentNativeDeletedSourceKeys: probeDeletedSourceKeys
+                }
+            );
+            if (!shouldPreserve && recentNativeDeletedSourceKeys && probeDeletedSourceKeys) {
+                recentNativeDeletedSourceKeys.forEach((sourceKey) => {
+                    if (!probeDeletedSourceKeys.has(sourceKey)) {
+                        authorizedNativeDeleteKeys?.add?.(sourceKey);
+                    }
+                });
+            }
+            return shouldPreserve;
         }
 
         function hasPreviousRecordForCurrentSource(source, sourceLookup, previousSourceRecordsByKey) {
@@ -2008,43 +2105,169 @@
             const sourcesByKey = getSourcesByKey();
             const state = getState();
             const groupsById = getGroupsById();
-            const knownSourceRefs = collectGroupedSourceRefs(groupsById);
-            if (!Array.isArray(state.ungrouped)) {
-                state.ungrouped = [];
-            }
-            state.ungrouped.forEach((sourceKey) => {
-                if (sourceKey) knownSourceRefs.add(sourceKey);
-            });
-
-            let mergedCount = 0;
-            loadingSources.forEach((source) => {
-                const hydratedSource = {
+            const hydratedSources = loadingSources.map((source) => ({
+                source,
+                record: {
                     ...source,
                     enabled: getNativeSourceCheckboxState(source, true),
                     nativeLabelTitle: source.nativeLabelTitle || ''
-                };
+                }
+            }));
+            const liveSourceKeys = new Set(sourcesByKey.keys());
+            hydratedSources.forEach(({ source }) => liveSourceKeys.add(source.key));
+            const placementResult = normalizeAndCommitPlacement(
+                state,
+                groupsById,
+                liveSourceKeys,
+                'partial_loading_merge'
+            );
+            if (!placementResult.ok) return 0;
 
-                sourcesByKey.set(source.key, hydratedSource);
+            hydratedSources.forEach(({ source, record }) => {
+                sourcesByKey.set(source.key, record);
                 setSourceTagIds(source.key, []);
                 if (source.element && keyByElement && typeof keyByElement.set === 'function') {
                     keyByElement.set(source.element, source.key);
                 }
-                if (!knownSourceRefs.has(source.key)) {
-                    state.ungrouped.push(source.key);
-                    knownSourceRefs.add(source.key);
-                }
-                syncSourceToPage(hydratedSource, isSourceEffectivelyEnabled(hydratedSource), {
+            });
+            runtime.keyByElement = keyByElement;
+            buildParentMap();
+            hydratedSources.forEach(({ record }) => {
+                syncSourceToPage(record, isSourceEffectivelyEnabled(record), {
                     currentSourceViewKind: runtime.sourceViewKind || SOURCE_VIEW_KIND_UNKNOWN,
                     preferStoredCheckbox: true
                 });
-                mergedCount += 1;
             });
 
-            if (mergedCount > 0) {
-                runtime.keyByElement = keyByElement;
-                buildParentMap();
+            return hydratedSources.length;
+        }
+
+        function createPreservedPartialSourceDescriptor(sourceKey, sourceRecord) {
+            const existingSource = getSourcesByKey().get(sourceKey) || null;
+            const title = String(
+                existingSource?.title
+                || sourceRecord?.title
+                || sourceRecord?.normalizedTitle
+                || sourceKey
+            );
+            const normalizedTitle = String(
+                existingSource?.normalizedTitle
+                || sourceRecord?.normalizedTitle
+                || normalizeSourceText(title)
+            );
+            return {
+                ...(existingSource || {}),
+                key: sourceKey,
+                legacyKey: existingSource?.legacyKey || sourceKey,
+                title,
+                normalizedTitle,
+                lowercaseTitle: normalizedTitle,
+                ariaLabel: existingSource?.ariaLabel || '',
+                stableToken: existingSource?.stableToken || sourceRecord?.stableToken || '',
+                fingerprint: existingSource?.fingerprint || sourceRecord?.fingerprint || '',
+                identityType: existingSource?.identityType || sourceRecord?.identityType || 'fingerprint',
+                element: null,
+                checkbox: null,
+                hasNativeCheckbox: false,
+                isLoading: false,
+                isFailed: false,
+                isDisabled: false,
+                sourceViewKind: existingSource?.sourceViewKind || SOURCE_VIEW_KIND_UNKNOWN,
+                nativeLabelTitle: existingSource?.nativeLabelTitle || sourceRecord?.nativeLabelTitle || '',
+                addedAt: existingSource?.addedAt || sourceRecord?.addedAt || '',
+                isPendingNativeHydration: true,
+                isPreservedPartialSource: true
+            };
+        }
+
+        function supplementCurrentSourcesForPartialMerge(
+            currentSources,
+            sourceLookup,
+            previousSourceRecordsByKey
+        ) {
+            const supplementedSources = (Array.isArray(currentSources) ? currentSources : [])
+                .filter((source) => source && !source.isLoading);
+            const supplementedKeys = new Set(
+                supplementedSources.map((source) => source.key).filter(Boolean)
+            );
+
+            previousSourceRecordsByKey?.forEach?.((sourceRecord, storedKey) => {
+                const resolution = resolveStoredSourceKeyWithReason(
+                    storedKey,
+                    sourceLookup,
+                    sourceRecord
+                );
+                if (resolution?.key && supplementedKeys.has(resolution.key)) return;
+                if (!storedKey || supplementedKeys.has(storedKey)) return;
+                const preservedSource = createPreservedPartialSourceDescriptor(
+                    storedKey,
+                    sourceRecord
+                );
+                if (isRecentlyNativeDeletedSource(preservedSource)) return;
+                supplementedSources.push(preservedSource);
+                supplementedKeys.add(storedKey);
+            });
+
+            return supplementedSources;
+        }
+
+        function consumeNativeDeleteMarkersAfterSuccessfulSync(
+            pendingNativeDeleteSourceKeys,
+            pendingNativeDeleteIdentityKeys
+        ) {
+            const recentSourceKeys = getRecentNativeDeletedSourceKeys();
+            const recentIdentityKeys = getRecentNativeDeletedSourceIdentityKeys();
+            pendingNativeDeleteSourceKeys?.forEach?.((sourceKey) => {
+                recentSourceKeys?.delete?.(sourceKey);
+            });
+            pendingNativeDeleteIdentityKeys?.forEach?.((identityKey) => {
+                recentIdentityKeys?.delete?.(identityKey);
+            });
+        }
+
+        function queueUnobservedNativeDeleteMarkersForSuccessfulSync(
+            rawCurrentSources,
+            pendingNativeDeleteSourceKeys,
+            pendingNativeDeleteIdentityKeys
+        ) {
+            if (
+                !(pendingNativeDeleteSourceKeys instanceof Set)
+                || !(pendingNativeDeleteIdentityKeys instanceof Set)
+            ) {
+                return;
             }
-            return mergedCount;
+            const recentSourceKeys = getRecentNativeDeletedSourceKeys();
+            const recentIdentityKeys = getRecentNativeDeletedSourceIdentityKeys();
+            if (
+                (!recentSourceKeys || recentSourceKeys.size === 0)
+                && (!recentIdentityKeys || recentIdentityKeys.size === 0)
+            ) {
+                return;
+            }
+
+            const observedSourceKeys = new Set();
+            const observedIdentityKeys = new Set();
+            (Array.isArray(rawCurrentSources) ? rawCurrentSources : []).forEach((source) => {
+                if (source?.key) observedSourceKeys.add(source.key);
+                if (source?.legacyKey) observedSourceKeys.add(source.legacyKey);
+                if (source?.stableToken) {
+                    observedIdentityKeys.add(`stable:${source.stableToken}`);
+                }
+                if (source?.fingerprint) {
+                    observedIdentityKeys.add(`fingerprint:${source.fingerprint}`);
+                }
+            });
+
+            recentSourceKeys?.forEach?.((sourceKey) => {
+                if (!observedSourceKeys.has(sourceKey)) {
+                    pendingNativeDeleteSourceKeys.add(sourceKey);
+                }
+            });
+            recentIdentityKeys?.forEach?.((identityKey) => {
+                if (!observedIdentityKeys.has(identityKey)) {
+                    pendingNativeDeleteIdentityKeys.add(identityKey);
+                }
+            });
         }
 
         function getRecentNativeDeletedSourceKeys() {
@@ -2118,12 +2341,8 @@
 
             const sourcesByKey = getSourcesByKey();
             const state = getState();
-            const knownSourceRefs = new Set(Array.isArray(state.ungrouped) ? state.ungrouped : []);
-            getGroupsById().forEach((group) => {
-                collectSourceKeysFromGroup(group, getGroupsById(), knownSourceRefs);
-            });
-
-            let captured = false;
+            const groupsById = getGroupsById();
+            const capturedSources = new Map();
             const seenSourceIds = new Map();
             const seenLegacyKeys = new Map();
             rows.forEach((row) => {
@@ -2138,25 +2357,43 @@
                 const previous = sourcesByKey.get(descriptor.key) || null;
                 const previousEnabled = previous ? Boolean(previous.enabled) : true;
                 const nativeCheckboxState = getNativeSourceCheckboxState(descriptor, previousEnabled);
-                sourcesByKey.set(descriptor.key, Object.assign({}, descriptor, {
+                capturedSources.set(descriptor.key, Object.assign({}, descriptor, {
                     enabled: previous ? previousEnabled : nativeCheckboxState,
                     nativeLabelTitle: previous?.nativeLabelTitle || nativeLabelTitle,
                     sourceViewKind: SOURCE_VIEW_KIND_LABEL
                 }));
-                if (!knownSourceRefs.has(descriptor.key)) {
-                    state.ungrouped.push(descriptor.key);
-                    knownSourceRefs.add(descriptor.key);
-                }
-                captured = true;
             });
 
-            if (captured) {
-                buildParentMap();
-            }
-            return captured;
+            if (capturedSources.size === 0) return false;
+            const liveSourceKeys = new Set(sourcesByKey.keys());
+            capturedSources.forEach((source, sourceKey) => {
+                liveSourceKeys.add(sourceKey);
+            });
+            const placementResult = normalizeAndCommitPlacement(
+                state,
+                groupsById,
+                liveSourceKeys,
+                'detached_native_label_capture'
+            );
+            if (!placementResult.ok) return false;
+
+            capturedSources.forEach((source, sourceKey) => {
+                sourcesByKey.set(sourceKey, source);
+            });
+            buildParentMap();
+            return true;
         }
 
         function scanAndSyncSources(loadedState, isFirstLoad = false, options = {}) {
+            const createScanResult = (
+                ok,
+                shouldUpgradeStorage = false,
+                reason = ok ? 'completed' : 'failed'
+            ) => ({
+                ok: Boolean(ok),
+                shouldUpgradeStorage: Boolean(shouldUpgradeStorage),
+                reason
+            });
             const sourcesByKey = getSourcesByKey();
             const sourceTagsById = getSourceTagsById();
             const groupsById = getGroupsById();
@@ -2165,6 +2402,9 @@
             const oldSourcesMap = new Map();
             const oldSourceTags = new Map();
             const previousSourceRecordsByKey = !isFirstLoad ? snapshotExistingSourceRecords() : new Map();
+            const authorizedNativeDeleteKeys = new Set();
+            const pendingNativeDeleteSourceKeys = new Set();
+            const pendingNativeDeleteIdentityKeys = new Set();
 
             if (!isFirstLoad) {
                 sourcesByKey.forEach((source, key) => {
@@ -2198,7 +2438,7 @@
 
             const seenSourceIds = new Map();
             const seenLegacyKeys = new Map();
-            const currentSources = sourceEntries
+            const rawCurrentSources = sourceEntries
                 .map((entry) => {
                     const descriptor = createSourceDescriptor(entry.row, seenSourceIds, seenLegacyKeys);
                     if (!descriptor) return null;
@@ -2207,14 +2447,68 @@
                         nativeLabelTitle: entry.nativeLabelTitle || ''
                     });
                 })
-                .filter((source) => source && !isRecentlyNativeDeletedSource(source));
-            const sourceLookup = buildSourceLookup(currentSources);
+                .filter(Boolean);
+            if (
+                !isFirstLoad
+                && sourcePanel
+                && getSourcePanelState(sourcePanel).state === 'ready'
+            ) {
+                queueUnobservedNativeDeleteMarkersForSuccessfulSync(
+                    rawCurrentSources,
+                    pendingNativeDeleteSourceKeys,
+                    pendingNativeDeleteIdentityKeys
+                );
+            }
+            let currentSources = rawCurrentSources
+                .filter((source) => !isRecentlyNativeDeletedSource(source));
+            let sourceLookup = buildSourceLookup(currentSources);
+            if (isFirstLoad && loadedState && typeof loadedState === 'object') {
+                const unresolvedStoredKeys = [];
+                collectPersistedSourceRefs(loadedState).forEach((storedKey) => {
+                    const sourceRecord = loadedState.sourceStateById
+                        && Object.prototype.hasOwnProperty.call(
+                            loadedState.sourceStateById,
+                            storedKey
+                        )
+                        ? loadedState.sourceStateById[storedKey]
+                        : null;
+                    const resolution = resolveStoredSourceKeyWithReason(
+                        storedKey,
+                        sourceLookup,
+                        sourceRecord
+                    );
+                    if (!resolution?.key) unresolvedStoredKeys.push(storedKey);
+                });
+                if (
+                    unresolvedStoredKeys.length > 0
+                    && (currentSources.length > 0 || sourceEntries.length > 0)
+                ) {
+                    developerLog('warn', 'source_sync', 'scan_skipped_partial_initial_sync', {
+                        currentCount: currentSources.length,
+                        unresolvedPersistedCount: unresolvedStoredKeys.length,
+                        reason: 'partial_initial_source_sync'
+                    });
+                    return createScanResult(false, false, 'partial_initial_source_sync');
+                }
+            }
             const transientRawUrlSourceCount = !isFirstLoad
                 ? markTransientRawUrlImportSources(currentSources, sourceLookup, previousSourceRecordsByKey)
                 : 0;
             if (transientRawUrlSourceCount > 0) {
                 developerLog('debug', 'source_sync', 'raw_url_import_rows_marked_loading', {
                     count: transientRawUrlSourceCount
+                });
+            }
+            if (!isFirstLoad && options.preserveMissingExistingSources === true) {
+                currentSources = supplementCurrentSourcesForPartialMerge(
+                    currentSources,
+                    sourceLookup,
+                    previousSourceRecordsByKey
+                );
+                sourceLookup = buildSourceLookup(currentSources);
+                developerLog('info', 'source_sync', 'partial_sources_merged_with_staged_state', {
+                    previousCount: previousSourceRecordsByKey.size,
+                    mergedCount: currentSources.length
                 });
             }
             if (!isFirstLoad && nativeLabelGroupSelections.size > 0 && applyNativeLabelGroupSelectionsToExistingSources(nativeLabelGroupSelections)) {
@@ -2227,7 +2521,12 @@
                     });
                 });
             }
-            if (!isFirstLoad && shouldPreserveExistingSourcesDuringPartialSync(currentSources, sourceLookup, previousSourceRecordsByKey)) {
+            if (!isFirstLoad && shouldPreserveExistingSourcesDuringPartialSync(
+                currentSources,
+                sourceLookup,
+                previousSourceRecordsByKey,
+                authorizedNativeDeleteKeys
+            )) {
                 const transientLoadingSourceCount = mergeVisibleLoadingSourcesDuringPartialSync(
                     currentSources,
                     sourceLookup,
@@ -2246,12 +2545,8 @@
                     transientLoadingSourceCount,
                     reason: 'partial_source_sync'
                 });
-                return false;
+                return createScanResult(false, false, 'partial_source_sync');
             }
-
-            sourcesByKey.clear();
-            sourceTagsById.clear();
-            runtime.keyByElement = keyByElement;
 
             const normalizedTagState = isFirstLoad ? buildNormalizedTagState(loadedState) : null;
             const resolvedSourceStateById = isFirstLoad
@@ -2261,44 +2556,41 @@
                 ? buildResolvedSourceTagsById(sourceLookup, loadedState, normalizedTagState?.rawToSafeTagId || null)
                 : new Map();
 
-            if (isFirstLoad && normalizedTagState) {
-                const tagsById = runtime.tagsById instanceof Map ? runtime.tagsById : ensureMap('tagsById');
-                tagsById.clear();
-                normalizedTagState.nextTagsById.forEach((tag, tagId) => {
-                    tagsById.set(tagId, tag);
-                });
-                state.tagOrder = normalizedTagState.nextTagOrder;
-            }
-
-            let knownSourceRefs = new Set();
+            let candidateRoot;
+            let candidateUngrouped;
+            let candidateGroupsById;
             if (isFirstLoad) {
                 const reconciledTree = reconcilePersistedTree(loadedState, sourceLookup);
-                state.root = reconciledTree.root;
-                state.ungrouped = reconciledTree.ungrouped;
-                groupsById.clear();
-                reconciledTree.groupsById.forEach((group, groupId) => {
-                    groupsById.set(groupId, group);
-                });
-                knownSourceRefs = reconciledTree.seenSourceRefs;
+                if (!reconciledTree?.ok) {
+                    developerLog('warn', 'source_sync', 'scan_reconcile_failed', {
+                        reason: reconciledTree?.reason || 'invalid_model'
+                    });
+                    return createScanResult(false, false, 'reconcile_failed');
+                }
+                candidateRoot = reconciledTree.root;
+                candidateUngrouped = reconciledTree.ungrouped;
+                candidateGroupsById = reconciledTree.groupsById;
             } else {
                 const remappedState = remapExistingStateToCurrentSources(sourceLookup, {
                     sourceRecordsByKey: previousSourceRecordsByKey,
                     sourceTagsById: oldSourceTags
                 });
-                if (shouldPreserveExistingTreeDuringUnsafeRemap(remappedState, previousSourceRecordsByKey, sourceLookup)) {
+                if (shouldPreserveExistingTreeDuringUnsafeRemap(
+                    remappedState,
+                    previousSourceRecordsByKey,
+                    sourceLookup,
+                    authorizedNativeDeleteKeys
+                )) {
                     developerLog('warn', 'source_sync', 'scan_skipped_unsafe_remap', {
                         previousCount: previousSourceRecordsByKey.size,
                         currentCount: currentSources.length,
                         reason: 'unsafe_remap'
                     });
-                    return false;
+                    return createScanResult(false, false, 'unsafe_remap');
                 }
-                state.root = remappedState.root;
-                state.ungrouped = remappedState.ungrouped;
-                groupsById.clear();
-                remappedState.groupsById.forEach((group, groupId) => {
-                    groupsById.set(groupId, group);
-                });
+                candidateRoot = remappedState.root;
+                candidateUngrouped = remappedState.ungrouped;
+                candidateGroupsById = remappedState.groupsById;
                 oldSourcesMap.clear();
                 remappedState.sourceStateById.forEach((sourceRecord, sourceKey) => {
                     const existingSource = sourcesByKey.get(sourceKey);
@@ -2312,22 +2604,32 @@
                 remappedState.sourceTagsById.forEach((tagIds, sourceKey) => {
                     oldSourceTags.set(sourceKey, [...tagIds]);
                 });
-                knownSourceRefs = remappedState.seenSourceRefs;
             }
 
+            const nextSourcesByKey = new Map();
+            const nextSourceTagsById = new Map();
             currentSources.forEach((source) => {
                 let enabled;
                 const previousSourceState = oldSourcesMap.get(source.key) || null;
                 const resolvedSourceState = isFirstLoad ? (resolvedSourceStateById.get(source.key) || null) : null;
+                const hasResolvedSourceState = Boolean(
+                    resolvedSourceState
+                    && typeof resolvedSourceState === 'object'
+                    && !Array.isArray(resolvedSourceState)
+                );
+                const hasResolvedEnabled = Boolean(
+                    hasResolvedSourceState
+                    && typeof resolvedSourceState.enabled === 'boolean'
+                );
                 const previousEnabled = previousSourceState ? Boolean(previousSourceState.enabled) : true;
                 const nativeCheckboxState = getNativeSourceCheckboxState(source, previousEnabled);
                 const nativeLabelTitle = source.nativeLabelTitle || previousSourceState?.nativeLabelTitle || '';
                 const nativeLabelGroupSelection = nativeLabelGroupSelections.get(getComparableNativeLabelTitle(nativeLabelTitle));
                 const addedAt = isFirstLoad
-                    ? (resolvedSourceStateById.has(source.key) ? (resolvedSourceState?.addedAt || '') : new Date().toISOString())
+                    ? (hasResolvedSourceState ? (resolvedSourceState.addedAt || '') : new Date().toISOString())
                     : (oldSourcesMap.has(source.key) ? (previousSourceState?.addedAt || '') : new Date().toISOString());
                 if (isFirstLoad) {
-                    enabled = resolvedSourceStateById.has(source.key)
+                    enabled = hasResolvedEnabled
                         ? Boolean(resolvedSourceState.enabled)
                         : nativeCheckboxState;
                 } else if (source.sourceViewKind === SOURCE_VIEW_KIND_LABEL && nativeLabelGroupSelection) {
@@ -2347,27 +2649,59 @@
                     addedAt
                 };
 
-                sourcesByKey.set(source.key, hydratedSource);
-                keyByElement.set(source.element, source.key);
-                setSourceTagIds(
+                nextSourcesByKey.set(source.key, hydratedSource);
+                if (source.element && typeof source.element === 'object') {
+                    keyByElement.set(source.element, source.key);
+                }
+                nextSourceTagsById.set(
                     source.key,
                     isFirstLoad
                         ? (resolvedSourceTagsById.get(source.key) || [])
                         : (oldSourceTags.get(source.key) || [])
                 );
-
-                if (!knownSourceRefs.has(source.key)) {
-                    state.ungrouped.push(source.key);
-                    knownSourceRefs.add(source.key);
-                }
             });
 
-            if (state.activeTagId && !(runtime.tagsById instanceof Map ? runtime.tagsById : ensureMap('tagsById')).has(state.activeTagId)) {
+            const placementResult = normalizeAndCommitPlacement(
+                {
+                    ...state,
+                    root: candidateRoot,
+                    ungrouped: candidateUngrouped
+                },
+                candidateGroupsById,
+                new Set(nextSourcesByKey.keys()),
+                isFirstLoad ? 'initial_scan' : 'later_scan'
+            );
+            if (!placementResult.ok) {
+                return createScanResult(false, false, 'placement_failed');
+            }
+
+            if (isFirstLoad && normalizedTagState) {
+                const tagsById = runtime.tagsById instanceof Map ? runtime.tagsById : ensureMap('tagsById');
+                tagsById.clear();
+                normalizedTagState.nextTagsById.forEach((tag, tagId) => {
+                    tagsById.set(tagId, tag);
+                });
+                state.tagOrder = normalizedTagState.nextTagOrder;
+            }
+
+            sourcesByKey.clear();
+            nextSourcesByKey.forEach((source, sourceKey) => {
+                sourcesByKey.set(sourceKey, source);
+            });
+            sourceTagsById.clear();
+            nextSourceTagsById.forEach((tagIds, sourceKey) => {
+                setSourceTagIds(sourceKey, tagIds);
+            });
+            runtime.keyByElement = keyByElement;
+
+            const tagsById = runtime.tagsById instanceof Map ? runtime.tagsById : ensureMap('tagsById');
+            if (state.activeTagId && !tagsById.has(state.activeTagId)) {
                 state.activeTagId = null;
             }
 
             buildParentMap();
             sourcesByKey.forEach((source) => {
+                if (source.isPreservedPartialSource) return;
                 syncSourceToPage(source, isSourceEffectivelyEnabled(source), {
                     currentSourceViewKind: runtime.sourceViewKind || SOURCE_VIEW_KIND_UNKNOWN,
                     preferStoredCheckbox: true
@@ -2375,13 +2709,17 @@
             });
 
             const pendingStorageUpgrade = isFirstLoad && getPendingStorageUpgrade();
+            consumeNativeDeleteMarkersAfterSuccessfulSync(
+                pendingNativeDeleteSourceKeys,
+                pendingNativeDeleteIdentityKeys
+            );
             developerLog('debug', 'source_sync', 'scan_finished', {
                 isFirstLoad,
                 sourceCount: sourcesByKey.size,
                 groupCount: groupsById.size,
                 pendingStorageUpgrade
             });
-            return pendingStorageUpgrade;
+            return createScanResult(true, pendingStorageUpgrade);
         }
 
         const createDebounced = typeof debounceFn === 'function'

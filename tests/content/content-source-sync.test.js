@@ -55,11 +55,17 @@ describe('accepted native source deletion reconciliation', () => {
             { type: 'source', key: 'B' }
         ];
         mod.state.ungrouped = ['B'];
-        mod.sourcesByKey.set('A', { key: 'A' });
+        const deletedSource = {
+            key: 'A',
+            stableToken: 'stable-a',
+            fingerprint: 'fingerprint-a'
+        };
+        mod.sourcesByKey.set('A', deletedSource);
         mod.sourcesByKey.set('B', { key: 'B' });
         mod.sourceTagsById.set('A', new Set(['tag-1']));
         mod.pendingBatchKeys.add('A');
         mod.parentMap.set('A', 'stale-parent');
+        mod._setRecentNativeDeleteMarkersForTest('A', deletedSource);
 
         expect(mod._handleNativeSourceDeleteAcceptedForTest('A')).toBe(true);
 
@@ -69,6 +75,13 @@ describe('accepted native source deletion reconciliation', () => {
         expect(mod.parentMap.has('A')).toBe(false);
         expect(mod.state.root).toEqual([{ type: 'source', key: 'B' }]);
         expect(mod.state.ungrouped).toEqual([]);
+        expect(mod._getRecentNativeDeleteMarkersForTest()).toEqual({
+            sourceKeys: new Set(['A']),
+            identityKeys: new Set([
+                'stable:stable-a',
+                'fingerprint:fingerprint-a'
+            ])
+        });
     });
 
     it('clears stale parent-map entries when the deleted source was already absent from the tree', () => {
@@ -84,6 +97,45 @@ describe('accepted native source deletion reconciliation', () => {
         expect(mod.parentMap.has('A')).toBe(false);
         expect(mod.state.root).toEqual([{ type: 'source', key: 'B' }]);
         expect(mod.state.ungrouped).toEqual([]);
+    });
+
+    it('does not persist dangling refs when accepted-delete tree repair fails closed', () => {
+        mod.state.root = [{ type: 'group', id: 'B' }];
+        mod.state.ungrouped = [];
+        mod.groupsById.set('B', {
+            id: 'B',
+            title: 'Identity collision',
+            children: [{ type: 'source', key: 'A' }]
+        });
+        const deletedSource = {
+            key: 'A',
+            stableToken: 'stable-a',
+            fingerprint: 'fingerprint-a'
+        };
+        mod.sourcesByKey.set('A', deletedSource);
+        mod.sourcesByKey.set('B', { key: 'B' });
+        mod.sourceTagsById.set('A', new Set(['tag-1']));
+        mod._setRecentNativeDeleteMarkersForTest('A', deletedSource);
+        global.chrome.runtime.sendMessage.mockClear();
+
+        expect(mod._handleNativeSourceDeleteAcceptedForTest('A')).toBe(false);
+
+        expect(mod.sourcesByKey.has('A')).toBe(true);
+        expect(mod.sourceTagsById.has('A')).toBe(true);
+        expect(mod.groupsById.get('B').children).toEqual([
+            { type: 'source', key: 'A' }
+        ]);
+        expect(global.chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+            expect.objectContaining({ type: 'SAVE_STATE' }),
+            expect.any(Function)
+        );
+        expect(mod._getRecentNativeDeleteMarkersForTest()).toEqual({
+            sourceKeys: new Set(['A']),
+            identityKeys: new Set([
+                'stable:stable-a',
+                'fingerprint:fingerprint-a'
+            ])
+        });
     });
 });
 
@@ -104,6 +156,17 @@ describe('scanAndSyncSources', () => {
 
     afterEach(teardownGlobalMocks);
 
+    it('routes live orphan placement through Tree Placement normalization', () => {
+        const sourceText = fs.readFileSync(
+            path.join(__dirname, '../../src/content/content-source-sync.js'),
+            'utf8'
+        );
+
+        expect(sourceText).toMatch(/normalizePlacementState/);
+        expect(sourceText).toMatch(/commitPlacementModel/);
+        expect(sourceText).not.toMatch(/state\.ungrouped\.push\(/);
+    });
+
     it('scans rows from the current source panel instead of hidden stale panels', () => {
         const stale = createMockSourceRow({ title: 'Hidden Old Source', stableToken: 'old-doc', checked: true });
         const current = createMockSourceRow({ title: 'Current Source', stableToken: 'current-doc', checked: true });
@@ -123,6 +186,85 @@ describe('scanAndSyncSources', () => {
 
         expect(panel.querySelectorAll).toHaveBeenCalled();
         expect(Array.from(mod.sourcesByKey.values()).map((source) => source.title)).toEqual(['Current Source']);
+    });
+
+    it('repairs a cyclic live tree during later sync without recursing indefinitely', () => {
+        const source = createMockSourceRow({
+            title: 'Cycle source',
+            stableToken: 'cycle-source',
+            checked: true
+        });
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        panel.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [source.row] : []
+        ));
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel'
+                ? panel
+                : null
+        ));
+        mod.scanAndSyncSources({}, true);
+        const sourceKey = Array.from(mod.sourcesByKey.keys())[0];
+        mod.groupsById.set('a', {
+            id: 'a',
+            children: [
+                { type: 'group', id: 'b' },
+                { type: 'source', key: sourceKey }
+            ]
+        });
+        mod.groupsById.set('b', {
+            id: 'b',
+            children: [{ type: 'group', id: 'a' }]
+        });
+        mod.state.root = [{ type: 'group', id: 'a' }];
+        mod.state.ungrouped = [];
+
+        expect(() => mod.scanAndSyncSources(null, false)).not.toThrow();
+        expect(mod.groupsById.get('a').children).toEqual([
+            { type: 'group', id: 'b' },
+            { type: 'source', key: sourceKey }
+        ]);
+        expect(mod.groupsById.get('b').children).toEqual([]);
+        expect(mod.state.ungrouped).toEqual([]);
+    });
+
+    it('preserves a deeply nested live tree through the real later-sync consumer', () => {
+        const source = createMockSourceRow({
+            title: 'Deep source',
+            stableToken: 'deep-source',
+            checked: true
+        });
+        const descriptor = mod.createSourceDescriptor(source.row, new Map(), new Map());
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [source.row] : []
+        ));
+
+        expect(mod.scanAndSyncSources({}, true)).toEqual({
+            ok: true,
+            shouldUpgradeStorage: false,
+            reason: 'completed'
+        });
+
+        const depth = 12_000;
+        mod.state.root = [{ type: 'group', id: 'deep-0' }];
+        mod.state.ungrouped = [];
+        mod.groupsById.clear();
+        for (let index = 0; index < depth; index += 1) {
+            const groupId = `deep-${index}`;
+            mod.groupsById.set(groupId, {
+                id: groupId,
+                title: groupId,
+                children: index === depth - 1
+                    ? [{ type: 'source', key: descriptor.key }]
+                    : [{ type: 'group', id: `deep-${index + 1}` }]
+            });
+        }
+
+        expect(() => mod.scanAndSyncSources({}, false)).not.toThrow();
+        expect(mod.groupsById.get(`deep-${depth - 1}`).children).toEqual([
+            { type: 'source', key: descriptor.key }
+        ]);
+        expect(mod.state.ungrouped).toEqual([]);
     });
 
     it('detects the traditional list source view from source rows', () => {
@@ -535,7 +677,7 @@ describe('scanAndSyncSources', () => {
             enabled: true,
             collapsed: false
         });
-        mod.state.groups = ['ai-group'];
+        mod.state.root = [{ type: 'group', id: 'ai-group' }];
         mod.state.ungrouped = [];
 
         const groupCheckbox = {
@@ -589,7 +731,7 @@ describe('scanAndSyncSources', () => {
             enabled: true,
             collapsed: false
         });
-        mod.state.groups = ['imported-folder'];
+        mod.state.root = [{ type: 'group', id: 'imported-folder' }];
         mod.state.ungrouped = [];
 
         const groupCheckbox = {
@@ -692,7 +834,7 @@ describe('scanAndSyncSources', () => {
             enabled: true,
             collapsed: false
         });
-        mod.state.groups = ['ordinary-folder'];
+        mod.state.root = [{ type: 'group', id: 'ordinary-folder' }];
         mod.state.ungrouped = [];
 
         const groupCheckbox = {
@@ -2479,7 +2621,7 @@ describe('scanAndSyncSources', () => {
             enabled: true,
             collapsed: false
         });
-        mod.state.groups = ['existing-clinical'];
+        mod.state.root = [{ type: 'group', id: 'existing-clinical' }];
         mod.scanAndSyncSources({}, false);
 
         expect(mod.getNativeLabelImportPreview()).toMatchObject({
@@ -2488,7 +2630,11 @@ describe('scanAndSyncSources', () => {
             sourceCount: 2
         });
 
+        const existingSourceRecords = new Map(mod.sourcesByKey);
         expect(mod.applyNativeLabelImport()).toBe(true);
+        existingSourceRecords.forEach((source, sourceKey) => {
+            expect(mod.sourcesByKey.get(sourceKey)).toBe(source);
+        });
         expect(mod.groupsById.get('existing-clinical').children).toHaveLength(1);
         expect(mod.groupsById.get('existing-clinical').nativeLabelTitle).toBe('Clinical Papers');
         expect(Array.from(mod.groupsById.values()).map((group) => group.title).sort()).toEqual([
@@ -2536,6 +2682,58 @@ describe('scanAndSyncSources', () => {
         expect(mod.state.ungrouped).toEqual([]);
     });
 
+    it('rejects native label import atomically when a source key conflicts with a group id', () => {
+        mod._setProjectId('native-label-identity-collision');
+        mod.groupsById.set('collision', {
+            id: 'collision',
+            title: 'Existing Folder',
+            children: [],
+            enabled: true,
+            collapsed: false
+        });
+        mod.state.root = [{ type: 'group', id: 'collision' }];
+        global.chrome.runtime.sendMessage.mockClear();
+
+        const preview = {
+            ok: true,
+            labels: [{
+                title: 'Imported Label',
+                sourceKeys: ['collision'],
+                sourceRecords: [{
+                    key: 'collision',
+                    legacyKey: 'collision',
+                    title: 'Conflicting Source',
+                    normalizedTitle: 'conflicting source',
+                    enabled: true
+                }],
+                existingGroupId: null
+            }]
+        };
+
+        expect(mod.applyNativeLabelImport(preview)).toBe(false);
+        expect(mod.state.root).toEqual([{ type: 'group', id: 'collision' }]);
+        expect(mod.state.ungrouped).toEqual([]);
+        expect(mod.groupsById).toEqual(new Map([[
+            'collision',
+            {
+                id: 'collision',
+                title: 'Existing Folder',
+                children: [],
+                enabled: true,
+                collapsed: false
+            }
+        ]]));
+        expect(mod.sourcesByKey.size).toBe(0);
+        expect(mod.sourceTagsById.size).toBe(0);
+        expect(mod.getDiagnosticsInfo().lastNativeLabelImportSummary).toBeNull();
+        expect(mod._getActiveToastItemForTest()).toBeNull();
+        expect(mod._getToastQueueLengthForTest()).toBe(0);
+        expect(global.chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+            expect.objectContaining({ type: 'SAVE_STATE' }),
+            expect.any(Function)
+        );
+    });
+
     it('does not silently reuse ordinary same-title folders during native label import', () => {
         const source = createMockSourceRow({ title: 'Paper One', stableToken: 'paper-1', checked: true });
         source.row.__nativeLabelTitle = 'Clinical Papers';
@@ -2557,7 +2755,7 @@ describe('scanAndSyncSources', () => {
             enabled: true,
             collapsed: false
         });
-        mod.state.groups = ['ordinary-clinical'];
+        mod.state.root = [{ type: 'group', id: 'ordinary-clinical' }];
 
         expect(mod.getSourceViewInfo(panel).kind).toBe('label');
         expect(mod.getNativeLabelImportPreview()).toMatchObject({
@@ -2719,7 +2917,7 @@ describe('scanAndSyncSources', () => {
             { type: 'source', key: firstDescriptor.key },
             { type: 'source', key: secondDescriptor.key }
         ];
-        mod.state.groups = ['folder'];
+        mod.state.root = [{ type: 'group', id: 'folder' }];
         mod.state.ungrouped = [];
         mod.groupsById.set('folder', {
             id: 'folder',
@@ -2739,7 +2937,11 @@ describe('scanAndSyncSources', () => {
         const changed = mod.scanAndSyncSources(null, false);
         mod.flushPendingStateSave();
 
-        expect(changed).toBe(false);
+        expect(changed).toEqual({
+            ok: false,
+            shouldUpgradeStorage: false,
+            reason: 'unsafe_remap'
+        });
         expect(mod.groupsById.get('folder').children).toEqual(originalChildren);
         expect(mod.state.ungrouped).toEqual([]);
         expect(mod.getDiagnosticsInfo().lastSkippedStructuralSourceSync).toEqual(expect.objectContaining({
@@ -2750,6 +2952,318 @@ describe('scanAndSyncSources', () => {
             expect.objectContaining({ type: 'SAVE_STATE' }),
             expect.any(Function)
         );
+    });
+
+    it('retains native-delete markers until the replacement tree commits successfully', () => {
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const deletedRow = createMockSourceRow({
+            title: 'Deleted Source',
+            stableToken: 'deleted-source',
+            checked: true
+        });
+        const replacementRow = createMockSourceRow({
+            title: 'Replacement Source',
+            stableToken: 'replacement-source',
+            checked: true
+        });
+        const deletedDescriptor = mod.createSourceDescriptor(
+            deletedRow.row,
+            new Map(),
+            new Map()
+        );
+        const replacementDescriptor = mod.createSourceDescriptor(
+            replacementRow.row,
+            new Map(),
+            new Map()
+        );
+
+        panel.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [replacementRow.row] : []
+        ));
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel'
+                ? panel
+                : null
+        ));
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [replacementRow.row] : []
+        ));
+
+        mod.sourcesByKey.set(deletedDescriptor.key, deletedDescriptor);
+        mod.sourcesByKey.set(replacementDescriptor.key, replacementDescriptor);
+        mod.groupsById.set(replacementDescriptor.key, {
+            id: replacementDescriptor.key,
+            title: 'Temporary identity collision',
+            children: [{ type: 'source', key: deletedDescriptor.key }]
+        });
+        mod.state.root = [{ type: 'group', id: replacementDescriptor.key }];
+        mod.state.ungrouped = [];
+        mod._setRecentNativeDeleteMarkersForTest(
+            deletedDescriptor.key,
+            deletedDescriptor
+        );
+
+        expect(mod.scanAndSyncSources({}, false)).toEqual({
+            ok: false,
+            shouldUpgradeStorage: false,
+            reason: 'placement_failed'
+        });
+        expect(mod._getRecentNativeDeleteMarkersForTest()).toEqual({
+            sourceKeys: new Set([deletedDescriptor.key]),
+            identityKeys: new Set([
+                `stable:${deletedDescriptor.stableToken}`,
+                `fingerprint:${deletedDescriptor.fingerprint}`
+            ])
+        });
+        expect(mod.sourcesByKey.has(deletedDescriptor.key)).toBe(true);
+
+        mod.groupsById.clear();
+        mod.state.root = [];
+        mod.state.ungrouped = [
+            deletedDescriptor.key,
+            replacementDescriptor.key
+        ];
+
+        expect(mod.scanAndSyncSources({}, false)).toEqual({
+            ok: true,
+            shouldUpgradeStorage: false,
+            reason: 'completed'
+        });
+        expect(mod.sourcesByKey.has(deletedDescriptor.key)).toBe(false);
+        expect(mod.sourcesByKey.has(replacementDescriptor.key)).toBe(true);
+        expect(mod._getRecentNativeDeleteMarkersForTest()).toEqual({
+            sourceKeys: new Set(),
+            identityKeys: new Set()
+        });
+    });
+
+    it('keeps accepted-delete markers until a ready raw DOM scan confirms the source is gone', () => {
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const deletedRow = createMockSourceRow({
+            title: 'Accepted Delete Source',
+            stableToken: 'accepted-delete-source',
+            checked: true
+        });
+        const deletedDescriptor = mod.createSourceDescriptor(
+            deletedRow.row,
+            new Map(),
+            new Map()
+        );
+        let visibleRows = [deletedRow.row];
+
+        panel.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? visibleRows : []
+        ));
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel'
+                ? panel
+                : null
+        ));
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? visibleRows : []
+        ));
+        mod.sourcesByKey.set(deletedDescriptor.key, deletedDescriptor);
+        mod.state.root = [];
+        mod.state.ungrouped = [deletedDescriptor.key];
+        mod._setRecentNativeDeleteMarkersForTest(
+            deletedDescriptor.key,
+            deletedDescriptor
+        );
+
+        expect(mod._handleNativeSourceDeleteAcceptedForTest(deletedDescriptor.key)).toBe(true);
+        expect(mod.sourcesByKey.has(deletedDescriptor.key)).toBe(false);
+
+        expect(mod.scanAndSyncSources({}, false)).toEqual({
+            ok: true,
+            shouldUpgradeStorage: false,
+            reason: 'completed'
+        });
+        expect(mod.sourcesByKey.has(deletedDescriptor.key)).toBe(false);
+        expect(mod._getRecentNativeDeleteMarkersForTest()).toEqual({
+            sourceKeys: new Set([deletedDescriptor.key]),
+            identityKeys: new Set([
+                `stable:${deletedDescriptor.stableToken}`,
+                `fingerprint:${deletedDescriptor.fingerprint}`
+            ])
+        });
+
+        visibleRows = [];
+        expect(mod.scanAndSyncSources({}, false)).toEqual({
+            ok: true,
+            shouldUpgradeStorage: false,
+            reason: 'completed'
+        });
+        expect(mod._getRecentNativeDeleteMarkersForTest()).toEqual({
+            sourceKeys: new Set(),
+            identityKeys: new Set()
+        });
+
+        visibleRows = [deletedRow.row];
+        expect(mod.scanAndSyncSources({}, false)).toEqual({
+            ok: true,
+            shouldUpgradeStorage: false,
+            reason: 'completed'
+        });
+        expect(mod.sourcesByKey.has(deletedDescriptor.key)).toBe(true);
+        expect(mod.state.ungrouped).toContain(deletedDescriptor.key);
+    });
+
+    it('retains failed-delete markers across stale raw DOM scans and clears them after disappearance', () => {
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const deletedRow = createMockSourceRow({
+            title: 'Failed Delete Source',
+            stableToken: 'failed-delete-source',
+            checked: true
+        });
+        const replacementRow = createMockSourceRow({
+            title: 'Failure Collision Source',
+            stableToken: 'failure-collision-source',
+            checked: true
+        });
+        const deletedDescriptor = mod.createSourceDescriptor(
+            deletedRow.row,
+            new Map(),
+            new Map()
+        );
+        const replacementDescriptor = mod.createSourceDescriptor(
+            replacementRow.row,
+            new Map(),
+            new Map()
+        );
+        let visibleRows = [deletedRow.row, replacementRow.row];
+
+        panel.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? visibleRows : []
+        ));
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel'
+                ? panel
+                : null
+        ));
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? visibleRows : []
+        ));
+        mod.sourcesByKey.set(deletedDescriptor.key, deletedDescriptor);
+        mod.sourcesByKey.set(replacementDescriptor.key, replacementDescriptor);
+        mod.groupsById.set(replacementDescriptor.key, {
+            id: replacementDescriptor.key,
+            title: 'Temporary identity collision',
+            children: [{ type: 'source', key: deletedDescriptor.key }]
+        });
+        mod.state.root = [{ type: 'group', id: replacementDescriptor.key }];
+        mod.state.ungrouped = [];
+        mod._setRecentNativeDeleteMarkersForTest(
+            deletedDescriptor.key,
+            deletedDescriptor
+        );
+
+        expect(mod._handleNativeSourceDeleteAcceptedForTest(deletedDescriptor.key)).toBe(false);
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+            expect(mod.scanAndSyncSources({}, false)).toEqual({
+                ok: false,
+                shouldUpgradeStorage: false,
+                reason: 'placement_failed'
+            });
+            expect(mod.sourcesByKey.has(deletedDescriptor.key)).toBe(true);
+            expect(mod._getRecentNativeDeleteMarkersForTest()).toEqual({
+                sourceKeys: new Set([deletedDescriptor.key]),
+                identityKeys: new Set([
+                    `stable:${deletedDescriptor.stableToken}`,
+                    `fingerprint:${deletedDescriptor.fingerprint}`
+                ])
+            });
+        }
+
+        visibleRows = [replacementRow.row];
+        mod.groupsById.clear();
+        mod.state.root = [];
+        mod.state.ungrouped = [
+            deletedDescriptor.key,
+            replacementDescriptor.key
+        ];
+
+        expect(mod.scanAndSyncSources({}, false)).toEqual({
+            ok: true,
+            shouldUpgradeStorage: false,
+            reason: 'completed'
+        });
+        expect(mod.sourcesByKey.has(deletedDescriptor.key)).toBe(false);
+        expect(mod.sourcesByKey.has(replacementDescriptor.key)).toBe(true);
+        expect(mod._getRecentNativeDeleteMarkersForTest()).toEqual({
+            sourceKeys: new Set(),
+            identityKeys: new Set()
+        });
+    });
+
+    it('consumes committed delete markers when a new source keeps the scan count unchanged', () => {
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const deletedRow = createMockSourceRow({
+            title: 'Equal Count Deleted',
+            stableToken: 'equal-count-deleted',
+            checked: true
+        });
+        const retainedRow = createMockSourceRow({
+            title: 'Equal Count Retained',
+            stableToken: 'equal-count-retained',
+            checked: true
+        });
+        const addedRow = createMockSourceRow({
+            title: 'Equal Count Added',
+            stableToken: 'equal-count-added',
+            checked: true
+        });
+        const deletedDescriptor = mod.createSourceDescriptor(
+            deletedRow.row,
+            new Map(),
+            new Map()
+        );
+        const retainedDescriptor = mod.createSourceDescriptor(
+            retainedRow.row,
+            new Map(),
+            new Map()
+        );
+        const addedDescriptor = mod.createSourceDescriptor(
+            addedRow.row,
+            new Map(),
+            new Map()
+        );
+        const visibleRows = [retainedRow.row, addedRow.row];
+
+        panel.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? visibleRows : []
+        ));
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel'
+                ? panel
+                : null
+        ));
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? visibleRows : []
+        ));
+        mod.sourcesByKey.set(deletedDescriptor.key, deletedDescriptor);
+        mod.sourcesByKey.set(retainedDescriptor.key, retainedDescriptor);
+        mod.state.root = [];
+        mod.state.ungrouped = [
+            deletedDescriptor.key,
+            retainedDescriptor.key
+        ];
+        mod._setRecentNativeDeleteMarkersForTest(
+            deletedDescriptor.key,
+            deletedDescriptor
+        );
+
+        expect(mod.scanAndSyncSources({}, false)).toEqual({
+            ok: true,
+            shouldUpgradeStorage: false,
+            reason: 'completed'
+        });
+        expect(mod.sourcesByKey.has(deletedDescriptor.key)).toBe(false);
+        expect(mod.sourcesByKey.has(retainedDescriptor.key)).toBe(true);
+        expect(mod.sourcesByKey.has(addedDescriptor.key)).toBe(true);
+        expect(mod._getRecentNativeDeleteMarkersForTest()).toEqual({
+            sourceKeys: new Set(),
+            identityKeys: new Set()
+        });
     });
 
     it('hydrates v2 state, appends new sources, and preserves loading metadata', () => {
@@ -2780,13 +3294,49 @@ describe('scanAndSyncSources', () => {
         }, true);
 
         const secondKey = mod.state.ungrouped[0];
-        expect(shouldUpgrade).toBe(false);
+        expect(shouldUpgrade).toEqual({
+            ok: true,
+            shouldUpgradeStorage: false,
+            reason: 'completed'
+        });
         expect(mod.sourcesByKey.get(descriptorA.key).enabled).toBe(false);
         expect(mod.groupsById.get('group1').children[0].key).toBe(descriptorA.key);
         expect(secondKey).toBeDefined();
         expect(mod.sourcesByKey.get(secondKey).iconName).toBe('smart_display');
         expect(mod.sourcesByKey.get(secondKey).isDisabled).toBe(true);
         expect(mod.sourcesByKey.get(secondKey).isLoading).toBe(true);
+    });
+
+    it.each([
+        ['null', null],
+        ['missing enabled', { title: 'Stored source without an enabled flag' }],
+        ['invalid enabled', { enabled: 'false', title: 'Stored source with an invalid enabled flag' }]
+    ])('falls back to the native checkbox for a %s first-load source record', (label, sourceRecord) => {
+        const row = createMockSourceRow({
+            title: 'Fallback Source',
+            stableToken: 'fallback-source',
+            checked: true
+        });
+        const descriptor = mod.createSourceDescriptor(row.row, new Map(), new Map());
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [row.row] : []
+        ));
+
+        expect(() => mod.scanAndSyncSources({
+            schemaVersion: 5,
+            root: [{ type: 'source', key: descriptor.key }],
+            groupsById: {},
+            ungrouped: [],
+            sourceStateById: {
+                [descriptor.key]: sourceRecord
+            },
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {}
+        }, true)).not.toThrow();
+
+        expect(mod.sourcesByKey.get(descriptor.key).enabled).toBe(true);
+        expect(mod.state.root).toEqual([{ type: 'source', key: descriptor.key }]);
     });
 
     it('migrates legacy source keys to v2 ids and marks storage for rewrite', () => {
@@ -2808,7 +3358,11 @@ describe('scanAndSyncSources', () => {
             }
         }), true);
 
-        expect(shouldUpgrade).toBe(true);
+        expect(shouldUpgrade).toEqual({
+            ok: true,
+            shouldUpgradeStorage: true,
+            reason: 'completed'
+        });
         expect(mod.groupsById.get('group1').children[0].key).toBe(descriptor.key);
         expect(mod.sourcesByKey.get(descriptor.key).enabled).toBe(false);
     });
@@ -2849,6 +3403,72 @@ describe('scanAndSyncSources', () => {
         expect(mod.sourcesByKey.get(currentDescriptor.key).enabled).toBe(false);
     });
 
+    it('produces the same placement invariant through real first-load and later-sync consumers', () => {
+        const duplicateRow = createMockSourceRow({
+            title: 'Duplicate Source',
+            stableToken: 'duplicate-source',
+            checked: true
+        });
+        const orphanRow = createMockSourceRow({
+            title: 'Orphan Source',
+            stableToken: 'orphan-source',
+            checked: true
+        });
+        const duplicate = mod.createSourceDescriptor(duplicateRow.row, new Map(), new Map());
+        const orphan = mod.createSourceDescriptor(orphanRow.row, new Map(), new Map());
+        const rows = [duplicateRow.row, orphanRow.row];
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? rows : []
+        ));
+        const malformedState = {
+            schemaVersion: 5,
+            root: [
+                { type: 'group', id: 'group' },
+                { type: 'source', key: duplicate.key }
+            ],
+            groupsById: {
+                group: {
+                    id: 'group',
+                    children: [{ type: 'source', key: duplicate.key }]
+                }
+            },
+            ungrouped: [duplicate.key],
+            sourceStateById: {
+                [duplicate.key]: { enabled: true },
+                [orphan.key]: { enabled: true }
+            },
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {}
+        };
+
+        mod.scanAndSyncSources(malformedState, true);
+        const firstLoadPlacement = {
+            root: JSON.parse(JSON.stringify(mod.state.root)),
+            ungrouped: [...mod.state.ungrouped],
+            groupChildren: JSON.parse(JSON.stringify(mod.groupsById.get('group').children))
+        };
+
+        mod.state.root = [
+            { type: 'group', id: 'group' },
+            { type: 'source', key: duplicate.key }
+        ];
+        mod.state.ungrouped = [duplicate.key];
+        mod.groupsById.get('group').children = [{ type: 'source', key: duplicate.key }];
+        mod.scanAndSyncSources(null, false);
+
+        expect({
+            root: mod.state.root,
+            ungrouped: mod.state.ungrouped,
+            groupChildren: mod.groupsById.get('group').children
+        }).toEqual(firstLoadPlacement);
+        expect(firstLoadPlacement).toEqual({
+            root: [{ type: 'group', id: 'group' }],
+            ungrouped: [orphan.key],
+            groupChildren: [{ type: 'source', key: duplicate.key }]
+        });
+    });
+
     it('does not remap persisted grouped sources by title when stable token drift suggests a new source', () => {
         const currentRow = createMockSourceRow({
             title: 'Title Fallback Source',
@@ -2864,7 +3484,7 @@ describe('scanAndSyncSources', () => {
             mod.DEPS.row.includes(selector) ? [currentRow.row] : []
         ));
 
-        mod.scanAndSyncSources({
+        expect(mod.scanAndSyncSources({
             schemaVersion: 3,
             groups: ['group1'],
             groupsById: {
@@ -2885,10 +3505,14 @@ describe('scanAndSyncSources', () => {
                     identityType: 'stable-token'
                 }
             }
-        }, true);
+        }, true)).toEqual({
+            ok: false,
+            shouldUpgradeStorage: false,
+            reason: 'partial_initial_source_sync'
+        });
 
-        expect(mod.groupsById.get('group1').children).toEqual([]);
-        expect(mod.sourcesByKey.get(currentDescriptor.key).enabled).toBe(true);
+        expect(mod.groupsById.has('group1')).toBe(false);
+        expect(mod.sourcesByKey.has(currentDescriptor.key)).toBe(false);
     });
 
     it('keeps local enabled state across DOM re-renders', () => {
@@ -3087,7 +3711,11 @@ describe('scanAndSyncSources', () => {
             isLoading: true,
             isDisabled: true
         });
-        expect(shouldUpgrade).toBe(false);
+        expect(shouldUpgrade).toEqual({
+            ok: true,
+            shouldUpgradeStorage: false,
+            reason: 'completed'
+        });
         expect(mod.hasRenderableSourceRows()).toBe(true);
         expect(mod.getSourcePanelState(panel)).toEqual(expect.objectContaining({
             state: 'ready',
@@ -3331,7 +3959,7 @@ describe('scanAndSyncSources', () => {
         ));
         mod.scanAndSyncSources(null, true);
 
-        mod.state.groups = ['group1'];
+        mod.state.root = [{ type: 'group', id: 'group1' }];
         mod.state.ungrouped = [];
         mod.groupsById.set('group1', {
             id: 'group1',
@@ -3643,7 +4271,7 @@ describe('scanAndSyncSources', () => {
         ));
         mod.scanAndSyncSources(null, true);
 
-        mod.state.groups = ['group1'];
+        mod.state.root = [{ type: 'group', id: 'group1' }];
         mod.state.ungrouped = [oldAnchorDescriptor.key];
         mod.groupsById.set('group1', {
             id: 'group1',
@@ -3679,7 +4307,7 @@ describe('scanAndSyncSources', () => {
         ));
         mod.scanAndSyncSources(null, true);
 
-        mod.state.groups = ['group1'];
+        mod.state.root = [{ type: 'group', id: 'group1' }];
         mod.state.ungrouped = [oldAnchorDescriptor.key];
         mod.groupsById.set('group1', {
             id: 'group1',
@@ -3720,7 +4348,7 @@ describe('scanAndSyncSources', () => {
         mod.scanAndSyncSources(null, true);
 
         const oldKeys = Array.from(mod.sourcesByKey.keys());
-        mod.state.groups = ['group1'];
+        mod.state.root = [{ type: 'group', id: 'group1' }];
         mod.state.ungrouped = [];
         mod.groupsById.set('group1', {
             id: 'group1',
@@ -3744,6 +4372,12 @@ describe('scanAndSyncSources', () => {
                     id: 'group1',
                     children: [{ type: 'source', key: 'source1' }]
                 }
+            }
+        })).toBe(true);
+        expect(mod.hasPersistedSourceRefs({
+            sourceStateById: {},
+            sourceTagsById: {
+                'tag-only-source': ['tag-1']
             }
         })).toBe(true);
 
@@ -3851,12 +4485,13 @@ describe('scanAndSyncSources', () => {
             mod.DEPS.row.includes(selector) ? [loadingRow.row] : []
         ));
 
-        expect(mod.restoreInitialLoadedState(loadedState)).toEqual({
-            deferred: true,
-            shouldUpgradeStorage: false
+        const normalizedLoadedState = mod.normalizeLoadedState(loadedState);
+        expect(mod.restoreInitialLoadedState(normalizedLoadedState)).toEqual({
+            deferred: false,
+            shouldUpgradeStorage: true
         });
 
-        expect(mod._getPendingInitialLoadedState()).toEqual(loadedState);
+        expect(mod._getPendingInitialLoadedState()).toBe(null);
         expect(mod.groupsById.get('group1').children).toEqual([{ type: 'source', key: 'source_id_doc-1' }]);
         expect(mod.state.ungrouped).toEqual(['source_id_doc-2']);
         expect(Array.from(mod.sourcesByKey.keys()).sort()).toEqual([
@@ -3910,7 +4545,383 @@ describe('scanAndSyncSources', () => {
         expect(mod._getPendingInitialLoadedState()).toBe(null);
         expect(mod.groupsById.get('group1').children).toEqual([{ type: 'source', key: restoredKey }]);
         expect(mod.state.ungrouped).toEqual([]);
-        expect(mod.sourcesByKey.get(restoredKey).enabled).toBe(false);
+        expect(mod.sourcesByKey.get(restoredKey)).toMatchObject({
+            enabled: false,
+            hasNativeCheckbox: true
+        });
+    });
+
+    it('flushes a deferred null source record without blocking the initial-load gate', () => {
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const row = createMockSourceRow({
+            title: 'Deferred Null Source',
+            stableToken: 'doc-1',
+            checked: false
+        });
+        const descriptor = mod.createSourceDescriptor(row.row, new Map(), new Map());
+        const loadedState = {
+            schemaVersion: 5,
+            root: [],
+            groupsById: {},
+            ungrouped: [descriptor.key],
+            sourceStateById: {
+                [descriptor.key]: null
+            },
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {}
+        };
+        global.document.querySelectorAll = jest.fn(() => []);
+
+        expect(mod.restoreInitialLoadedState(loadedState)).toEqual({
+            deferred: true,
+            shouldUpgradeStorage: false
+        });
+
+        panel.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [row.row] : []
+        ));
+        global.document.querySelector = jest.fn(() => panel);
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [row.row] : []
+        ));
+        const result = mod._flushPendingInitialLoadedStateForTest();
+        const restoredKey = Array.from(mod.sourcesByKey.keys())[0];
+
+        expect(result).toEqual({
+            restored: true,
+            deferred: false,
+            shouldUpgradeStorage: false
+        });
+        expect(mod._getPendingInitialLoadedState()).toBe(null);
+        expect(restoredKey).toBe(descriptor.key);
+        expect(mod.sourcesByKey.get(restoredKey)).toMatchObject({
+            enabled: false,
+            hasNativeCheckbox: true
+        });
+    });
+
+    it('stages the full persisted tree when the first ready panel is virtualized', () => {
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const rows = [
+            createMockSourceRow({ title: 'Virtual A', stableToken: 'virtual-a', checked: true }),
+            createMockSourceRow({ title: 'Virtual B', stableToken: 'virtual-b', checked: true }),
+            createMockSourceRow({ title: 'Virtual C', stableToken: 'virtual-c', checked: true })
+        ];
+        const descriptors = rows.map(({ row }) => (
+            mod.createSourceDescriptor(row, new Map(), new Map())
+        ));
+        const loadedState = {
+            schemaVersion: 5,
+            root: [{ type: 'group', id: 'folder' }],
+            groupsById: {
+                folder: {
+                    id: 'folder',
+                    title: 'Folder',
+                    children: [{ type: 'source', key: descriptors[0].key }]
+                }
+            },
+            ungrouped: [descriptors[1].key, descriptors[2].key],
+            sourceStateById: Object.fromEntries(descriptors.map((descriptor) => [
+                descriptor.key,
+                {
+                    enabled: true,
+                    title: descriptor.title,
+                    normalizedTitle: descriptor.normalizedTitle,
+                    stableToken: descriptor.stableToken,
+                    fingerprint: descriptor.fingerprint,
+                    identityType: descriptor.identityType
+                }
+            ])),
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {}
+        };
+        let visibleRows = [rows[0].row];
+        panel.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? visibleRows : []
+        ));
+        global.document.querySelector = jest.fn(() => panel);
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? visibleRows : []
+        ));
+
+        expect(mod.restoreInitialLoadedState(loadedState)).toEqual({
+            deferred: false,
+            shouldUpgradeStorage: false
+        });
+        expect(mod._getPendingInitialLoadedState()).toBe(null);
+        expect(Array.from(mod.sourcesByKey.keys()).sort()).toEqual(
+            descriptors.map(({ key }) => key).sort()
+        );
+        expect(mod.groupsById.get('folder').children).toEqual([
+            { type: 'source', key: descriptors[0].key }
+        ]);
+        expect(mod.state.ungrouped).toEqual([
+            descriptors[1].key,
+            descriptors[2].key
+        ]);
+        expect(mod.sourcesByKey.get(descriptors[0].key)).toMatchObject({
+            hasNativeCheckbox: true
+        });
+        expect(mod.sourcesByKey.get(descriptors[0].key).isPendingNativeHydration).not.toBe(true);
+        expect(mod.sourcesByKey.get(descriptors[1].key)).toMatchObject({
+            hasNativeCheckbox: false,
+            isPendingNativeHydration: true
+        });
+        expect(mod.sourcesByKey.get(descriptors[2].key)).toMatchObject({
+            hasNativeCheckbox: false,
+            isPendingNativeHydration: true
+        });
+        expect(mod.buildPersistableState().sourceStateById).toEqual(
+            expect.objectContaining(Object.fromEntries(descriptors.map(({ key }) => [
+                key,
+                expect.objectContaining({ enabled: true })
+            ])))
+        );
+
+        expect(mod.scanAndSyncSources({}, false)).toEqual({
+            ok: false,
+            shouldUpgradeStorage: false,
+            reason: 'partial_source_sync'
+        });
+        expect(mod.groupsById.get('folder').children).toEqual([
+            { type: 'source', key: descriptors[0].key }
+        ]);
+        expect(mod.state.ungrouped).toEqual([
+            descriptors[1].key,
+            descriptors[2].key
+        ]);
+
+        visibleRows = rows.map(({ row }) => row);
+        expect(mod.scanAndSyncSources({}, false)).toEqual({
+            ok: true,
+            shouldUpgradeStorage: false,
+            reason: 'completed'
+        });
+        expect(mod._getPendingInitialLoadedState()).toBe(null);
+        expect(mod.groupsById.get('folder').children).toEqual([
+            { type: 'source', key: descriptors[0].key }
+        ]);
+        expect(mod.state.ungrouped).toEqual([
+            descriptors[1].key,
+            descriptors[2].key
+        ]);
+        descriptors.forEach(({ key }) => {
+            expect(mod.sourcesByKey.get(key)).toMatchObject({
+                hasNativeCheckbox: true
+            });
+            expect(mod.sourcesByKey.get(key).isPendingNativeHydration).not.toBe(true);
+        });
+    });
+
+    it('merges newly visible rows with persisted rows during a partial initial restore', () => {
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const persistedRow = createMockSourceRow({
+            title: 'Persisted Visible A',
+            stableToken: 'persisted-visible-a',
+            checked: true
+        });
+        const newRow = createMockSourceRow({
+            title: 'New Visible B',
+            stableToken: 'new-visible-b',
+            checked: false
+        });
+        const hiddenPersistedRow = createMockSourceRow({
+            title: 'Persisted Hidden C',
+            stableToken: 'persisted-hidden-c',
+            checked: true
+        });
+        const persistedDescriptor = mod.createSourceDescriptor(
+            persistedRow.row,
+            new Map(),
+            new Map()
+        );
+        const newDescriptor = mod.createSourceDescriptor(
+            newRow.row,
+            new Map(),
+            new Map()
+        );
+        const hiddenPersistedDescriptor = mod.createSourceDescriptor(
+            hiddenPersistedRow.row,
+            new Map(),
+            new Map()
+        );
+        const loadedState = {
+            schemaVersion: 5,
+            root: [{ type: 'group', id: 'persisted-folder' }],
+            groupsById: {
+                'persisted-folder': {
+                    id: 'persisted-folder',
+                    title: 'Persisted folder',
+                    children: [
+                        { type: 'source', key: persistedDescriptor.key },
+                        { type: 'source', key: hiddenPersistedDescriptor.key }
+                    ]
+                }
+            },
+            ungrouped: [],
+            sourceStateById: {
+                [persistedDescriptor.key]: {
+                    enabled: true,
+                    title: persistedDescriptor.title,
+                    normalizedTitle: persistedDescriptor.normalizedTitle,
+                    stableToken: persistedDescriptor.stableToken,
+                    fingerprint: persistedDescriptor.fingerprint,
+                    identityType: persistedDescriptor.identityType
+                },
+                [hiddenPersistedDescriptor.key]: {
+                    enabled: false,
+                    title: hiddenPersistedDescriptor.title,
+                    normalizedTitle: hiddenPersistedDescriptor.normalizedTitle,
+                    stableToken: hiddenPersistedDescriptor.stableToken,
+                    fingerprint: hiddenPersistedDescriptor.fingerprint,
+                    identityType: hiddenPersistedDescriptor.identityType
+                }
+            },
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {}
+        };
+        const visibleRows = [persistedRow.row, newRow.row];
+        panel.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? visibleRows : []
+        ));
+        global.document.querySelector = jest.fn(() => panel);
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? visibleRows : []
+        ));
+
+        expect(mod.restoreInitialLoadedState(loadedState)).toEqual({
+            deferred: false,
+            shouldUpgradeStorage: false
+        });
+
+        expect(mod._getPendingInitialLoadedState()).toBe(null);
+        expect(mod.groupsById.get('persisted-folder').children).toEqual([
+            { type: 'source', key: persistedDescriptor.key },
+            { type: 'source', key: hiddenPersistedDescriptor.key }
+        ]);
+        expect(mod.state.ungrouped).toEqual([newDescriptor.key]);
+        expect(mod.sourcesByKey.get(persistedDescriptor.key)).toMatchObject({
+            hasNativeCheckbox: true,
+            enabled: true
+        });
+        expect(mod.sourcesByKey.get(newDescriptor.key)).toMatchObject({
+            hasNativeCheckbox: true,
+            enabled: false
+        });
+        expect(mod.sourcesByKey.get(hiddenPersistedDescriptor.key)).toMatchObject({
+            hasNativeCheckbox: false,
+            enabled: false,
+            isPendingNativeHydration: true
+        });
+    });
+
+    it('resolves canonical and legacy aliases before deciding an initial panel is partial', () => {
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const row = createMockSourceRow({
+            title: 'Aliased Source',
+            stableToken: 'aliased-source',
+            checked: true
+        });
+        const descriptor = mod.createSourceDescriptor(row.row, new Map(), new Map());
+        const sourceRecord = {
+            enabled: true,
+            title: descriptor.title,
+            normalizedTitle: descriptor.normalizedTitle,
+            stableToken: descriptor.stableToken,
+            fingerprint: descriptor.fingerprint,
+            identityType: descriptor.identityType
+        };
+        const loadedState = {
+            schemaVersion: 5,
+            root: [
+                { type: 'source', key: descriptor.key },
+                { type: 'group', id: 'folder' }
+            ],
+            groupsById: {
+                folder: {
+                    id: 'folder',
+                    title: 'Folder',
+                    children: [{ type: 'source', key: descriptor.legacyKey }]
+                }
+            },
+            ungrouped: [],
+            sourceStateById: {
+                [descriptor.key]: sourceRecord,
+                [descriptor.legacyKey]: sourceRecord
+            },
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {}
+        };
+        panel.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [row.row] : []
+        ));
+        global.document.querySelector = jest.fn(() => panel);
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [row.row] : []
+        ));
+
+        expect(mod.restoreInitialLoadedState(loadedState)).toEqual({
+            deferred: false,
+            shouldUpgradeStorage: false
+        });
+        expect(mod._getPendingInitialLoadedState()).toBe(null);
+        expect(mod.state.root).toEqual([{ type: 'group', id: 'folder' }]);
+        expect(mod.groupsById.get('folder').children).toEqual([
+            { type: 'source', key: descriptor.key }
+        ]);
+        expect(mod.state.ungrouped).toEqual([]);
+    });
+
+    it('retains an initial snapshot when both DOM reconciliation and no-DOM staging fail closed', () => {
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const row = createMockSourceRow({
+            title: 'Identity Collision',
+            stableToken: 'identity-collision',
+            checked: true
+        });
+        const descriptor = mod.createSourceDescriptor(row.row, new Map(), new Map());
+        const loadedState = {
+            schemaVersion: 5,
+            root: [{ type: 'group', id: descriptor.key }],
+            groupsById: {
+                [descriptor.key]: {
+                    id: descriptor.key,
+                    title: 'Identity Collision',
+                    children: [{ type: 'source', key: descriptor.key }]
+                }
+            },
+            ungrouped: [],
+            sourceStateById: {
+                [descriptor.key]: {
+                    enabled: true,
+                    title: descriptor.title,
+                    normalizedTitle: descriptor.normalizedTitle,
+                    stableToken: descriptor.stableToken,
+                    fingerprint: descriptor.fingerprint,
+                    identityType: descriptor.identityType
+                }
+            },
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {}
+        };
+        panel.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [row.row] : []
+        ));
+        global.document.querySelector = jest.fn(() => panel);
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [row.row] : []
+        ));
+
+        expect(mod.restoreInitialLoadedState(loadedState)).toEqual({
+            deferred: true,
+            shouldUpgradeStorage: false
+        });
+        expect(mod._getPendingInitialLoadedState()).toEqual(loadedState);
     });
 
     it('flushes deferred initial state once the initial load gate opens and rows already exist', () => {
@@ -4618,15 +5629,20 @@ describe('mutation-driven persistence', () => {
     });
 
     it('treats missing persistable signatures as a save-required fallback', () => {
+        const runtime = {
+            state: { root: [], ungrouped: [], tagOrder: [], activeTagId: null },
+            sourcesByKey: new Map(),
+            sourceTagsById: new Map(),
+            groupsById: new Map(),
+            parentMap: new Map(),
+            keyByElement: new WeakMap()
+        };
         const syncModule = globalThis.NSM_CREATE_CONTENT_SOURCE_SYNC({
-            runtime: {
-                state: { groups: [], ungrouped: [], tagOrder: [], activeTagId: null },
-                sourcesByKey: new Map(),
-                sourceTagsById: new Map(),
-                groupsById: new Map(),
-                parentMap: new Map(),
-                keyByElement: new WeakMap()
-            },
+            runtime,
+            treePlacement: globalThis.NSM_CREATE_CONTENT_TREE_PLACEMENT({
+                getState: () => runtime.state,
+                getGroupsById: () => runtime.groupsById
+            }),
             debounce: (fn) => Object.assign(fn, {
                 flush: () => false,
                 cancel: () => {},

@@ -33,7 +33,9 @@
             }
             if (value && typeof value === 'object') {
                 const prototype = Object.getPrototypeOf(value);
-                if (prototype === Object.prototype || prototype === null) {
+                const isPlainRecord = prototype === null
+                    || Object.getPrototypeOf(prototype) === null;
+                if (isPlainRecord) {
                     return Object.fromEntries(
                         Object.entries(value).map(([key, entry]) => [key, cloneValue(entry)])
                     );
@@ -43,11 +45,14 @@
         }
 
         function cloneTreeEntry(entry) {
-            if (entry?.type === 'source' && typeof entry.key === 'string' && entry.key) {
-                return { type: 'source', key: entry.key };
+            const entryType = getOwnFieldValue(entry, 'type');
+            const sourceKey = getOwnFieldValue(entry, 'key');
+            const groupId = getOwnFieldValue(entry, 'id');
+            if (entryType === 'source' && typeof sourceKey === 'string' && sourceKey) {
+                return { type: 'source', key: sourceKey };
             }
-            if (entry?.type === 'group' && typeof entry.id === 'string' && entry.id) {
-                return { type: 'group', id: entry.id };
+            if (entryType === 'group' && typeof groupId === 'string' && groupId) {
+                return { type: 'group', id: groupId };
             }
             return cloneValue(entry);
         }
@@ -56,10 +61,28 @@
             return (Array.isArray(entries) ? entries : []).map((entry) => cloneTreeEntry(entry));
         }
 
+        function getOwnFieldValue(record, key, fallbackValue = undefined) {
+            if (
+                !record
+                || (typeof record !== 'object' && typeof record !== 'function')
+                || !Object.prototype.hasOwnProperty.call(record, key)
+            ) {
+                return fallbackValue;
+            }
+            return record[key];
+        }
+
+        function hasOwnArrayField(record, key) {
+            return Array.isArray(getOwnFieldValue(record, key));
+        }
+
         function cloneGroupRecord(group, fallbackId = '') {
-            const cloned = cloneValue(group && typeof group === 'object' ? group : {});
-            if (!cloned.id && fallbackId) cloned.id = fallbackId;
-            cloned.children = cloneTreeEntries(group?.children);
+            const clonedValue = cloneValue(group && typeof group === 'object' ? group : {});
+            const cloned = clonedValue && typeof clonedValue === 'object'
+                ? { ...clonedValue }
+                : {};
+            if (!getOwnFieldValue(cloned, 'id') && fallbackId) cloned.id = fallbackId;
+            cloned.children = cloneTreeEntries(getOwnFieldValue(group, 'children', []));
             return cloned;
         }
 
@@ -93,9 +116,12 @@
         function collectReachableGroupIds(state, groupsById) {
             const reachable = new Set();
             const pending = [];
-            (Array.isArray(state?.root) ? state.root : []).forEach((entry) => {
-                if (entry?.type === 'group' && groupsById?.has?.(entry.id)) {
-                    pending.push(entry.id);
+            const rawRoot = getOwnFieldValue(state, 'root', []);
+            (Array.isArray(rawRoot) ? rawRoot : []).forEach((entry) => {
+                const entryType = getOwnFieldValue(entry, 'type');
+                const groupId = getOwnFieldValue(entry, 'id');
+                if (entryType === 'group' && groupsById?.has?.(groupId)) {
+                    pending.push(groupId);
                 }
             });
             while (pending.length > 0) {
@@ -103,13 +129,16 @@
                 if (reachable.has(groupId)) continue;
                 reachable.add(groupId);
                 const group = groupsById.get(groupId);
-                (Array.isArray(group?.children) ? group.children : []).forEach((entry) => {
+                const rawChildren = getOwnFieldValue(group, 'children', []);
+                (Array.isArray(rawChildren) ? rawChildren : []).forEach((entry) => {
+                    const entryType = getOwnFieldValue(entry, 'type');
+                    const childGroupId = getOwnFieldValue(entry, 'id');
                     if (
-                        entry?.type === 'group'
-                        && groupsById.has(entry.id)
-                        && !reachable.has(entry.id)
+                        entryType === 'group'
+                        && groupsById.has(childGroupId)
+                        && !reachable.has(childGroupId)
                     ) {
-                        pending.push(entry.id);
+                        pending.push(childGroupId);
                     }
                 });
             }
@@ -117,12 +146,17 @@
         }
 
         function clonePlacementState(stateInput) {
-            const state = stateInput && typeof stateInput === 'object'
+            const clonedValue = stateInput && typeof stateInput === 'object'
                 ? cloneValue(stateInput)
                 : {};
-            state.root = cloneTreeEntries(stateInput?.root);
-            state.ungrouped = Array.isArray(stateInput?.ungrouped)
-                ? [...stateInput.ungrouped]
+            const state = clonedValue && typeof clonedValue === 'object'
+                ? { ...clonedValue }
+                : {};
+            const rawRoot = getOwnFieldValue(stateInput, 'root', []);
+            const rawUngrouped = getOwnFieldValue(stateInput, 'ungrouped', []);
+            state.root = cloneTreeEntries(rawRoot);
+            state.ungrouped = Array.isArray(rawUngrouped)
+                ? [...rawUngrouped]
                 : [];
             return state;
         }
@@ -434,11 +468,14 @@
 
         function groupMetadataEqual(left, right) {
             if (!left || !right) return left === right;
-            const leftComparable = cloneValue(left);
-            const rightComparable = cloneValue(right);
-            delete leftComparable.children;
-            delete rightComparable.children;
-            return valuesEqual(leftComparable, rightComparable);
+            const leftKeys = Object.keys(left)
+                .filter((key) => key !== 'children')
+                .sort();
+            const rightKeys = Object.keys(right)
+                .filter((key) => key !== 'children')
+                .sort();
+            if (!stringArraysEqual(leftKeys, rightKeys)) return false;
+            return leftKeys.every((key) => valuesEqual(left[key], right[key]));
         }
 
         function groupsEqual(leftGroups, rightGroups) {
@@ -1083,8 +1120,8 @@
             if (
                 !state
                 || typeof state !== 'object'
-                || !Array.isArray(state.root)
-                || !Array.isArray(state.ungrouped)
+                || !hasOwnArrayField(state, 'root')
+                || !hasOwnArrayField(state, 'ungrouped')
                 || !groupsById
                 || !liveSourceKeys
             ) {
@@ -1127,23 +1164,26 @@
             };
 
             const checkTreeEntry = (entry) => {
-                if (entry?.type === 'source' && typeof entry.key === 'string' && entry.key) {
-                    checkSource(entry.key);
+                const entryType = getOwnFieldValue(entry, 'type');
+                const sourceKey = getOwnFieldValue(entry, 'key');
+                const groupId = getOwnFieldValue(entry, 'id');
+                if (entryType === 'source' && typeof sourceKey === 'string' && sourceKey) {
+                    checkSource(sourceKey);
                     return;
                 }
-                if (entry?.type === 'group' && typeof entry.id === 'string' && entry.id) {
-                    if (!groupsById.has(entry.id)) {
+                if (entryType === 'group' && typeof groupId === 'string' && groupId) {
+                    if (!groupsById.has(groupId)) {
                         errors.push(createValidationError('missing_group', {
                             kind: 'group',
-                            id: entry.id
+                            id: groupId
                         }));
-                    } else if (seenGroupPlacements.has(entry.id)) {
+                    } else if (seenGroupPlacements.has(groupId)) {
                         errors.push(createValidationError('invalid_entry', {
                             kind: 'group',
-                            id: entry.id
+                            id: groupId
                         }));
                     } else {
-                        seenGroupPlacements.add(entry.id);
+                        seenGroupPlacements.add(groupId);
                     }
                     return;
                 }
@@ -1156,8 +1196,8 @@
                     || !groupId
                     || !group
                     || typeof group !== 'object'
-                    || group.id !== groupId
-                    || !Array.isArray(group.children)
+                    || getOwnFieldValue(group, 'id') !== groupId
+                    || !hasOwnArrayField(group, 'children')
                 ) {
                     errors.push(createValidationError('invalid_entry', {
                         kind: 'group',
@@ -1165,7 +1205,7 @@
                     }));
                     return;
                 }
-                group.children.forEach(checkTreeEntry);
+                getOwnFieldValue(group, 'children', []).forEach(checkTreeEntry);
             });
             state.root.forEach(checkTreeEntry);
             state.ungrouped.forEach((sourceKey) => checkSource(sourceKey));
@@ -1187,7 +1227,9 @@
                 const stack = [{
                     groupId,
                     index: 0,
-                    children: Array.isArray(group?.children) ? group.children : []
+                    children: hasOwnArrayField(group, 'children')
+                        ? getOwnFieldValue(group, 'children')
+                        : []
                 }];
                 while (stack.length > 0) {
                     const frame = stack[stack.length - 1];
@@ -1198,23 +1240,25 @@
                     }
                     const entry = frame.children[frame.index];
                     frame.index += 1;
-                    if (entry?.type !== 'group' || !groupsById.has(entry.id)) continue;
-                    const color = colors.get(entry.id);
+                    const entryType = getOwnFieldValue(entry, 'type');
+                    const childGroupId = getOwnFieldValue(entry, 'id');
+                    if (entryType !== 'group' || !groupsById.has(childGroupId)) continue;
+                    const color = colors.get(childGroupId);
                     if (color === 'gray') {
                         errors.push(createValidationError('group_cycle', {
                             kind: 'group',
-                            id: entry.id
+                            id: childGroupId
                         }));
                         continue;
                     }
                     if (color === 'black') continue;
-                    const childGroup = groupsById.get(entry.id);
-                    colors.set(entry.id, 'gray');
+                    const childGroup = groupsById.get(childGroupId);
+                    colors.set(childGroupId, 'gray');
                     stack.push({
-                        groupId: entry.id,
+                        groupId: childGroupId,
                         index: 0,
-                        children: Array.isArray(childGroup?.children)
-                            ? childGroup.children
+                        children: hasOwnArrayField(childGroup, 'children')
+                            ? getOwnFieldValue(childGroup, 'children')
                             : []
                     });
                 }
@@ -1257,8 +1301,8 @@
             if (
                 !inputState
                 || typeof inputState !== 'object'
-                || !Array.isArray(inputState.root)
-                || !Array.isArray(inputState.ungrouped)
+                || !hasOwnArrayField(inputState, 'root')
+                || !hasOwnArrayField(inputState, 'ungrouped')
                 || !inputGroups
                 || !inputLiveSourceKeys
             ) {
@@ -1271,8 +1315,8 @@
                     || !groupId
                     || !group
                     || typeof group !== 'object'
-                    || group.id !== groupId
-                    || !Array.isArray(group.children)
+                    || getOwnFieldValue(group, 'id') !== groupId
+                    || !hasOwnArrayField(group, 'children')
                 ) {
                     return invalidNormalizedModel();
                 }
@@ -1299,11 +1343,14 @@
             let repaired = false;
 
             nextState.root = nextState.root.filter((entry) => {
-                if (entry?.type === 'group' && nextGroups.has(entry.id)) return true;
+                const entryType = getOwnFieldValue(entry, 'type');
+                const groupId = getOwnFieldValue(entry, 'id');
+                const sourceKey = getOwnFieldValue(entry, 'key');
+                if (entryType === 'group' && nextGroups.has(groupId)) return true;
                 if (
-                    entry?.type === 'source'
-                    && typeof entry.key === 'string'
-                    && liveSourceKeys.has(entry.key)
+                    entryType === 'source'
+                    && typeof sourceKey === 'string'
+                    && liveSourceKeys.has(sourceKey)
                 ) {
                     return true;
                 }
@@ -1313,11 +1360,14 @@
 
             nextGroups.forEach((group) => {
                 group.children = group.children.filter((entry) => {
-                    if (entry?.type === 'group' && nextGroups.has(entry.id)) return true;
+                    const entryType = getOwnFieldValue(entry, 'type');
+                    const groupId = getOwnFieldValue(entry, 'id');
+                    const sourceKey = getOwnFieldValue(entry, 'key');
+                    if (entryType === 'group' && nextGroups.has(groupId)) return true;
                     if (
-                        entry?.type === 'source'
-                        && typeof entry.key === 'string'
-                        && liveSourceKeys.has(entry.key)
+                        entryType === 'source'
+                        && typeof sourceKey === 'string'
+                        && liveSourceKeys.has(sourceKey)
                     ) {
                         return true;
                     }
@@ -1356,46 +1406,51 @@
 
                     const entry = frame.children[frame.index];
                     frame.index += 1;
-                    if (entry?.type === 'source') {
-                        if (seenSourceKeys.has(entry.key)) {
+                    const entryType = getOwnFieldValue(entry, 'type');
+                    const sourceKey = getOwnFieldValue(entry, 'key');
+                    const childGroupId = getOwnFieldValue(entry, 'id');
+                    if (entryType === 'source') {
+                        if (seenSourceKeys.has(sourceKey)) {
                             removedDuplicates += 1;
                             repaired = true;
                             continue;
                         }
-                        seenSourceKeys.add(entry.key);
+                        seenSourceKeys.add(sourceKey);
                         frame.nextChildren.push(entry);
                         continue;
                     }
-                    if (entry?.type !== 'group') continue;
-                    if (visitingGroupIds.has(entry.id)) {
+                    if (entryType !== 'group') continue;
+                    if (visitingGroupIds.has(childGroupId)) {
                         removedCycles += 1;
                         repaired = true;
                         continue;
                     }
-                    if (claimedGroupIds.has(entry.id)) {
+                    if (claimedGroupIds.has(childGroupId)) {
                         repaired = true;
                         continue;
                     }
-                    claimedGroupIds.add(entry.id);
+                    claimedGroupIds.add(childGroupId);
                     frame.nextChildren.push(entry);
-                    visitingGroupIds.add(entry.id);
-                    stack.push(createGroupFrame(entry.id));
+                    visitingGroupIds.add(childGroupId);
+                    stack.push(createGroupFrame(childGroupId));
                 }
             };
 
             const nextRoot = [];
             nextState.root.forEach((entry) => {
-                if (entry?.type !== 'group') {
+                const entryType = getOwnFieldValue(entry, 'type');
+                const groupId = getOwnFieldValue(entry, 'id');
+                if (entryType !== 'group') {
                     nextRoot.push(entry);
                     return;
                 }
-                if (claimedGroupIds.has(entry.id)) {
+                if (claimedGroupIds.has(groupId)) {
                     repaired = true;
                     return;
                 }
-                claimedGroupIds.add(entry.id);
+                claimedGroupIds.add(groupId);
                 nextRoot.push(entry);
-                normalizeGroupEdges(entry.id);
+                normalizeGroupEdges(groupId);
             });
             nextState.root = nextRoot;
             nextGroups.forEach((group, groupId) => {
@@ -1406,13 +1461,15 @@
             });
 
             nextState.root = nextState.root.filter((entry) => {
-                if (entry?.type === 'group') return true;
-                if (seenSourceKeys.has(entry.key)) {
+                const entryType = getOwnFieldValue(entry, 'type');
+                const sourceKey = getOwnFieldValue(entry, 'key');
+                if (entryType === 'group') return true;
+                if (seenSourceKeys.has(sourceKey)) {
                     removedDuplicates += 1;
                     repaired = true;
                     return false;
                 }
-                seenSourceKeys.add(entry.key);
+                seenSourceKeys.add(sourceKey);
                 return true;
             });
 

@@ -347,68 +347,6 @@ describe('areAllAncestorsEnabled', () => {
     });
 });
 
-describe('removeGroupFromTree', () => {
-    let mod;
-
-    beforeEach(() => {
-        jest.resetModules();
-        setupGlobalMocks();
-
-        mod = loadContentModule();
-        mod._resetState();
-    });
-
-    afterEach(teardownGlobalMocks);
-
-    it('removes a top-level group from state.root', () => {
-        mod.state.root = [{ type: 'group', id: 'group1' }, { type: 'group', id: 'group2' }, { type: 'group', id: 'group3' }];
-        mod.removeGroupFromTree('group2');
-        expect(mod.state.root).toEqual([{ type: 'group', id: 'group1' }, { type: 'group', id: 'group3' }]);
-    });
-
-    it('removes a nested group from its parent children array', () => {
-        const parentGroup = { id: 'parent1', children: [{ id: 'child1' }, { id: 'child2' }] };
-        mod.groupsById.set('parent1', parentGroup);
-
-        mod.removeGroupFromTree('child1');
-
-        expect(parentGroup.children).toEqual([{ id: 'child2' }]);
-    });
-
-    it('removes a group from both state.root and parent children if present in both', () => {
-        mod.state.root = [{ type: 'group', id: 'group1' }, { type: 'group', id: 'orphanChild' }];
-        const parentGroup = { id: 'parent1', children: [{ id: 'orphanChild' }, { id: 'other' }] };
-        mod.groupsById.set('parent1', parentGroup);
-
-        mod.removeGroupFromTree('orphanChild');
-
-        expect(mod.state.root).toEqual([{ type: 'group', id: 'group1' }]);
-        expect(parentGroup.children).toEqual([{ id: 'other' }]);
-    });
-
-    it('does nothing if group id is not found', () => {
-        mod.state.root = [{ type: 'group', id: 'group1' }];
-        const parentGroup = { id: 'parent1', children: [{ id: 'child1' }] };
-        mod.groupsById.set('parent1', parentGroup);
-
-        mod.removeGroupFromTree('nonExistent');
-
-        expect(mod.state.root).toEqual([{ type: 'group', id: 'group1' }]);
-        expect(parentGroup.children).toEqual([{ id: 'child1' }]);
-    });
-
-    it('tolerates persisted groups that are missing children arrays', () => {
-        mod.state.root = [{ type: 'group', id: 'group1' }];
-        const parentGroup = { id: 'parent1' };
-        mod.groupsById.set('parent1', parentGroup);
-
-        expect(() => mod.removeGroupFromTree('group1')).not.toThrow();
-
-        expect(mod.state.root).toEqual([]);
-        expect(parentGroup.children).toEqual([]);
-    });
-});
-
 describe('drag and drop ordering guards', () => {
     let createContentTreeInteractions;
 
@@ -467,6 +405,12 @@ describe('drag and drop ordering guards', () => {
             'return _treePlacementModule.rebuildParentMap(parentMap);'
         );
         expect(indexSource).toContain(
+            'const normalized = _treePlacementModule.normalizePlacementState({'
+        );
+        expect(indexSource).toContain(
+            'placementResult = _treePlacementModule.commitPlacementModel(normalized);'
+        );
+        expect(indexSource).not.toContain(
             'placementResult = _treePlacementModule.removeSource({'
         );
         expect(indexSource).not.toContain('_getSourceTreePositionForTest');
@@ -636,62 +580,6 @@ describe('drag and drop ordering guards', () => {
         expect(openNativeDetails).not.toHaveBeenCalled();
         expect(saveState).not.toHaveBeenCalled();
         expect(render).not.toHaveBeenCalled();
-    });
-
-    it('tolerates stale parent maps that point to groups without children arrays', () => {
-        const state = { groups: [], ungrouped: ['source-1'] };
-        const groupsById = new Map([
-            ['group-1', { id: 'group-1', title: 'Legacy Group' }]
-        ]);
-        const parentMap = new Map([
-            ['source-1', 'group-1']
-        ]);
-        const interactions = createContentTreeInteractions({
-            getState: () => state,
-            getGroupsById: () => groupsById,
-            getParentMap: () => parentMap
-        });
-
-        expect(() => interactions.removeSourceFromTree('source-1')).not.toThrow();
-
-        expect(groupsById.get('group-1').children).toEqual([]);
-    });
-
-    it('removeSourceFromTree drops a positioned root source out of state.root', () => {
-        const state = {
-            root: [
-                { type: 'group', id: 'g1' },
-                { type: 'source', key: 'src-pos' },
-                { type: 'source', key: 'src-keep' }
-            ],
-            ungrouped: ['bin-1']
-        };
-        const interactions = createContentTreeInteractions({
-            getState: () => state,
-            getGroupsById: () => new Map(),
-            getParentMap: () => new Map()
-        });
-
-        interactions.removeSourceFromTree('src-pos');
-
-        expect(state.root).toEqual([
-            { type: 'group', id: 'g1' },
-            { type: 'source', key: 'src-keep' }
-        ]);
-        // bin untouched
-        expect(state.ungrouped).toEqual(['bin-1']);
-    });
-
-    it('removeSourceFromTree still drops a bin source out of state.ungrouped', () => {
-        const state = { root: [{ type: 'source', key: 'src-keep' }], ungrouped: ['bin-1', 'bin-2'] };
-        const interactions = createContentTreeInteractions({
-            getState: () => state,
-            getGroupsById: () => new Map(),
-            getParentMap: () => new Map()
-        });
-        interactions.removeSourceFromTree('bin-1');
-        expect(state.ungrouped).toEqual(['bin-2']);
-        expect(state.root).toEqual([{ type: 'source', key: 'src-keep' }]);
     });
 
     it('preserves source XOR when a single source moves from a group to positioned root', () => {

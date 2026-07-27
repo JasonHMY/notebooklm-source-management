@@ -19,18 +19,19 @@
      *    `writeStateToLocalStorage` 是 local fallback。两条路径都同时把 backup snapshot 落盘。
      *  - 读取路径:`loadState` 拉取 primary + backup + history,经
      *    `pickPreferredStoredState` 选最佳,`normalizeLoadedState` 兼容老 schema,
-     *    最后 `applyLoadedStateToManager` 调下游 state-apply 灌回 runtime。
+     *    最后 `applyLoadedStateToManager` 按 DOM readiness 选择 live reconcile 或独立
+     *    no-DOM staging + Tree Placement commit。
      *  - 历史:`appendStateHistorySnapshot` per-notebook ring buffer(retention 来自
      *    getHistoryRetentionLimit);`getStateHistoryEntries` 是 UI history panel 数据源。
      *  - Recovery:`writeRecoverySnapshot` / `readRecoverySnapshot` /
      *    `detectRecoverySnapshotAvailability` 处理崩溃恢复。
      *  - Save status 流:saving/saved/failed/stale/recovery_available — 通过 onSaveStatusChange 回调。
      *
-     * @param {Object} context 命名为 `context`(不是 deps)。完整 deps 见 line 4+ 的 const 块,主要分类:
+     * @param {Object} context 命名为 `context`(不是 deps)。factory 起始处的 const 块按以下类别解构:
      *   - chrome / storageSchemaVersion / debounce
      *   - state getters: getState (lazy), state initial,getHistoryRetentionLimit
      *   - normalize / build helpers: normalizeSourceText, getSourceTagIds, getSerializedTag,
-     *     buildNormalizedTagState, appendGroupChildIfAcyclic, cloneSerializableData
+     *     buildNormalizedTagState, treePlacement, cloneSerializableData
      *   - NotebookLM 侧:scanAndSyncSources, findSourcePanel, getSourcePanelState, hasRenderableSourceRows
      *   - UI 回调:render, getMessage, showToast, developerLog, onSaveStatusChange
      *   - 内部依赖:globalThis.NSM_CREATE_CONTENT_SNAPSHOT_SIGNATURE(必须先加载)
@@ -49,7 +50,6 @@
      *     capturePendingPanelReattachState, isLiveManagerLoadRequest, invalidateManagerInstance
      *   - 状态查询:getSaveStatus, setSaveStatus, hasPreservableManagerSnapshot, canPersistManagerState,
      *     hasPersistedSourceRefs, getPersistedSourceRefCount
-     *   完整 return 块见 line 1648。
      */
     function createContentPersistence(context = {}) {
         const ctx = context && typeof context === 'object' ? context : {};
@@ -68,10 +68,16 @@
         const buildNormalizedTagState = typeof ctx.buildNormalizedTagState === 'function'
             ? ctx.buildNormalizedTagState
             : null;
-        const appendGroupChildIfAcyclic = typeof ctx.appendGroupChildIfAcyclic === 'function'
-            ? ctx.appendGroupChildIfAcyclic
-            : null;
-        const scanAndSyncSources = typeof ctx.scanAndSyncSources === 'function' ? ctx.scanAndSyncSources : () => false;
+        const treePlacement = ctx.treePlacement;
+        if (
+            typeof treePlacement?.normalizePlacementState !== 'function'
+            || typeof treePlacement?.commitPlacementModel !== 'function'
+        ) {
+            throw new Error('GeminiNotebook-Source-Management: createContentPersistence requires Tree Placement.');
+        }
+        const scanAndSyncSources = typeof ctx.scanAndSyncSources === 'function'
+            ? ctx.scanAndSyncSources
+            : () => ({ ok: false, shouldUpgradeStorage: false, reason: 'unavailable' });
         const findSourcePanel = typeof ctx.findSourcePanel === 'function' ? ctx.findSourcePanel : () => null;
         const getSourcePanelState = typeof ctx.getSourcePanelState === 'function'
             ? ctx.getSourcePanelState
@@ -145,6 +151,17 @@
                 return Object.prototype.hasOwnProperty.call(value, key);
             }
             return false;
+        };
+
+        const getOwnField = (record, key, fallbackValue = undefined) => {
+            if (
+                !record
+                || (typeof record !== 'object' && typeof record !== 'function')
+                || !Object.prototype.hasOwnProperty.call(record, key)
+            ) {
+                return fallbackValue;
+            }
+            return record[key];
         };
 
         const createStateRepairFactory = globalThis.NSM_CREATE_CONTENT_STATE_REPAIR;
@@ -1592,41 +1609,40 @@
             return panelState.state === 'ready';
         }
 
-        function hasPersistedSourceRefs(loadedState) {
-            if (!loadedState || typeof loadedState !== 'object') return false;
-
-            const hasGroupedSources = getMapLikeValues(loadedState.groupsById || {}).some((group) => (
-                Array.isArray(group?.children) && group.children.some((child) => child?.type === 'source')
-            ));
-            if (hasGroupedSources) return true;
-
-            if (Array.isArray(loadedState.ungrouped) && loadedState.ungrouped.length > 0) {
-                return true;
-            }
-
-            return Boolean(
-                loadedState.sourceStateById &&
-                getMapLikeEntries(loadedState.sourceStateById).length > 0
-            );
-        }
-
-        function getPersistedSourceRefCount(loadedState) {
-            if (!loadedState || typeof loadedState !== 'object') return 0;
+        function collectPersistedSourceKeys(loadedState) {
             const sourceKeys = new Set();
+            if (!loadedState || typeof loadedState !== 'object') return sourceKeys;
 
             getMapLikeEntries(loadedState.sourceStateById || {}).forEach(([sourceKey]) => {
                 if (sourceKey) sourceKeys.add(sourceKey);
             });
+            getMapLikeEntries(loadedState.sourceTagsById || {}).forEach(([sourceKey]) => {
+                if (sourceKey) sourceKeys.add(sourceKey);
+            });
+            getMapLikeEntries(loadedState.legacyEnabledMap || {}).forEach(([sourceKey]) => {
+                if (sourceKey) sourceKeys.add(sourceKey);
+            });
             getMapLikeValues(loadedState.groupsById || {}).forEach((group) => {
-                (Array.isArray(group?.children) ? group.children : []).forEach((child) => {
+                const children = getOwnField(group, 'children', []);
+                (Array.isArray(children) ? children : []).forEach((child) => {
                     if (child?.type === 'source' && child.key) sourceKeys.add(child.key);
                 });
+            });
+            (Array.isArray(loadedState.root) ? loadedState.root : []).forEach((entry) => {
+                if (entry?.type === 'source' && entry.key) sourceKeys.add(entry.key);
             });
             (Array.isArray(loadedState.ungrouped) ? loadedState.ungrouped : []).forEach((sourceKey) => {
                 if (sourceKey) sourceKeys.add(sourceKey);
             });
+            return sourceKeys;
+        }
 
-            return sourceKeys.size;
+        function hasPersistedSourceRefs(loadedState) {
+            return collectPersistedSourceKeys(loadedState).size > 0;
+        }
+
+        function getPersistedSourceRefCount(loadedState) {
+            return collectPersistedSourceKeys(loadedState).size;
         }
 
         function hasPersistableManagerState(snapshot) {
@@ -1654,24 +1670,38 @@
                 return false;
             }
 
-            const sourceRecords = getMapLikeEntries(loadedState.sourceStateById || {});
-            const sourceKeys = new Set(sourceRecords.map(([sourceKey]) => sourceKey));
-            const seenSourceRefs = new Set();
-
-            sourcesByKey.clear();
-            sourceRecords.forEach(([sourceKey, sourceRecord]) => {
-                const title = String(sourceRecord?.title || getMessage('ui_source_untitled'));
-                const normalizedTitle = sourceRecord?.normalizedTitle || normalizeSourceText(title);
-                sourcesByKey.set(sourceKey, {
+            const sourceRecordsByKey = new Map(
+                getMapLikeEntries(loadedState.sourceStateById || {})
+            );
+            const legacyEnabledMap = loadedState.legacyEnabledMap
+                && typeof loadedState.legacyEnabledMap === 'object'
+                ? loadedState.legacyEnabledMap
+                : {};
+            const sourceKeys = collectPersistedSourceKeys(loadedState);
+            const nextSourcesByKey = new Map();
+            sourceKeys.forEach((sourceKey) => {
+                const sourceRecord = sourceRecordsByKey.get(sourceKey) || null;
+                const title = String(
+                    getOwnField(sourceRecord, 'title', '')
+                    || getMessage('ui_source_untitled')
+                );
+                const normalizedTitle = getOwnField(sourceRecord, 'normalizedTitle', '')
+                    || normalizeSourceText(title);
+                const hasLegacyEnabled = Object.prototype.hasOwnProperty.call(
+                    legacyEnabledMap,
+                    sourceKey
+                );
+                const sourceEnabled = getOwnField(sourceRecord, 'enabled', undefined);
+                nextSourcesByKey.set(sourceKey, {
                     key: sourceKey,
                     legacyKey: sourceKey,
                     title,
                     normalizedTitle,
                     lowercaseTitle: normalizedTitle,
                     ariaLabel: '',
-                    stableToken: sourceRecord?.stableToken || '',
-                    fingerprint: sourceRecord?.fingerprint || '',
-                    identityType: sourceRecord?.identityType || 'fingerprint',
+                    stableToken: getOwnField(sourceRecord, 'stableToken', ''),
+                    fingerprint: getOwnField(sourceRecord, 'fingerprint', ''),
+                    identityType: getOwnField(sourceRecord, 'identityType', 'fingerprint'),
                     element: null,
                     iconName: 'article',
                     iconColorClass: '',
@@ -1680,132 +1710,104 @@
                     hasNativeCheckbox: false,
                     isLoading: false,
                     isDisabled: false,
-                    enabled: sourceRecord?.enabled !== false,
-                    nativeLabelTitle: sourceRecord?.nativeLabelTitle || '',
-                    addedAt: sourceRecord?.addedAt || '',
+                    enabled: typeof sourceEnabled === 'boolean'
+                        ? sourceEnabled
+                        : (hasLegacyEnabled ? Boolean(legacyEnabledMap[sourceKey]) : true),
+                    nativeLabelTitle: getOwnField(sourceRecord, 'nativeLabelTitle', ''),
+                    addedAt: getOwnField(sourceRecord, 'addedAt', ''),
                     isPendingNativeHydration: true
                 });
             });
 
-            groupsById.clear();
+            const candidateGroupsById = new Map();
             getMapLikeEntries(loadedState.groupsById || {}).forEach(([groupId, rawGroup]) => {
                 if (!rawGroup || typeof rawGroup !== 'object') return;
-                groupsById.set(groupId, {
+                const rawEnabled = getOwnField(rawGroup, 'enabled', undefined);
+                const rawChildren = getOwnField(rawGroup, 'children', []);
+                candidateGroupsById.set(groupId, {
                     ...rawGroup,
-                    id: rawGroup.id || groupId,
-                    enabled: rawGroup.enabled !== undefined ? rawGroup.enabled : true,
-                    collapsed: rawGroup.collapsed === true,
-                    children: []
+                    id: groupId,
+                    enabled: rawEnabled !== undefined ? rawEnabled : true,
+                    collapsed: getOwnField(rawGroup, 'collapsed', false) === true,
+                    children: Array.isArray(rawChildren)
+                        ? cloneSerializableData(rawChildren)
+                        : []
                 });
             });
 
-            getMapLikeEntries(loadedState.groupsById || {}).forEach(([groupId, rawGroup]) => {
-                const nextGroup = groupsById.get(groupId);
-                if (!nextGroup) return;
-
-                (Array.isArray(rawGroup?.children) ? rawGroup.children : []).forEach((child) => {
-                    if (
-                        child?.type === 'group' &&
-                        (
-                            appendGroupChildIfAcyclic
-                                ? appendGroupChildIfAcyclic(groupsById, groupId, child.id)
-                                : appendGroupChildIfAcyclicLocal(groupsById, groupId, child.id)
-                        )
-                    ) {
-                        return;
-                    }
-
-                    if (child?.type === 'source' && sourceKeys.has(child.key) && !seenSourceRefs.has(child.key)) {
-                        nextGroup.children.push({ type: 'source', key: child.key });
-                        seenSourceRefs.add(child.key);
-                    }
-                });
+            const rawRoot = Array.isArray(loadedState.root)
+                ? loadedState.root
+                : (Array.isArray(loadedState.groups)
+                    ? loadedState.groups.map((id) => ({ type: 'group', id }))
+                    : []);
+            const normalizedPlacement = treePlacement.normalizePlacementState({
+                state: {
+                    ...state,
+                    ...loadedState,
+                    root: rawRoot,
+                    ungrouped: Array.isArray(loadedState.ungrouped)
+                        ? loadedState.ungrouped
+                        : []
+                },
+                groupsById: candidateGroupsById,
+                liveSourceKeys: sourceKeys
             });
+            if (!normalizedPlacement?.ok) return false;
 
-            state.root = [];
-            (Array.isArray(loadedState.root) ? loadedState.root : []).forEach((entry) => {
-                if (entry?.type === 'group' && groupsById.has(entry.id)) {
-                    state.root.push({ type: 'group', id: entry.id });
-                } else if (
-                    entry?.type === 'source' &&
-                    sourceKeys.has(entry.key) &&
-                    !seenSourceRefs.has(entry.key)
-                ) {
-                    state.root.push({ type: 'source', key: entry.key });
-                    seenSourceRefs.add(entry.key);
-                }
-            });
-            state.ungrouped = [];
-            (Array.isArray(loadedState.ungrouped) ? loadedState.ungrouped : []).forEach((sourceKey) => {
-                if (!sourceKeys.has(sourceKey) || seenSourceRefs.has(sourceKey)) return;
-                state.ungrouped.push(sourceKey);
-                seenSourceRefs.add(sourceKey);
-            });
-            sourceRecords.forEach(([sourceKey]) => {
-                if (seenSourceRefs.has(sourceKey)) return;
-                state.ungrouped.push(sourceKey);
-                seenSourceRefs.add(sourceKey);
-            });
-
-            tagsById.clear();
             const normalizedTagState = buildNormalizedTagState ? buildNormalizedTagState(loadedState) : null;
             const rawToSafeTagId = normalizedTagState?.rawToSafeTagId || null;
+            const nextTagsById = new Map();
+            let nextTagOrder = [];
             if (normalizedTagState) {
                 normalizedTagState.nextTagsById.forEach((tag, tagId) => {
-                    tagsById.set(tagId, tag);
+                    nextTagsById.set(tagId, tag);
                 });
-                state.tagOrder = normalizedTagState.nextTagOrder;
+                nextTagOrder = normalizedTagState.nextTagOrder;
             } else {
                 getMapLikeEntries(loadedState.tagsById || {}).forEach(([tagId, tag]) => {
                     if (tag && typeof tag === 'object') {
-                        tagsById.set(tagId, { ...tag, id: tag.id || tagId });
+                        nextTagsById.set(tagId, {
+                            ...tag,
+                            id: getOwnField(tag, 'id', '') || tagId
+                        });
                     }
                 });
-                state.tagOrder = (Array.isArray(loadedState.tagOrder) ? loadedState.tagOrder : [])
-                    .filter((tagId) => tagsById.has(tagId));
+                nextTagOrder = (Array.isArray(loadedState.tagOrder) ? loadedState.tagOrder : [])
+                    .filter((tagId) => nextTagsById.has(tagId));
             }
 
-            sourceTagsById.clear();
+            const nextSourceTagsById = new Map();
             getMapLikeEntries(loadedState.sourceTagsById || {}).forEach(([sourceKey, tagIds]) => {
                 if (!sourceKeys.has(sourceKey)) return;
                 const validTagIds = (Array.isArray(tagIds) ? tagIds : [])
                     .map((tagId) => rawToSafeTagId?.get?.(tagId) || tagId)
-                    .filter((tagId) => tagsById.has(tagId));
+                    .filter((tagId) => nextTagsById.has(tagId));
                 if (validTagIds.length > 0) {
-                    sourceTagsById.set(sourceKey, validTagIds);
+                    nextSourceTagsById.set(sourceKey, validTagIds);
                 }
             });
 
-            if (state.activeTagId && !tagsById.has(state.activeTagId)) {
+            const placementCommit = treePlacement.commitPlacementModel(normalizedPlacement);
+            if (!placementCommit?.ok) return false;
+
+            sourcesByKey.clear();
+            nextSourcesByKey.forEach((source, sourceKey) => {
+                sourcesByKey.set(sourceKey, source);
+            });
+            tagsById.clear();
+            nextTagsById.forEach((tag, tagId) => {
+                tagsById.set(tagId, tag);
+            });
+            sourceTagsById.clear();
+            nextSourceTagsById.forEach((tagIds, sourceKey) => {
+                sourceTagsById.set(sourceKey, tagIds);
+            });
+            state.tagOrder = nextTagOrder;
+            if (state.activeTagId && !nextTagsById.has(state.activeTagId)) {
                 state.activeTagId = null;
             }
+            treePlacement.rebuildParentMap?.(ctx.parentMap);
 
-            return true;
-        }
-
-        function appendGroupChildIfAcyclicLocal(groupsById, parentGroupId, childGroupId) {
-            const parentGroup = groupsById.get(parentGroupId);
-            if (!parentGroup || !childGroupId || childGroupId === parentGroupId || !groupsById.has(childGroupId)) {
-                return false;
-            }
-
-            const stack = [childGroupId];
-            const visited = new Set();
-            while (stack.length > 0) {
-                const groupId = stack.pop();
-                if (!groupId || visited.has(groupId)) continue;
-                if (groupId === parentGroupId) return false;
-                visited.add(groupId);
-
-                const group = groupsById.get(groupId);
-                (Array.isArray(group?.children) ? group.children : []).forEach((child) => {
-                    if (child?.type === 'group' && child.id && !visited.has(child.id)) {
-                        stack.push(child.id);
-                    }
-                });
-            }
-
-            parentGroup.children.push({ type: 'group', id: childGroupId });
             return true;
         }
 
@@ -1822,15 +1824,7 @@
             if (!hasRenderableSourceRows(sourcePanel) || panelState.state !== 'ready') {
                 return true;
             }
-
-            const persistedSourceCount = getPersistedSourceRefCount(loadedState);
-            const currentSourceCount = getManageableSourceElements(sourcePanel).length;
-            return Boolean(
-                persistedSourceCount > 0 &&
-                currentSourceCount > 0 &&
-                currentSourceCount < persistedSourceCount &&
-                ((Number(panelState.loadingRows) || 0) > 0 || (Number(panelState.failedRows) || 0) > 0)
-            );
+            return false;
         }
 
         function restoreInitialLoadedState(loadedState) {
@@ -1845,9 +1839,35 @@
                 return { deferred: true, shouldUpgradeStorage: false };
             }
 
-            const shouldUpgradeStorage = scanAndSyncSources(loadedState, true);
+            const rawSyncResult = scanAndSyncSources(loadedState, true);
+            const syncResult = rawSyncResult && typeof rawSyncResult === 'object'
+                ? rawSyncResult
+                : { ok: true, shouldUpgradeStorage: Boolean(rawSyncResult) };
+            if (!syncResult.ok) {
+                const staged = restorePersistedSnapshotWithoutDom(loadedState);
+                if (syncResult.reason === 'partial_initial_source_sync' && staged) {
+                    const mergeResult = scanAndSyncSources({}, false, {
+                        preserveMissingExistingSources: true
+                    });
+                    if (mergeResult?.ok) {
+                        ctx.pendingInitialLoadedState = null;
+                        return {
+                            deferred: false,
+                            shouldUpgradeStorage: Boolean(
+                                mergeResult.shouldUpgradeStorage
+                                || ctx.pendingStorageUpgrade
+                            )
+                        };
+                    }
+                }
+                ctx.pendingInitialLoadedState = loadedState;
+                return { deferred: true, shouldUpgradeStorage: false };
+            }
             ctx.pendingInitialLoadedState = null;
-            return { deferred: false, shouldUpgradeStorage };
+            return {
+                deferred: false,
+                shouldUpgradeStorage: Boolean(syncResult.shouldUpgradeStorage)
+            };
         }
 
         function flushPendingInitialLoadedState() {
@@ -1859,9 +1879,38 @@
                 return { restored: false, deferred: true, shouldUpgradeStorage: false };
             }
 
-            const shouldUpgradeStorage = scanAndSyncSources(ctx.pendingInitialLoadedState, true);
+            const rawSyncResult = scanAndSyncSources(ctx.pendingInitialLoadedState, true);
+            const syncResult = rawSyncResult && typeof rawSyncResult === 'object'
+                ? rawSyncResult
+                : { ok: true, shouldUpgradeStorage: Boolean(rawSyncResult) };
+            if (!syncResult.ok) {
+                if (
+                    syncResult.reason === 'partial_initial_source_sync'
+                    && restorePersistedSnapshotWithoutDom(ctx.pendingInitialLoadedState)
+                ) {
+                    const mergeResult = scanAndSyncSources({}, false, {
+                        preserveMissingExistingSources: true
+                    });
+                    if (mergeResult?.ok) {
+                        ctx.pendingInitialLoadedState = null;
+                        return {
+                            restored: true,
+                            deferred: false,
+                            shouldUpgradeStorage: Boolean(
+                                mergeResult.shouldUpgradeStorage
+                                || ctx.pendingStorageUpgrade
+                            )
+                        };
+                    }
+                }
+                return { restored: false, deferred: true, shouldUpgradeStorage: false };
+            }
             ctx.pendingInitialLoadedState = null;
-            return { restored: true, deferred: false, shouldUpgradeStorage };
+            return {
+                restored: true,
+                deferred: false,
+                shouldUpgradeStorage: Boolean(syncResult.shouldUpgradeStorage)
+            };
         }
 
         function applyLoadedStateToManager(loadedState) {
@@ -2060,20 +2109,6 @@
                 console.warn('GeminiNotebook-Source-Management: Context invalidated during load. Using local read fallback.', error);
                 readLocalState();
             }
-        }
-
-        function getSourceElements(parent = typeof document !== 'undefined' ? document : null) {
-            if (typeof ctx.getSourceElements === 'function') {
-                return ctx.getSourceElements(parent);
-            }
-            return [];
-        }
-
-        function getManageableSourceElements(parent = typeof document !== 'undefined' ? document : null) {
-            if (typeof ctx.getManageableSourceElements === 'function') {
-                return ctx.getManageableSourceElements(parent);
-            }
-            return getSourceElements(parent);
         }
 
         return {

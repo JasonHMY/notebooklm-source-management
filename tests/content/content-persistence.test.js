@@ -400,6 +400,89 @@ describe('saveState', () => {
         expect(mod.buildPersistableState().sourceStateById.source1.addedAt).toBe('2026-05-17T00:00:00.000Z');
     });
 
+    it('uses a safe default when no-DOM restore receives a non-boolean enabled value', () => {
+        const restored = mod.restorePersistedSnapshotWithoutDom({
+            schemaVersion: 5,
+            root: [],
+            groupsById: {},
+            ungrouped: ['source1'],
+            sourceStateById: {
+                source1: {
+                    enabled: 'false',
+                    title: 'Source 1',
+                    normalizedTitle: 'source 1'
+                }
+            },
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {}
+        });
+
+        expect(restored).toBe(true);
+        expect(mod.sourcesByKey.get('source1').enabled).toBe(true);
+    });
+
+    it('restores legacy tree source refs without DOM rows or sourceStateById records', () => {
+        const normalizedLegacy = mod.normalizeLoadedState({
+            groups: ['legacy-group'],
+            groupsById: {
+                'legacy-group': {
+                    id: 'legacy-group',
+                    children: [{ type: 'source', key: 'legacy-source' }]
+                }
+            },
+            ungrouped: [],
+            enabledMap: {
+                'legacy-source': false
+            }
+        });
+
+        const restored = mod.restorePersistedSnapshotWithoutDom(normalizedLegacy);
+
+        expect(restored).toBe(true);
+        expect(mod.state.root).toEqual([
+            { type: 'group', id: 'legacy-group' }
+        ]);
+        expect(mod.groupsById.get('legacy-group').children).toEqual([
+            { type: 'source', key: 'legacy-source' }
+        ]);
+        expect(mod.sourcesByKey.get('legacy-source')).toMatchObject({
+            key: 'legacy-source',
+            enabled: false,
+            isPendingNativeHydration: true
+        });
+    });
+
+    it('restores a source referenced only by persisted tag assignments', () => {
+        const restored = mod.restorePersistedSnapshotWithoutDom({
+            schemaVersion: 5,
+            root: [],
+            groupsById: {},
+            ungrouped: [],
+            sourceStateById: {},
+            tagsById: {
+                'tag-1': {
+                    id: 'tag-1',
+                    label: 'Important',
+                    color: '#336699'
+                }
+            },
+            tagOrder: ['tag-1'],
+            sourceTagsById: {
+                'tag-only-source': ['tag-1']
+            }
+        });
+
+        expect(restored).toBe(true);
+        expect(mod.sourcesByKey.get('tag-only-source')).toMatchObject({
+            key: 'tag-only-source',
+            enabled: true,
+            isPendingNativeHydration: true
+        });
+        expect(mod.state.ungrouped).toEqual(['tag-only-source']);
+        expect(mod.sourceTagsById.get('tag-only-source')).toEqual(['tag-1']);
+    });
+
     it('rebuilds runtime state.root from a migrated v5 snapshot with positioned sources', () => {
         const restored = mod.restorePersistedSnapshotWithoutDom({
             schemaVersion: 5,
@@ -1107,7 +1190,7 @@ describe('saveState', () => {
         });
     });
 
-    it('preserves an existing recovery snapshot when import application is deferred before saving', async () => {
+    it('replaces stale recovery with an import backup and clears recovery after acknowledgement', async () => {
         const projectId = seedPersistedState();
         const recoveryKey = `sourcesPlusRecovery_${projectId}`;
         const existingRecovery = {
@@ -1138,13 +1221,22 @@ describe('saveState', () => {
         }));
 
         expect(result).toMatchObject({
-            ok: false,
-            reason: 'deferred',
-            rolledBack: true
+            ok: true,
+            totalSources: 1,
+            matchedSources: 0
         });
-        expect(JSON.parse(global.sessionStorage.getItem(recoveryKey))).toEqual(existingRecovery);
-        expect(global.chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
-            expect.objectContaining({ type: 'SAVE_STATE' }),
+        expect(global.sessionStorage.getItem(recoveryKey)).toBeNull();
+        expect(mod.readImportBackupSnapshot()).toMatchObject({
+            snapshot: {
+                root: expectedPersistableState.root,
+                groupsById: expectedPersistableState.groupsById
+            }
+        });
+        expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(
+            expect.objectContaining({
+                type: 'SAVE_STATE',
+                critical: true
+            }),
             expect.any(Function)
         );
     });
@@ -1626,9 +1718,7 @@ describe('saveState', () => {
 
         expect(mod.restoreRecoverySnapshotFromUi()).toBe(true);
 
-        // The runtime root-field reconciliation (state.root) lives in applyPersistableSnapshotToRuntime
-        // (content-state-apply.js), which the state-shape subsystem migrates separately; until then the
-        // durable evidence that the snapshot was applied is the rebuilt groupsById.
+        expect(mod.state.root).toEqual([{ type: 'group', id: 'recovered' }]);
         expect(mod.groupsById.get('recovered')).toMatchObject({
             id: 'recovered',
             title: 'Recovered'
@@ -1947,7 +2037,7 @@ describe('saveState', () => {
 
     it('immediately persists folder toggle changes without waiting for timers', () => {
         mod._setProjectId('project-folder-toggle');
-        mod.state.groups = ['group1'];
+        mod.state.root = [{ type: 'group', id: 'group1' }];
         mod.groupsById.set('group1', {
             id: 'group1',
             title: 'Pinned',
@@ -2184,7 +2274,7 @@ describe('saveState', () => {
             shouldUpgradeStorage: false
         });
 
-        mod.state.groups = [];
+        mod.state.root = [];
         mod.state.ungrouped = [];
         mod.groupsById.clear();
         mod.sourcesByKey.clear();
@@ -2487,9 +2577,10 @@ describe('settings import/export configuration', () => {
         }, { 'old-source': 'current-source' });
 
         expect(remapped.groupsById.group.children).toEqual([
+            { type: 'source', key: 'current-source' },
             { type: 'source', key: 'current-source' }
         ]);
-        expect(remapped.ungrouped).toEqual(['loose-source']);
+        expect(remapped.ungrouped).toEqual(['current-source', 'loose-source']);
         expect(remapped.sourceStateById).toMatchObject({
             'current-source': { enabled: false, title: 'Old Source' },
             'loose-source': { enabled: true, title: 'Loose Source' }
@@ -2499,7 +2590,7 @@ describe('settings import/export configuration', () => {
         });
     });
 
-    it('remaps positioned root sources in snapshot.root and de-dups them out of the bin', () => {
+    it('preserves remapped positioned root and bin candidates for Tree Placement', () => {
         const remapped = mod.applySourceRemapsToSnapshot({
             schemaVersion: 5,
             root: [
@@ -2518,8 +2609,8 @@ describe('settings import/export configuration', () => {
             { type: 'group', id: 'g1' },
             { type: 'source', key: 'new-root-source' }
         ]);
-        // The same (remapped) key in the bin is de-duped away — root placement wins.
-        expect(remapped.ungrouped).toEqual([]);
+        // Remap preserves every candidate; Tree Placement resolves root-over-bin precedence.
+        expect(remapped.ungrouped).toEqual(['new-root-source']);
         expect(remapped.sourceStateById).toMatchObject({
             'new-root-source': { enabled: true, title: 'Root Source' }
         });
@@ -2608,7 +2699,7 @@ describe('settings import/export configuration', () => {
         mod.state.root = [{ type: 'group', id: 'before' }];
         mod.groupsById.set('before', { id: 'before', title: 'Before', children: [] });
 
-        const result = await mod.applyImportConfig(JSON.stringify({
+        const importText = JSON.stringify({
             format: 'notebooklm-source-management-config',
             formatVersion: 1,
             data: {
@@ -2623,7 +2714,23 @@ describe('settings import/export configuration', () => {
                 tagOrder: [],
                 sourceTagsById: {}
             }
-        }));
+        });
+        const parsed = mod.parseImportConfigText(importText);
+        expect(parsed.state.groupsById.after).toEqual({
+            id: 'after',
+            title: 'After',
+            children: []
+        });
+        const preview = mod.previewImportConfig(importText);
+        expect(preview.state.groupsById.after).toEqual({
+            id: 'after',
+            title: 'After',
+            children: [],
+            enabled: true,
+            collapsed: false
+        });
+
+        const result = await mod.applyImportConfig(importText);
 
         expect(result.ok).toBe(true);
         expect(mod.readImportBackupSnapshot()).toMatchObject({
@@ -2687,8 +2794,7 @@ describe('settings import/export configuration', () => {
         await Promise.resolve();
         expect(events).toEqual(['history_append_started']);
         // Before the history append resolves, the imported config has not been applied yet.
-        // (Runtime root-field reconciliation is owned by applyPersistableSnapshotToRuntime in
-        // content-state-apply.js; assert via the rebuilt groupsById, which the restore path populates.)
+        expect(mod.state.root).toEqual([{ type: 'group', id: 'before' }]);
         expect(mod.groupsById.has('before')).toBe(true);
         expect(mod.groupsById.has('after')).toBe(false);
 
@@ -2701,6 +2807,7 @@ describe('settings import/export configuration', () => {
             'history_append_resolved',
             'critical_save'
         ]);
+        expect(mod.state.root).toEqual([{ type: 'group', id: 'after' }]);
         expect(mod.groupsById.has('after')).toBe(true);
     });
 
@@ -2722,9 +2829,7 @@ describe('settings import/export configuration', () => {
 
         await expect(mod.restoreImportBackupSnapshotFromUi()).resolves.toBe(true);
 
-        // Runtime root-field reconciliation (state.root) is owned by applyPersistableSnapshotToRuntime
-        // in content-state-apply.js, migrated separately; the rebuilt groupsById is the durable evidence
-        // the backup was restored.
+        expect(mod.state.root).toEqual([{ type: 'group', id: 'before' }]);
         expect(mod.groupsById.get('before')).toMatchObject({ title: 'Before' });
         expect(mod.groupsById.has('after')).toBe(false);
         expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(

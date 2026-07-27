@@ -614,13 +614,18 @@ git commit -m "refactor: unify batch and modal placement"
 - Modify: `src/content/content-source-sync.js`
 - Modify: `src/content/content-import-export.js`
 - Modify: `src/content/content-persistence.js`
+- Modify: `src/content/content-tree-placement.js`
+- Modify: `src/content/content-tree-interactions.js`
 - Modify: `src/content/index.js`
 - Modify: `tests/content/content-state-reconcile.test.js`
 - Modify: `tests/content/content-state-apply.test.js`
 - Modify: `tests/content/content-source-sync.test.js`
 - Modify: `tests/content/content-import-export.test.js`
 - Modify: `tests/content/content-persistence.test.js`
+- Modify: `tests/content/content-tree-placement.test.js`
+- Modify: `tests/content/content-tree.test.js`
 - Modify: `docs/PROJECT_DIRECTORY.md`
+- Modify: `docs/superpowers/plans/2026-07-26-architecture-deepening-and-accessibility.md`
 - Modify: `CHANGELOG.md`
 
 **Interfaces:**
@@ -629,7 +634,7 @@ git commit -m "refactor: unify batch and modal placement"
 - `applyPersistableSnapshotToRuntime(snapshot)` remains restore Adapter。
 - import preview/apply 使用同一个 pure tree validation result。
 
-- [ ] **Step 1: 写 normalization 一致性失败测试**
+- [x] **Step 1: 写 normalization 一致性失败测试**
 
 覆盖：
 
@@ -640,7 +645,7 @@ git commit -m "refactor: unify batch and modal placement"
 - first load 与 later sync 产出相同 invariant；
 - second normalize → `changed:false`。
 
-- [ ] **Step 2: 运行并确认红灯**
+- [x] **Step 2: 运行并确认红灯**
 
 Run:
 
@@ -656,7 +661,7 @@ npm run test:unit -- --runTestsByPath \
 
 Expected: FAIL；consumer 尚未委托 Module。
 
-- [ ] **Step 3: 按 restore pipeline 顺序迁移**
+- [x] **Step 3: 按 restore pipeline 顺序迁移**
 
 1. `reconcilePersistedTree` 继续 source-key remap，最终调用 normalize；
 2. `applyPersistableSnapshotToRuntime` 删除本地 duplicate/orphan sweep；
@@ -664,10 +669,11 @@ Expected: FAIL；consumer 尚未委托 Module。
    成功后通过 `commitPlacementModel` 一次提交；不得对尚未位于 tree 的 orphan 调
    `applyPlacement`（它会正确返回 `not_found`）；
 4. import group-cycle/entry-shape validation 复用 pure validation；
-5. undo/history/import/SW push 继续统一进入 state-apply Adapter；
+5. undo/redo、配置导入/回滚、手动历史恢复、恢复快照与来源修复继续统一进入
+   state-apply Adapter；初始 LOAD_STATE 保留 DOM-aware / no-DOM staging 路径；
 6. normalize + parent-map rebuild 完成后才 sync Gemini Notebook checkbox。
 
-- [ ] **Step 4: 检查分散 mutation**
+- [x] **Step 4: 检查分散 mutation**
 
 Run:
 
@@ -679,7 +685,7 @@ rg -n "state\\.root\\.(push|splice)|state\\.ungrouped\\.(push|splice)|children\\
 Expected: 除 `content-tree-placement.js` 与 snapshot construction/只读 render traversal 外，
 业务放置路径无直接 mutation。逐条记录允许命中，不以 blanket ignore 通过。
 
-- [ ] **Step 5: 测试并提交**
+- [x] **Step 5: 测试并提交**
 
 Run: 同 Step 2。
 
@@ -696,7 +702,13 @@ git add src/content/content-state-reconcile.js \
   tests/content/content-source-sync.test.js \
   tests/content/content-import-export.test.js \
   tests/content/content-persistence.test.js \
-  docs/PROJECT_DIRECTORY.md CHANGELOG.md
+  src/content/content-tree-placement.js \
+  src/content/content-tree-interactions.js \
+  tests/content/content-tree-placement.test.js \
+  tests/content/content-tree.test.js \
+  docs/PROJECT_DIRECTORY.md \
+  docs/superpowers/plans/2026-07-26-architecture-deepening-and-accessibility.md \
+  CHANGELOG.md
 git commit -m "refactor: normalize sync and restore placement"
 ```
 

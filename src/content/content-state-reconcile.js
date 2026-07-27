@@ -12,12 +12,12 @@
      *    'unresolved' / 'duplicate_title' 便于诊断。
      *  - `applySourceRemapsToSnapshot` 用 remap map 重写 snapshot 的 sourceStateById /
      *    sourceTagsById / groups children / ungrouped。
-     *  - `reconcilePersistedTree` 是顶层入口:校验 groupsById 循环、给孤儿 source 派回
-     *    ungrouped、做 tag id 规范化(buildNormalizedTagState)。
+     *  - `reconcilePersistedTree` 是顶层入口:只负责 source-key remap,再把候选树交给
+     *    Tree Placement 做 cycle/duplicate/reachability/orphan normalization。
      *
-     * @param {Object} deps Required: normalizeSourceText, normalizeTagLabel, normalizeTagColor.
-     *   Optional: runtime(从 deps.runtime 或 deps 自身回退)。
-     * @returns {Object} 15 个 fn —
+     * @param {Object} deps Required: normalizeSourceText, normalizeTagLabel, normalizeTagColor,
+     *   treePlacement.normalizePlacementState. Optional: runtime(从 deps.runtime 或 deps 自身回退)。
+     * @returns {Object} 对账 helpers —
      *   - 源 lookup / 匹配:buildSourceLookup, buildSourceMatchReport, resolveStoredSourceKey,
      *     resolveStoredSourceKeyWithReason
      *   - Snapshot remap:applySourceRemapsToSnapshot, collectPersistedSourceRefs,
@@ -25,16 +25,53 @@
      *     remapExistingStateToCurrentSources
      *   - 解析后状态:buildResolvedSourceStateById, buildResolvedSourceTagsById,
      *     buildNormalizedTagState
-     *   - 树校验:reconcilePersistedTree, appendGroupChildIfAcyclic
-     *   完整 return 块见 line 834。
+     *   - 树归一:reconcilePersistedTree
      */
     function createContentStateReconcile(deps = {}) {
         const {
             normalizeSourceText,
             normalizeTagLabel,
-            normalizeTagColor
+            normalizeTagColor,
+            treePlacement
         } = deps;
         const runtime = deps.runtime || deps;
+        const normalizePlacementState = treePlacement?.normalizePlacementState;
+
+        if (typeof normalizePlacementState !== 'function') {
+            throw new Error('GeminiNotebook-Source-Management: createContentStateReconcile requires Tree Placement normalization.');
+        }
+
+        function getOwnRecordValue(recordMap, key) {
+            if (
+                !recordMap
+                || (typeof recordMap !== 'object' && typeof recordMap !== 'function')
+                || !Object.prototype.hasOwnProperty.call(recordMap, key)
+            ) {
+                return null;
+            }
+            return recordMap[key];
+        }
+
+        function getOwnFieldValue(record, key, fallbackValue = undefined) {
+            if (
+                !record
+                || (typeof record !== 'object' && typeof record !== 'function')
+                || !Object.prototype.hasOwnProperty.call(record, key)
+            ) {
+                return fallbackValue;
+            }
+            return record[key];
+        }
+
+        function setOwnFieldValue(record, key, value) {
+            Object.defineProperty(record, key, {
+                configurable: true,
+                enumerable: true,
+                writable: true,
+                value
+            });
+            return value;
+        }
 
         function buildSourceLookup(sourceList) {
             const byId = new Map();
@@ -128,7 +165,8 @@
         }
 
         function getStoredStableToken(sourceRecord = null, storedKey = '') {
-            return sourceRecord?.stableToken || extractStableTokenFromSourceKey(storedKey);
+            return getOwnFieldValue(sourceRecord, 'stableToken', '')
+                || extractStableTokenFromSourceKey(storedKey);
         }
 
         function canResolveSourceByWeakIdentity(sourceLookup, candidateKey, sourceRecord = null, storedKey = '') {
@@ -153,28 +191,31 @@
             if (sourceLookup.byId.has(storedKey)) return createResolvedSourceKey(sourceLookup.byId.get(storedKey), 'id');
             if (sourceLookup.byLegacyKey.has(storedKey)) return createResolvedSourceKey(sourceLookup.byLegacyKey.get(storedKey), 'legacy');
 
-            if (sourceRecord && sourceRecord.stableToken && sourceLookup.uniqueByStableToken.has(sourceRecord.stableToken)) {
-                return createResolvedSourceKey(sourceLookup.uniqueByStableToken.get(sourceRecord.stableToken), 'stable-token');
+            const stableToken = getOwnFieldValue(sourceRecord, 'stableToken', '');
+            if (stableToken && sourceLookup.uniqueByStableToken.has(stableToken)) {
+                return createResolvedSourceKey(sourceLookup.uniqueByStableToken.get(stableToken), 'stable-token');
             }
 
-            if (sourceRecord && sourceRecord.fingerprint && sourceLookup.uniqueByFingerprint.has(sourceRecord.fingerprint)) {
-                const fingerprintKey = sourceLookup.uniqueByFingerprint.get(sourceRecord.fingerprint);
+            const fingerprint = getOwnFieldValue(sourceRecord, 'fingerprint', '');
+            if (fingerprint && sourceLookup.uniqueByFingerprint.has(fingerprint)) {
+                const fingerprintKey = sourceLookup.uniqueByFingerprint.get(fingerprint);
                 if (canResolveSourceByWeakIdentity(sourceLookup, fingerprintKey, sourceRecord, storedKey)) {
                     return createResolvedSourceKey(fingerprintKey, 'fingerprint');
                 }
             }
 
+            const sourceElement = getOwnFieldValue(sourceRecord, 'element', null);
             if (
-                sourceRecord &&
-                sourceRecord.element &&
+                sourceElement &&
                 sourceLookup.byElement &&
-                sourceLookup.byElement.has(sourceRecord.element)
+                sourceLookup.byElement.has(sourceElement)
             ) {
-                return createResolvedSourceKey(sourceLookup.byElement.get(sourceRecord.element), 'element');
+                return createResolvedSourceKey(sourceLookup.byElement.get(sourceElement), 'element');
             }
 
             const normalizedTitle = normalizeSourceText(
-                sourceRecord && (sourceRecord.normalizedTitle || sourceRecord.title)
+                getOwnFieldValue(sourceRecord, 'normalizedTitle', '')
+                || getOwnFieldValue(sourceRecord, 'title', '')
             );
             if (normalizedTitle && sourceLookup.uniqueByTitle.has(normalizedTitle)) {
                 const titleKey = sourceLookup.uniqueByTitle.get(normalizedTitle);
@@ -192,29 +233,63 @@
 
         function collectPersistedSourceRefs(snapshot) {
             const refs = new Set();
-            const groupsById = snapshot && typeof snapshot.groupsById === 'object' ? snapshot.groupsById : {};
+            const rawGroupsById = getOwnFieldValue(snapshot, 'groupsById', {});
+            const groupsById = rawGroupsById && typeof rawGroupsById === 'object'
+                ? rawGroupsById
+                : {};
             const visitedGroups = new Set();
-
-            const visitGroup = (groupId) => {
-                if (!groupId || visitedGroups.has(groupId)) return;
+            const pendingEntries = Object.keys(groupsById)
+                .reverse()
+                .map((groupId) => ({ type: 'group', id: groupId }));
+            while (pendingEntries.length > 0) {
+                const entry = pendingEntries.pop();
+                const entryType = getOwnFieldValue(entry, 'type');
+                const sourceKey = getOwnFieldValue(entry, 'key');
+                const groupId = getOwnFieldValue(entry, 'id');
+                if (entryType === 'source') {
+                    if (sourceKey) refs.add(sourceKey);
+                    continue;
+                }
+                if (
+                    entryType !== 'group'
+                    || !groupId
+                    || visitedGroups.has(groupId)
+                    || !Object.prototype.hasOwnProperty.call(groupsById, groupId)
+                ) {
+                    continue;
+                }
                 visitedGroups.add(groupId);
                 const group = groupsById[groupId];
-                (Array.isArray(group?.children) ? group.children : []).forEach((child) => {
-                    if (child?.type === 'source' && child.key) {
-                        refs.add(child.key);
-                        return;
-                    }
-                    if (child?.type === 'group' && child.id) {
-                        visitGroup(child.id);
-                    }
-                });
-            };
-
-            Object.keys(groupsById).forEach(visitGroup);
-            (Array.isArray(snapshot?.ungrouped) ? snapshot.ungrouped : []).forEach((sourceKey) => {
+                const rawChildren = getOwnFieldValue(group, 'children', []);
+                const children = Array.isArray(rawChildren) ? rawChildren : [];
+                for (let index = children.length - 1; index >= 0; index -= 1) {
+                    pendingEntries.push(children[index]);
+                }
+            }
+            const rawRoot = getOwnFieldValue(snapshot, 'root', []);
+            (Array.isArray(rawRoot) ? rawRoot : []).forEach((entry) => {
+                const entryType = getOwnFieldValue(entry, 'type');
+                const sourceKey = getOwnFieldValue(entry, 'key');
+                if (entryType === 'source' && sourceKey) refs.add(sourceKey);
+            });
+            const rawUngrouped = getOwnFieldValue(snapshot, 'ungrouped', []);
+            (Array.isArray(rawUngrouped) ? rawUngrouped : []).forEach((sourceKey) => {
                 if (sourceKey) refs.add(sourceKey);
             });
-            Object.keys(snapshot?.sourceStateById || {}).forEach((sourceKey) => {
+            const rawSourceStateById = getOwnFieldValue(snapshot, 'sourceStateById', {});
+            Object.keys(
+                rawSourceStateById && typeof rawSourceStateById === 'object'
+                    ? rawSourceStateById
+                    : {}
+            ).forEach((sourceKey) => {
+                if (sourceKey) refs.add(sourceKey);
+            });
+            const rawSourceTagsById = getOwnFieldValue(snapshot, 'sourceTagsById', {});
+            Object.keys(
+                rawSourceTagsById && typeof rawSourceTagsById === 'object'
+                    ? rawSourceTagsById
+                    : {}
+            ).forEach((sourceKey) => {
                 if (sourceKey) refs.add(sourceKey);
             });
             return refs;
@@ -222,8 +297,8 @@
 
         function getSourceRepairTitle(sourceRecord, storedKey) {
             return String(
-                sourceRecord?.title ||
-                sourceRecord?.normalizedTitle ||
+                getOwnFieldValue(sourceRecord, 'title', '') ||
+                getOwnFieldValue(sourceRecord, 'normalizedTitle', '') ||
                 storedKey ||
                 ''
             );
@@ -263,28 +338,31 @@
                 'legacy'
             );
 
-            if (sourceRecord?.stableToken) {
+            const stableToken = getOwnFieldValue(sourceRecord, 'stableToken', '');
+            if (stableToken) {
                 addSourceCandidateBucket(
                     candidates,
                     seenKeys,
                     sourceLookup,
-                    sourceLookup.stableTokenBuckets?.get?.(sourceRecord.stableToken),
+                    sourceLookup.stableTokenBuckets?.get?.(stableToken),
                     'stable-token'
                 );
             }
 
-            if (sourceRecord?.fingerprint) {
+            const fingerprint = getOwnFieldValue(sourceRecord, 'fingerprint', '');
+            if (fingerprint) {
                 addSourceCandidateBucket(
                     candidates,
                     seenKeys,
                     sourceLookup,
-                    sourceLookup.fingerprintBuckets?.get?.(sourceRecord.fingerprint),
+                    sourceLookup.fingerprintBuckets?.get?.(fingerprint),
                     'fingerprint'
                 );
             }
 
             const normalizedTitle = normalizeSourceText(
-                sourceRecord && (sourceRecord.normalizedTitle || sourceRecord.title)
+                getOwnFieldValue(sourceRecord, 'normalizedTitle', '')
+                || getOwnFieldValue(sourceRecord, 'title', '')
             );
             if (normalizedTitle) {
                 addSourceCandidateBucket(
@@ -306,7 +384,7 @@
             const ambiguous = [];
 
             sourceRefs.forEach((storedKey) => {
-                const sourceRecord = snapshot?.sourceStateById?.[storedKey] || null;
+                const sourceRecord = getOwnRecordValue(snapshot?.sourceStateById, storedKey);
                 const resolution = resolveStoredSourceKeyWithReason(storedKey, sourceLookup, sourceRecord);
                 const baseItem = {
                     storedKey,
@@ -379,75 +457,92 @@
             if (sourceRemaps.size === 0) return clonedSnapshot;
 
             const mapSourceKey = (sourceKey) => sourceRemaps.get(sourceKey) || sourceKey;
-            const seenTreeSourceRefs = new Set();
-            const groupsById = clonedSnapshot.groupsById && typeof clonedSnapshot.groupsById === 'object'
-                ? clonedSnapshot.groupsById
+            const rawGroupsById = getOwnFieldValue(clonedSnapshot, 'groupsById', {});
+            const groupsById = rawGroupsById && typeof rawGroupsById === 'object'
+                ? rawGroupsById
                 : {};
 
             Object.values(groupsById).forEach((group) => {
-                if (!group || !Array.isArray(group.children)) return;
-                const nextChildren = [];
-                (Array.isArray(group.children) ? group.children : []).forEach((child) => {
-                    if (child?.type !== 'source') {
-                        nextChildren.push(child);
-                        return;
-                    }
-                    const nextKey = mapSourceKey(child.key);
-                    if (!nextKey || seenTreeSourceRefs.has(nextKey)) return;
-                    seenTreeSourceRefs.add(nextKey);
-                    nextChildren.push({ ...child, key: nextKey });
-                });
-                group.children = nextChildren;
+                const rawChildren = getOwnFieldValue(group, 'children');
+                if (!group || typeof group !== 'object' || !Array.isArray(rawChildren)) return;
+                const remappedChildren = rawChildren
+                    .map((child) => {
+                        const childType = getOwnFieldValue(child, 'type');
+                        const childKey = getOwnFieldValue(child, 'key');
+                        return childType === 'source'
+                            ? { ...child, key: mapSourceKey(childKey) }
+                            : child;
+                    })
+                    .filter((child) => (
+                        getOwnFieldValue(child, 'type') !== 'source'
+                        || Boolean(getOwnFieldValue(child, 'key'))
+                    ));
+                setOwnFieldValue(group, 'children', remappedChildren);
             });
 
-            // v5: rewrite positioned root sources (state.root {type:'source'} entries) too,
-            // sharing seenTreeSourceRefs so a remapped key is de-duped against group children
-            // and (below) the bin. Group entries pass through untouched; order is preserved.
-            clonedSnapshot.root = (Array.isArray(clonedSnapshot.root) ? clonedSnapshot.root : [])
-                .map((entry) => (entry?.type === 'source' ? { ...entry, key: mapSourceKey(entry.key) } : entry))
-                .filter((entry) => {
-                    if (entry?.type !== 'source') return Boolean(entry);
-                    if (!entry.key || seenTreeSourceRefs.has(entry.key)) return false;
-                    seenTreeSourceRefs.add(entry.key);
-                    return true;
-                });
+            // Preserve every remapped placement candidate. Reachability-aware de-duplication
+            // belongs to Tree Placement; doing it here would let an unreachable group that
+            // happens to appear first in object order steal a source from its reachable group.
+            const rawRoot = getOwnFieldValue(clonedSnapshot, 'root', []);
+            const remappedRoot = (Array.isArray(rawRoot) ? rawRoot : [])
+                .map((entry) => (
+                    getOwnFieldValue(entry, 'type') === 'source'
+                        ? {
+                            ...entry,
+                            key: mapSourceKey(getOwnFieldValue(entry, 'key'))
+                        }
+                        : entry
+                ))
+                .filter((entry) => (
+                    getOwnFieldValue(entry, 'type') !== 'source'
+                    || Boolean(getOwnFieldValue(entry, 'key'))
+                ));
+            setOwnFieldValue(clonedSnapshot, 'root', remappedRoot);
 
-            clonedSnapshot.ungrouped = (Array.isArray(clonedSnapshot.ungrouped) ? clonedSnapshot.ungrouped : [])
-                .map(mapSourceKey)
-                .filter((sourceKey) => {
-                    if (!sourceKey || seenTreeSourceRefs.has(sourceKey)) return false;
-                    seenTreeSourceRefs.add(sourceKey);
-                    return true;
-                });
+            const rawUngrouped = getOwnFieldValue(clonedSnapshot, 'ungrouped', []);
+            setOwnFieldValue(
+                clonedSnapshot,
+                'ungrouped',
+                (Array.isArray(rawUngrouped) ? rawUngrouped : [])
+                    .map(mapSourceKey)
+                    .filter(Boolean)
+            );
 
-            const sourceStateById = clonedSnapshot.sourceStateById && typeof clonedSnapshot.sourceStateById === 'object'
-                ? clonedSnapshot.sourceStateById
+            const rawSourceStateById = getOwnFieldValue(clonedSnapshot, 'sourceStateById', {});
+            const sourceStateById = rawSourceStateById && typeof rawSourceStateById === 'object'
+                ? rawSourceStateById
                 : {};
-            const nextSourceStateById = {};
+            const nextSourceStateById = new Map();
             Object.entries(sourceStateById).forEach(([sourceKey, sourceRecord]) => {
                 if (sourceRemaps.has(sourceKey)) return;
-                nextSourceStateById[sourceKey] = sourceRecord;
+                nextSourceStateById.set(sourceKey, sourceRecord);
             });
             Object.entries(sourceStateById).forEach(([sourceKey, sourceRecord]) => {
                 if (!sourceRemaps.has(sourceKey)) return;
-                nextSourceStateById[mapSourceKey(sourceKey)] = sourceRecord;
+                nextSourceStateById.set(mapSourceKey(sourceKey), sourceRecord);
             });
-            clonedSnapshot.sourceStateById = nextSourceStateById;
+            setOwnFieldValue(
+                clonedSnapshot,
+                'sourceStateById',
+                Object.fromEntries(nextSourceStateById)
+            );
 
-            const sourceTagsById = clonedSnapshot.sourceTagsById && typeof clonedSnapshot.sourceTagsById === 'object'
-                ? clonedSnapshot.sourceTagsById
+            const rawSourceTagsById = getOwnFieldValue(clonedSnapshot, 'sourceTagsById', {});
+            const sourceTagsById = rawSourceTagsById && typeof rawSourceTagsById === 'object'
+                ? rawSourceTagsById
                 : {};
-            const nextSourceTagsById = {};
+            const nextSourceTagsById = new Map();
             const mergeTagIds = (targetSourceKey, tagIds) => {
                 if (!targetSourceKey) return;
-                const nextTagIds = new Set(Array.isArray(nextSourceTagsById[targetSourceKey])
-                    ? nextSourceTagsById[targetSourceKey]
+                const currentTagIds = nextSourceTagsById.get(targetSourceKey);
+                const nextTagIds = new Set(Array.isArray(currentTagIds)
+                    ? currentTagIds
                     : []);
                 (Array.isArray(tagIds) ? tagIds : []).forEach((tagId) => {
                     if (tagId) nextTagIds.add(tagId);
                 });
                 if (nextTagIds.size > 0) {
-                    nextSourceTagsById[targetSourceKey] = Array.from(nextTagIds);
+                    nextSourceTagsById.set(targetSourceKey, Array.from(nextTagIds));
                 }
             };
             Object.entries(sourceTagsById).forEach(([sourceKey, tagIds]) => {
@@ -458,7 +553,11 @@
                 if (!sourceRemaps.has(sourceKey)) return;
                 mergeTagIds(mapSourceKey(sourceKey), tagIds);
             });
-            clonedSnapshot.sourceTagsById = nextSourceTagsById;
+            setOwnFieldValue(
+                clonedSnapshot,
+                'sourceTagsById',
+                Object.fromEntries(nextSourceTagsById)
+            );
 
             return clonedSnapshot;
         }
@@ -576,6 +675,60 @@
             ]]);
         }
 
+        function collectStoredSourceKeysByPlacementPriority(treeState) {
+            const orderedKeys = [];
+            const seenStoredKeys = new Set();
+            const visitedGroupIds = new Set();
+            const groupsById = treeState?.groupsById instanceof Map
+                ? treeState.groupsById
+                : new Map(Object.entries(treeState?.groupsById || {}));
+            const appendSourceKey = (storedKey) => {
+                if (
+                    typeof storedKey !== 'string'
+                    || !storedKey
+                    || seenStoredKeys.has(storedKey)
+                ) {
+                    return;
+                }
+                seenStoredKeys.add(storedKey);
+                orderedKeys.push(storedKey);
+            };
+            const rootEntries = Array.isArray(treeState?.root)
+                ? treeState.root
+                : (Array.isArray(treeState?.groups)
+                    ? treeState.groups.map((id) => ({ type: 'group', id }))
+                    : []);
+            const pendingEntries = [...rootEntries].reverse();
+            while (pendingEntries.length > 0) {
+                const entry = pendingEntries.pop();
+                const entryType = getOwnFieldValue(entry, 'type');
+                const sourceKey = getOwnFieldValue(entry, 'key');
+                const groupId = getOwnFieldValue(entry, 'id');
+                if (entryType === 'source') {
+                    appendSourceKey(sourceKey);
+                    continue;
+                }
+                if (
+                    entryType !== 'group'
+                    || !groupId
+                    || visitedGroupIds.has(groupId)
+                    || !groupsById.has(groupId)
+                ) {
+                    continue;
+                }
+                visitedGroupIds.add(groupId);
+                const group = groupsById.get(groupId);
+                const rawChildren = getOwnFieldValue(group, 'children', []);
+                const children = Array.isArray(rawChildren) ? rawChildren : [];
+                for (let index = children.length - 1; index >= 0; index -= 1) {
+                    pendingEntries.push(children[index]);
+                }
+            }
+            (Array.isArray(treeState?.ungrouped) ? treeState.ungrouped : [])
+                .forEach(appendSourceKey);
+            return orderedKeys;
+        }
+
         function remapExistingStateToCurrentSources(sourceLookup, previousState) {
             const nextRoot = [];
             const nextUngrouped = [];
@@ -602,26 +755,23 @@
                 if (!nextGroup) return;
 
                 (Array.isArray(group.children) ? group.children : []).forEach((child) => {
-                    if (child.type === 'group' && appendGroupChildIfAcyclic(nextGroupsById, groupId, child.id)) {
+                    const childType = getOwnFieldValue(child, 'type');
+                    const childGroupId = getOwnFieldValue(child, 'id');
+                    const childSourceKey = getOwnFieldValue(child, 'key');
+                    if (childType === 'group' && typeof childGroupId === 'string' && childGroupId) {
+                        nextGroup.children.push({ type: 'group', id: childGroupId });
                         return;
                     }
 
-                    if (child.type !== 'source') return;
+                    if (childType !== 'source') return;
 
-                    const sourceRecord = previousState.sourceRecordsByKey.get(child.key) || null;
-                    const resolvedKey = resolveCurrentSourceKey(child.key, sourceRecord);
-                    if (!resolvedKey || seenSourceRefs.has(resolvedKey)) return;
+                    const sourceRecord = previousState.sourceRecordsByKey.get(childSourceKey) || null;
+                    const resolvedKey = resolveCurrentSourceKey(childSourceKey, sourceRecord);
+                    if (!resolvedKey) return;
 
                     nextGroup.children.push({ type: 'source', key: resolvedKey });
                     seenSourceRefs.add(resolvedKey);
 
-                    if (!nextSourceStateById.has(resolvedKey) && sourceRecord) {
-                        nextSourceStateById.set(resolvedKey, sourceRecord);
-                    }
-
-                    if (!nextSourceTagsById.has(resolvedKey) && previousState.sourceTagsById.has(child.key)) {
-                        nextSourceTagsById.set(resolvedKey, [...previousState.sourceTagsById.get(child.key)]);
-                    }
                 });
             });
 
@@ -629,42 +779,48 @@
             // sources) from the live runtime state, re-resolving source keys to current rows.
             (Array.isArray(runtime.state?.root) ? runtime.state.root : []).forEach((entry) => {
                 if (!entry) return;
-                if (entry.type === 'group') {
-                    if (entry.id && nextGroupsById.has(entry.id)) {
-                        nextRoot.push({ type: 'group', id: entry.id });
+                const entryType = getOwnFieldValue(entry, 'type');
+                const groupId = getOwnFieldValue(entry, 'id');
+                const sourceKey = getOwnFieldValue(entry, 'key');
+                if (entryType === 'group') {
+                    if (groupId && nextGroupsById.has(groupId)) {
+                        nextRoot.push({ type: 'group', id: groupId });
                     }
                     return;
                 }
-                if (entry.type !== 'source') return;
+                if (entryType !== 'source') return;
 
-                const sourceRecord = previousState.sourceRecordsByKey.get(entry.key) || null;
-                const resolvedKey = resolveCurrentSourceKey(entry.key, sourceRecord);
-                if (!resolvedKey || seenSourceRefs.has(resolvedKey)) return;
+                const sourceRecord = previousState.sourceRecordsByKey.get(sourceKey) || null;
+                const resolvedKey = resolveCurrentSourceKey(sourceKey, sourceRecord);
+                if (!resolvedKey) return;
 
                 nextRoot.push({ type: 'source', key: resolvedKey });
                 seenSourceRefs.add(resolvedKey);
 
-                if (!nextSourceStateById.has(resolvedKey) && sourceRecord) {
-                    nextSourceStateById.set(resolvedKey, sourceRecord);
-                }
-
-                if (!nextSourceTagsById.has(resolvedKey) && previousState.sourceTagsById.has(entry.key)) {
-                    nextSourceTagsById.set(resolvedKey, [...previousState.sourceTagsById.get(entry.key)]);
-                }
             });
 
             (Array.isArray(runtime.state?.ungrouped) ? runtime.state.ungrouped : []).forEach((storedKey) => {
                 const sourceRecord = previousState.sourceRecordsByKey.get(storedKey) || null;
                 const resolvedKey = resolveCurrentSourceKey(storedKey, sourceRecord);
-                if (!resolvedKey || seenSourceRefs.has(resolvedKey)) return;
+                if (!resolvedKey) return;
 
                 nextUngrouped.push(resolvedKey);
                 seenSourceRefs.add(resolvedKey);
 
+            });
+
+            collectStoredSourceKeysByPlacementPriority({
+                root: runtime.state?.root,
+                groups: runtime.state?.groups,
+                groupsById: runtime.groupsById,
+                ungrouped: runtime.state?.ungrouped
+            }).forEach((storedKey) => {
+                const sourceRecord = previousState.sourceRecordsByKey.get(storedKey) || null;
+                const resolvedKey = resolveCurrentSourceKey(storedKey, sourceRecord);
+                if (!resolvedKey) return;
                 if (!nextSourceStateById.has(resolvedKey) && sourceRecord) {
                     nextSourceStateById.set(resolvedKey, sourceRecord);
                 }
-
                 if (!nextSourceTagsById.has(resolvedKey) && previousState.sourceTagsById.has(storedKey)) {
                     nextSourceTagsById.set(resolvedKey, [...previousState.sourceTagsById.get(storedKey)]);
                 }
@@ -696,23 +852,43 @@
         function buildResolvedSourceStateById(sourceLookup, loadedState) {
             const resolvedSourceState = new Map();
             if (!loadedState) return resolvedSourceState;
+            const preferredStoredKeys = collectStoredSourceKeysByPlacementPriority(loadedState);
+            const registerSourceState = (storedKey, sourceRecord) => {
+                if (
+                    !sourceRecord
+                    || typeof sourceRecord !== 'object'
+                    || Array.isArray(sourceRecord)
+                ) {
+                    return;
+                }
+                const resolvedKey = resolveStoredSourceKey(storedKey, sourceLookup, sourceRecord);
+                if (resolvedKey && !resolvedSourceState.has(resolvedKey)) {
+                    resolvedSourceState.set(resolvedKey, sourceRecord);
+                }
+            };
 
             if (loadedState.sourceStateById) {
-                Object.entries(loadedState.sourceStateById).forEach(([storedKey, sourceRecord]) => {
-                    const resolvedKey = resolveStoredSourceKey(storedKey, sourceLookup, sourceRecord);
-                    if (resolvedKey && !resolvedSourceState.has(resolvedKey)) {
-                        resolvedSourceState.set(resolvedKey, sourceRecord);
+                preferredStoredKeys.forEach((storedKey) => {
+                    if (Object.prototype.hasOwnProperty.call(loadedState.sourceStateById, storedKey)) {
+                        registerSourceState(storedKey, loadedState.sourceStateById[storedKey]);
                     }
+                });
+                Object.entries(loadedState.sourceStateById).forEach(([storedKey, sourceRecord]) => {
+                    registerSourceState(storedKey, sourceRecord);
                 });
                 return resolvedSourceState;
             }
 
             if (loadedState.legacyEnabledMap) {
-                Object.entries(loadedState.legacyEnabledMap).forEach(([legacyKey, enabled]) => {
-                    const resolvedKey = resolveStoredSourceKey(legacyKey, sourceLookup);
-                    if (resolvedKey && !resolvedSourceState.has(resolvedKey)) {
-                        resolvedSourceState.set(resolvedKey, { enabled: Boolean(enabled) });
+                preferredStoredKeys.forEach((storedKey) => {
+                    if (Object.prototype.hasOwnProperty.call(loadedState.legacyEnabledMap, storedKey)) {
+                        registerSourceState(storedKey, {
+                            enabled: Boolean(loadedState.legacyEnabledMap[storedKey])
+                        });
                     }
+                });
+                Object.entries(loadedState.legacyEnabledMap).forEach(([legacyKey, enabled]) => {
+                    registerSourceState(legacyKey, { enabled: Boolean(enabled) });
                 });
             }
 
@@ -728,9 +904,20 @@
             const nextTagOrder = [];
 
             const registerTag = (tagId) => {
-                if (!tagId || rawToSafeTagId.has(tagId)) return;
+                if (
+                    !tagId
+                    || rawToSafeTagId.has(tagId)
+                    || !Object.prototype.hasOwnProperty.call(rawTagsById, tagId)
+                ) {
+                    return;
+                }
                 const rawTag = rawTagsById[tagId];
-                const label = normalizeTagLabel(rawTag && (rawTag.label || rawTag.title || rawTag.name || ''));
+                if (!rawTag || typeof rawTag !== 'object' || Array.isArray(rawTag)) return;
+                const label = normalizeTagLabel(
+                    getOwnFieldValue(rawTag, 'label', '')
+                    || getOwnFieldValue(rawTag, 'title', '')
+                    || getOwnFieldValue(rawTag, 'name', '')
+                );
                 if (!label) return;
                 const safeTagId = createSafeTagId(tagId, safeTagIds);
                 rawToSafeTagId.set(tagId, safeTagId);
@@ -738,7 +925,7 @@
                 nextTagsById.set(safeTagId, {
                     id: safeTagId,
                     label,
-                    color: normalizeTagColor(rawTag && rawTag.color)
+                    color: normalizeTagColor(getOwnFieldValue(rawTag, 'color', ''))
                 });
             };
 
@@ -752,8 +939,8 @@
             const resolvedSourceTags = new Map();
             if (!loadedState || !loadedState.sourceTagsById) return resolvedSourceTags;
 
-            Object.entries(loadedState.sourceTagsById).forEach(([storedKey, rawTagIds]) => {
-                const sourceRecord = loadedState.sourceStateById ? loadedState.sourceStateById[storedKey] : null;
+            const registerSourceTags = (storedKey, rawTagIds) => {
+                const sourceRecord = getOwnRecordValue(loadedState.sourceStateById, storedKey);
                 const resolvedKey = resolveStoredSourceKey(storedKey, sourceLookup, sourceRecord);
                 if (!resolvedKey || resolvedSourceTags.has(resolvedKey)) return;
 
@@ -763,6 +950,14 @@
                         .map((tagId) => rawToSafeTagId?.get?.(tagId) || tagId)
                         .filter((tagId) => rawToSafeTagId ? rawToSafeTagIdHasValue(rawToSafeTagId, tagId) : Boolean(tagId))))
                 );
+            };
+            collectStoredSourceKeysByPlacementPriority(loadedState).forEach((storedKey) => {
+                if (Object.prototype.hasOwnProperty.call(loadedState.sourceTagsById, storedKey)) {
+                    registerSourceTags(storedKey, loadedState.sourceTagsById[storedKey]);
+                }
+            });
+            Object.entries(loadedState.sourceTagsById).forEach(([storedKey, rawTagIds]) => {
+                registerSourceTags(storedKey, rawTagIds);
             });
 
             return resolvedSourceTags;
@@ -800,14 +995,21 @@
 
         function reconcilePersistedTree(loadedState, sourceLookup) {
             const nextGroupsById = new Map();
-            const seenSourceRefs = new Set();
             const rawGroupsById = loadedState && loadedState.groupsById ? loadedState.groupsById : {};
+            const liveSourceKeys = new Set(
+                Array.isArray(sourceLookup?.orderedKeys)
+                    ? sourceLookup.orderedKeys
+                    : Array.from(sourceLookup?.sourceByKey?.keys?.() || [])
+            );
 
             Object.entries(rawGroupsById).forEach(([groupId, rawGroup]) => {
                 nextGroupsById.set(groupId, {
                     ...rawGroup,
-                    enabled: rawGroup.enabled !== undefined ? rawGroup.enabled : true,
-                    collapsed: rawGroup.collapsed === true,
+                    id: groupId,
+                    enabled: getOwnFieldValue(rawGroup, 'enabled', undefined) !== undefined
+                        ? getOwnFieldValue(rawGroup, 'enabled')
+                        : true,
+                    collapsed: getOwnFieldValue(rawGroup, 'collapsed', false) === true,
                     children: []
                 });
             });
@@ -816,21 +1018,30 @@
                 const nextGroup = nextGroupsById.get(groupId);
                 if (!nextGroup) return;
 
-                (Array.isArray(rawGroup.children) ? rawGroup.children : []).forEach((child) => {
-                    if (child.type === 'group' && appendGroupChildIfAcyclic(nextGroupsById, groupId, child.id)) {
+                const rawChildren = getOwnFieldValue(rawGroup, 'children', []);
+                (Array.isArray(rawChildren) ? rawChildren : []).forEach((child) => {
+                    const childType = getOwnFieldValue(child, 'type');
+                    const childGroupId = getOwnFieldValue(child, 'id');
+                    const childSourceKey = getOwnFieldValue(child, 'key');
+                    if (childType === 'group' && typeof childGroupId === 'string' && childGroupId) {
+                        nextGroup.children.push({ type: 'group', id: childGroupId });
                         return;
                     }
 
-                    if (child.type !== 'source') return;
+                    if (childType !== 'source') return;
 
-                    const sourceRecord = loadedState && loadedState.sourceStateById
-                        ? loadedState.sourceStateById[child.key]
-                        : null;
-                    const resolvedKey = resolveStoredSourceKey(child.key, sourceLookup, sourceRecord);
-                    if (!resolvedKey || seenSourceRefs.has(resolvedKey)) return;
+                    const sourceRecord = getOwnRecordValue(
+                        loadedState && loadedState.sourceStateById,
+                        childSourceKey
+                    );
+                    const resolvedKey = resolveStoredSourceKey(
+                        childSourceKey,
+                        sourceLookup,
+                        sourceRecord
+                    );
+                    if (!resolvedKey) return;
 
                     nextGroup.children.push({ type: 'source', key: resolvedKey });
-                    seenSourceRefs.add(resolvedKey);
                 });
             });
 
@@ -845,75 +1056,70 @@
                     : []);
             rawRootEntries.forEach((entry) => {
                 if (!entry) return;
-                if (entry.type === 'group') {
-                    if (entry.id && nextGroupsById.has(entry.id)) {
-                        nextRoot.push({ type: 'group', id: entry.id });
+                const entryType = getOwnFieldValue(entry, 'type');
+                const groupId = getOwnFieldValue(entry, 'id');
+                const sourceKey = getOwnFieldValue(entry, 'key');
+                if (entryType === 'group') {
+                    if (groupId && nextGroupsById.has(groupId)) {
+                        nextRoot.push({ type: 'group', id: groupId });
                     }
                     return;
                 }
-                if (entry.type === 'source') {
-                    const sourceRecord = loadedState && loadedState.sourceStateById
-                        ? loadedState.sourceStateById[entry.key]
-                        : null;
-                    const resolvedKey = resolveStoredSourceKey(entry.key, sourceLookup, sourceRecord);
-                    if (!resolvedKey || seenSourceRefs.has(resolvedKey)) return;
+                if (entryType === 'source') {
+                    const sourceRecord = getOwnRecordValue(
+                        loadedState && loadedState.sourceStateById,
+                        sourceKey
+                    );
+                    const resolvedKey = resolveStoredSourceKey(
+                        sourceKey,
+                        sourceLookup,
+                        sourceRecord
+                    );
+                    if (!resolvedKey) return;
                     nextRoot.push({ type: 'source', key: resolvedKey });
-                    seenSourceRefs.add(resolvedKey);
                 }
             });
             const nextUngrouped = [];
 
             (Array.isArray(loadedState && loadedState.ungrouped) ? loadedState.ungrouped : []).forEach((storedKey) => {
-                const sourceRecord = loadedState && loadedState.sourceStateById
-                    ? loadedState.sourceStateById[storedKey]
-                    : null;
+                const sourceRecord = getOwnRecordValue(
+                    loadedState && loadedState.sourceStateById,
+                    storedKey
+                );
                 const resolvedKey = resolveStoredSourceKey(storedKey, sourceLookup, sourceRecord);
-                if (!resolvedKey || seenSourceRefs.has(resolvedKey)) return;
+                if (!resolvedKey) return;
 
                 nextUngrouped.push(resolvedKey);
-                seenSourceRefs.add(resolvedKey);
             });
 
-            return {
-                root: nextRoot,
+            const normalized = normalizePlacementState({
+                state: {
+                    ...(loadedState && typeof loadedState === 'object' ? loadedState : {}),
+                    root: nextRoot,
+                    ungrouped: nextUngrouped
+                },
                 groupsById: nextGroupsById,
-                ungrouped: nextUngrouped,
-                seenSourceRefs
+                liveSourceKeys
+            });
+            if (!normalized?.ok) {
+                return {
+                    ok: false,
+                    reason: normalized?.reason || 'invalid_model',
+                    root: [],
+                    groupsById: new Map(),
+                    ungrouped: [],
+                    seenSourceRefs: new Set()
+                };
+            }
+
+            return {
+                ok: true,
+                root: normalized.state.root,
+                groupsById: normalized.groupsById,
+                ungrouped: normalized.state.ungrouped,
+                seenSourceRefs: new Set(normalized.liveSourceKeys),
+                normalization: normalized
             };
-        }
-
-        function hasGroupPathToTarget(groupsById, startGroupId, targetGroupId) {
-            if (!startGroupId || !targetGroupId || startGroupId === targetGroupId) return true;
-            const stack = [startGroupId];
-            const visited = new Set();
-
-            while (stack.length > 0) {
-                const groupId = stack.pop();
-                if (!groupId || visited.has(groupId)) continue;
-                if (groupId === targetGroupId) return true;
-                visited.add(groupId);
-
-                const group = groupsById.get(groupId);
-                (Array.isArray(group?.children) ? group.children : []).forEach((child) => {
-                    if (child?.type === 'group' && child.id && !visited.has(child.id)) {
-                        stack.push(child.id);
-                    }
-                });
-            }
-
-            return false;
-        }
-
-        function appendGroupChildIfAcyclic(groupsById, parentGroupId, childGroupId) {
-            const parentGroup = groupsById.get(parentGroupId);
-            if (!parentGroup || !childGroupId || childGroupId === parentGroupId || !groupsById.has(childGroupId)) {
-                return false;
-            }
-            if (hasGroupPathToTarget(groupsById, childGroupId, parentGroupId)) {
-                return false;
-            }
-            parentGroup.children.push({ type: 'group', id: childGroupId });
-            return true;
         }
 
         return {
@@ -929,8 +1135,7 @@
             buildResolvedSourceStateById,
             buildNormalizedTagState,
             buildResolvedSourceTagsById,
-            reconcilePersistedTree,
-            appendGroupChildIfAcyclic
+            reconcilePersistedTree
         };
     }
 
