@@ -79,8 +79,14 @@
         const canMoveSourceToUngrouped = typeof deps.canMoveSourceToUngrouped === 'function'
             ? deps.canMoveSourceToUngrouped
             : () => false;
+        const resolveDirectionalTarget = typeof deps.resolveDirectionalTarget === 'function'
+            ? deps.resolveDirectionalTarget
+            : () => ({ ok: false, reason: 'unavailable', target: null });
         const moveSourceToUngrouped = typeof deps.moveSourceToUngrouped === 'function'
             ? deps.moveSourceToUngrouped
+            : () => false;
+        const orderTreeItem = typeof deps.orderTreeItem === 'function'
+            ? deps.orderTreeItem
             : () => false;
         const markSourceDetailViewRequested = typeof deps.markSourceDetailViewRequested === 'function'
             ? deps.markSourceDetailViewRequested
@@ -102,7 +108,8 @@
                 getState,
                 getSourcesByKey,
                 getMessage,
-                canMoveSourceToUngrouped
+                canMoveSourceToUngrouped,
+                resolveDirectionalTarget
             })
             : {};
         const menuCanOpenSourceActionMenu = typeof sourceActionMenu.canOpenSourceActionMenu === 'function'
@@ -1684,6 +1691,9 @@
             sourceActionInvokers.openTags = (sourceKey) => renderTagModal(sourceKey);
             sourceActionInvokers.moveToFolder = (sourceKey) => renderMoveToFolderModal(sourceKey);
             sourceActionInvokers.moveSourceToUngrouped = (sourceKey) => moveSourceToUngrouped(sourceKey);
+            sourceActionInvokers.orderTreeItem = (sourceKey, direction) => (
+                orderTreeItem(sourceKey, direction)
+            );
             sourceActionInvokers.deleteSource = (sourceKey) => deleteNativeSourceFromAction(sourceKey);
             return sourceActionInvokers;
         }
@@ -1714,15 +1724,29 @@
                 return false;
             }
 
-            closeSourceActionMenu();
-            const menuItem = getSourceActionMenuItems(sourceKey).find((item) => item.action === action);
+            const menuItems = getSourceActionMenuItems(sourceKey);
+            const parentItem = menuItems.find((item) => item.action === action);
+            const childItem = menuItems
+                .filter((item) => item.kind === 'submenu' && Array.isArray(item.children))
+                .flatMap((item) => item.children)
+                .find((item) => item.action === action);
+            const menuItem = parentItem || childItem;
             if (!menuItem) {
+                closeSourceActionMenu();
                 return false;
             }
             if (menuItem?.disabled) {
+                closeSourceActionMenu();
                 showToast(getMessage('ui_keyboard_move_unavailable'), { variant: 'info' });
                 return false;
             }
+            if (menuItem.kind === 'submenu') {
+                activeSourceActionSourceKey = sourceKey;
+                activeSourceActionSubmenuAction = menuItem.action;
+                return true;
+            }
+
+            closeSourceActionMenu();
 
             switch (action) {
             case 'view-source-details': {
@@ -1743,6 +1767,11 @@
                 return true;
             case 'move-ungrouped':
                 return sourceActionInvokers.moveSourceToUngrouped(sourceKey);
+            case 'tree-order-up':
+            case 'tree-order-down':
+            case 'tree-order-in':
+            case 'tree-order-out':
+                return sourceActionInvokers.orderTreeItem(sourceKey, menuItem.direction);
             case 'delete-source':
                 return sourceActionInvokers.deleteSource(sourceKey);
             default:

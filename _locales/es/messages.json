@@ -1267,6 +1267,65 @@
     "ui_keyboard_moved_ungrouped_toast": {
         "message": "Movido a Sin agrupar"
     },
+    "ui_tree_order": {
+        "message": "Orden preciso"
+    },
+    "ui_tree_order_up": {
+        "message": "Mover hacia arriba"
+    },
+    "ui_tree_order_down": {
+        "message": "Mover hacia abajo"
+    },
+    "ui_tree_order_in": {
+        "message": "Mover dentro de la carpeta anterior"
+    },
+    "ui_tree_order_out": {
+        "message": "Mover fuera de la carpeta actual"
+    },
+    "ui_tree_order_moved_up_status": {
+        "message": "Movido hacia arriba. Posición $1 de $2.",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            },
+            "2": {
+                "content": "$2"
+            }
+        }
+    },
+    "ui_tree_order_moved_down_status": {
+        "message": "Movido hacia abajo. Posición $1 de $2.",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            },
+            "2": {
+                "content": "$2"
+            }
+        }
+    },
+    "ui_tree_order_moved_in_status": {
+        "message": "Movido dentro de la carpeta anterior. Posición $1 de $2.",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            },
+            "2": {
+                "content": "$2"
+            }
+        }
+    },
+    "ui_tree_order_moved_out_status": {
+        "message": "Movido fuera de la carpeta actual. Posición $1 de $2.",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            },
+            "2": {
+                "content": "$2"
+            }
+        }
+    },
     "ui_drop_to_ungroup_hint": {
         "message": "Suelta aquí para desagrupar"
     },

@@ -71,6 +71,13 @@
             el('div', { id: 'sp-view-state', className: 'sp-view-state', hidden: true }),
             el('div', { id: 'sources-list' }),
             el('div', {
+                id: 'sp-tree-order-status',
+                className: 'sp-sr-only',
+                role: 'status',
+                'aria-live': 'polite',
+                'aria-atomic': 'true'
+            }),
+            el('div', {
                 className: 'sp-resizer',
                 role: 'separator',
                 'aria-orientation': 'horizontal',

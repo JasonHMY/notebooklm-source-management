@@ -72,6 +72,266 @@ describe('content-tree-placement factory', () => {
         };
     }
 
+    describe('resolveDirectionalTarget', () => {
+        it('resolves source and group up/down targets without mutating the live tree', () => {
+            const { state, groupsById, treePlacement } = createHarness({
+                state: {
+                    root: [
+                        { type: 'group', id: 'group-a' },
+                        { type: 'group', id: 'group-b' },
+                        { type: 'source', key: 'source-a' },
+                        { type: 'source', key: 'source-b' }
+                    ],
+                    ungrouped: ['bin-a', 'bin-b']
+                },
+                groupsById: new Map([
+                    ['group-a', { id: 'group-a', children: [] }],
+                    ['group-b', { id: 'group-b', children: [] }]
+                ])
+            });
+            const before = snapshotLiveModel(state, groupsById);
+
+            expect(treePlacement.resolveDirectionalTarget(
+                { kind: 'group', id: 'group-b' },
+                'up'
+            )).toEqual({
+                ok: true,
+                reason: 'ready',
+                target: { container: 'root', index: 0 }
+            });
+            expect(treePlacement.resolveDirectionalTarget(
+                { kind: 'source', key: 'source-a' },
+                'down'
+            )).toEqual({
+                ok: true,
+                reason: 'ready',
+                target: { container: 'root', index: 4 }
+            });
+            expect(treePlacement.resolveDirectionalTarget(
+                { kind: 'source', key: 'bin-b' },
+                'up'
+            )).toEqual({
+                ok: true,
+                reason: 'ready',
+                target: { container: 'ungrouped', index: 0 }
+            });
+
+            expect(snapshotLiveModel(state, groupsById)).toEqual(before);
+
+            const result = treePlacement.applyPlacement({
+                item: { kind: 'source', key: 'source-a' },
+                target: treePlacement.resolveDirectionalTarget(
+                    { kind: 'source', key: 'source-a' },
+                    'down'
+                ).target
+            });
+            expect(result).toEqual(expect.objectContaining({
+                ok: true,
+                changed: true,
+                to: { container: 'root', index: 3 }
+            }));
+            expect(state.root.map((entry) => entry.id || entry.key)).toEqual([
+                'group-a',
+                'group-b',
+                'source-b',
+                'source-a'
+            ]);
+        });
+
+        it('moves into the previous sibling group tail and out immediately after the parent', () => {
+            const { state, groupsById, treePlacement } = createHarness({
+                state: {
+                    root: [
+                        { type: 'group', id: 'destination' },
+                        { type: 'source', key: 'root-source' },
+                        { type: 'group', id: 'parent' }
+                    ],
+                    ungrouped: ['bin-source']
+                },
+                groupsById: new Map([
+                    ['destination', {
+                        id: 'destination',
+                        children: [{ type: 'source', key: 'existing' }]
+                    }],
+                    ['parent', {
+                        id: 'parent',
+                        children: [{ type: 'group', id: 'child' }]
+                    }],
+                    ['child', {
+                        id: 'child',
+                        children: [{ type: 'source', key: 'nested-source' }]
+                    }]
+                ])
+            });
+            const before = snapshotLiveModel(state, groupsById);
+
+            expect(treePlacement.resolveDirectionalTarget(
+                { kind: 'source', key: 'root-source' },
+                'in'
+            )).toEqual({
+                ok: true,
+                reason: 'ready',
+                target: {
+                    container: 'group',
+                    groupId: 'destination',
+                    index: 1
+                }
+            });
+            expect(treePlacement.resolveDirectionalTarget(
+                { kind: 'source', key: 'nested-source' },
+                'out'
+            )).toEqual({
+                ok: true,
+                reason: 'ready',
+                target: {
+                    container: 'group',
+                    groupId: 'parent',
+                    index: 1
+                }
+            });
+            expect(treePlacement.resolveDirectionalTarget(
+                { kind: 'group', id: 'child' },
+                'out'
+            )).toEqual({
+                ok: true,
+                reason: 'ready',
+                target: { container: 'root', index: 3 }
+            });
+
+            expect(snapshotLiveModel(state, groupsById)).toEqual(before);
+        });
+
+        it('fails closed at boundaries, in the bin, and when the previous sibling is not a group', () => {
+            const { state, groupsById, treePlacement } = createHarness({
+                state: {
+                    root: [
+                        { type: 'source', key: 'root-first' },
+                        { type: 'source', key: 'root-last' }
+                    ],
+                    ungrouped: ['bin-only']
+                }
+            });
+            const before = snapshotLiveModel(state, groupsById);
+
+            [
+                [{ kind: 'source', key: 'root-first' }, 'up'],
+                [{ kind: 'source', key: 'root-last' }, 'down'],
+                [{ kind: 'source', key: 'root-first' }, 'out'],
+                [{ kind: 'source', key: 'root-last' }, 'in'],
+                [{ kind: 'source', key: 'bin-only' }, 'in'],
+                [{ kind: 'source', key: 'bin-only' }, 'out']
+            ].forEach(([item, direction]) => {
+                expect(treePlacement.resolveDirectionalTarget(item, direction)).toEqual({
+                    ok: false,
+                    reason: 'unavailable',
+                    target: null
+                });
+            });
+
+            expect(snapshotLiveModel(state, groupsById)).toEqual(before);
+        });
+
+        it('rejects invalid, ambiguous, missing, and cyclic directional commands without mutation', () => {
+            const { state, groupsById, treePlacement } = createHarness({
+                state: {
+                    root: [
+                        { type: 'group', id: 'child' },
+                        { type: 'group', id: 'parent' },
+                        { type: 'source', key: 'duplicate' }
+                    ],
+                    ungrouped: ['duplicate']
+                },
+                groupsById: new Map([
+                    ['parent', {
+                        id: 'parent',
+                        children: [{ type: 'group', id: 'child' }]
+                    }],
+                    ['child', { id: 'child', children: [] }]
+                ])
+            });
+            const before = snapshotLiveModel(state, groupsById);
+
+            expect(treePlacement.resolveDirectionalTarget(
+                { kind: 'group', id: 'parent' },
+                'in'
+            )).toEqual({
+                ok: false,
+                reason: 'cycle',
+                target: null
+            });
+            expect(treePlacement.resolveDirectionalTarget(
+                { kind: 'source', key: 'duplicate' },
+                'up'
+            )).toEqual({
+                ok: false,
+                reason: 'ambiguous',
+                target: null
+            });
+            expect(treePlacement.resolveDirectionalTarget(
+                { kind: 'source', key: 'missing' },
+                'down'
+            )).toEqual({
+                ok: false,
+                reason: 'not_found',
+                target: null
+            });
+            expect(treePlacement.resolveDirectionalTarget(
+                { kind: 'source', key: 'duplicate' },
+                'sideways'
+            )).toEqual({
+                ok: false,
+                reason: 'invalid_direction',
+                target: null
+            });
+            expect(treePlacement.resolveDirectionalTarget({}, 'up')).toEqual({
+                ok: false,
+                reason: 'invalid_item',
+                target: null
+            });
+
+            expect(snapshotLiveModel(state, groupsById)).toEqual(before);
+        });
+
+        it('creates one immutable indexed resolver snapshot for a render pass', () => {
+            const state = {
+                root: [
+                    { type: 'group', id: 'group-a' },
+                    { type: 'group', id: 'group-b' }
+                ],
+                ungrouped: []
+            };
+            const groupsById = new Map([
+                ['group-a', { id: 'group-a', children: [] }],
+                ['group-b', { id: 'group-b', children: [] }]
+            ]);
+            const getState = jest.fn(() => state);
+            const getGroupsById = jest.fn(() => groupsById);
+            const treePlacement = createContentTreePlacement({
+                getState,
+                getGroupsById
+            });
+
+            const resolveForRender = treePlacement.createDirectionalTargetResolver();
+            const before = snapshotLiveModel(state, groupsById);
+            const firstPass = ['up', 'down', 'in', 'out'].map((direction) => (
+                resolveForRender({ kind: 'group', id: 'group-b' }, direction)
+            ));
+            const secondPass = ['up', 'down', 'in', 'out'].map((direction) => (
+                resolveForRender({ kind: 'group', id: 'group-b' }, direction)
+            ));
+
+            expect(firstPass).toEqual(secondPass);
+            expect(firstPass[0]).toEqual({
+                ok: true,
+                reason: 'ready',
+                target: { container: 'root', index: 0 }
+            });
+            expect(getState).toHaveBeenCalledTimes(1);
+            expect(getGroupsById).toHaveBeenCalledTimes(1);
+            expect(snapshotLiveModel(state, groupsById)).toEqual(before);
+        });
+    });
+
     it('applyPlacement moves a source from bin to root using object entry shape', () => {
         const group = { id: 'g1', title: 'Folder', children: [] };
         const { state, treePlacement } = createHarness({

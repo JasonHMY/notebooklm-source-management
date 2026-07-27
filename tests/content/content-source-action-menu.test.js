@@ -1,11 +1,17 @@
 const createContentSourceActionMenu = require('../../src/content/content-source-action-menu.js');
 
 describe('content source action menu helper', () => {
-    const createMenu = ({ state = {}, sources = new Map(), canMove = true } = {}) => createContentSourceActionMenu({
+    const createMenu = ({
+        state = {},
+        sources = new Map(),
+        canMove = true,
+        resolveDirectionalTarget = () => ({ ok: false, reason: 'unavailable', target: null })
+    } = {}) => createContentSourceActionMenu({
         getState: () => state,
         getSourcesByKey: () => sources,
         getMessage: (key) => `msg:${key}`,
-        canMoveSourceToUngrouped: () => canMove
+        canMoveSourceToUngrouped: () => canMove,
+        resolveDirectionalTarget
     });
 
     it('blocks menus for batch mode, loading, disabled, or missing sources', () => {
@@ -29,8 +35,17 @@ describe('content source action menu helper', () => {
         ]);
     });
 
-    it('returns the standard source menu and move disabled state', () => {
-        const menu = createMenu({ sources: new Map([['ready', {}]]), canMove: false });
+    it('returns precise-order submenu state exclusively from the directional resolver', () => {
+        const resolveDirectionalTarget = jest.fn((item, direction) => ({
+            ok: direction !== 'up',
+            reason: direction === 'up' ? 'unavailable' : 'ready',
+            target: direction === 'up' ? null : { container: 'root', index: 1 }
+        }));
+        const menu = createMenu({
+            sources: new Map([['ready', {}]]),
+            canMove: false,
+            resolveDirectionalTarget
+        });
         const items = menu.getSourceActionMenuItems('ready');
 
         expect(items.map((item) => item.action)).toEqual([
@@ -39,9 +54,60 @@ describe('content source action menu helper', () => {
             'tags',
             'move',
             'move-ungrouped',
+            'tree-order',
             'delete-source'
         ]);
         expect(items.find((item) => item.action === 'move-ungrouped')).toMatchObject({ disabled: true });
+        const orderItem = items.find((item) => item.action === 'tree-order');
+        expect(orderItem).toMatchObject({
+            kind: 'submenu',
+            icon: 'swap_vert',
+            label: 'msg:ui_tree_order'
+        });
+        expect(menu.getSourceActionSubmenuItems('ready', 'tree-order')).toEqual([
+            expect.objectContaining({
+                action: 'tree-order-up',
+                direction: 'up',
+                disabled: true,
+                label: 'msg:ui_tree_order_up'
+            }),
+            expect.objectContaining({
+                action: 'tree-order-down',
+                direction: 'down',
+                disabled: false,
+                label: 'msg:ui_tree_order_down'
+            }),
+            expect.objectContaining({
+                action: 'tree-order-in',
+                direction: 'in',
+                disabled: false,
+                label: 'msg:ui_tree_order_in'
+            }),
+            expect.objectContaining({
+                action: 'tree-order-out',
+                direction: 'out',
+                disabled: false,
+                label: 'msg:ui_tree_order_out'
+            })
+        ]);
+        expect(resolveDirectionalTarget).toHaveBeenCalledTimes(8);
+        expect(resolveDirectionalTarget).toHaveBeenCalledWith(
+            { kind: 'source', key: 'ready' },
+            'up'
+        );
+    });
+
+    it('disables the precise-order parent when every direction is unavailable', () => {
+        const menu = createMenu({
+            sources: new Map([['only', {}]])
+        });
+
+        expect(menu.getSourceActionMenuItems('only').find((item) => (
+            item.action === 'tree-order'
+        ))).toMatchObject({
+            kind: 'submenu',
+            disabled: true
+        });
     });
 
     it('creates native action results', () => {

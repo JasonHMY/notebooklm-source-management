@@ -2373,6 +2373,276 @@ describe('drag and drop ordering guards', () => {
         expect(showUndoableToast).toHaveBeenCalledWith('ui_keyboard_moved_ungrouped_toast', { variant: 'success' });
     });
 
+    it('handles the click produced by Enter once and restores focus after a source order move', () => {
+        const state = {
+            root: [
+                { type: 'source', key: 'source-a' },
+                { type: 'source', key: 'source-b' }
+            ],
+            ungrouped: []
+        };
+        const groupsById = new Map();
+        const parentMap = new Map();
+        const sourcesByKey = new Map([
+            ['source-a', { key: 'source-a', title: 'First private title', enabled: true }],
+            ['source-b', { key: 'source-b', title: 'Second private title', enabled: true }]
+        ]);
+        const createContentTreePlacement = require('../../src/content/content-tree-placement.js');
+        const treePlacement = createContentTreePlacement({
+            getState: () => state,
+            getGroupsById: () => groupsById
+        });
+        jest.spyOn(treePlacement, 'resolveDirectionalTarget');
+        jest.spyOn(treePlacement, 'applyPlacement');
+        jest.spyOn(treePlacement, 'rebuildParentMap');
+        const saveState = jest.fn();
+        const render = jest.fn();
+        const closeSourceActionMenu = jest.fn();
+        const status = { textContent: '' };
+        const restoredControl = {
+            dataset: { sourceKey: 'source-b' },
+            focus: jest.fn()
+        };
+        const shadowRoot = {
+            getElementById: jest.fn((id) => (
+                id === 'sp-tree-order-status' ? status : null
+            )),
+            querySelectorAll: jest.fn((selector) => (
+                selector === '.sp-source-actions-button' ? [restoredControl] : []
+            ))
+        };
+        const interactions = createContentTreeInteractions({
+            treePlacement,
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getSourcesByKey: () => sourcesByKey,
+            getParentMap: () => parentMap,
+            getShadowRoot: () => shadowRoot,
+            saveState,
+            render,
+            closeSourceActionMenu,
+            getMessage: (key, args = []) => `${key}:${args.join('/')}`
+        });
+        const orderButton = {
+            dataset: {
+                sourceKey: 'source-b',
+                treeDirection: 'up'
+            },
+            classList: { contains: jest.fn(() => false) },
+            closest: jest.fn((selector) => (
+                selector === '[data-tree-direction]' ? orderButton : null
+            ))
+        };
+
+        interactions.handleInteraction({ target: orderButton });
+
+        expect(state.root).toEqual([
+            { type: 'source', key: 'source-b' },
+            { type: 'source', key: 'source-a' }
+        ]);
+        expect(treePlacement.resolveDirectionalTarget).toHaveBeenCalledTimes(1);
+        expect(treePlacement.applyPlacement).toHaveBeenCalledTimes(1);
+        expect(treePlacement.rebuildParentMap).toHaveBeenCalledTimes(1);
+        expect(closeSourceActionMenu).toHaveBeenCalledTimes(1);
+        expect(render).toHaveBeenCalledTimes(1);
+        expect(saveState).toHaveBeenCalledTimes(1);
+        expect(saveState).toHaveBeenCalledWith({ immediate: true, critical: true });
+        expect(restoredControl.focus).toHaveBeenCalledTimes(1);
+        expect(status.textContent).toBe('ui_tree_order_moved_up_status:1/2');
+        expect(status.textContent).not.toContain('private title');
+    });
+
+    it('fails closed when a stale directional control has reached a boundary', () => {
+        const state = {
+            root: [{ type: 'source', key: 'source-a' }],
+            ungrouped: []
+        };
+        const groupsById = new Map();
+        const createContentTreePlacement = require('../../src/content/content-tree-placement.js');
+        const treePlacement = createContentTreePlacement({
+            getState: () => state,
+            getGroupsById: () => groupsById
+        });
+        jest.spyOn(treePlacement, 'resolveDirectionalTarget');
+        jest.spyOn(treePlacement, 'applyPlacement');
+        jest.spyOn(treePlacement, 'rebuildParentMap');
+        const status = { textContent: '' };
+        const saveState = jest.fn();
+        const render = jest.fn();
+        const interactions = createContentTreeInteractions({
+            treePlacement,
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getSourcesByKey: () => new Map([[
+                'source-a',
+                { key: 'source-a', title: 'Never announce me', enabled: true }
+            ]]),
+            getParentMap: () => new Map(),
+            getShadowRoot: () => ({
+                getElementById: (id) => (id === 'sp-tree-order-status' ? status : null),
+                querySelectorAll: () => []
+            }),
+            saveState,
+            render
+        });
+        const orderButton = {
+            dataset: {
+                sourceKey: 'source-a',
+                treeDirection: 'up'
+            },
+            classList: { contains: jest.fn(() => false) },
+            closest: jest.fn((selector) => (
+                selector === '[data-tree-direction]' ? orderButton : null
+            ))
+        };
+
+        interactions.handleInteraction({ target: orderButton });
+
+        expect(treePlacement.resolveDirectionalTarget).toHaveBeenCalledTimes(1);
+        expect(treePlacement.applyPlacement).not.toHaveBeenCalled();
+        expect(treePlacement.rebuildParentMap).not.toHaveBeenCalled();
+        expect(saveState).not.toHaveBeenCalled();
+        expect(render).not.toHaveBeenCalled();
+        expect(status.textContent).toBe('');
+    });
+
+    it('restores group focus to an enabled sibling control after reaching a boundary', () => {
+        const state = {
+            root: [
+                { type: 'group', id: 'group-a' },
+                { type: 'group', id: 'group-b' }
+            ],
+            ungrouped: []
+        };
+        const groupsById = new Map([
+            ['group-a', { id: 'group-a', title: 'A', children: [] }],
+            ['group-b', { id: 'group-b', title: 'B', children: [] }]
+        ]);
+        const createContentTreePlacement = require('../../src/content/content-tree-placement.js');
+        const treePlacement = createContentTreePlacement({
+            getState: () => state,
+            getGroupsById: () => groupsById
+        });
+        const movedUpControl = {
+            dataset: { groupId: 'group-b', treeDirection: 'up' },
+            disabled: true,
+            focus: jest.fn()
+        };
+        const moveDownControl = {
+            dataset: { groupId: 'group-b', treeDirection: 'down' },
+            disabled: false,
+            focus: jest.fn()
+        };
+        const status = { textContent: '' };
+        const render = jest.fn();
+        const saveState = jest.fn();
+        const interactions = createContentTreeInteractions({
+            treePlacement,
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getParentMap: () => new Map(),
+            getShadowRoot: () => ({
+                querySelectorAll: jest.fn((selector) => {
+                    if (selector === '.sp-tree-order-button') {
+                        return [movedUpControl, moveDownControl];
+                    }
+                    return [];
+                }),
+                getElementById: (id) => (id === 'sp-tree-order-status' ? status : null)
+            }),
+            render,
+            saveState,
+            getMessage: (key, args = []) => `${key}:${args.join('/')}`
+        });
+
+        expect(interactions.executeDirectionalTreeMove(
+            { kind: 'group', id: 'group-b' },
+            'up'
+        )).toBe(true);
+
+        expect(state.root.map((entry) => entry.id)).toEqual(['group-b', 'group-a']);
+        expect(movedUpControl.focus).not.toHaveBeenCalled();
+        expect(moveDownControl.focus).toHaveBeenCalledTimes(1);
+        expect(render).toHaveBeenCalledTimes(1);
+        expect(saveState).toHaveBeenCalledTimes(1);
+        expect(status.textContent).toBe('ui_tree_order_moved_up_status:1/2');
+    });
+
+    it('restores focus to the destination caret when moving into a collapsed group', () => {
+        const state = {
+            root: [
+                { type: 'group', id: 'group-a' },
+                { type: 'source', key: 'source-b' }
+            ],
+            ungrouped: []
+        };
+        const groupsById = new Map([[
+            'group-a',
+            { id: 'group-a', title: 'A', collapsed: true, children: [] }
+        ]]);
+        const createContentTreePlacement = require('../../src/content/content-tree-placement.js');
+        const treePlacement = createContentTreePlacement({
+            getState: () => state,
+            getGroupsById: () => groupsById
+        });
+        const hiddenSourceControl = {
+            dataset: { sourceKey: 'source-b' },
+            focus: jest.fn(),
+            closest: jest.fn((selector) => (
+                selector === '.group-children.collapsed' ? {} : null
+            ))
+        };
+        const destinationCaret = {
+            focus: jest.fn(),
+            closest: jest.fn(() => null)
+        };
+        const destinationGroup = {
+            dataset: { groupId: 'group-a' },
+            querySelector: jest.fn((selector) => (
+                selector === '.sp-caret' ? destinationCaret : null
+            ))
+        };
+        const status = { textContent: '' };
+        const render = jest.fn();
+        const saveState = jest.fn();
+        const interactions = createContentTreeInteractions({
+            treePlacement,
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getParentMap: () => new Map(),
+            getShadowRoot: () => ({
+                querySelectorAll: jest.fn((selector) => {
+                    if (selector === '.sp-source-actions-button') {
+                        return [hiddenSourceControl];
+                    }
+                    if (selector === '.group-container') {
+                        return [destinationGroup];
+                    }
+                    return [];
+                }),
+                getElementById: (id) => (id === 'sp-tree-order-status' ? status : null)
+            }),
+            render,
+            saveState,
+            getMessage: (key, args = []) => `${key}:${args.join('/')}`
+        });
+
+        expect(interactions.executeDirectionalTreeMove(
+            { kind: 'source', key: 'source-b' },
+            'in'
+        )).toBe(true);
+
+        expect(state.root).toEqual([{ type: 'group', id: 'group-a' }]);
+        expect(groupsById.get('group-a').children).toEqual([
+            { type: 'source', key: 'source-b' }
+        ]);
+        expect(hiddenSourceControl.focus).not.toHaveBeenCalled();
+        expect(destinationCaret.focus).toHaveBeenCalledTimes(1);
+        expect(render).toHaveBeenCalledTimes(1);
+        expect(saveState).toHaveBeenCalledTimes(1);
+        expect(status.textContent).toBe('ui_tree_order_moved_in_status:1/1');
+    });
+
 });
 
 describe('handleDragStart multi-source branch', () => {

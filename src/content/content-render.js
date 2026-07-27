@@ -120,6 +120,12 @@
         const canOpenSourceActionMenu = typeof deps.canOpenSourceActionMenu === 'function'
             ? deps.canOpenSourceActionMenu
             : () => false;
+        const resolveDirectionalTarget = typeof deps.resolveDirectionalTarget === 'function'
+            ? deps.resolveDirectionalTarget
+            : () => ({ ok: false, reason: 'unavailable', target: null });
+        const createDirectionalTargetResolver = typeof deps.createDirectionalTargetResolver === 'function'
+            ? deps.createDirectionalTargetResolver
+            : null;
         const findSourceActionButton = typeof deps.findSourceActionButton === 'function'
             ? deps.findSourceActionButton
             : () => null;
@@ -170,6 +176,12 @@
         const COUNT_UP_DURATION_MS = 320;
         const MOTION_STAGGER_MAX_INDEX = 10;
         const SPOTLIGHT_SURFACE_SELECTOR = '.sp-spotlight-surface';
+        const TREE_ORDER_DIRECTIONS = [
+            { direction: 'up', icon: 'arrow_upward', labelKey: 'ui_tree_order_up' },
+            { direction: 'down', icon: 'arrow_downward', labelKey: 'ui_tree_order_down' },
+            { direction: 'in', icon: 'subdirectory_arrow_right', labelKey: 'ui_tree_order_in' },
+            { direction: 'out', icon: 'subdirectory_arrow_left', labelKey: 'ui_tree_order_out' }
+        ];
         let focusedSourceActionMenuKey = null;
         let pendingSourceActionMenuFocus = null;
 
@@ -902,6 +914,7 @@
             const submenuAction = getActiveSourceActionSubmenuAction();
             const submenuItems = getSourceActionSubmenuItems(sourceKey, submenuAction);
             const submenuParentIndex = menuItems.findIndex((item) => item.action === submenuAction);
+            const submenuParent = menuItems[submenuParentIndex] || null;
             const menuPosition = getSourceActionMenuPositionState();
 
             if (sourceKey && source && canOpenSourceActionMenu(source)) {
@@ -956,17 +969,23 @@
                             (submenuPosition.horizontalPlacement === 'left' ? ' is-left' : ''),
                         role: 'menu',
                         dataset: { menuKind: 'submenu' },
-                        'aria-label': getMessage('ui_view_source'),
+                        'aria-label': submenuParent?.label || getMessage('ui_source_actions'),
                         style: `top:${Math.round(submenuPosition.top)}px;left:${Math.round(submenuPosition.left)}px;`
                     }, submenuItems.map((item, index) => (
                         el('button', {
                             type: 'button',
                             className: 'sp-source-actions-menu-item',
-                            dataset: { sourceKey, action: item.action },
+                            dataset: {
+                                sourceKey,
+                                action: item.action,
+                                ...(item.direction ? { treeDirection: item.direction } : {})
+                            },
                             role: 'menuitem',
+                            disabled: item.disabled ? true : null,
                             style: `--sp-menu-item-index:${index};`,
                             title: item.label,
-                            'aria-label': item.label
+                            'aria-label': item.label,
+                            'aria-disabled': item.disabled ? 'true' : null
                         }, [
                             el('span', { className: 'sp-source-actions-menu-item-content' }, [
                                 el('span', { className: 'google-symbols' }, [item.icon]),
@@ -1129,6 +1148,10 @@
             }
 
             const state = getState() || {};
+            const renderDirectionalTargetResolver = !state.isBatchMode
+                && createDirectionalTargetResolver
+                ? createDirectionalTargetResolver()
+                : resolveDirectionalTarget;
             const activeFilters = hasActiveRenderFilters();
             const groupsById = getGroupsById();
             const sourcesByKey = getSourcesByKey();
@@ -1259,6 +1282,29 @@
                 const isSearchExpanded = searchExpandedGroupIds.has(group.id);
                 const isCollapsed = group.collapsed && !isSearchExpanded;
                 const groupChildren = Array.isArray(group.children) ? group.children : [];
+                const treeOrderControls = !state.isBatchMode
+                    ? el('div', {
+                        className: 'sp-tree-order-controls',
+                        role: 'group',
+                        'aria-label': getMessage('ui_tree_order')
+                    }, TREE_ORDER_DIRECTIONS.map(({ direction, icon, labelKey }) => {
+                        const resolution = renderDirectionalTargetResolver(
+                            { kind: 'group', id: group.id },
+                            direction
+                        );
+                        const disabled = !resolution?.ok;
+                        const label = getMessage(labelKey);
+                        return el('button', {
+                            type: 'button',
+                            className: 'sp-tree-order-button sp-glare-hover',
+                            dataset: { groupId: group.id, treeDirection: direction },
+                            title: label,
+                            'aria-label': label,
+                            'aria-disabled': disabled ? 'true' : null,
+                            disabled: disabled ? true : null
+                        }, [el('span', { className: 'google-symbols' }, [icon])]);
+                    }))
+                    : '';
 
                 groupChildren.forEach((child) => {
                     if (child.type === 'source') {
@@ -1299,8 +1345,9 @@
                             el('span', { className: 'sp-toggle-slider' })
                         ]) : '',
                         createGroupTitleIconElement(),
-	                        el('span', { className: 'group-title' }, createHighlightedTextChildren(groupTitle, folderHighlightTerms)),
-	                        el('span', { className: 'badge' }, [` ${on} / ${total} `]),
+                        el('span', { className: 'group-title' }, createHighlightedTextChildren(groupTitle, folderHighlightTerms)),
+                        el('span', { className: 'badge' }, [` ${on} / ${total} `]),
+                            treeOrderControls,
 	                        el('button', {
 	                            type: 'button',
 	                            className: 'sp-add-subgroup-button sp-glare-hover',

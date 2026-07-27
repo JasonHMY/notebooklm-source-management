@@ -1267,6 +1267,65 @@
     "ui_keyboard_moved_ungrouped_toast": {
         "message": "已移到未分组"
     },
+    "ui_tree_order": {
+        "message": "精确排序"
+    },
+    "ui_tree_order_up": {
+        "message": "上移"
+    },
+    "ui_tree_order_down": {
+        "message": "下移"
+    },
+    "ui_tree_order_in": {
+        "message": "移入前一个文件夹"
+    },
+    "ui_tree_order_out": {
+        "message": "移出当前文件夹"
+    },
+    "ui_tree_order_moved_up_status": {
+        "message": "已上移，当前位置 $1/$2。",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            },
+            "2": {
+                "content": "$2"
+            }
+        }
+    },
+    "ui_tree_order_moved_down_status": {
+        "message": "已下移，当前位置 $1/$2。",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            },
+            "2": {
+                "content": "$2"
+            }
+        }
+    },
+    "ui_tree_order_moved_in_status": {
+        "message": "已移入前一个文件夹，当前位置 $1/$2。",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            },
+            "2": {
+                "content": "$2"
+            }
+        }
+    },
+    "ui_tree_order_moved_out_status": {
+        "message": "已移出当前文件夹，当前位置 $1/$2。",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            },
+            "2": {
+                "content": "$2"
+            }
+        }
+    },
     "ui_drop_to_ungroup_hint": {
         "message": "放到此处以取消分组"
     },

@@ -345,6 +345,230 @@
             return false;
         }
 
+        function createDirectionalTargetResult(ok, reason, target = null) {
+            return {
+                ok: Boolean(ok),
+                reason,
+                target: target ? normalizeTarget(target) : null
+            };
+        }
+
+        function getDirectionalLocationKey(item) {
+            if (item?.kind === 'source') return `source:${item.key}`;
+            if (item?.kind === 'group') return `group:${item.id}`;
+            return '';
+        }
+
+        function createDirectionalLocationIndex(model) {
+            const index = new Map();
+            const addLocation = (item, location) => {
+                const key = getDirectionalLocationKey(item);
+                if (!key) return;
+                if (!index.has(key)) index.set(key, []);
+                index.get(key).push(location);
+            };
+
+            (Array.isArray(model?.state?.root) ? model.state.root : [])
+                .forEach((entry, entryIndex) => {
+                    if (entry?.type === 'source' && entry.key) {
+                        addLocation(
+                            { kind: 'source', key: entry.key },
+                            { container: 'root', index: entryIndex }
+                        );
+                    } else if (entry?.type === 'group' && entry.id) {
+                        addLocation(
+                            { kind: 'group', id: entry.id },
+                            { container: 'root', index: entryIndex }
+                        );
+                    }
+                });
+
+            (Array.isArray(model?.state?.ungrouped) ? model.state.ungrouped : [])
+                .forEach((sourceKey, entryIndex) => {
+                    if (typeof sourceKey === 'string' && sourceKey) {
+                        addLocation(
+                            { kind: 'source', key: sourceKey },
+                            { container: 'ungrouped', index: entryIndex }
+                        );
+                    }
+                });
+
+            model?.groupsById?.forEach?.((group, groupId) => {
+                (Array.isArray(group?.children) ? group.children : [])
+                    .forEach((entry, entryIndex) => {
+                        if (entry?.type === 'source' && entry.key) {
+                            addLocation(
+                                { kind: 'source', key: entry.key },
+                                { container: 'group', groupId, index: entryIndex }
+                            );
+                        } else if (entry?.type === 'group' && entry.id) {
+                            addLocation(
+                                { kind: 'group', id: entry.id },
+                                { container: 'group', groupId, index: entryIndex }
+                            );
+                        }
+                    });
+            });
+            return index;
+        }
+
+        function getDirectionalLocations(model, item, locationIndex = null) {
+            if (locationIndex instanceof Map) {
+                return locationIndex.get(getDirectionalLocationKey(item)) || [];
+            }
+            return collectItemLocations(model, item);
+        }
+
+        function resolveDirectionalTargetOnModel(
+            model,
+            item,
+            direction,
+            { locationIndex = null, validation = null } = {}
+        ) {
+            if (!model) {
+                return createDirectionalTargetResult(false, 'invalid_model');
+            }
+
+            const locations = getDirectionalLocations(model, item, locationIndex);
+            if (locations.length === 0) {
+                return createDirectionalTargetResult(false, 'not_found');
+            }
+            if (locations.length !== 1) {
+                return createDirectionalTargetResult(false, 'ambiguous');
+            }
+
+            const from = locations[0];
+            const currentList = getTargetList(model, from);
+            if (!Array.isArray(currentList)) {
+                return createDirectionalTargetResult(false, 'unavailable');
+            }
+
+            let target = null;
+            if (direction === 'up') {
+                if (from.index <= 0) {
+                    return createDirectionalTargetResult(false, 'unavailable');
+                }
+                target = {
+                    container: from.container,
+                    ...(from.container === 'group' ? { groupId: from.groupId } : {}),
+                    index: from.index - 1
+                };
+            } else if (direction === 'down') {
+                if (from.index >= currentList.length - 1) {
+                    return createDirectionalTargetResult(false, 'unavailable');
+                }
+                target = {
+                    container: from.container,
+                    ...(from.container === 'group' ? { groupId: from.groupId } : {}),
+                    // Placement targets use the pre-removal slot. Skipping over the next
+                    // sibling therefore needs two raw slots; planning adjusts it back by one.
+                    index: from.index + 2
+                };
+            } else if (direction === 'in') {
+                if (from.container === 'ungrouped' || from.index <= 0) {
+                    return createDirectionalTargetResult(false, 'unavailable');
+                }
+                const previousEntry = currentList[from.index - 1];
+                if (
+                    previousEntry?.type !== 'group'
+                    || typeof previousEntry.id !== 'string'
+                    || !model.groupsById.has(previousEntry.id)
+                ) {
+                    return createDirectionalTargetResult(false, 'unavailable');
+                }
+                if (
+                    item.kind === 'group'
+                    && hasGroupPath(model.groupsById, item.id, previousEntry.id)
+                ) {
+                    return createDirectionalTargetResult(false, 'cycle');
+                }
+                const previousGroup = model.groupsById.get(previousEntry.id);
+                if (!Array.isArray(previousGroup?.children)) {
+                    return createDirectionalTargetResult(false, 'unavailable');
+                }
+                target = {
+                    container: 'group',
+                    groupId: previousEntry.id,
+                    index: previousGroup.children.length
+                };
+            } else {
+                if (from.container !== 'group' || !from.groupId) {
+                    return createDirectionalTargetResult(false, 'unavailable');
+                }
+                const parentItem = { kind: 'group', id: from.groupId };
+                const parentLocations = getDirectionalLocations(
+                    model,
+                    parentItem,
+                    locationIndex
+                );
+                if (parentLocations.length !== 1) {
+                    return createDirectionalTargetResult(
+                        false,
+                        parentLocations.length === 0 ? 'unavailable' : 'ambiguous'
+                    );
+                }
+                const parentLocation = parentLocations[0];
+                const parentContainer = getTargetList(model, parentLocation);
+                if (!Array.isArray(parentContainer)) {
+                    return createDirectionalTargetResult(false, 'unavailable');
+                }
+                target = {
+                    container: parentLocation.container,
+                    ...(parentLocation.container === 'group'
+                        ? { groupId: parentLocation.groupId }
+                        : {}),
+                    index: parentLocation.index + 1
+                };
+            }
+
+            const modelValidation = validation || validateWorkingModel(model);
+            if (!modelValidation.ok) {
+                return createDirectionalTargetResult(
+                    false,
+                    getValidationFailureReason(modelValidation)
+                );
+            }
+            return createDirectionalTargetResult(true, 'ready', target);
+        }
+
+        function resolveDirectionalTarget(itemInput, directionInput) {
+            const item = normalizeItem(itemInput);
+            if (!item) {
+                return createDirectionalTargetResult(false, 'invalid_item');
+            }
+            const direction = typeof directionInput === 'string'
+                ? directionInput.trim().toLowerCase()
+                : '';
+            if (!['up', 'down', 'in', 'out'].includes(direction)) {
+                return createDirectionalTargetResult(false, 'invalid_direction');
+            }
+            return resolveDirectionalTargetOnModel(getLiveModel(), item, direction);
+        }
+
+        function createDirectionalTargetResolver() {
+            const model = getLiveModel();
+            const locationIndex = model ? createDirectionalLocationIndex(model) : null;
+            const validation = model ? validateWorkingModel(model) : null;
+            return (itemInput, directionInput) => {
+                const item = normalizeItem(itemInput);
+                if (!item) {
+                    return createDirectionalTargetResult(false, 'invalid_item');
+                }
+                const direction = typeof directionInput === 'string'
+                    ? directionInput.trim().toLowerCase()
+                    : '';
+                if (!['up', 'down', 'in', 'out'].includes(direction)) {
+                    return createDirectionalTargetResult(false, 'invalid_direction');
+                }
+                return resolveDirectionalTargetOnModel(
+                    model,
+                    item,
+                    direction,
+                    { locationIndex, validation }
+                );
+            };
+        }
+
         function createPlacementFailure(reason, from = null) {
             return {
                 ok: false,
@@ -1739,6 +1963,8 @@
 
         return {
             locateItem,
+            resolveDirectionalTarget,
+            createDirectionalTargetResolver,
             previewPlacement,
             applyPlacement,
             applyBatchPlacement,

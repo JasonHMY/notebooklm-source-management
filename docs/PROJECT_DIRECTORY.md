@@ -42,17 +42,17 @@ GeminiNotebook-Source-Management
 │   │   ├── content-native-label-detector.js
 │   │   │   └── 原生标签标题清理、可比较归一、label/view-switch 控件识别 helper
 │   │   ├── content-source-actions.js
-│   │   │   └── 来源三点菜单、详情、重命名、删除、原生 menu/dialog 自动化
+│   │   │   └── 来源三点菜单、精准排序 submenu 分发、详情、重命名、删除、原生 menu/dialog 自动化
 │   │   ├── content-source-action-menu.js
-│   │   │   └── 来源三点菜单和 submenu item 生成 helper；失败来源菜单收口
+│   │   │   └── 来源三点菜单和 submenu item 生成 helper；精准排序 disabled state 委托 Tree Placement resolver，失败来源菜单收口
 │   │   ├── content-native-checkbox-sync.js
 │   │   │   └── 原生 checkbox 状态读取、切换判定、detached 行解析 helper
 │   │   ├── content-tree-placement.js
-│   │   │   └── 纯分组树放置 Module；集中 validate → plan → commit、entry shape、source XOR、文件夹唯一父级、reachable group 优先级、循环/索引/no-op、批量事务、跨 realm 安全克隆与迭代式原子归一化不变量
+│   │   │   └── 纯分组树放置 Module；集中 validate → plan → commit、四方向精准排序 target 与 render-scoped indexed resolver、entry shape、source XOR、文件夹唯一父级、reachable group 优先级、循环/索引/no-op、批量事务、跨 realm 安全克隆与迭代式原子归一化不变量
 │   │   ├── content-tree-interactions.js
-│   │   │   └── 分组树、checkbox、批量模式与拖拽 read → plan → write；single/batch drag、新增/删除/移出分组及批量移到未分组通过严格语义 target 适配 Tree Placement，批量 payload 必须与可信拖拽会话完全一致，另维护同步 native dropEffect、类型化 geometry snapshot、滚动 delta patch、auto-scroll 静止指针刷新/落下前同步 flush、ResizeObserver/render 失效和 fail-closed 重建
+│   │   │   └── 分组树、checkbox、键盘精准排序、焦点恢复/live-region 播报、批量模式与拖拽 read → plan → write；single/batch drag、新增/删除/移出分组及批量移到未分组通过严格语义 target 适配 Tree Placement，批量 payload 必须与可信拖拽会话完全一致，另维护同步 native dropEffect、类型化 geometry snapshot、滚动 delta patch、auto-scroll 静止指针刷新/落下前同步 flush、ResizeObserver/render 失效和 fail-closed 重建
 │   │   ├── content-render.js
-│   │   │   └── Shadow DOM manager 渲染、列表行、批量条、菜单层；将纯搜索分段映射为安全文本节点与高亮 span
+│   │   │   └── Shadow DOM manager 渲染、列表行、文件夹精准排序控件、批量条、菜单层；将纯搜索分段映射为安全文本节点与高亮 span
 │   │   ├── content-modals.js
 │   │   │   └── 首次欢迎、更新介绍、设置、导入预览、标签、移动文件夹、批量标签 modal
 │   │   ├── content-search-semantics.js
@@ -124,9 +124,9 @@ GeminiNotebook-Source-Management
 │   │   ├── content-source-view-switch-controller.js
 │   │   │   └── 来源视图切换目标归一、状态字段和 attempt 记录 helper
 │   │   ├── content-style-text.js
-│   │   │   └── manager 和 overlay 的 CSS 文本
+│   │   │   └── manager 和 overlay 的 CSS 文本；含 row action family 与 `.sp-sr-only` 无障碍 utility
 │   │   ├── content-template.js
-│   │   │   └── manager shell 模板
+│   │   │   └── manager shell 模板；含持久化精准排序 polite live region
 │   │   └── styles.css
 │   │       └── 原生 Gemini Notebook DOM 覆写（manifest content_scripts[0].css 注入，scoped 在 .sources-plus-manager-active；三套 CSS 之一）
 │   ├── background/
@@ -384,6 +384,7 @@ manifest.json
 │   │   ├── reflow transform 使用 source/group 类型化 map；仅可视区 + 一个真实行高 overscan 动画，离屏位移静态应用并在结束/下次 preflight 清理
 │   │   ├── 批量选择、加入文件夹、添加/移除标签
 │   │   ├── 纯 Tree Placement Interface 集中 entry shape、source XOR、循环拒绝、索引修正、no-op、批量/事务原子提交与 import normalization；single/batch drag、移动到分组、批量/单项移出分组、分组新增/删除、原生来源删除、Classic sweep、来源同步、restore/reconcile、state apply、配置/原生标签导入均已迁移，业务路径不再直接修改放置数组
+│   │   ├── 来源三点菜单与文件夹标题栏共用 up/down/in/out 精准排序 resolver；渲染期以单次快照索引计算全部 disabled state，执行时再按实时树重新解析；边界禁用，成功后恢复可见稳定控件焦点并只播报 canonical N/M（过滤视图不改用可见索引，批量模式隐藏文件夹控件）
 │   │   ├── 移到未分组
 │   │   └── 批量删除入口
 │   ├── 先看
@@ -397,7 +398,10 @@ manifest.json
 │   │   ├── src/content/content-native-checkbox-sync.js
 │   │   ├── src/content/content-render.js
 │   │   ├── src/content/content-modals.js
-│   │   └── src/content/content-source-actions.js
+│   │   ├── src/content/content-source-actions.js
+│   │   ├── src/content/content-source-action-menu.js
+│   │   ├── src/content/content-template.js
+│   │   └── src/content/content-style-text.js
 │   └── 测试
 │       ├── tests/content/content-tree-placement.test.js
 │       ├── tests/content/content-tree.test.js
@@ -406,6 +410,8 @@ manifest.json
 │       ├── tests/content/content-native-checkbox-sync.test.js
 │       ├── tests/content/content-render.test.js
 │       ├── tests/content/content-source-actions.test.js
+│       ├── tests/content/content-source-action-menu.test.js
+│       ├── tests/locales.test.js
 │       ├── tests/smoke/drag-reflow-layout.smoke.spec.js
 │       └── tests/smoke/drag-performance.smoke.spec.js（仅 `npm run benchmark:drag` opt-in）
 ├── 标签系统
@@ -444,6 +450,7 @@ manifest.json
 ├── 原生来源操作
 │   ├── 负责
 │   │   ├── 插件三点菜单定位和 submenu
+│   │   ├── 来源精准排序 submenu 与 resolver-derived disabled state
 │   │   ├── 打开 Gemini Notebook 来源详情
 │   │   ├── 触发 Gemini Notebook 原生命名修改
 │   │   ├── 触发 Gemini Notebook 原生删除确认
@@ -717,8 +724,8 @@ content runtime memory
 │   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-source-actions.test.js tests/content/content-source-action-menu.test.js
 │   └── 文件: tests/content/content-source-actions.test.js, tests/content/content-source-action-menu.test.js, tests/content/content-source-sync.test.js；删除 marker 覆盖 stale raw DOM、ready-panel disappearance、placement failure/retry 与同身份重新添加
 ├── 分组树 / checkbox
-│   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-tree-placement.test.js tests/content/content-tree.test.js
-│   └── 文件: tests/content/content-tree-placement.test.js, tests/content/content-tree.test.js
+│   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-tree-placement.test.js tests/content/content-source-action-menu.test.js tests/content/content-source-actions.test.js tests/content/content-tree.test.js tests/content/content-render.test.js tests/locales.test.js
+│   └── 文件: 上述 6 个测试；覆盖四方向 target、source/group 共用 Interface、边界禁用、submenu、单次 placement/save/render、焦点恢复、匿名位置 live region、三语 key/placeholder 对齐
 ├── 搜索语义 / 渲染 / 批量操作条
 │   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-search-semantics.test.js tests/content/content-render.test.js tests/content/content-view-state.test.js tests/content/content-module.test.js tests/manifest-loader-sync.test.js
 │   └── 文件: tests/content/content-search-semantics.test.js, tests/content/content-render.test.js, tests/content/content-view-state.test.js, tests/content/content-module.test.js, tests/manifest-loader-sync.test.js
@@ -855,6 +862,11 @@ CI: .github/workflows/ci.yml
 │   ├── 然后看: src/content/content-render.js
 │   ├── 测试: content-source-actions.test.js
 │   └── 注意: 菜单 state 在 source actions 模块内，渲染层只展示
+├── 键盘精准排序不可用、重复移动或焦点丢失
+│   ├── 先看: src/content/content-tree-placement.js
+│   ├── 然后看: src/content/content-source-action-menu.js, src/content/content-source-actions.js, src/content/content-tree-interactions.js, src/content/content-render.js, src/content/content-template.js
+│   ├── 测试: content-tree-placement.test.js, content-source-action-menu.test.js, content-source-actions.test.js, content-tree.test.js, content-render.test.js, locales.test.js
+│   └── 注意: disabled state 只能来自 resolveDirectionalTarget；source submenu 和 group button 都由原生 button Enter 生成一次 click，执行器负责 fresh resolve → apply → rebuild → render/save → stable-key focus → canonical N/M 播报，no-op 不写 success live region
 ├── 删除误报失败或删错来源
 │   ├── 先看: src/content/content-source-actions.js
 │   ├── 然后看: src/content/index.js 的 accepted delete handler

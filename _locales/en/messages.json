@@ -1267,6 +1267,65 @@
     "ui_keyboard_moved_ungrouped_toast": {
         "message": "Moved to Ungrouped"
     },
+    "ui_tree_order": {
+        "message": "Precise ordering"
+    },
+    "ui_tree_order_up": {
+        "message": "Move up"
+    },
+    "ui_tree_order_down": {
+        "message": "Move down"
+    },
+    "ui_tree_order_in": {
+        "message": "Move into previous folder"
+    },
+    "ui_tree_order_out": {
+        "message": "Move out of current folder"
+    },
+    "ui_tree_order_moved_up_status": {
+        "message": "Moved up. Position $1 of $2.",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            },
+            "2": {
+                "content": "$2"
+            }
+        }
+    },
+    "ui_tree_order_moved_down_status": {
+        "message": "Moved down. Position $1 of $2.",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            },
+            "2": {
+                "content": "$2"
+            }
+        }
+    },
+    "ui_tree_order_moved_in_status": {
+        "message": "Moved into the previous folder. Position $1 of $2.",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            },
+            "2": {
+                "content": "$2"
+            }
+        }
+    },
+    "ui_tree_order_moved_out_status": {
+        "message": "Moved out of the current folder. Position $1 of $2.",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            },
+            "2": {
+                "content": "$2"
+            }
+        }
+    },
     "ui_drop_to_ungroup_hint": {
         "message": "Drop here to ungroup"
     },

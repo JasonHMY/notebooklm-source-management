@@ -518,6 +518,13 @@
         renderMoveToFolderModal: (...args) => renderMoveToFolderModal(...args),
         canMoveSourceToUngrouped: (...args) => canMoveSourceToUngrouped(...args),
         moveSourceToUngrouped: (...args) => moveSourceToUngrouped(...args),
+        resolveDirectionalTarget: (...args) => _treePlacementModule.resolveDirectionalTarget(...args),
+        orderTreeItem: (sourceKey, direction) => (
+            treeInteractionsModule?.executeDirectionalTreeMove?.(
+                { kind: 'source', key: sourceKey },
+                direction
+            ) || false
+        ),
         markSourceDetailViewRequested: () => {
             const suppressReadyStateUntil = Date.now() + 1500;
             sourceDetailViewRequested = true;
@@ -922,6 +929,10 @@
         getTagStyleVars,
         handleInteraction: (...args) => handleInteraction(...args),
         canOpenSourceActionMenu,
+        resolveDirectionalTarget: (...args) => _treePlacementModule.resolveDirectionalTarget(...args),
+        createDirectionalTargetResolver: () => (
+            _treePlacementModule.createDirectionalTargetResolver()
+        ),
         findSourceActionButton,
         getSourceActionMenuItems,
         getSourceActionSubmenuItems,

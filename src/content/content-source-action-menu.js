@@ -7,7 +7,8 @@
      * 不渲染 DOM,只生成 `{ action, kind, icon, label, disabled? }[]` 描述,
      * 实际渲染 + 定位在 content-source-actions.js。
      *
-     * @param {Object} deps Optional: getState, getSourcesByKey (Map), getMessage, canMoveSourceToUngrouped(sourceKey)
+     * @param {Object} deps Optional: getState, getSourcesByKey (Map), getMessage,
+     *   canMoveSourceToUngrouped(sourceKey), resolveDirectionalTarget(item, direction)
      *   全部有 fallback。
      * @returns {{ canOpenSourceActionMenu, createNativeActionResult, getSourceActionMenuItems, getSourceActionSubmenuItems }}
      *   `canOpenSourceActionMenu`: batch mode / loading 不允许;failed 允许(可删)。
@@ -19,6 +20,16 @@
         const canMoveSourceToUngrouped = typeof deps.canMoveSourceToUngrouped === 'function'
             ? deps.canMoveSourceToUngrouped
             : () => false;
+        const resolveDirectionalTarget = typeof deps.resolveDirectionalTarget === 'function'
+            ? deps.resolveDirectionalTarget
+            : () => ({ ok: false, reason: 'unavailable', target: null });
+
+        const TREE_ORDER_ACTIONS = [
+            { direction: 'up', icon: 'arrow_upward', labelKey: 'ui_tree_order_up' },
+            { direction: 'down', icon: 'arrow_downward', labelKey: 'ui_tree_order_down' },
+            { direction: 'in', icon: 'subdirectory_arrow_right', labelKey: 'ui_tree_order_in' },
+            { direction: 'out', icon: 'subdirectory_arrow_left', labelKey: 'ui_tree_order_out' }
+        ];
 
         function canOpenSourceActionMenu(source) {
             const state = getState() || {};
@@ -45,6 +56,25 @@
                     }
                 ];
             }
+
+            const treeOrderChildren = TREE_ORDER_ACTIONS.map(({
+                direction,
+                icon,
+                labelKey
+            }) => {
+                const resolution = resolveDirectionalTarget(
+                    { kind: 'source', key: sourceKey },
+                    direction
+                );
+                return {
+                    action: `tree-order-${direction}`,
+                    kind: 'action',
+                    direction,
+                    icon,
+                    label: getMessage(labelKey),
+                    disabled: !resolution?.ok
+                };
+            });
 
             return [
                 {
@@ -77,6 +107,14 @@
                     icon: 'drive_file_move_rtl',
                     label: getMessage('ui_move_to_ungrouped'),
                     disabled: !canMoveSourceToUngrouped(sourceKey)
+                },
+                {
+                    action: 'tree-order',
+                    kind: 'submenu',
+                    icon: 'swap_vert',
+                    label: getMessage('ui_tree_order'),
+                    disabled: treeOrderChildren.every((item) => item.disabled),
+                    children: treeOrderChildren
                 },
                 {
                     action: 'delete-source',

@@ -205,6 +205,17 @@
                 box-shadow: var(--sp-focus-ring-strong);
                 transform: translateY(-2px);
             }
+            .sp-sr-only {
+                position: absolute;
+                width: 1px;
+                height: 1px;
+                padding: 0;
+                margin: -1px;
+                overflow: hidden;
+                clip: rect(0, 0, 0, 0);
+                white-space: nowrap;
+                border: 0;
+            }
             .sp-container.is-native-label-view {
                 min-height: 0;
                 max-height: none;
@@ -889,11 +900,17 @@
                 font-weight: 600;
                 background-color: var(--sp-bg-primary);
             }
+            .group-header.sp-spotlight-surface {
+                overflow: visible;
+            }
             .source-item:hover, .group-header:hover {
                 background-color: var(--sp-bg-hover);
                 z-index: 4;
                 transform: scale(1.01);
                 box-shadow: var(--sp-shadow-hover-item);
+            }
+            .group-header:focus-within {
+                z-index: 4;
             }
             /* JS-managed pseudo-hover for the post-drop window: when drop finishes,
                Chromes native :hover stays stuck on whichever DOM element was under the
@@ -1115,7 +1132,7 @@
                 display: flex;
                 align-items: center;
             }
-            .sp-source-actions-button, .sp-add-subgroup-button, .sp-isolate-button, .sp-edit-button, .sp-delete-button {
+            .sp-source-actions-button, .sp-tree-order-button, .sp-add-subgroup-button, .sp-isolate-button, .sp-edit-button, .sp-delete-button {
                 background: none;
                 border: none;
                 cursor: pointer;
@@ -1136,6 +1153,7 @@
                     box-shadow var(--sp-motion-base) var(--sp-ease-standard);
             }
             .sp-source-actions-button .google-symbols,
+            .sp-tree-order-button .google-symbols,
             .sp-add-subgroup-button .google-symbols,
             .sp-isolate-button .google-symbols,
             .sp-edit-button .google-symbols,
@@ -1275,6 +1293,26 @@
                 position: relative;
                 z-index: 1;
             }
+            .group-header.sp-spotlight-surface > .sp-tree-order-controls {
+                position: absolute;
+                top: calc(100% - 2px);
+                right: 8px;
+                display: flex;
+                align-items: center;
+                justify-content: flex-end;
+                gap: 2px;
+                padding: 2px;
+                border: 1px solid var(--sp-border-light);
+                border-radius: 12px;
+                background: var(--sp-bg-primary);
+                box-shadow: var(--sp-shadow-hover-item);
+                opacity: 0;
+                pointer-events: none;
+                transform: translateY(-4px) scale(0.98);
+                transition:
+                    opacity var(--sp-motion-medium) var(--sp-ease-standard),
+                    transform var(--sp-motion-medium) var(--sp-ease-emphasized);
+            }
             .sp-add-subgroup-button, .sp-isolate-button, .sp-edit-button, .sp-delete-button {
                 display: flex;
                 opacity: 0;
@@ -1292,22 +1330,33 @@
             .group-header:hover .sp-isolate-button,
             .group-header:hover .sp-edit-button,
             .group-header:hover .sp-delete-button,
+            .group-header:hover .sp-tree-order-controls,
             .group-header:focus-within .sp-add-subgroup-button,
             .group-header:focus-within .sp-isolate-button,
             .group-header:focus-within .sp-edit-button,
-            .group-header:focus-within .sp-delete-button {
+            .group-header:focus-within .sp-delete-button,
+            .group-header:focus-within .sp-tree-order-controls {
                 opacity: 1;
                 transform: translateX(0) scale(1);
                 pointer-events: auto;
             }
+            .group-header:hover .sp-tree-order-controls,
+            .group-header:focus-within .sp-tree-order-controls {
+                transform: translateY(0) scale(1);
+            }
+            #sources-list.sp-drag-active .sp-tree-order-controls {
+                opacity: 0;
+                pointer-events: none;
+                transform: translateY(-4px) scale(0.98);
+            }
             .group-title + .badge {
                 margin-left: auto;
             }
-            .sp-source-actions-button:hover, .sp-source-actions-menu-item:hover, .sp-add-subgroup-button:hover, .sp-isolate-button:hover, .sp-edit-button:hover {
+            .sp-source-actions-button:hover, .sp-source-actions-menu-item:hover, .sp-tree-order-button:hover, .sp-add-subgroup-button:hover, .sp-isolate-button:hover, .sp-edit-button:hover {
                 background-color: var(--sp-icon-button-hover);
                 color: var(--sp-text-primary);
             }
-            .sp-source-actions-button:hover, .sp-add-subgroup-button:hover, .sp-isolate-button:hover, .sp-edit-button:hover {
+            .sp-source-actions-button:hover, .sp-tree-order-button:hover, .sp-add-subgroup-button:hover, .sp-isolate-button:hover, .sp-edit-button:hover {
                 transform: scale(1.06);
             }
             .sp-source-actions-menu-item:hover {
@@ -1326,8 +1375,19 @@
             .sp-source-actions-menu-item:hover .google-symbols {
                 color: var(--sp-text-primary);
             }
+            .sp-tree-order-button[disabled] {
+                opacity: 0.32;
+                cursor: not-allowed;
+                transform: none;
+            }
+            .sp-tree-order-button[disabled]:hover {
+                background-color: transparent;
+                color: var(--sp-text-secondary);
+                transform: none;
+            }
             .sp-source-actions-button:focus-visible,
             .sp-source-actions-menu-item:focus-visible,
+            .sp-tree-order-button:focus-visible,
             .sp-add-subgroup-button:focus-visible,
             .sp-isolate-button:focus-visible,
             .sp-edit-button:focus-visible,
@@ -1354,7 +1414,7 @@
                 transform: scale(1.06);
                 box-shadow: inset 0 0 0 1px rgba(255, 59, 48, 0.18), 0 0 14px var(--sp-danger-glow);
             }
-            .sp-source-actions-button:active, .sp-add-subgroup-button:active, .sp-isolate-button:active, .sp-edit-button:active, .sp-delete-button:active {
+            .sp-source-actions-button:active, .sp-tree-order-button:active, .sp-add-subgroup-button:active, .sp-isolate-button:active, .sp-edit-button:active, .sp-delete-button:active {
                 transform: scale(0.95);
             }
             .icon-color {
@@ -3260,6 +3320,8 @@
                 .group-header:active,
                 .sp-source-actions-button:hover,
                 .sp-source-actions-button:active,
+                .sp-tree-order-button:hover,
+                .sp-tree-order-button:active,
                 .sp-add-subgroup-button:hover,
                 .sp-add-subgroup-button:active,
                 .sp-isolate-button:hover,

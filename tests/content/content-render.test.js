@@ -395,6 +395,24 @@ describe('manager shell structure', () => {
         expect(searchCount.attrs['aria-atomic']).toBe('true');
     });
 
+    it('keeps a persistent polite live region for precise tree-order announcements', () => {
+        const createManagerShell = require('../../src/content/content-template.js');
+        const shell = createManagerShell(createTreeEl, {
+            i18n: {
+                getMessage: (key) => key
+            }
+        });
+        const orderStatus = shell.children.find((child) => (
+            child.attrs.id === 'sp-tree-order-status'
+        ));
+
+        expect(orderStatus).toBeDefined();
+        expect(orderStatus.attrs.className).toBe('sp-sr-only');
+        expect(orderStatus.attrs.role).toBe('status');
+        expect(orderStatus.attrs['aria-live']).toBe('polite');
+        expect(orderStatus.attrs['aria-atomic']).toBe('true');
+    });
+
     it('labels the quick-view rail as an accessible group', () => {
         const createManagerShell = require('../../src/content/content-template.js');
         const shell = createManagerShell(createTreeEl, {
@@ -498,10 +516,31 @@ describe('manager shell structure', () => {
         expect(global.NSM_CONTENT_STYLE_TEXT).toContain('.group-header:focus-within .sp-add-subgroup-button,');
         expect(global.NSM_CONTENT_STYLE_TEXT).toContain('.group-header:focus-within .sp-isolate-button,');
         expect(global.NSM_CONTENT_STYLE_TEXT).toContain('.group-header:focus-within .sp-edit-button,');
-        expect(global.NSM_CONTENT_STYLE_TEXT).toContain('.group-header:focus-within .sp-delete-button');
+        expect(global.NSM_CONTENT_STYLE_TEXT).toContain('.group-header:focus-within .sp-delete-button,');
+        expect(global.NSM_CONTENT_STYLE_TEXT).toContain('.group-header:focus-within .sp-tree-order-controls');
+        expect(extractCssBlock(
+            global.NSM_CONTENT_STYLE_TEXT,
+            '.group-header:focus-within {'
+        )).toContain('z-index: 4;');
         expect(global.NSM_CONTENT_STYLE_TEXT).toContain('.sp-source-actions-menu-item:focus-visible,');
+        expect(global.NSM_CONTENT_STYLE_TEXT).toContain('.sp-tree-order-button:focus-visible,');
         expect(global.NSM_CONTENT_STYLE_TEXT).toContain('.sp-caret:focus-visible');
         expect(global.NSM_CONTENT_STYLE_TEXT).toContain('box-shadow: var(--sp-focus-ring);');
+        expect(global.NSM_CONTENT_STYLE_TEXT).toContain('.sp-sr-only {');
+        expect(extractCssBlock(
+            global.NSM_CONTENT_STYLE_TEXT,
+            '.group-header.sp-spotlight-surface > .sp-tree-order-controls {'
+        )).toContain('position: absolute;');
+        expect(global.NSM_CONTENT_STYLE_TEXT).toContain(
+            '.group-header.sp-spotlight-surface > .sp-tree-order-controls {'
+        );
+        expect(global.NSM_CONTENT_STYLE_TEXT).toContain(
+            '#sources-list.sp-drag-active .sp-tree-order-controls {'
+        );
+        expect(extractCssBlock(
+            global.NSM_CONTENT_STYLE_TEXT,
+            '.group-header.sp-spotlight-surface > .sp-tree-order-controls {'
+        )).not.toContain('max-height');
     });
 
     it('renders folder icon-only controls with button semantics and labels', () => {
@@ -509,8 +548,9 @@ describe('manager shell structure', () => {
 
         expect(source).toContain("className: 'sp-caret'");
         expect(source).toContain("'aria-label': isCollapsed ? getMessage('ui_expand') : getMessage('ui_collapse')");
-        expect(source).not.toContain('sp-move-group-up-button');
-        expect(source).not.toContain('sp-move-group-down-button');
+        expect(source).toContain("className: 'sp-tree-order-controls'");
+        expect(source).toContain("className: 'sp-tree-order-button sp-glare-hover'");
+        expect(source).toContain("dataset: { groupId: group.id, treeDirection: direction }");
         expect(source).toContain("className: 'sp-add-subgroup-button sp-glare-hover'");
         expect(source).toContain("'aria-label': getMessage('ui_add_subgroup')");
         expect(source).toContain("className: 'sp-isolate-button sp-glare-hover'");
@@ -538,6 +578,8 @@ describe('manager shell structure', () => {
         // alone still leaves toolbar/search/import-item items appearing on an index-based delay.
         expect(global.NSM_CONTENT_STYLE_TEXT).toContain('animation-delay: 0ms !important;');
         expect(global.NSM_CONTENT_STYLE_TEXT).toContain('transition-delay: 0ms !important;');
+        expect(global.NSM_CONTENT_STYLE_TEXT).toContain('.sp-tree-order-button:hover,');
+        expect(global.NSM_CONTENT_STYLE_TEXT).toContain('.sp-tree-order-button:active,');
     });
 
     it('folds physical row geometry synchronously while keeping only opacity motion', () => {
@@ -1704,7 +1746,20 @@ describe('batch count and source menu motion rendering', () => {
                 { action: 'move', icon: 'drive_file_move', label: 'Move' }
             ],
             getSourceActionSubmenuItems: () => [
-                { action: 'view-source-details', icon: 'description', label: 'Source details' }
+                {
+                    action: 'tree-order-up',
+                    direction: 'up',
+                    icon: 'arrow_upward',
+                    label: 'Move up',
+                    disabled: true
+                },
+                {
+                    action: 'tree-order-down',
+                    direction: 'down',
+                    icon: 'arrow_downward',
+                    label: 'Move down',
+                    disabled: false
+                }
             ]
         });
 
@@ -1717,9 +1772,17 @@ describe('batch count and source menu motion rendering', () => {
             '--sp-menu-item-index:1;',
             '--sp-menu-item-index:2;'
         ]);
-        expect(menus[1].querySelectorAll('.sp-source-actions-menu-item').map((item) => item.attrs.style)).toEqual([
-            '--sp-menu-item-index:0;'
+        expect(menus[1].attrs['aria-label']).toBe('View source');
+        const submenuItems = menus[1].querySelectorAll('.sp-source-actions-menu-item');
+        expect(submenuItems.map((item) => item.attrs.style)).toEqual([
+            '--sp-menu-item-index:0;',
+            '--sp-menu-item-index:1;'
         ]);
+        expect(submenuItems[0].dataset.treeDirection).toBe('up');
+        expect(submenuItems[0].disabled).toBe(true);
+        expect(submenuItems[0].attrs['aria-disabled']).toBe('true');
+        expect(submenuItems[1].disabled).toBe(false);
+        expect(submenuItems[1].attrs['aria-disabled']).toBeNull();
     });
 
     it('renders disabled source action menu items with aria-disabled state', () => {
@@ -1861,6 +1924,17 @@ describe('batch count and source menu motion rendering', () => {
             ['source-2', { key: 'source-2', title: 'Source 2', enabled: true }],
             ['loose', { key: 'loose', title: 'Loose', enabled: true }]
         ]);
+        const resolveDirectionalTargetForRender = jest.fn((item, direction) => ({
+            ok: (
+                (item.id === 'root' && direction === 'down') ||
+                (item.id === 'child' && (direction === 'up' || direction === 'out'))
+            ),
+            reason: 'test',
+            target: null
+        }));
+        const createDirectionalTargetResolver = jest.fn(() => (
+            resolveDirectionalTargetForRender
+        ));
         const renderModule = createContentRender({
             el: createRenderTestElement,
             getDocument: () => ({
@@ -1881,6 +1955,10 @@ describe('batch count and source menu motion rendering', () => {
             getGroupsById: () => groupsById,
             getSourcesByKey: () => sourcesByKey,
             canOpenSourceActionMenu: () => true,
+            resolveDirectionalTarget: jest.fn(() => {
+                throw new Error('render should use its one snapshot resolver');
+            }),
+            createDirectionalTargetResolver,
             getMessage: (key) => key
         });
 
@@ -1890,8 +1968,8 @@ describe('batch count and source menu motion rendering', () => {
         const groupHeaders = findRenderTestNodesByClass(listContainer, 'group-header');
         const sources = findRenderTestNodesByClass(listContainer, 'source-item');
         const sourceActionButtons = findRenderTestNodesByClass(listContainer, 'sp-source-actions-button');
-        const moveGroupUpButtons = findRenderTestNodesByClass(listContainer, 'sp-move-group-up-button');
-        const moveGroupDownButtons = findRenderTestNodesByClass(listContainer, 'sp-move-group-down-button');
+        const treeOrderControls = findRenderTestNodesByClass(listContainer, 'sp-tree-order-controls');
+        const treeOrderButtons = findRenderTestNodesByClass(listContainer, 'sp-tree-order-button');
         const glareButtons = findRenderTestNodesByClass(listContainer, 'sp-glare-hover');
         expect(groups.map((group) => [group.dataset.groupId, group.attrs.style])).toEqual([
             ['root', 'padding-left: 0px;--sp-list-item-index:0;'],
@@ -1905,8 +1983,27 @@ describe('batch count and source menu motion rendering', () => {
         expect(sources.every((source) => source.className.includes('sp-spotlight-surface'))).toBe(true);
         expect(groupHeaders.every((header) => header.className.includes('sp-spotlight-surface'))).toBe(true);
         expect(sourceActionButtons.every((button) => button.className.includes('sp-glare-hover'))).toBe(true);
-        expect(moveGroupUpButtons).toHaveLength(0);
-        expect(moveGroupDownButtons).toHaveLength(0);
+        expect(treeOrderControls).toHaveLength(2);
+        expect(treeOrderControls.every((controls) => controls.attrs.role === 'group')).toBe(true);
+        expect(treeOrderControls.every((controls) => controls.attrs['aria-label'] === 'ui_tree_order')).toBe(true);
+        expect(treeOrderButtons).toHaveLength(8);
+        expect(treeOrderButtons.map((button) => [
+            button.dataset.groupId,
+            button.dataset.treeDirection,
+            button.disabled,
+            button.attrs['aria-disabled']
+        ])).toEqual([
+            ['root', 'up', true, 'true'],
+            ['root', 'down', false, null],
+            ['root', 'in', true, 'true'],
+            ['root', 'out', true, 'true'],
+            ['child', 'up', false, null],
+            ['child', 'down', true, 'true'],
+            ['child', 'in', true, 'true'],
+            ['child', 'out', false, null]
+        ]);
+        expect(createDirectionalTargetResolver).toHaveBeenCalledTimes(1);
+        expect(resolveDirectionalTargetForRender).toHaveBeenCalledTimes(8);
         expect(glareButtons.length).toBeGreaterThan(sourceActionButtons.length);
 
         listContainer.childNodes = [];

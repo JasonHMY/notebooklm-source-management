@@ -848,6 +848,7 @@ git commit -m "refactor: unify search semantics"
 - Modify: `src/content/content-render.js`
 - Modify: `src/content/content-template.js`
 - Modify: `src/content/content-style-text.js`
+- Modify: `src/content/index.js`
 - Modify: `_locales/en/messages.json`
 - Modify: `_locales/es/messages.json`
 - Modify: `_locales/zh_CN/messages.json`
@@ -899,8 +900,10 @@ Semantics：
 ```
 
 - announcement 使用“已上移/下移/移入/移出，当前位置 N/M”；不读出 source/group title。
+- 搜索、quick view 或 isolation 过滤下仍按 canonical 完整树排序并播报 canonical N/M；
+- batch mode 隐藏 group 精准排序 controls，source action menu 继续按现有规则不可打开。
 
-- [ ] **Step 1: 写 domain + UI 失败测试**
+- [x] **Step 1: 写 domain + UI 失败测试**
 
 覆盖：
 
@@ -913,7 +916,7 @@ Semantics：
 - success 包含方向+位置，no-op 不宣布成功；
 - 三 locale key set 一致。
 
-- [ ] **Step 2: 运行并确认红灯**
+- [x] **Step 2: 运行并确认红灯**
 
 Run:
 
@@ -929,7 +932,7 @@ npm run test:unit -- --runTestsByPath \
 
 Expected: FAIL，directional Interface/controls/live region 尚不存在。
 
-- [ ] **Step 3: 实现 domain target、controls 与 focus restoration**
+- [x] **Step 3: 实现 domain target、controls 与 focus restoration**
 
 Adapter 统一流程：
 
@@ -941,13 +944,13 @@ Adapter 统一流程：
 6. 更新 live region；
 7. result false → 不宣布成功。
 
-- [ ] **Step 4: 运行 tests + reduced-motion/style checks**
+- [x] **Step 4: 运行 tests + reduced-motion/style checks**
 
 Run: 同 Step 2。
 
 Expected: PASS；新增 controls 复用 `.sp-*` action/menu patterns，无 one-off visual language。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/content/content-tree-placement.js \
@@ -955,7 +958,7 @@ git add src/content/content-tree-placement.js \
   src/content/content-source-actions.js \
   src/content/content-tree-interactions.js \
   src/content/content-render.js src/content/content-template.js \
-  src/content/content-style-text.js \
+  src/content/content-style-text.js src/content/index.js \
   _locales/en/messages.json _locales/es/messages.json \
   _locales/zh_CN/messages.json \
   tests/content/content-tree-placement.test.js \

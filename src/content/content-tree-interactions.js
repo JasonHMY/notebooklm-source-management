@@ -33,6 +33,12 @@
     function createContentTreeInteractions(deps = {}) {
         const runtime = deps.runtime || deps;
         const NATIVE_SELECTION_SYNC_RETRY_LIMIT = 6;
+        const TREE_ORDER_STATUS_KEYS = {
+            up: 'ui_tree_order_moved_up_status',
+            down: 'ui_tree_order_moved_down_status',
+            in: 'ui_tree_order_moved_in_status',
+            out: 'ui_tree_order_moved_out_status'
+        };
 
         const getState = typeof deps.getState === 'function'
             ? deps.getState
@@ -2159,6 +2165,135 @@
             showUndoableToast(getMessage(messageKey), { variant: 'success' });
         }
 
+        function getDirectionalContainerLength(location) {
+            if (!location) return 0;
+            if (location.container === 'root') {
+                return Array.isArray(getState()?.root) ? getState().root.length : 0;
+            }
+            if (location.container === 'ungrouped') {
+                return Array.isArray(getState()?.ungrouped) ? getState().ungrouped.length : 0;
+            }
+            if (location.container === 'group' && location.groupId) {
+                const group = getGroupsById().get(location.groupId);
+                return Array.isArray(group?.children) ? group.children.length : 0;
+            }
+            return 0;
+        }
+
+        function isDirectionalFocusCandidate(control) {
+            if (!control || typeof control.focus !== 'function' || control.disabled) return false;
+            const ariaDisabled = control.getAttribute?.('aria-disabled')
+                ?? control.attrs?.['aria-disabled']
+                ?? null;
+            if (ariaDisabled === 'true') return false;
+            if (control.closest?.('.group-children.collapsed')) return false;
+            if (
+                typeof control.getClientRects === 'function'
+                && control.getClientRects().length === 0
+            ) {
+                return false;
+            }
+            return true;
+        }
+
+        function focusDirectionalCandidate(control) {
+            if (!isDirectionalFocusCandidate(control)) return null;
+            control.focus();
+            return control;
+        }
+
+        function restoreDirectionalTreeOrderFocus(item, direction, result = {}) {
+            const root = getShadowRoot();
+            if (!root || typeof root.querySelectorAll !== 'function') return null;
+            const controls = item?.kind === 'source'
+                ? Array.from(root.querySelectorAll('.sp-source-actions-button'))
+                : Array.from(root.querySelectorAll('.sp-tree-order-button'));
+            const exactControl = controls.find((candidate) => {
+                if (item?.kind === 'source') {
+                    return candidate?.dataset?.sourceKey === item.key;
+                }
+                return (
+                    candidate?.dataset?.groupId === item?.id
+                    && candidate?.dataset?.treeDirection === direction
+                );
+            }) || null;
+            const focusedExactControl = focusDirectionalCandidate(exactControl);
+            if (focusedExactControl) return focusedExactControl;
+
+            if (item?.kind === 'group') {
+                const alternateControl = controls.find((candidate) => (
+                    candidate?.dataset?.groupId === item.id
+                    && isDirectionalFocusCandidate(candidate)
+                )) || null;
+                const focusedAlternateControl = focusDirectionalCandidate(alternateControl);
+                if (focusedAlternateControl) return focusedAlternateControl;
+            }
+
+            const fallbackGroupIds = [
+                item?.kind === 'group' ? item.id : null,
+                result?.to?.groupId || null,
+                result?.from?.groupId || null
+            ].filter((groupId, index, allIds) => (
+                groupId && allIds.indexOf(groupId) === index
+            ));
+            const groupContainers = Array.from(root.querySelectorAll('.group-container'));
+            for (const groupId of fallbackGroupIds) {
+                const groupContainer = groupContainers.find((candidate) => (
+                    candidate?.dataset?.groupId === groupId
+                ));
+                const caret = groupContainer?.querySelector?.('.sp-caret') || null;
+                const focusedCaret = focusDirectionalCandidate(caret);
+                if (focusedCaret) return focusedCaret;
+            }
+
+            const shellFallback = typeof root.getElementById === 'function'
+                ? root.getElementById('sp-new-group-btn')
+                : null;
+            return focusDirectionalCandidate(shellFallback);
+        }
+
+        function announceDirectionalTreeOrder(direction, location) {
+            const messageKey = TREE_ORDER_STATUS_KEYS[direction];
+            const total = getDirectionalContainerLength(location);
+            const position = Number.isInteger(location?.index) ? location.index + 1 : 0;
+            if (!messageKey || position <= 0 || total <= 0 || position > total) return false;
+            const root = getShadowRoot();
+            const status = root && typeof root.getElementById === 'function'
+                ? root.getElementById('sp-tree-order-status')
+                : null;
+            if (!status) return false;
+            status.textContent = getMessage(messageKey, [String(position), String(total)]);
+            return true;
+        }
+
+        function executeDirectionalTreeMove(item, direction) {
+            if (
+                !treePlacement
+                || typeof treePlacement.resolveDirectionalTarget !== 'function'
+                || typeof treePlacement.applyPlacement !== 'function'
+                || typeof treePlacement.rebuildParentMap !== 'function'
+            ) {
+                return false;
+            }
+
+            const resolution = treePlacement.resolveDirectionalTarget(item, direction);
+            if (!resolution?.ok || !resolution.target) return false;
+
+            const result = treePlacement.applyPlacement({
+                item,
+                target: resolution.target
+            });
+            if (!result?.ok || !result.changed || !result.to) return false;
+
+            closeSourceActionMenu();
+            rebuildPlacementParentMap();
+            render();
+            saveState({ immediate: true, critical: true });
+            restoreDirectionalTreeOrderFocus(item, direction, result);
+            announceDirectionalTreeOrder(direction, result.to);
+            return true;
+        }
+
         function canMoveSourceToUngrouped(sourceKey) {
             const source = getSourcesByKey().get(sourceKey);
             return Boolean(isBatchOperableSource(source) && findParentGroupOfSource(sourceKey));
@@ -2258,7 +2393,17 @@
             const sourceKey = sourceRow?.dataset.sourceKey;
             const sourceActionsButton = target.closest('.sp-source-actions-button');
             const sourceActionsMenuItem = target.closest('.sp-source-actions-menu-item');
+            const directionalControl = target.closest('[data-tree-direction]');
             const isolationGroupId = getActiveIsolationGroupId();
+
+            if (directionalControl) {
+                const direction = directionalControl.dataset?.treeDirection;
+                const item = directionalControl.dataset?.sourceKey
+                    ? { kind: 'source', key: directionalControl.dataset.sourceKey }
+                    : { kind: 'group', id: directionalControl.dataset?.groupId };
+                executeDirectionalTreeMove(item, direction);
+                return;
+            }
 
             if (sourceActionsMenuItem) {
                 handleSourceActionSelection(sourceActionsMenuItem.dataset.sourceKey, sourceActionsMenuItem.dataset.action);
@@ -2377,7 +2522,7 @@
                 return;
             }
 
-            if (target.closest('.group-header') && !target.closest('.sp-caret, .sp-toggle-switch, .sp-add-subgroup-button, .sp-isolate-button, .sp-edit-button, .sp-delete-button, input')) {
+            if (target.closest('.group-header') && !target.closest('.sp-caret, .sp-toggle-switch, .sp-tree-order-controls, .sp-tree-order-button, .sp-add-subgroup-button, .sp-isolate-button, .sp-edit-button, .sp-delete-button, input')) {
                 toggleGroupCollapse(groupsById.get(groupId), groupContainer);
                 return;
             }
@@ -5301,6 +5446,7 @@
             executeBatchMoveToUngrouped,
             canMoveSourceToUngrouped,
             moveSourceToUngrouped,
+            executeDirectionalTreeMove,
             toggleGroupCollapse,
             handleInteraction,
             handleOriginalCheckboxChange,

@@ -507,6 +507,7 @@ Rules:
 Classes:
 
 - `.sp-source-actions-button`
+- `.sp-tree-order-button`
 - `.sp-add-subgroup-button`
 - `.sp-isolate-button`
 - `.sp-edit-button`
@@ -530,6 +531,7 @@ Special behavior:
 
 - Source action button defaults to partial opacity and becomes fully visible on row hover.
 - Group secondary actions stay hidden until hover and reveal with opacity + translate + scale.
+- Precise-order group buttons live in `.sp-tree-order-controls`, reuse this 24×24 family, and reveal as one compact cluster on hover or `:focus-within`.
 - Delete hover uses red tint and danger color.
 - Isolate active state uses accent tint.
 
@@ -662,7 +664,8 @@ Group header contents:
 2. Enable switch
 3. Group title
 4. Count badge
-5. Secondary hover actions
+5. Precise-order hover/focus cluster (up/down/in/out)
+6. Secondary hover actions
 
 Feedback:
 
@@ -674,6 +677,7 @@ Rules:
 
 - Group UI must feel structurally related to source rows, not like a separate product.
 - Future nested controls must not break indentation rhythm or tree-line clarity.
+- The four precise-order buttons are omitted in batch mode. In filtered/search/isolation views they still operate on the canonical full tree, and their status reports canonical position rather than the visible subset.
 
 ### 10.3 Drag and drop feedback
 
@@ -800,6 +804,7 @@ Rules:
 
 - Small contextual menus should follow this glass popover pattern.
 - Do not create solid opaque dropdowns for content-panel context menus.
+- Source precise ordering is a nested menu with up/down/in/out actions. Each child uses native `disabled` plus `aria-disabled`, and availability comes only from the Tree Placement directional resolver.
 
 ### 12.2 Modal system
 
@@ -1061,6 +1066,9 @@ Required rules:
 - Icon-only buttons must have `title` and `aria-label`.
 - Keyboard-focusable controls must show a clear focus treatment.
 - Related control clusters and dynamic regions carry landmark/grouping semantics: the quick-view rail is `role="group"` (`ui_quick_view_rail_label`), the batch action bar is `role="toolbar"` (`ui_batch_actions_region`), and the panel resizer is a focusable `role="separator"` (`aria-orientation="horizontal"`, `ui_panel_resizer_label`, `tabindex=0`) operable with ArrowUp/ArrowDown (steps height, clamped to the same per-view min as drag, persisted). The toggle buttons that flip state (batch mode, quick-view, isolate) expose `aria-pressed`.
+- Precise tree ordering uses the persistent `#sp-tree-order-status.sp-sr-only` polite/atomic live region. Success text contains only direction and canonical position `N/M`; it must never include private source titles, group names, tags, or URLs, and no-op commands must not announce success.
+- After a successful precise-order render, focus returns by stable source key or group id + direction. If that control becomes disabled or lands inside a collapsed folder, use another enabled control for the same item, then the visible destination/parent folder caret as the fallback. Do not add a second Enter key handler: native buttons already translate Enter into one click.
+- Folder precise-order controls use an absolutely positioned hover/focus surface so revealing them does not change row height or drag geometry. Keep the surface hidden and non-interactive while `#sources-list.sp-drag-active` is present.
 - New UI copy must go through i18n.
 - Disabled states must change both visuals and pointer behavior.
 - Loading states must block interaction when the action cannot succeed.
@@ -1203,6 +1211,7 @@ Before merging a UI change, check:
 - Does it match the documented radius scale?
 - Does it use the standard easing curve and duration tier?
 - Does it define hover, active, focus, disabled, and loading states when applicable?
+- For tree ordering, does disabled state come from `resolveDirectionalTarget`, does one activation cause one mutation/save/render, and does focus survive render?
 - Does it work in both light and dark mode?
 - Does it keep toolbar, row, and modal density consistent with existing UI?
 - Does it use i18n strings?
@@ -1225,10 +1234,10 @@ Use this map when updating UI. It lists UI / style / render / modal / toast modu
 
 - `src/content/content-style-text.js`: content-panel tokens, components, motion, overlays (Shadow-DOM `NSM_CONTENT_STYLE_TEXT` + global-overlay `NSM_GLOBAL_OVERLAY_STYLE_TEXT`)
 - `src/content/styles.css`: native Gemini Notebook DOM overrides — injected via manifest `content_scripts[0].css`, scoped under `.sources-plus-manager-active`, uses `!important` to hide native source-list containers and restyle native Material menus (the third CSS mechanism; lives in the page, not the Shadow DOM)
-- `src/content/content-template.js`: shell structure
+- `src/content/content-template.js`: shell structure and persistent tree-order live region
 - `src/content/content-panel-dom.js`: source panel lookup, renderability, lifecycle scheduling helpers
-- `src/content/content-source-actions.js`: source action menu state, menu models, native menu bridge
-- `src/content/content-source-action-menu.js`: source action menu item generation and failed-source menu variants
+- `src/content/content-source-actions.js`: source action menu state, precise-order submenu dispatch, menu models, native menu bridge
+- `src/content/content-source-action-menu.js`: source action menu item generation, resolver-derived precise-order children, and failed-source menu variants
 - `src/content/content-tags.js`: tag normalization, serialization, CRUD helpers
 - `src/content/content-state-reconcile.js`: persisted source and tag reconciliation
 - `src/content/content-persistence.js`: state load/save, schema normalization, lifecycle persistence
@@ -1243,9 +1252,9 @@ Use this map when updating UI. It lists UI / style / render / modal / toast modu
 - `src/content/content-toast.js`: Shadow-DOM toast queue/renderer (showToast / showUndoableToast); distinct from `content-toast-status.js` below (text normalization only)
 - `src/content/content-modal-focus.js`: modal focus trap, Escape handling, and focus restoration helpers
 - `src/content/content-native-label-import-modal.js`: native label import preview modal node generation
-- `src/content/content-render.js`: fragment patching, icons, menu layer, main render path
+- `src/content/content-render.js`: fragment patching, icons, menu layer, resolver-derived group order controls, main render path
 - `src/content/content-view-state.js`: search/filter/quick-view/isolation view-state helpers and effective-state sync
-- `src/content/content-tree-interactions.js`: tree mutations, rename, batch interactions, drag-and-drop
+- `src/content/content-tree-interactions.js`: directional move adapter, focus/live-region feedback, tree mutations, rename, batch interactions, drag-and-drop
 - `src/content/content-drag-reflow.js`: drag reflow / fold / drop-shift visual transition engine (`prepareDragSession` / `foldDraggedItems` / `computeReflow` / `applyReflow` / `clearReflow` / `unfoldDraggedItems`; `DEFAULT_TRANSITION_MS = 180`, aligned to `--sp-motion-base`)
 - `src/content/content-drag-multi.js`: multi-source drag — custom drag-ghost cloning/stacking (`.sp-drag-ghost*`) + edge auto-scroll
 - `src/content/content-source-list-scan.js`: native source-list row scan and checkbox state extraction

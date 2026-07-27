@@ -27,6 +27,9 @@
 
 ## [Unreleased] (未发布)
 
+### Added
+- **新增键盘精准树排序 (Add Keyboard-Accessible Precise Tree Ordering)**: **影响**: 来源三点菜单和文件夹标题栏现在提供上移、下移、移入前一文件夹、移出当前文件夹四种可键盘激活的精准排序；不可用边界直接禁用，成功后焦点返回被移动项目的稳定控件，并通过不包含来源或文件夹标题的礼貌 live region 播报 canonical 位置。 四方向共用纯 Tree Placement resolver，点击时重新解析并只执行一次放置、保存与重绘；搜索、快速视图或隔离过滤下仍按完整树位置排序和播报，批量模式不显示文件夹排序控件，未新增全局快捷键。
+
 ### Changed
 - **统一搜索解析、匹配与高亮语义 (Unify Search Parsing, Matching, and Highlight Semantics)**: **影响**: 对扩展使用无可感知变化。 新增无 DOM 的 `content-search-semantics` Module，集中 `tag:` / `folder:` 查询解析、来源标题/标签/祖先文件夹上下文、source/group AND 匹配、高亮词范围与最长优先文本分段；view-state 只保留搜索 UI、quick view、标签和隔离过滤编排，render 只把纯分段映射为安全文本节点与 `.sp-search-highlight`。生产装配只创建一个语义实例并同时注入过滤与渲染，保留原有 scoped phrase、大小写不敏感、去重顺序、空查询、自动展开和结果计数行为。
 - **同步、恢复与导入统一树归一化 (Unify Tree Normalization Across Sync, Restore, and Import)**: **影响**: 首次加载、后续来源扫描、撤销、历史恢复和无 DOM 恢复现在都会先按同一套 group → root → 未分组优先级修复重复来源与孤儿来源、修剪成环边，再原子提交并重建 parent map；原生标签导入的来源与文件夹放置也委托同一 Tree Placement 事务。 配置导入则在修改运行时前严格拒绝非法 entry、缺失分组和循环，并让 preview 与 apply 共用 source-key remap 后的 canonical state；无 DOM 恢复从 snapshot 的 `sourceStateById`、legacy enabled map、root、group children 与 `ungrouped` 汇总持久化来源全集，兼容只有旧树引用的快照，再 staging 完整候选后提交。同步与无 DOM 恢复不再各自直接修改 `root`、`ungrouped` 或 group children，已迁空的旧 `removeSourceFromTree` / `removeGroupFromTree` 直接 mutation helper 也已删除。

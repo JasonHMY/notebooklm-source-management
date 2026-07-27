@@ -1526,9 +1526,18 @@ describe('source action menu', () => {
             'tags',
             'move',
             'move-ungrouped',
+            'tree-order',
             'delete-source'
         ]);
-        expect(mod._getSourceActionMenuItemsForTest('source-1').every((item) => item.kind === 'action')).toBe(true);
+        expect(mod._getSourceActionMenuItemsForTest('source-1').find((item) => (
+            item.action === 'tree-order'
+        ))).toMatchObject({
+            kind: 'submenu',
+            label: 'ui_tree_order'
+        });
+        expect(mod._getSourceActionSubmenuItemsForTest('source-1', 'tree-order').map((item) => (
+            item.direction
+        ))).toEqual(['up', 'down', 'in', 'out']);
         expect(mod._getSourceActionSubmenuItemsForTest('source-1', 'view-source-details')).toEqual([]);
     });
 
@@ -1565,7 +1574,15 @@ describe('source action menu', () => {
     });
 
     it('moves keyboard focus inside the source action menu', () => {
-        const menu = createKeyboardMenu(['view-source-details', 'rename-source', 'tags', 'move', 'move-ungrouped', 'delete-source']);
+        const menu = createKeyboardMenu([
+            'view-source-details',
+            'rename-source',
+            'tags',
+            'move',
+            'move-ungrouped',
+            'tree-order',
+            'delete-source'
+        ]);
 
         const downEvent = createKeyboardEvent('ArrowDown', menu.items[0]);
         expect(mod._handleSourceActionMenuKeydownForTest(downEvent)).toBe(true);
@@ -1574,13 +1591,13 @@ describe('source action menu', () => {
 
         const upEvent = createKeyboardEvent('ArrowUp', menu.items[0]);
         expect(mod._handleSourceActionMenuKeydownForTest(upEvent)).toBe(true);
-        expect(menu.items[5].focus).toHaveBeenCalledTimes(1);
+        expect(menu.items[6].focus).toHaveBeenCalledTimes(1);
 
         const endEvent = createKeyboardEvent('End', menu.items[0]);
         expect(mod._handleSourceActionMenuKeydownForTest(endEvent)).toBe(true);
-        expect(menu.items[5].focus).toHaveBeenCalledTimes(2);
+        expect(menu.items[6].focus).toHaveBeenCalledTimes(2);
 
-        const homeEvent = createKeyboardEvent('Home', menu.items[5]);
+        const homeEvent = createKeyboardEvent('Home', menu.items[6]);
         expect(mod._handleSourceActionMenuKeydownForTest(homeEvent)).toBe(true);
         expect(menu.items[0].focus).toHaveBeenCalledTimes(1);
     });
@@ -1627,8 +1644,8 @@ describe('source action menu', () => {
         expect(actionButton.focus).toHaveBeenCalledTimes(1);
     });
 
-    it('does not open a source action submenu because source actions are flattened', () => {
-        const mainMenu = createKeyboardMenu(['view-source-details', 'tags']);
+    it('opens and closes the precise-order submenu with horizontal arrow keys', () => {
+        const mainMenu = createKeyboardMenu(['view-source-details', 'tree-order', 'tags']);
         mod.sourcesByKey.set('source-1', {
             key: 'source-1',
             title: 'Source One',
@@ -1638,10 +1655,46 @@ describe('source action menu', () => {
         });
         mod._setActiveSourceActionSourceKey('source-1');
 
-        const rightEvent = createKeyboardEvent('ArrowRight', mainMenu.items[0]);
-        expect(mod._handleSourceActionMenuKeydownForTest(rightEvent)).toBe(false);
-        expect(rightEvent.preventDefault).not.toHaveBeenCalled();
+        const rightEvent = createKeyboardEvent('ArrowRight', mainMenu.items[1]);
+        expect(mod._handleSourceActionMenuKeydownForTest(rightEvent)).toBe(true);
+        expect(rightEvent.preventDefault).toHaveBeenCalledTimes(1);
+        expect(mod._getActiveSourceActionSubmenuAction()).toBe('tree-order');
+
+        const submenu = createKeyboardMenu(
+            ['tree-order-up', 'tree-order-down', 'tree-order-in', 'tree-order-out'],
+            'sp-source-actions-menu sp-source-actions-submenu'
+        );
+        const leftEvent = createKeyboardEvent('ArrowLeft', submenu.items[0]);
+        expect(mod._handleSourceActionMenuKeydownForTest(leftEvent)).toBe(true);
+        expect(leftEvent.preventDefault).toHaveBeenCalledTimes(1);
         expect(mod._getActiveSourceActionSubmenuAction()).toBeNull();
+    });
+
+    it('dispatches one enabled precise-order source action to the directional invoker', () => {
+        const orderTreeItem = jest.fn(() => true);
+        mod.sourcesByKey.set('source-1', {
+            key: 'source-1',
+            title: 'Private title must not be announced',
+            enabled: true,
+            isLoading: false,
+            isDisabled: false
+        });
+        mod.sourcesByKey.set('source-2', {
+            key: 'source-2',
+            title: 'Sibling',
+            enabled: true,
+            isLoading: false,
+            isDisabled: false
+        });
+        mod.state.root = [
+            { type: 'source', key: 'source-1' },
+            { type: 'source', key: 'source-2' }
+        ];
+        mod._setSourceActionInvokerForTest('orderTreeItem', orderTreeItem);
+
+        expect(mod.handleSourceActionSelection('source-1', 'tree-order-down')).toBe(true);
+        expect(orderTreeItem).toHaveBeenCalledTimes(1);
+        expect(orderTreeItem).toHaveBeenCalledWith('source-1', 'down');
     });
 
     it('matches native delete menu items through the unified action scorer', () => {
