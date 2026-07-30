@@ -69,6 +69,24 @@ describe('content module loading', () => {
         });
     });
 
+    it('resolves source images from both current and legacy Notebook hosts', () => {
+        jest.resetModules();
+        setupGlobalMocks();
+        global.window.location.href = 'https://notebook.google.com/notebook/current-host';
+
+        loadContentModule();
+        const helpers = global.NSM_SOURCE_DESCRIPTOR_HELPERS;
+
+        expect(helpers.resolveSourceImageUrl('/thumbs/current.png'))
+            .toBe('https://notebook.google.com/thumbs/current.png');
+        expect(helpers.resolveSourceImageUrl('https://notebooklm.google.com/thumbs/legacy.png'))
+            .toBe('https://notebooklm.google.com/thumbs/legacy.png');
+        expect(helpers.resolveSourceImageUrl('blob:https://notebook.google.com/current-icon'))
+            .toBe('blob:https://notebook.google.com/current-icon');
+        expect(helpers.resolveSourceImageUrl('blob:https://notebooklm.google.com/legacy-icon'))
+            .toBe('blob:https://notebooklm.google.com/legacy-icon');
+    });
+
     it('wires the row-replacement render seam to drag geometry invalidation', () => {
         const indexSource = fs.readFileSync(
             path.join(__dirname, '../../src/content/index.js'),
@@ -261,6 +279,10 @@ describe('manifest web accessible resources', () => {
             '_locales/es/messages.json',
             '_locales/zh_CN/messages.json',
         ];
+        const expectedMatches = [
+            'https://notebook.google.com/*',
+            'https://notebooklm.google.com/*'
+        ];
 
         expect(fs.existsSync(path.join(__dirname, '../../', fontPath))).toBe(true);
         expectedResources.forEach((resourcePath) => {
@@ -268,7 +290,8 @@ describe('manifest web accessible resources', () => {
         });
         expect(fontResource).toBeTruthy();
         expect(fontResource.resources).toEqual(expectedResources);
-        expect(fontResource.matches).toEqual(['https://notebooklm.google.com/*']);
+        expect(fontResource.matches).toEqual(expectedMatches);
+        expect(manifest.content_scripts[0].matches).toEqual(expectedMatches);
         expect(manifest.permissions).toEqual(['storage', 'tabs']);
     });
 });

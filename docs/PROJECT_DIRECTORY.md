@@ -7,7 +7,7 @@
 ```text
 GeminiNotebook-Source-Management
 ├── 类型: Manifest V3 Chrome extension
-├── 运行页面: https://notebooklm.google.com/*
+├── 运行页面: https://notebook.google.com/*（当前）+ https://notebooklm.google.com/*（兼容）
 ├── 主功能: 在 Gemini Notebook 来源面板内注入 Shadow DOM manager
 ├── 数据层: chrome.storage.local + sessionStorage recovery
 ├── 后端: 无后端、无数据库、无认证服务
@@ -42,7 +42,7 @@ GeminiNotebook-Source-Management
 │   │   ├── content-native-label-detector.js
 │   │   │   └── 原生标签标题清理、可比较归一、label/view-switch 控件识别 helper
 │   │   ├── content-source-actions.js
-│   │   │   └── 来源三点菜单、精准排序 submenu 分发、详情、重命名、删除、原生 menu/dialog 自动化
+│   │   │   └── 来源三点菜单、精准排序 submenu 分发、详情、重命名、删除、原生 menu/dialog 自动化；删除只在两次完整 ready-panel 扫描确认唯一身份消失且行数准确减少后成功
 │   │   ├── content-source-action-menu.js
 │   │   │   └── 来源三点菜单和 submenu item 生成 helper；精准排序 disabled state 委托 Tree Placement resolver，失败来源菜单收口
 │   │   ├── content-native-checkbox-sync.js
@@ -50,9 +50,9 @@ GeminiNotebook-Source-Management
 │   │   ├── content-tree-placement.js
 │   │   │   └── 纯分组树放置 Module；集中 validate → plan → commit、四方向精准排序 target 与 render-scoped indexed resolver、entry shape、source XOR、文件夹唯一父级、reachable group 优先级、循环/索引/no-op、批量事务、跨 realm 安全克隆与迭代式原子归一化不变量
 │   │   ├── content-tree-interactions.js
-│   │   │   └── 分组树、checkbox、键盘精准排序、焦点恢复/live-region 播报、批量模式与拖拽 read → plan → write；single/batch drag、新增/删除/移出分组及批量移到未分组通过严格语义 target 适配 Tree Placement，批量 payload 必须与可信拖拽会话完全一致，另维护同步 native dropEffect、类型化 geometry snapshot、滚动 delta patch、auto-scroll 静止指针刷新/落下前同步 flush、ResizeObserver/render 失效和 fail-closed 重建
+│   │   │   └── 分组树、checkbox、可跨重绘恢复草稿、在 filter/isolation/collapse 下强制显示 pending path 且确认前不持久化临时记录的即刻 inline naming、折叠 aria/inert、Select visible/Clear selection、上下文 empty-state CTA 与退出隔离时的 native effective-state 回同步、键盘精准排序、焦点恢复/live-region 播报、批量模式与拖拽 read → plan → write；single/batch drag、新增/删除/移出分组及批量移到未分组通过严格语义 target 适配 Tree Placement，未分组桶以 section rect + 内层 list items host 读取 geometry，批量 payload 必须与可信拖拽会话完全一致，另维护同步 native dropEffect、类型化 geometry snapshot、滚动 delta patch、auto-scroll 静止指针刷新/落下前同步 flush、ResizeObserver/render 失效和 fail-closed 重建
 │   │   ├── content-render.js
-│   │   │   └── Shadow DOM manager 渲染、列表行、文件夹精准排序控件、批量条、菜单层；将纯搜索分段映射为安全文本节点与高亮 span
+│   │   │   └── Shadow DOM manager 渲染、严格 owned list/listitem 树语义（含未分组 section → inner list、空态与批量条 wrapper）、上下文控件名称、折叠状态、上下文空状态、列表行、文件夹精准排序控件、批量 toolbar、菜单层；将纯搜索分段映射为安全文本节点与高亮 span
 │   │   ├── content-modals.js
 │   │   │   └── 首次欢迎、更新介绍、设置、导入预览、标签、移动文件夹、批量标签 modal
 │   │   ├── content-search-semantics.js
@@ -64,9 +64,9 @@ GeminiNotebook-Source-Management
 │   │   ├── content-modal-whats-new.js
 │   │   │   └── 更新介绍 modal 渲染、变更亮点和反馈入口 helper
 │   │   ├── content-modal-tag-filter.js
-│   │   │   └── tag filter modal：标签列表、选中状态、过滤回调 helper
+│   │   │   └── tag filter modal：标签搜索、结果计数、无匹配状态、aria-pressed 选中状态和过滤回调 helper
 │   │   ├── content-modal-move.js
-│   │   │   └── 移动到分组 modal：候选分组列表、实时来源索引预检、通过 Tree Placement 批量追加到目标分组尾部，仅 changed result 后保存/重绘/关闭
+│   │   │   └── 移动到分组 modal：候选分组列表、modal 内新建目标分组并一次保存移动、实时来源索引预检、通过 Tree Placement 批量追加到目标分组尾部，仅 changed result 后保存/重绘/关闭
 │   │   ├── content-modal-command-palette.js
 │   │   │   └── 命令面板 modal：命令搜索、快捷键展示、触发执行 helper
 │   │   ├── content-modal-tag.js
@@ -78,11 +78,11 @@ GeminiNotebook-Source-Management
 │   │   ├── content-state-repair.js
 │   │   │   └── 受损分组树结构修复候选筛选、合并和 grouped-source-key 扫描 helper
 │   │   ├── content-persistence.js
-│   │   │   └── runtime-first LOAD_STATE、raw primary/backup 选择、save/history/import-owned recovery；无 DOM 恢复汇总 snapshot sourceStateById、legacy enabled map、root、group children 与 ungrouped 的持久化来源引用；首次虚拟化 partial 先 staging，再以 ready DOM + 持久化占位确定性合并，只有原子提交成功才清 pending，其余同步/placement 失败保留待恢复快照
+│   │   │   └── runtime-first LOAD_STATE、raw primary/backup 选择、save/history/import-owned recovery；snapshot 构造会剔除尚未确认初始名称的临时文件夹、关联 edge 与 rename-only 字段；无 DOM 恢复汇总 snapshot sourceStateById、legacy enabled map、root、group children 与 ungrouped 的持久化来源引用；首次虚拟化 partial 先 staging，再以 ready DOM + 持久化占位确定性合并，只有原子提交成功才清 pending，其余同步/placement 失败保留待恢复快照
 │   │   ├── content-import-export.js
 │   │   │   └── 配置 JSON 导出/导入、size/depth/entry/cycle 校验、source-key remap；preview/apply 共用 canonical placement 与 diff，并在 history/preview/save await 前后校验上下文和运行时指纹，失败回滚不得覆盖并发新状态
 │   │   ├── content-undo-history.js
-│   │   │   └── 撤销/重做栈、容量限制、apply/clear helper
+│   │   │   └── 有界事务 Undo/Redo 双栈；critical save 明确成功后才移动栈，失败恢复操作前 runtime 并保留历史项
 │   │   ├── content-state-apply.js
 │   │   │   └── undo/redo、配置导入/回滚、手动历史/恢复快照与来源修复共用的快照应用 Adapter；先归一化并原子提交树，再更新标签/来源状态、parent map 与原生 checkbox
 │   │   ├── content-toast.js
@@ -128,7 +128,7 @@ GeminiNotebook-Source-Management
 │   │   ├── content-style-text.js
 │   │   │   └── manager 和 overlay 的 CSS 文本；含 row action family 与 `.sp-sr-only` 无障碍 utility
 │   │   ├── content-template.js
-│   │   │   └── manager shell 模板；含持久化精准排序 polite live region
+│   │   │   └── manager shell 模板；含 Undo/Redo 工具栏、主面板保存/恢复状态区、来源 list 与持久化精准排序 polite live region
 │   │   └── styles.css
 │   │       └── 原生 Gemini Notebook DOM 覆写（manifest content_scripts[0].css 注入，scoped 在 .sources-plus-manager-active；三套 CSS 之一）
 │   ├── background/
@@ -183,8 +183,10 @@ GeminiNotebook-Source-Management
 │           │   └── 导入原子性、版本兼容、save/load 队列、恢复点、日志隔离与 storage contract 计划
 │           ├── 2026-07-26-drag-correctness-and-performance.md
 │           │   └── Classic 跨 notebook、reflow box model、过滤落点、auto-scroll 和 100/500 行热路径计划
-│           └── 2026-07-26-architecture-deepening-and-accessibility.md
-│               └── Tree Placement/Search/Preferences Module 与键盘精准排序计划；均不是 runtime，也不进入发布包
+│           ├── 2026-07-26-architecture-deepening-and-accessibility.md
+│           │   └── Tree Placement/Search/Preferences Module 与键盘精准排序计划；均不是 runtime，也不进入发布包
+│           └── 2026-07-30-user-centered-top-10-optimizations.md
+│               └── 当前域名、安全删除、事务历史、恢复可见性、常用任务和无障碍 Top 10 的审计证据、实施顺序、验收与回滚边界
 ├── _locales/
 │   ├── en/messages.json
 │   ├── es/messages.json
@@ -246,7 +248,7 @@ manifest.json
 │   └── src/popup/popup.html
 │       ├── src/popup/index.js
 │       └── src/popup/styles.css
-└── content_scripts on https://notebooklm.google.com/*
+└── content_scripts on https://notebook.google.com/* + https://notebooklm.google.com/*
     ├── src/utils/index.js
     ├── src/utils/storage-contract.js
     ├── src/utils/preference-normalizers.js
@@ -377,7 +379,7 @@ manifest.json
 │       └── tests/popup.test.js
 ├── 分组树 / 拖拽 / 批量模式
 │   ├── 负责
-│   │   ├── 新建、重命名、删除、折叠分组
+│   │   ├── 新建分组/子分组后立即命名，只有确认非空名称后才保存，Escape、空名或 editor 无法挂载均回滚临时分组；重命名、删除、折叠同步 list/listitem、aria-expanded/controls、aria-hidden/inert
 │   │   ├── 嵌套 children 和 parent map
 │   │   ├── 来源/分组拖拽排序
 │   │   ├── 批量模式多源拖拽与边缘自动滚动
@@ -385,11 +387,11 @@ manifest.json
 │   │   ├── 避让 dragover 每帧只读一次 geometry snapshot 后纯计算并集中写入；纯滚动按 root/嵌套 children 精确 delta 修补，auto-scroll 无新 dragover 时仍按静止指针合并刷新，drop 前同步消费 dirty geometry，尺寸/render/混合失效时 fail closed 重建
 │   │   ├── native dropEffect 只在原始 dragover 事件内由 clean snapshot 同步解析；dirty/missing snapshot 保守 move，未知 payload 为 none，异步 drag frame 不保留 DataTransfer
 │   │   ├── reflow transform 使用 source/group 类型化 map；仅可视区 + 一个真实行高 overscan 动画，离屏位移静态应用并在结束/下次 preflight 清理
-│   │   ├── 批量选择、加入文件夹、添加/移除标签
+│   │   ├── 批量选择、Select visible（只选当前渲染、未处于折叠/hidden/inert 祖先且 native-operable 的来源）、Clear selection、真实选中数、加入文件夹、添加/移除标签；删除进行中冻结选择变更
 │   │   ├── 纯 Tree Placement Interface 集中 entry shape、source XOR、循环拒绝、索引修正、no-op、批量/事务原子提交与 import normalization；single/batch drag、移动到分组、批量/单项移出分组、分组新增/删除、原生来源删除、Classic sweep、来源同步、restore/reconcile、state apply、配置/原生标签导入均已迁移，业务路径不再直接修改放置数组
 │   │   ├── 来源三点菜单与文件夹标题栏共用 up/down/in/out 精准排序 resolver；渲染期以单次快照索引计算全部 disabled state，执行时再按实时树重新解析；边界禁用，成功后恢复可见稳定控件焦点并只播报 canonical N/M（过滤视图不改用可见索引，批量模式隐藏文件夹控件）
-│   │   ├── 移到未分组
-│   │   └── 批量删除入口
+│   │   ├── 移动 modal 内新建目标文件夹并一次完成移动；也可移到未分组
+│   │   └── 批量删除先经过扩展 alertdialog；原生确认后只有两次完整 ready-panel 扫描证明唯一身份消失且行数准确减少才提交本地删除
 │   ├── 先看
 │   │   ├── src/content/content-tree-placement.js
 │   │   ├── src/content/content-tree-interactions.js
@@ -423,6 +425,7 @@ manifest.json
 │   │   ├── tagOrder
 │   │   ├── sourceTagsById
 │   │   ├── 单来源标签编辑
+│   │   ├── tag filter modal 内搜索、结果计数、无匹配状态和 aria-pressed active state
 │   │   └── 批量添加/移除标签
 │   ├── 先看
 │   │   ├── src/content/content-tags.js
@@ -439,6 +442,7 @@ manifest.json
 │   │   ├── activeQuickViewKind session-only runtime state
 │   │   ├── 搜索时自动展开匹配分组
 │   │   ├── active isolation group
+│   │   ├── 零来源、搜索无结果、筛选无结果、隔离无结果的不同状态与 Clear search/Clear filters/Show all CTA
 │   │   └── effective enabled source 计算
 │   ├── 先看
 │   │   ├── src/content/content-search-semantics.js
@@ -458,7 +462,7 @@ manifest.json
 │   │   ├── 触发 Gemini Notebook 原生命名修改
 │   │   ├── 触发 Gemini Notebook 原生删除确认
 │   │   ├── 失败来源删除入口
-│   │   └── 删除确认弹窗歧义防护
+│   │   └── 删除确认弹窗歧义防护与原生删除后的双次完整扫描 absence proof
 │   ├── 先看
 │   │   ├── src/content/content-source-actions.js
 │   │   └── src/content/content-source-action-menu.js
@@ -468,7 +472,8 @@ manifest.json
 ├── 欢迎弹窗 / 设置弹窗 / 导入导出 / 原生标签导入
 │   ├── 负责
 │   │   ├── 首次欢迎 modal、更新介绍 modal 和反馈入口
-│   │   ├── 设置 modal；按“备份与恢复”“偏好设置”“帮助与反馈”组织，保存状态在标题栏显示
+│   │   ├── 设置 modal；按“备份与恢复”“偏好设置”“帮助与反馈”组织，保存状态在标题栏显示；主 manager 同步显示 persistent save/stale/recovery 状态和就地操作
+│   │   ├── Move modal 内新建目标文件夹并一次保存移动；Tag filter modal 搜索标签
 │   │   ├── export/import config JSON 与版本历史恢复入口
 │   │   ├── import diff preview；说明替换语义、来源启用变化、文件夹/tag 差异和设置变化
 │   │   ├── import size/count/depth 与 Tree Placement entry/missing-group/cycle 严格校验；非法 entry、缺失分组或循环直接拒绝，不按内部恢复规则修剪；group/tag/source 可选字段、children 及 tree entry type/key/id 只读取对象自有属性，remap 用安全 own-field define 写回
@@ -498,6 +503,8 @@ manifest.json
 │   └── 测试
 │       ├── tests/content/content-modals-tags.test.js
 │       ├── tests/content/content-modal-focus.test.js
+│       ├── tests/content/content-modal-move.test.js
+│       ├── tests/content/content-modal-tag-filter.test.js
 │       ├── tests/content/content-native-label-import-controller.test.js
 │       ├── tests/content/content-native-label-import-modal.test.js
 │       ├── tests/content/content-persistence.test.js
@@ -528,7 +535,8 @@ manifest.json
 │   │   ├── schemaVersion 5 和 sourceStateById[sourceKey].addedAt
 │   │   ├── background FIFO、revision guard、equal-revision conflict
 │   │   ├── runtime-first LOAD_STATE 与 metadata-first raw primary/backup 兼容性选择
-│   │   ├── backup/history
+│   │   ├── backup/history；工具栏、命令面板与 Cmd/Ctrl+Z、Cmd/Ctrl+Shift+Z、Ctrl+Y 暴露 Undo/Redo
+│   │   ├── Undo/Redo 双栈均有界；应用目标 snapshot 后等待 critical save `{ ok: true }` 才移动栈，失败恢复操作前 runtime 并保持栈不变
 │   │   ├── lifecycle critical save、import-owned session recovery 与 A→B import completion 隔离
 │   │   ├── deferred initial load
 │   │   ├── 旧状态 source-key remap 后统一 normalize；first/later sync 保留完整候选到 Tree Placement，再按 reachable group → root → bin 修剪重复与循环边
@@ -549,6 +557,7 @@ manifest.json
 │       ├── tests/content/content-snapshot-signature.test.js
 │       ├── tests/content/content-state-repair.test.js
 │       ├── tests/content/content-state-apply.test.js
+│       ├── tests/content/content-undo-history.test.js
 │       ├── tests/content/content-tree-placement.test.js
 │       ├── tests/content/content-state-reconcile.test.js
 │       └── tests/background.test.js
@@ -573,11 +582,12 @@ manifest.json
 │       └── tests/background.test.js
 ├── Popup launcher
 │   ├── 负责
-│   │   ├── 检测当前 tab
-│   │   ├── 打开/聚焦 Gemini Notebook
+│   │   ├── 检测当前 `notebook.google.com` tab，并兼容 `notebooklm.google.com`
+│   │   ├── 打开/聚焦 Gemini Notebook，优先当前 canonical 域名
 │   │   ├── 聚焦页面内 manager
 │   │   ├── 启用/禁用扩展
-│   │   └── 切换来源视图
+│   │   ├── 切换来源视图
+│   │   └── 只有 content 明确返回 `success: true` 才报告动作完成
 │   ├── 先看
 │   │   ├── src/popup/index.js
 │   │   ├── src/background/index.js
@@ -966,8 +976,10 @@ CI: .github/workflows/ci.yml
 ├── 原生 destructive action
 │   ├── 删除/重命名前必须重新解析 fresh row
 │   ├── 必须校验目标身份
+│   ├── 批量删除必须先经过扩展 alertdialog，取消不得触发 native click 或本地 marker
 │   ├── dialog ambiguous 时 fail closed
-│   └── title 明显冲突时 fail closed
+│   ├── title 明显冲突时 fail closed
+│   └── 删除成功必须由两次完整 ready-panel 扫描共同证明：目标身份缺失且行数准确减少；dialog 关闭、partial/busy、row 仍存在或 timeout 都不够
 ├── storage 边界
 │   ├── content script 有 chrome.storage.local 权限
 │   ├── 正常状态写入仍应走 background
@@ -1025,8 +1037,10 @@ CI: .github/workflows/ci.yml
 │   │   └── 本地存储、导入、生命周期、history、quota 和 developer-log 数据完整性实施计划
 │   ├── 2026-07-26-drag-correctness-and-performance.md
 │   │   └── Classic/Reflow 拖拽正确性、真实布局测试与大列表测量实施计划
-│   └── 2026-07-26-architecture-deepening-and-accessibility.md
-│       └── 深 Module、consumer 迁移、统一搜索语义和键盘排序实施计划
+│   ├── 2026-07-26-architecture-deepening-and-accessibility.md
+│   │   └── 深 Module、consumer 迁移、统一搜索语义和键盘排序实施计划
+│   └── 2026-07-30-user-centered-top-10-optimizations.md
+│       └── 三路用户视角审计产生的 Top 10 优化、逐项实施范围、验收和回滚边界
 ├── docs/superpowers/reports/
 │   └── 2026-07-26-optimization-baseline.md
 │       └── 当前优化工作的无变更验证基线、roadmap 起始 SHA、后续专项 red-contract 与 drag benchmark 台账

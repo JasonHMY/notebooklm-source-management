@@ -130,6 +130,16 @@
             });
         }
 
+        function createUniqueMoveGroupId(groupsById) {
+            const baseId = `group_${Date.now()}`;
+            if (!groupsById.has(baseId)) return baseId;
+            let suffix = 1;
+            while (groupsById.has(`${baseId}_${suffix}`)) {
+                suffix += 1;
+            }
+            return `${baseId}_${suffix}`;
+        }
+
         function executeMoveToFolder(sourceKeys, targetGroupId) {
             const state = (typeof getState === 'function' ? getState() : null) || {};
             const groupsById = typeof getGroupsById === 'function' ? getGroupsById() : new Map();
@@ -205,6 +215,56 @@
             return result;
         }
 
+        function createFolderAndMove(sourceKeys, title) {
+            const state = (typeof getState === 'function' ? getState() : null) || {};
+            const groupsById = typeof getGroupsById === 'function' ? getGroupsById() : new Map();
+            const parentMap = typeof getParentMap === 'function' ? getParentMap() : null;
+            const normalizedTitle = String(title || '').trim().replace(/\s+/g, ' ').slice(0, 120);
+            const items = normalizeMoveItems(sourceKeys);
+            if (
+                !normalizedTitle
+                || !(groupsById instanceof Map)
+                || !(parentMap instanceof Map)
+                || !treePlacement
+                || typeof treePlacement.addGroup !== 'function'
+                || typeof treePlacement.removeGroup !== 'function'
+                || typeof treePlacement.rebuildParentMap !== 'function'
+            ) {
+                return createMoveFailure(items, normalizedTitle ? 'invalid_target' : 'invalid_name');
+            }
+
+            const group = {
+                id: createUniqueMoveGroupId(groupsById),
+                title: normalizedTitle,
+                children: [],
+                enabled: true,
+                collapsed: false
+            };
+            const addResult = treePlacement.addGroup({
+                group,
+                target: {
+                    container: 'root',
+                    index: Array.isArray(state.root) ? state.root.length : 0
+                }
+            });
+            if (!addResult?.ok || !addResult.changed) {
+                return createMoveFailure(items);
+            }
+
+            const moveResult = executeMoveToFolder(sourceKeys, group.id);
+            if (moveResult?.ok && moveResult.changed) {
+                return Object.assign({}, moveResult, {
+                    createdGroupId: group.id
+                });
+            }
+
+            treePlacement.removeGroup({
+                item: { kind: 'group', id: group.id }
+            });
+            treePlacement.rebuildParentMap(parentMap);
+            return moveResult || createMoveFailure(items);
+        }
+
         function renderMoveToFolderModal(sourceKeys) {
             const shadowRoot = getShadowRoot();
             if (!shadowRoot || !el) return;
@@ -232,6 +292,54 @@
             ]);
 
             const content = el('div', { className: 'sp-folder-modal-content' });
+            const createInput = el('input', {
+                type: 'text',
+                className: 'sp-move-new-folder-input',
+                maxlength: '120',
+                placeholder: getMessage('ui_move_new_folder_placeholder'),
+                'aria-label': getMessage('ui_move_new_folder_name'),
+                autocomplete: 'off'
+            });
+            const createButton = el('button', {
+                type: 'button',
+                className: 'sp-button sp-glare-hover sp-move-create-folder-btn'
+            }, [getMessage('ui_move_create_folder')]);
+            const createRow = el('div', { className: 'sp-move-create-row' }, [
+                createInput,
+                createButton
+            ]);
+            let createSubmitted = false;
+            const submitNewFolder = () => {
+                if (createSubmitted) return false;
+                const normalizedTitle = String(createInput.value || '').trim();
+                if (!normalizedTitle) {
+                    createInput.setAttribute?.('aria-invalid', 'true');
+                    createInput.focus?.();
+                    return false;
+                }
+                createInput.removeAttribute?.('aria-invalid');
+                createSubmitted = true;
+                createInput.disabled = true;
+                createButton.disabled = true;
+                const result = createFolderAndMove(keys, normalizedTitle);
+                if (!result?.ok || !result.changed) {
+                    createSubmitted = false;
+                    createInput.disabled = false;
+                    createButton.disabled = false;
+                    createInput.setAttribute?.('aria-invalid', 'true');
+                    createInput.focus?.();
+                    return false;
+                }
+                return true;
+            };
+            createButton.addEventListener('click', submitNewFolder);
+            createInput.addEventListener('input', () => createInput.removeAttribute?.('aria-invalid'));
+            createInput.addEventListener('keydown', (event) => {
+                if (event.key !== 'Enter') return;
+                event.preventDefault?.();
+                submitNewFolder();
+            });
+            content.appendChild(createRow);
 
             let folderFound = false;
             let modalItemIndex = 0;
@@ -290,7 +398,11 @@
 
             const modalKeyboard = bindModalKeyboardNavigation(modal, {
                 closeModal: closeMoveToFolderModal,
-                initialFocusTarget: () => modal.querySelector('.sp-folder-option') || modal.querySelector('.sp-modal-cancel')
+                initialFocusTarget: () => (
+                    modal.querySelector('.sp-folder-option')
+                    || modal.querySelector('.sp-move-new-folder-input')
+                    || modal.querySelector('.sp-modal-cancel')
+                )
             });
 
             if (typeof rafFn === 'function') {
@@ -310,7 +422,8 @@
             renderMoveToFolderModal,
             closeMoveToFolderModal,
             collectMoveFolderOptions,
-            executeMoveToFolder
+            executeMoveToFolder,
+            createFolderAndMove
         };
     }
 

@@ -163,6 +163,61 @@ describe('saveState', () => {
         expect(snapshot.ungrouped).toEqual(['source4']);
     });
 
+    it('excludes unconfirmed initial-name folders and transient rename fields from snapshots', () => {
+        mod.state.root = [
+            { type: 'group', id: 'confirmed' },
+            { type: 'group', id: 'pending-root' }
+        ];
+        mod.groupsById.set('confirmed', {
+            id: 'confirmed',
+            title: 'Confirmed',
+            children: [
+                { type: 'source', key: 'source1' },
+                { type: 'group', id: 'pending-child' }
+            ],
+            isNewlyCreated: true
+        });
+        mod.groupsById.set('pending-root', {
+            id: 'pending-root',
+            title: 'ui_new_group',
+            children: [],
+            isPendingInitialRename: true,
+            pendingInitialRenameDraft: 'Draft root',
+            pendingInitialRenameFocusReturnSelector: '#sp-new-group-btn',
+            pendingInitialRenameCollapsedAncestorIds: ['confirmed'],
+            isPendingInitialRenameRender: true
+        });
+        mod.groupsById.set('pending-child', {
+            id: 'pending-child',
+            title: 'ui_new_subgroup',
+            children: [],
+            isPendingInitialRename: true,
+            pendingInitialRenameDraft: 'Draft child'
+        });
+        mod.sourcesByKey.set('source1', {
+            enabled: true,
+            title: 'Source 1',
+            normalizedTitle: 'source 1',
+            stableToken: 'source-1',
+            fingerprint: 'source 1||article',
+            identityType: 'stable-token'
+        });
+
+        const snapshot = mod.buildPersistableState();
+
+        expect(snapshot.root).toEqual([{ type: 'group', id: 'confirmed' }]);
+        expect(snapshot.groupsById).toEqual({
+            confirmed: {
+                id: 'confirmed',
+                title: 'Confirmed',
+                children: [{ type: 'source', key: 'source1' }]
+            }
+        });
+        expect(mod.groupsById.has('pending-root')).toBe(true);
+        expect(mod.groupsById.has('pending-child')).toBe(true);
+        expect(mod.groupsById.get('pending-root').pendingInitialRenameDraft).toBe('Draft root');
+    });
+
     it('migrates a v4 snapshot (groups+ungrouped) to v5 (root+ungrouped) preserving order', () => {
         const normalized = mod.normalizeLoadedState({
             schemaVersion: 4,
@@ -1576,11 +1631,15 @@ describe('saveState', () => {
         seedPersistedState();
         const statusContainer = global.document.createElement('div');
         const statusSection = global.document.createElement('section');
+        const managerStatusContainer = global.document.createElement('div');
+        const managerStatusSection = global.document.createElement('section');
         mod._setShadowRootForTest({
             host: { isConnected: true },
             getElementById: jest.fn((id) => {
                 if (id === 'sp-settings-save-status') return statusContainer;
                 if (id === 'sp-settings-save-status-section') return statusSection;
+                if (id === 'sp-manager-save-status') return managerStatusContainer;
+                if (id === 'sp-manager-save-status-section') return managerStatusSection;
                 return null;
             }),
             querySelector: jest.fn(() => null)
@@ -1595,8 +1654,15 @@ describe('saveState', () => {
         expect(statusContainer.setAttribute).toHaveBeenCalledWith('aria-live', 'assertive');
         expect(statusContainer.childNodes[0].textContent).toBe('ui_save_status_failed');
         expect(statusContainer.childNodes[1].textContent).toBe('ui_save_status_retry');
+        expect(managerStatusContainer.hidden).toBe(false);
+        expect(managerStatusSection.hidden).toBe(false);
+        expect(managerStatusContainer.className).toBe('sp-save-status sp-save-status-failed');
+        expect(managerStatusContainer.childNodes.map((node) => node.textContent)).toEqual([
+            'ui_save_status_failed',
+            'ui_save_status_retry'
+        ]);
 
-        statusContainer.childNodes[1].dispatchEvent({
+        managerStatusContainer.childNodes[1].dispatchEvent({
             type: 'click',
             preventDefault: jest.fn(),
             stopPropagation: jest.fn()
@@ -1996,12 +2062,30 @@ describe('saveState', () => {
         expect(mod.pendingBatchKeys.size).toBe(0);
     });
 
-    it('immediately persists new folders without waiting for timers', () => {
+    it('persists a new folder only after its inline name is confirmed', () => {
         mod._setProjectId('project-group');
+        const titleSpan = global.document.createElement('span');
+        const groupContainer = {
+            dataset: {},
+            querySelector: jest.fn((selector) => (
+                selector === '.group-title' ? titleSpan : null
+            ))
+        };
+        mod._setShadowRootForTest({
+            host: { isConnected: true },
+            querySelector: jest.fn((selector) => {
+                const match = selector.match?.(/data-group-id="([^"]+)"/);
+                if (!match) return null;
+                groupContainer.dataset.groupId = match[1];
+                return groupContainer;
+            }),
+            getElementById: jest.fn(() => null),
+            appendChild: jest.fn()
+        });
 
-        mod.handleAddNewGroup();
+        expect(mod.handleAddNewGroup()).toBe(true);
 
-        expect(global.chrome.runtime.sendMessage).toHaveBeenCalledTimes(1);
+        expect(global.chrome.runtime.sendMessage).not.toHaveBeenCalled();
         expect(mod.state.root).toHaveLength(1);
         expect(mod.state.root[0]).toMatchObject({ type: 'group' });
         expect(mod.groupsById.get(mod.state.root[0].id)).toMatchObject({
@@ -2009,6 +2093,19 @@ describe('saveState', () => {
             enabled: true,
             collapsed: false
         });
+
+        const input = titleSpan.childNodes[0];
+        expect(input.className).toBe('sp-inline-group-name-input');
+        expect(input.value).toBe('');
+        input.value = 'Confirmed folder';
+        input.dispatchEvent({
+            type: 'keydown',
+            key: 'Enter',
+            preventDefault: jest.fn()
+        });
+
+        expect(global.chrome.runtime.sendMessage).toHaveBeenCalledTimes(1);
+        expect(mod.groupsById.get(mod.state.root[0].id).title).toBe('Confirmed folder');
     });
 
     it('immediately persists source checkbox toggles without waiting for timers', () => {
@@ -2889,7 +2986,20 @@ describe('undo recent operations', () => {
         });
     };
 
-    it('restores the previous persisted snapshot when Command+Z is pressed', () => {
+    const createHistoryEvent = (overrides = {}) => ({
+        key: 'z',
+        metaKey: true,
+        ctrlKey: false,
+        shiftKey: false,
+        altKey: false,
+        target: { tagName: 'DIV' },
+        preventDefault: jest.fn(),
+        stopPropagation: jest.fn(),
+        stopImmediatePropagation: jest.fn(),
+        ...overrides
+    });
+
+    it('supports undo and redo keyboard shortcuts outside editable targets', async () => {
         addUndoSource();
         mod.state.root = [{ type: 'group', id: 'group1' }];
         mod.state.ungrouped = ['source1'];
@@ -2901,23 +3011,99 @@ describe('undo recent operations', () => {
         expect(mod.groupsById.get('group1').children).toEqual([{ type: 'source', key: 'source1' }]);
         expect(mod._getUndoStackLengthForTest()).toBe(1);
 
-        const event = {
-            key: 'z',
-            metaKey: true,
-            ctrlKey: false,
-            shiftKey: false,
-            altKey: false,
-            target: { tagName: 'DIV' },
-            preventDefault: jest.fn(),
-            stopPropagation: jest.fn()
-        };
-        mod._handleUndoKeydownForTest(event);
+        const undoEvent = createHistoryEvent();
+        await expect(mod._handleHistoryKeydownForTest(undoEvent)).resolves.toBe(true);
 
-        expect(event.preventDefault).toHaveBeenCalled();
-        expect(event.stopPropagation).toHaveBeenCalled();
+        expect(undoEvent.preventDefault).toHaveBeenCalled();
+        expect(undoEvent.stopPropagation).toHaveBeenCalled();
+        expect(undoEvent.stopImmediatePropagation).toHaveBeenCalled();
         expect(mod.state.ungrouped).toEqual(['source1']);
         expect(mod.groupsById.get('group1').children).toEqual([]);
         expect(mod._getUndoStackLengthForTest()).toBe(0);
+        expect(mod._getRedoStackLengthForTest()).toBe(1);
+
+        await expect(mod._handleHistoryKeydownForTest(createHistoryEvent({
+            shiftKey: true
+        }))).resolves.toBe(true);
+        expect(mod.state.ungrouped).toEqual([]);
+        expect(mod.groupsById.get('group1').children).toEqual([{ type: 'source', key: 'source1' }]);
+
+        await expect(mod._handleHistoryKeydownForTest(createHistoryEvent({
+            metaKey: false,
+            ctrlKey: true
+        }))).resolves.toBe(true);
+        await expect(mod._handleHistoryKeydownForTest(createHistoryEvent({
+            metaKey: false,
+            ctrlKey: true,
+            shiftKey: true
+        }))).resolves.toBe(true);
+
+        await expect(mod._handleHistoryKeydownForTest(createHistoryEvent({
+            metaKey: false,
+            ctrlKey: true
+        }))).resolves.toBe(true);
+        await expect(mod._handleHistoryKeydownForTest(createHistoryEvent({
+            key: 'y',
+            metaKey: false,
+            ctrlKey: true
+        }))).resolves.toBe(true);
+        expect(mod.state.ungrouped).toEqual([]);
+        expect(mod.groupsById.get('group1').children).toEqual([{ type: 'source', key: 'source1' }]);
+        mod._hideActiveToastForTest(false);
+    });
+
+    it('leaves empty undo and redo shortcuts to Notebook', () => {
+        const events = [
+            createHistoryEvent(),
+            createHistoryEvent({ shiftKey: true }),
+            createHistoryEvent({
+                key: 'y',
+                metaKey: false,
+                ctrlKey: true
+            })
+        ];
+
+        events.forEach((event) => {
+            expect(mod._handleHistoryKeydownForTest(event)).toBe(false);
+            expect(event.preventDefault).not.toHaveBeenCalled();
+            expect(event.stopPropagation).not.toHaveBeenCalled();
+            expect(event.stopImmediatePropagation).not.toHaveBeenCalled();
+        });
+    });
+
+    it('leaves unavailable history shortcuts to Notebook while a transaction is pending', async () => {
+        addUndoSource();
+        mod.state.root = [{ type: 'group', id: 'group1' }];
+        mod.state.ungrouped = ['source1'];
+        mod.groupsById.set('group1', { id: 'group1', title: 'Pinned', children: [] });
+        mod._resetUndoHistoryBaselineForTest();
+        mod.executeMoveToFolder('source1', 'group1');
+        await mod.waitForPendingStateSave();
+
+        let acknowledgeSave;
+        global.chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+            if (message?.type === 'SAVE_STATE') {
+                acknowledgeSave = callback;
+            }
+        });
+        const undoPromise = mod.undoLastOperation();
+        expect(typeof acknowledgeSave).toBe('function');
+
+        const pendingUndoEvent = createHistoryEvent();
+        const pendingRedoEvent = createHistoryEvent({ shiftKey: true });
+        [pendingUndoEvent, pendingRedoEvent].forEach((event) => {
+            expect(mod._handleHistoryKeydownForTest(event)).toBe(false);
+            expect(event.preventDefault).not.toHaveBeenCalled();
+            expect(event.stopPropagation).not.toHaveBeenCalled();
+            expect(event.stopImmediatePropagation).not.toHaveBeenCalled();
+        });
+
+        acknowledgeSave({
+            success: true,
+            saveRevision: 2,
+            savedAt: '2026-07-31T00:00:00.000Z'
+        });
+        await expect(undoPromise).resolves.toBe(true);
         mod._hideActiveToastForTest(false);
     });
 
@@ -2932,7 +3118,7 @@ describe('undo recent operations', () => {
         expect(mod._getUndoStackLengthForTest()).toBe(0);
     });
 
-    it('adds an Undo action to undoable success toasts', () => {
+    it('adds an Undo action to undoable success toasts', async () => {
         addUndoSource();
         mod.state.ungrouped = ['source1'];
         mod._resetUndoHistoryBaselineForTest();
@@ -2949,7 +3135,7 @@ describe('undo recent operations', () => {
             actionLabel: 'ui_undo_action'
         });
         expect(typeof toastItem.onAction).toBe('function');
-        toastItem.onAction();
+        await toastItem.onAction();
         expect(mod.state.ungrouped).toEqual(['source1']);
         mod._hideActiveToastForTest(false);
     });
@@ -2970,6 +3156,212 @@ describe('undo recent operations', () => {
 
         expect(event.preventDefault).not.toHaveBeenCalled();
         expect(event.stopPropagation).not.toHaveBeenCalled();
+    });
+
+    it('uses the composed event path so retargeted manager inputs keep native text shortcuts', async () => {
+        const input = { tagName: 'TEXTAREA' };
+        const event = {
+            key: 'z',
+            metaKey: true,
+            ctrlKey: false,
+            shiftKey: false,
+            altKey: false,
+            target: { tagName: 'DIV' },
+            composedPath: () => [input, { tagName: 'DIV' }],
+            preventDefault: jest.fn(),
+            stopPropagation: jest.fn()
+        };
+
+        expect(mod._handleHistoryKeydownForTest(event)).toBe(false);
+        expect(event.preventDefault).not.toHaveBeenCalled();
+        expect(mod._isEditableUndoEventForTest(event)).toBe(true);
+
+        await mod._setCommandShortcutForTest('search-sources', 'Meta+Shift+F');
+        const commandEvent = {
+            key: 'f',
+            metaKey: true,
+            ctrlKey: false,
+            shiftKey: true,
+            altKey: false,
+            target: { tagName: 'DIV' },
+            composedPath: () => [input, { tagName: 'DIV' }],
+            preventDefault: jest.fn(),
+            stopPropagation: jest.fn()
+        };
+        expect(mod._handleCommandShortcutKeydownForTest(commandEvent)).toBe(false);
+        expect(commandEvent.preventDefault).not.toHaveBeenCalled();
+    });
+
+    it('reserves history shortcuts while the command palette is open', async () => {
+        addUndoSource();
+        mod.state.root = [{ type: 'group', id: 'group1' }];
+        mod.state.ungrouped = ['source1'];
+        mod.groupsById.set('group1', { id: 'group1', title: 'Pinned', children: [] });
+        mod._resetUndoHistoryBaselineForTest();
+        mod.executeMoveToFolder('source1', 'group1');
+        await mod.waitForPendingStateSave();
+        expect(mod._getUndoStackLengthForTest()).toBe(1);
+
+        const commandPaletteModal = {
+            id: 'sp-command-palette-modal',
+            getAttribute: (name) => (name === 'id' ? 'sp-command-palette-modal' : null)
+        };
+        mod._setShadowRootForTest({
+            host: { isConnected: true },
+            querySelector: jest.fn(() => null),
+            getElementById: (id) => (id === commandPaletteModal.id ? commandPaletteModal : null),
+            appendChild: jest.fn()
+        });
+        global.chrome.runtime.sendMessage.mockClear();
+        const event = {
+            key: 'z',
+            metaKey: true,
+            ctrlKey: false,
+            shiftKey: false,
+            altKey: false,
+            target: { tagName: 'DIV' },
+            preventDefault: jest.fn(),
+            stopPropagation: jest.fn()
+        };
+
+        expect(mod._handleHistoryKeydownForTest(event)).toBe(false);
+        expect(event.preventDefault).not.toHaveBeenCalled();
+        expect(mod._getUndoStackLengthForTest()).toBe(1);
+        expect(mod.state.ungrouped).toEqual([]);
+        expect(global.chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+            expect.objectContaining({ type: 'SAVE_STATE' }),
+            expect.any(Function)
+        );
+
+        await expect(
+            mod._setCommandShortcutForTest('search-sources', 'Meta+Z')
+        ).rejects.toThrow('reserved_history_shortcut');
+        expect(mod._getCommandShortcutsForTest()['search-sources']).not.toBe('Meta+Z');
+    });
+
+    it('updates toolbar disabled states as undo and redo availability changes', async () => {
+        const buttons = {
+            'sp-undo-btn': {
+                disabled: true,
+                setAttribute: jest.fn()
+            },
+            'sp-redo-btn': {
+                disabled: true,
+                setAttribute: jest.fn()
+            }
+        };
+        mod._setShadowRootForTest({
+            host: { isConnected: true },
+            querySelector: jest.fn(() => null),
+            getElementById: (id) => buttons[id] || null,
+            appendChild: jest.fn()
+        });
+        addUndoSource();
+        mod.state.ungrouped = ['source1'];
+        mod._resetUndoHistoryBaselineForTest();
+        mod.state.ungrouped = [];
+        mod.saveState({ immediate: true });
+
+        expect(buttons['sp-undo-btn'].disabled).toBe(false);
+        expect(buttons['sp-redo-btn'].disabled).toBe(true);
+        expect(buttons['sp-undo-btn'].setAttribute).toHaveBeenLastCalledWith('aria-disabled', 'false');
+
+        await mod.undoLastOperation();
+
+        expect(buttons['sp-undo-btn'].disabled).toBe(true);
+        expect(buttons['sp-redo-btn'].disabled).toBe(false);
+        expect(buttons['sp-redo-btn'].setAttribute).toHaveBeenLastCalledWith('aria-disabled', 'false');
+        mod._hideActiveToastForTest(false);
+    });
+
+    it('disables both toolbar history actions while a transaction awaits save acknowledgement', async () => {
+        const buttons = {
+            'sp-undo-btn': {
+                disabled: true,
+                setAttribute: jest.fn()
+            },
+            'sp-redo-btn': {
+                disabled: true,
+                setAttribute: jest.fn()
+            }
+        };
+        mod._setShadowRootForTest({
+            host: { isConnected: true },
+            querySelector: jest.fn(() => null),
+            getElementById: (id) => buttons[id] || null,
+            appendChild: jest.fn()
+        });
+        addUndoSource();
+        mod.state.root = [{ type: 'group', id: 'group1' }];
+        mod.state.ungrouped = ['source1'];
+        mod.groupsById.set('group1', { id: 'group1', title: 'Pinned', children: [] });
+        mod._resetUndoHistoryBaselineForTest();
+        mod.executeMoveToFolder('source1', 'group1');
+        await mod.waitForPendingStateSave();
+        expect(buttons['sp-undo-btn'].disabled).toBe(false);
+
+        let acknowledgeSave;
+        global.chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+            if (message?.type === 'SAVE_STATE') {
+                acknowledgeSave = callback;
+            }
+        });
+
+        const undoPromise = mod.undoLastOperation();
+
+        expect(typeof acknowledgeSave).toBe('function');
+        expect(buttons['sp-undo-btn'].disabled).toBe(true);
+        expect(buttons['sp-redo-btn'].disabled).toBe(true);
+        expect(mod._getUndoStackLengthForTest()).toBe(1);
+        expect(mod._getRedoStackLengthForTest()).toBe(0);
+
+        acknowledgeSave({
+            success: true,
+            saveRevision: 2,
+            savedAt: '2026-07-30T00:00:00.000Z'
+        });
+        await expect(undoPromise).resolves.toBe(true);
+
+        expect(buttons['sp-undo-btn'].disabled).toBe(true);
+        expect(buttons['sp-redo-btn'].disabled).toBe(false);
+        expect(mod._getUndoStackLengthForTest()).toBe(0);
+        expect(mod._getRedoStackLengthForTest()).toBe(1);
+        mod._hideActiveToastForTest(false);
+    });
+
+    it('exposes and executes undo and redo through the command palette', async () => {
+        addUndoSource();
+        mod.state.root = [{ type: 'group', id: 'group1' }];
+        mod.state.ungrouped = ['source1'];
+        mod.groupsById.set('group1', { id: 'group1', title: 'Pinned', children: [] });
+        mod._resetUndoHistoryBaselineForTest();
+
+        expect(mod._getCommandPaletteCommandsForTest('')).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: 'undo', action: 'undo', disabled: true }),
+            expect.objectContaining({ id: 'redo', action: 'redo', disabled: true })
+        ]));
+
+        mod.executeMoveToFolder('source1', 'group1');
+        await mod.waitForPendingStateSave();
+        expect(mod._getCommandPaletteCommandsForTest('')).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: 'undo', disabled: false }),
+            expect.objectContaining({ id: 'redo', disabled: true })
+        ]));
+
+        expect(mod._executeCommandPaletteCommandForTest('undo', { action: 'undo' })).toBe(true);
+        await mod.waitForPendingStateSave();
+        await Promise.resolve();
+        expect(mod.state.ungrouped).toEqual(['source1']);
+        expect(mod._getCommandPaletteCommandsForTest('')).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: 'redo', disabled: false })
+        ]));
+
+        expect(mod._executeCommandPaletteCommandForTest('redo', { action: 'redo' })).toBe(true);
+        await mod.waitForPendingStateSave();
+        await Promise.resolve();
+        expect(mod.state.ungrouped).toEqual([]);
+        expect(mod.groupsById.get('group1').children).toEqual([{ type: 'source', key: 'source1' }]);
+        mod._hideActiveToastForTest(false);
     });
 });
 

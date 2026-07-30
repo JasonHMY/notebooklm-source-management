@@ -56,7 +56,7 @@
                 --sp-border-checkbox: rgba(0,0,0,0.25);
                 --sp-text-primary: #1A1A1C;
                 --sp-text-secondary: #6E6E73;
-                --sp-text-tertiary: #8e8e93;
+                --sp-text-tertiary: #6e6e73;
                 --sp-text-toast: #fff;
                 --sp-text-badge: #6E6E73;
                 --sp-accent: #007aff;
@@ -268,7 +268,7 @@
                 display: flex;
                 align-items: center;
                 gap: 8px;
-                flex-wrap: nowrap;
+                flex-wrap: wrap;
                 min-width: 0;
                 flex-shrink: 0;
                 padding: 10px 0 8px;
@@ -286,11 +286,12 @@
             .sp-toolbar-actions {
                 display: flex;
                 align-items: center;
+                flex-wrap: wrap;
                 gap: 8px;
-                flex: 0 1 auto;
+                flex: 1 1 auto;
                 min-width: 0;
-                max-width: 540px;
-                overflow: hidden;
+                max-width: 100%;
+                overflow: visible;
                 transform-origin: right center;
                 transition:
                     max-width var(--sp-motion-slow) var(--sp-ease-emphasized),
@@ -301,7 +302,8 @@
             .sp-toolbar-actions > button {
                 flex-shrink: 0;
             }
-            .sp-toolbar-settings.sp-icon-button {
+            .sp-toolbar-settings.sp-icon-button,
+            .sp-toolbar-history-action.sp-icon-button {
                 width: 32px;
                 height: 32px;
                 border-radius: 999px;
@@ -331,6 +333,7 @@
             .sp-controls.is-search-expanded .sp-toolbar-actions {
                 flex-basis: 0;
                 max-width: 0;
+                overflow: hidden;
                 opacity: 0;
                 transform: translateX(12px) scale(0.96);
                 pointer-events: none;
@@ -353,6 +356,9 @@
             }
             .sp-toolbar-actions > button:nth-child(5) {
                 transition-delay: 0.12s;
+            }
+            .sp-toolbar-actions > button:nth-child(6) {
+                transition-delay: 0.15s;
             }
             .sp-save-status {
                 display: inline-flex;
@@ -411,6 +417,100 @@
             .sp-save-status-action-muted {
                 background: transparent;
                 color: var(--sp-text-secondary);
+            }
+            .sp-manager-save-status-region {
+                display: flex;
+                justify-content: flex-end;
+                padding: 0 12px 8px;
+            }
+            .sp-manager-save-status-region[hidden] {
+                display: none;
+            }
+            .sp-manager-save-status-region .sp-save-status {
+                max-width: min(100%, 520px);
+                flex-wrap: wrap;
+                justify-content: flex-end;
+                white-space: normal;
+            }
+            .sp-inline-group-name-input {
+                width: 100%;
+                min-width: 0;
+                box-sizing: border-box;
+                border: 1px solid var(--sp-accent);
+                border-radius: var(--sp-radius-xs);
+                background: var(--sp-bg-primary);
+                color: var(--sp-text-primary);
+                font: inherit;
+                padding: 3px 6px;
+                outline: 0;
+                box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.14);
+            }
+            .sp-contextual-empty-state {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                gap: 10px;
+                min-height: 112px;
+                text-align: center;
+            }
+            .sp-contextual-empty-copy {
+                max-width: 420px;
+                color: var(--sp-text-secondary);
+                line-height: 1.5;
+            }
+            .sp-move-create-row {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                margin-bottom: 10px;
+            }
+            .sp-move-new-folder-input {
+                flex: 1 1 auto;
+                min-width: 0;
+                border: 1px solid var(--sp-border);
+                border-radius: var(--sp-radius-sm);
+                background: var(--sp-bg-primary);
+                color: var(--sp-text-primary);
+                font: inherit;
+                padding: 8px 10px;
+                outline: 0;
+            }
+            .sp-move-new-folder-input:focus-visible {
+                border-color: var(--sp-accent);
+                box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.14);
+            }
+            .sp-move-new-folder-input[aria-invalid="true"] {
+                border-color: var(--sp-accent-danger);
+            }
+            .sp-batch-delete-confirm-modal {
+                width: min(460px, calc(100vw - 32px));
+            }
+            .sp-batch-delete-confirm-summary,
+            .sp-batch-delete-confirm-warning {
+                margin: 0;
+                line-height: 1.5;
+            }
+            .sp-batch-delete-preview-list {
+                margin: 12px 0;
+                padding-left: 22px;
+                color: var(--sp-text-secondary);
+            }
+            .sp-batch-delete-preview-item {
+                margin: 4px 0;
+                overflow-wrap: anywhere;
+            }
+            .sp-batch-delete-preview-more {
+                color: var(--sp-text-tertiary);
+            }
+            .sp-batch-delete-confirm-warning {
+                color: var(--sp-accent-danger);
+                font-weight: 700;
+            }
+            .sp-batch-delete-confirm-final-btn {
+                background: var(--sp-accent-danger);
+                border-color: transparent;
+                color: var(--sp-text-toast);
             }
             .sp-search-cluster {
                 margin-left: auto;
@@ -733,6 +833,16 @@
             }
             .sp-icon-button:active {
                 transform: scale(0.95);
+            }
+            .sp-toolbar-history-action:disabled,
+            .sp-toolbar-history-action:disabled:hover,
+            .sp-toolbar-history-action:disabled:active {
+                cursor: not-allowed;
+                opacity: 0.42;
+                color: var(--sp-text-tertiary);
+                background: var(--sp-bg-button);
+                transform: none;
+                box-shadow: none;
             }
             .sp-icon-button .google-symbols {
                 font-size: 18px;
@@ -1123,6 +1233,17 @@
                 background: var(--sp-tag-active-bg);
                 border-color: var(--sp-tag-active-border);
                 color: var(--sp-tag-active-text);
+            }
+            @media (prefers-color-scheme: dark) {
+                .sp-tag-pill {
+                    color: var(--sp-tag-dark-text, var(--sp-tag-text, var(--sp-text-secondary)));
+                }
+                .sp-tag-pill:hover {
+                    color: var(--sp-tag-dark-hover-text, var(--sp-tag-hover-text, var(--sp-text-primary)));
+                }
+                .sp-tag-pill.is-active {
+                    color: var(--sp-tag-dark-active-text, var(--sp-tag-active-text));
+                }
             }
             .checkbox-container {
                 flex-shrink: 0;
@@ -2163,6 +2284,19 @@
                 display: grid;
                 gap: 6px;
             }
+            .sp-tag-filter-content {
+                gap: 8px;
+            }
+            .sp-tag-filter-search {
+                flex-shrink: 0;
+            }
+            .sp-tag-filter-results-count {
+                min-height: 18px;
+                padding: 0 2px;
+                color: var(--sp-text-secondary);
+                font-size: 12px;
+                line-height: 1.5;
+            }
             .sp-command-palette-item,
             .sp-tag-filter-option {
                 width: 100%;
@@ -2190,9 +2324,13 @@
             .sp-command-palette-item:focus-visible,
             .sp-command-palette-item.is-active,
             .sp-tag-filter-option:hover,
-            .sp-tag-filter-option:focus-visible {
+            .sp-tag-filter-option:focus-visible,
+            .sp-tag-filter-option.is-active {
                 border-color: var(--sp-search-focus-border);
                 background: var(--sp-tag-active-bg);
+            }
+            .sp-tag-filter-option.is-active {
+                box-shadow: inset 3px 0 0 var(--sp-accent);
             }
             .sp-command-palette-item.is-disabled {
                 cursor: not-allowed;
@@ -2666,6 +2804,11 @@
                 display: flex;
                 flex-direction: column;
             }
+            .ungrouped-list {
+                display: flex;
+                flex-direction: column;
+                min-width: 0;
+            }
 
             .ungrouped-header {
                 margin: 16px 0 6px 8px;
@@ -3010,6 +3153,9 @@
             .sp-group-toggle-checkbox:checked + .sp-toggle-slider:before {
                 transform: translateX(16px);
             }
+            .sp-group-toggle-checkbox:focus-visible + .sp-toggle-slider {
+                box-shadow: var(--sp-focus-ring-strong);
+            }
             
             /* --- Batch Mode Additions --- */
             .source-item.selected-for-batch {
@@ -3041,12 +3187,10 @@
                 }
             }
             .sp-batch-action-bar {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                gap: 8px;
                 padding: 12px 16px;
                 margin-top: 8px;
+                max-width: 100%;
+                box-sizing: border-box;
                 position: sticky;
                 bottom: 8px;
                 background: var(--sp-glass-bg-body, rgba(255, 255, 255, 0.85));
@@ -3084,12 +3228,29 @@
                 position: relative;
                 z-index: 1;
             }
-	            .sp-batch-actions {
-	                display: flex;
-	                flex-wrap: wrap;
-	                justify-content: flex-end;
-	                gap: 8px;
-	            }
+            .sp-batch-toolbar {
+                display: flex;
+                flex-wrap: wrap;
+                justify-content: space-between;
+                align-items: center;
+                gap: 8px;
+                min-width: 0;
+                max-width: 100%;
+            }
+            .sp-batch-actions {
+                display: flex;
+                flex-wrap: wrap;
+                justify-content: flex-end;
+                gap: 8px;
+                min-width: 0;
+                max-width: 100%;
+            }
+                .sp-batch-selection-count {
+                    color: var(--sp-text-secondary);
+                    font-size: 11px;
+                    font-weight: 700;
+                    white-space: nowrap;
+                }
 	            .sp-batch-add-folder-btn,
 	            .sp-batch-add-tags-btn {
 	                background-color: var(--sp-accent);

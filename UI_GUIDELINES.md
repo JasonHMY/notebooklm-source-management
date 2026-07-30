@@ -388,7 +388,7 @@ Characteristics:
 
 - `position: sticky`
 - top aligned
-- compact horizontal layout
+- compact layout that wraps at narrow panel widths or with long translations
 - bottom border for separation
 - no heavy visual chrome
 
@@ -396,9 +396,10 @@ Toolbar actions live in `.sp-toolbar-actions`.
 
 Rules:
 
-- Top-level actions should remain in a single horizontal strip.
+- Top-level actions should remain compact, but `.sp-controls` and `.sp-toolbar-actions` must be allowed to wrap instead of clipping controls.
 - New top-level actions must be justified as "frequently used, global, and not row-scoped".
 - Do not overload the toolbar with low-frequency actions.
+- Undo and Redo are the canonical history actions. Their icon buttons expose localized names and remain disabled until the corresponding transactional history stack can be applied.
 
 ### 7.2 Search behavior
 
@@ -678,6 +679,8 @@ Rules:
 - Group UI must feel structurally related to source rows, not like a separate product.
 - Future nested controls must not break indentation rhythm or tree-line clarity.
 - The four precise-order buttons are omitted in batch mode. In filtered/search/isolation views they still operate on the canonical full tree, and their status reports canonical position rather than the visible subset.
+- New folders and subfolders enter inline naming immediately. A non-empty name commits one save, while Escape or an empty name cancels the temporary folder without creating an undo step. A rows patch must capture and restore the pending draft/editor, and persistence must omit the temporary folder and its parent/root edge until the name is confirmed. While naming, render must force the pending folder and ancestor path through search/tag/Quick View/isolation filters and virtual collapse; confirmation clears those view constraints and expands any stored-collapsed ancestors so the committed folder and focus target remain visible, while cancellation preserves the user's prior view.
+- Group containers are `listitem`s and `.group-children` is the controlled nested `list`; collapse state must update both visual rotation and the accessibility attributes documented in §16.
 
 ### 10.3 Drag and drop feedback
 
@@ -732,6 +735,7 @@ Rules:
 
 - Tags should remain visually lightweight.
 - Avoid using full-solid accent fills for idle tags.
+- Interactive tag pills are buttons and expose `aria-pressed`; custom tag colors may tint the border/background, but foreground text must remain readable in both themes.
 
 ### 11.3 Badges
 
@@ -764,6 +768,7 @@ Canonical style:
 - Preset swatches are circular, low-noise, and rely on border/ring state instead of large motion
 - Custom color trigger reuses `.sp-button`
 - Hex input reuses `.sp-tag-input`
+- The native color input is a programmatic picker target and stays out of the Tab order; the visible trigger carries the accessible name.
 
 Feedback:
 
@@ -837,6 +842,8 @@ Rules:
 - New panel-owned modal dialogs should reuse this shell.
 - Footer actions should be right-aligned.
 - Backdrop click may dismiss only when safe.
+- Destructive batch confirmation uses the same shell with `role="alertdialog"`, a bounded source preview, an irreversible-action warning, Cancel as initial focus, and an explicit final action.
+- The Move modal keeps folder selection and "create folder and move" in one flow; creating the destination and moving the current source selection must produce one saved history step.
 
 Welcome onboarding:
 
@@ -885,6 +892,7 @@ Canonical style:
 Rules:
 
 - Use list-row interaction language, not card-grid language, for modal choice lists.
+- The tag-filter modal adds a compact search input, polite result count, distinct no-match state, and `aria-pressed` on the active option.
 
 ## 13. Temporary and Informational Surfaces
 
@@ -925,6 +933,8 @@ Rules:
 - Do not use toast for workflows that require decision-making.
 - A toast shown while a modal with a frosted backdrop is open is obscured by the backdrop blur (toast `z=9999` < backdrop `z=10000`). In that context, suppress low-value success toasts and lift important ones above the modal with `.sp-toast-elevated` (`z=10003`) via the `{ elevated: true }` showToast option. The settings modal applies this: success confirmations are suppressed while it is open, and failures are shown elevated (see §5.8).
 
+Persistent save/recovery feedback uses `.sp-manager-save-status-region` and `.sp-save-status`, not a toast. The manager and Settings render from the same status model: saving is polite, failed/stale is an alert, recovery is persistent, and the available action is rendered next to the message.
+
 ### 13.3 Empty states
 
 Class: `.sp-empty-state`
@@ -940,6 +950,9 @@ Rules:
 
 - Empty states should be quiet and actionable.
 - Prefer one clear message over illustration-heavy placeholders.
+- Distinguish a notebook with no native sources from search, filter, or isolated-folder no-results states.
+- Search no-results offers Clear search; filtered no-results offers Clear filters; isolated-folder no-results offers Show all. Each action clears only the state named by its copy; any action that also exits folder isolation must capture and synchronize effective source states so the native Gemini Notebook checkboxes match the restored all-source view.
+- A true empty notebook points the user to add sources in Gemini Notebook; it must not imply that the extension can create a native source.
 
 ### 13.4 Drag interaction (physical reflow)
 
@@ -949,7 +962,7 @@ Classes: `.dragging` (state marker), `.sp-drag-folded`, `.sp-drag-unfolding`, `.
 
 Canonical behavior (reflow / Beta mode):
 
-- The root level renders folders and "positioned" loose sources **interleaved in `state.root` order** (a heterogeneous ordered array of `{ type:'group', id }` / `{ type:'source', key }` entries), so a source can sit between two folders, above all folders, or below them. The bottom "Ungrouped" bin (the bucket for newly imported / explicitly un-positioned sources) is wrapped in a `.ungrouped-section` container under an `.ungrouped-header` label. Wrapping the bin means its `.source-item` rows are **not** direct children of `#sources-list`, so `computeDropIntent`'s root scan only sees `state.root` entries — the bin is resolved as its own separate drop region.
+- The root level renders folders and "positioned" loose sources **interleaved in `state.root` order** (a heterogeneous ordered array of `{ type:'group', id }` / `{ type:'source', key }` entries), so a source can sit between two folders, above all folders, or below them. The bottom "Ungrouped" bin (the bucket for newly imported / explicitly un-positioned sources) is a root `listitem` `.ungrouped-section` with an `.ungrouped-header` and an inner `.ungrouped-list[role=list]` that owns its source `listitem`s. Those rows are **not** direct children of `#sources-list`, so `computeDropIntent`'s root scan only sees `state.root` entries; drag geometry keeps the section rect as the bin region and reads row ownership from the inner list.
 - On dragstart, `prepareDragSession` first records each selected row's visual rect, border/content-box height, margins, original inline box state, and exact vertical footprint. One all-selected probe reads the expanded anchors, applies motion suppression + the terminal folded box atomically, reads the folded anchors, then restores the box while motion is still suppressed and commits the restored layout. Each direct-host terminal run uses an inert zero-size end sentinel when it has no real survivor; when the final selected root branch has no real root survivor (including a nested-only selection inside the final group), an additional root-end sentinel supplies the outer flow anchor. The slot uses the larger deduplicated direct-run or outer displacement, so fixed/min-sized containers cannot absorb the measured gap. The probe restores every host's original `scrollTop` after the expanded layout commit, leaves no measurement node or animation behind, and uses at most three forced-layout read phases.
 - The formal fold remains deferred to the next animation frame so Chrome can finish native drag-image capture. In that frame, `height`/padding/margin/border reach their terminal zero values synchronously; only opacity transitions (`.sp-drag-folded`). Multi-source drag folds every selected row in the same frame. Keeping layout geometry synchronous prevents ResizeObserver churn and stale intermediate snapshots.
 - Each dragover frame follows one read → plan → write sequence. `readDragGeometry` performs one combined element snapshot and records both `visualRect` and transform-neutral `layoutRect`; `computeDropIntentRaw` and `planDragFrame` are pure consumers; `applyDragFramePlan` applies feedback, shifts, dropzone, hover lifecycle, and auto-scroll without a later geometry read. Source keys and group ids stay in separate typed maps.
@@ -1014,6 +1027,8 @@ Key elements:
 - Source row selection state
 - Batch checkbox variant
 - Sticky batch action bar at the bottom
+- Persistent selected count
+- Select visible and Clear selection actions
 - Add-to-folder and delete CTA variants
 
 Batch action bar style:
@@ -1021,12 +1036,13 @@ Batch action bar style:
 - Glass background
 - Radius `16px`
 - Sticky to bottom
-- Compact horizontal layout
+- Compact wrapping layout
 
 Rules:
 
 - Temporary mode UI should layer on top of the system, not replace it.
 - When introducing a new mode, prefer banner + sticky action area rather than rebuilding the whole screen.
+- Select visible is scoped to sources that remain visible and operable after the current search, quick view, tag filter, isolation, and folder-collapse state. It must not silently select filtered, collapsed/hidden/inert, failed, loading, native-checkbox-less, or deletion-pending rows.
 
 ## 15. Popup UI Specification
 
@@ -1064,8 +1080,12 @@ The current UI already hints at several accessibility expectations. Future UI sh
 Required rules:
 
 - Icon-only buttons must have `title` and `aria-label`.
+- Repeated row controls must include the source or folder name in their accessible label.
 - Keyboard-focusable controls must show a clear focus treatment.
-- Related control clusters and dynamic regions carry landmark/grouping semantics: the quick-view rail is `role="group"` (`ui_quick_view_rail_label`), the batch action bar is `role="toolbar"` (`ui_batch_actions_region`), and the panel resizer is a focusable `role="separator"` (`aria-orientation="horizontal"`, `ui_panel_resizer_label`, `tabindex=0`) operable with ArrowUp/ArrowDown (steps height, clamped to the same per-view min as drag, persisted). The toggle buttons that flip state (batch mode, quick-view, isolate) expose `aria-pressed`.
+- The source list and nested folder contents use owned `list` / `listitem` relationships. Root empty states and the batch surface use `listitem` wrappers; the batch commands remain a nested toolbar. The Ungrouped bin is one root list item with its own labeled inner list. Do not claim an ARIA tree unless the complete tree keyboard model is implemented.
+- Folder carets synchronize `aria-expanded` and `aria-controls`. Collapsed child lists use both `aria-hidden="true"` and `inert`; expanding removes both blocks before focus can enter the descendants.
+- Folder switches have an explicit `:focus-visible` ring, and source/group toggle labels describe the affected item rather than repeating a generic control name.
+- Related control clusters and dynamic regions carry landmark/grouping semantics: the quick-view rail is `role="group"` (`ui_quick_view_rail_label`), the batch surface is a root `listitem` containing a `role="toolbar"` (`ui_batch_actions_region`), and the panel resizer is a focusable `role="separator"` (`aria-orientation="horizontal"`, `ui_panel_resizer_label`, `tabindex=0`) operable with ArrowUp/ArrowDown (steps height, clamped to the same per-view min as drag, persisted). The toggle buttons that flip state (batch mode, quick-view, isolate) expose `aria-pressed`.
 - Precise tree ordering uses the persistent `#sp-tree-order-status.sp-sr-only` polite/atomic live region. Success text contains only direction and canonical position `N/M`; it must never include private source titles, group names, tags, or URLs, and no-op commands must not announce success.
 - After a successful precise-order render, focus returns by stable source key or group id + direction. If that control becomes disabled or lands inside a collapsed folder, use another enabled control for the same item, then the visible destination/parent folder caret as the fallback. Do not add a second Enter key handler: native buttons already translate Enter into one click.
 - Folder precise-order controls use an absolutely positioned hover/focus surface so revealing them does not change row height or drag geometry. Keep the surface hidden and non-interactive while `#sources-list.sp-drag-active` is present.
@@ -1073,6 +1093,7 @@ Required rules:
 - Disabled states must change both visuals and pointer behavior.
 - Loading states must block interaction when the action cannot succeed.
 - Empty, loading, error, and disabled states should exist for any non-trivial flow.
+- Saving, failed, stale, and recovery-available states are persistent in the manager surface. Retry, Refresh, Restore, and Dismiss stay adjacent to the state they resolve; short-lived success may collapse automatically.
 
 Recommended rules:
 

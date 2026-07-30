@@ -1155,6 +1155,7 @@
             const activeFilters = hasActiveRenderFilters();
             const groupsById = getGroupsById();
             const sourcesByKey = getSourcesByKey();
+            const parentMap = getParentMap();
             const tagsById = getTagsById();
             const pendingBatchKeys = getPendingBatchKeys();
             const activeIsolationGroupId = getActiveIsolationGroupId();
@@ -1169,8 +1170,24 @@
             const tagHighlightTerms = getSearchHighlightTerms(searchCriteria, 'tag');
             const folderHighlightTerms = getSearchHighlightTerms(searchCriteria, 'folder');
             const searchExpandedGroupIds = collectSearchExpandedGroupIds(rootGroupIds, state.filterQuery);
+            const pendingInitialRenamePathGroupIds = new Set();
+            groupsById.forEach((group, groupId) => {
+                if (!group?.isPendingInitialRename) return;
+                const seenGroupIds = new Set();
+                let currentGroupId = groupId;
+                while (
+                    currentGroupId
+                    && groupsById.has(currentGroupId)
+                    && !seenGroupIds.has(currentGroupId)
+                ) {
+                    seenGroupIds.add(currentGroupId);
+                    pendingInitialRenamePathGroupIds.add(currentGroupId);
+                    currentGroupId = parentMap.get(currentGroupId) || null;
+                }
+            });
             let listMotionIndex = 0;
             const countedSearchResultKeys = new Set();
+            const visibleBatchOperableKeys = new Set();
 
             const getNextListMotionStyle = () => {
                 const motionIndex = getCappedMotionIndex(listMotionIndex);
@@ -1178,7 +1195,7 @@
                 return `--sp-list-item-index:${motionIndex};`;
             };
 
-            const renderSourceItem = (source) => {
+            const renderSourceItem = (source, isVisibleInTree = true) => {
                 if (!source || !sourceMatchesCurrentFilters(source)) return null;
                 if (searchCriteria.hasQuery) {
                     countedSearchResultKeys.add(source.key);
@@ -1186,6 +1203,16 @@
                 const isGated = !areAllAncestorsEnabled(source.key) || !isSourceWithinActiveIsolation(source.key);
                 const isFailed = Boolean(source.isFailed || (source.isDisabled && !source.isLoading));
                 const isLoading = source.isLoading;
+                if (
+                    state.isBatchMode
+                    && isVisibleInTree
+                    && !source.isDisabled
+                    && !isFailed
+                    && !isLoading
+                    && source.hasNativeCheckbox !== false
+                ) {
+                    visibleBatchOperableKeys.add(source.key);
+                }
                 const showSourceActionButton = !state.isBatchMode;
                 const canOpenActions = canOpenSourceActionMenu(source);
                 const isSourceActionMenuOpen = canOpenActions && getActiveSourceActionSourceKey() === source.key;
@@ -1206,6 +1233,7 @@
 
                 return el('div', {
                     className: 'source-item sp-list-item-enter sp-spotlight-surface' + extraClasses,
+                    role: 'listitem',
                     draggable: !isFailed && !isLoading ? 'true' : 'false',
                     dataset: { sourceKey: source.key },
                     style: motionStyle,
@@ -1222,12 +1250,12 @@
                             className: 'sp-source-actions-button sp-glare-hover',
                             dataset: { sourceKey: source.key },
                             title: getMessage('ui_source_actions'),
-                            'aria-label': getMessage('ui_source_actions'),
+                            'aria-label': getMessage('ui_source_actions_for', [source.title || getMessage('ui_source_untitled')]),
                             'aria-haspopup': 'menu',
                             'aria-expanded': isSourceActionMenuOpen ? 'true' : 'false',
                             disabled: !canOpenActions
                         }, [
-                            el('span', { className: 'google-symbols' }, ['more_horiz'])
+                            el('span', { className: 'google-symbols', 'aria-hidden': 'true' }, ['more_horiz'])
                         ])
                     ]) : el('div', {
                         className: 'sp-source-actions-anchor sp-source-actions-placeholder',
@@ -1242,9 +1270,11 @@
                         }, [getMessage('ui_source_parsing')]) : '',
                         orderedSourceTags.length > 0 ? el('div', { className: 'source-tag-list' }, orderedSourceTags.map((tag) => (
                             el('button', {
+                                type: 'button',
                                 className: 'sp-tag-pill' + (state.activeTagId === tag.id ? ' is-active' : ''),
                                 dataset: { tagId: tag.id },
                                 title: getMessage('ui_tag_filter_active', [tag.label]),
+                                'aria-pressed': state.activeTagId === tag.id ? 'true' : 'false',
                                 style: getTagStyleVars(tag, state.activeTagId === tag.id)
                             }, createHighlightedTextChildren(tag.label, tagHighlightTerms))
                         ))) : ''
@@ -1256,6 +1286,7 @@
                                 className: 'sp-batch-checkbox sp-checkbox',
                                 dataset: { sourceKey: source.key },
                                 checked: pendingBatchKeys.has(source.key),
+                                'aria-label': getMessage('ui_batch_select_source', [source.title || getMessage('ui_source_untitled')]),
                                 disabled: isFailed || isLoading || source.hasNativeCheckbox === false
                             })
                             : el('input', {
@@ -1263,14 +1294,29 @@
                                 className: 'sp-checkbox',
                                 dataset: { sourceKey: source.key },
                                 checked: source.enabled,
+                                'aria-label': getMessage('ui_source_enabled_checkbox', [source.title || getMessage('ui_source_untitled')]),
                                 disabled: isFailed || isLoading || source.hasNativeCheckbox === false
                             })
                     ])
                 ]);
             };
 
-            const renderGroup = (group, level, ancestorGroupIds = new Set()) => {
-                if (!group || ancestorGroupIds.has(group.id) || !shouldRenderGroup(group)) return null;
+            const renderGroup = (
+                group,
+                level,
+                ancestorGroupIds = new Set(),
+                ancestorsVisible = true
+            ) => {
+                if (
+                    !group
+                    || ancestorGroupIds.has(group.id)
+                    || (
+                        !pendingInitialRenamePathGroupIds.has(group.id)
+                        && !shouldRenderGroup(group)
+                    )
+                ) {
+                    return null;
+                }
                 const nextAncestorGroupIds = new Set(ancestorGroupIds);
                 nextAncestorGroupIds.add(group.id);
 
@@ -1280,7 +1326,10 @@
                 const childrenElements = [];
                 const motionStyle = getNextListMotionStyle();
                 const isSearchExpanded = searchExpandedGroupIds.has(group.id);
-                const isCollapsed = group.collapsed && !isSearchExpanded;
+                const isPendingRenameExpanded = pendingInitialRenamePathGroupIds.has(group.id);
+                const isCollapsed = group.collapsed && !isSearchExpanded && !isPendingRenameExpanded;
+                const childrenVisible = ancestorsVisible && !isCollapsed;
+                const groupChildrenId = `sp-group-children-${String(group.id)}`;
                 const groupChildren = Array.isArray(group.children) ? group.children : [];
                 const treeOrderControls = !state.isBatchMode
                     ? el('div', {
@@ -1308,23 +1357,40 @@
 
                 groupChildren.forEach((child) => {
                     if (child.type === 'source') {
-                        const sourceElement = renderSourceItem(sourcesByKey.get(child.key));
+                        const sourceElement = renderSourceItem(
+                            sourcesByKey.get(child.key),
+                            childrenVisible
+                        );
                         if (sourceElement) childrenElements.push(sourceElement);
                         return;
                     }
 
                     const childGroup = groupsById.get(child.id);
                     if (!childGroup) return;
-                    const childElement = renderGroup(childGroup, level + 1, nextAncestorGroupIds);
+                    const childElement = renderGroup(
+                        childGroup,
+                        level + 1,
+                        nextAncestorGroupIds,
+                        childrenVisible
+                    );
                     if (childElement) childrenElements.push(childElement);
                 });
 
                 if (childrenElements.length === 0 && !activeFilters) {
-                    childrenElements.push(el('div', { className: 'sp-empty-state' }, [getMessage('ui_empty_group')]));
+                    childrenElements.push(el('div', {
+                        className: 'sp-empty-list-item',
+                        role: 'listitem'
+                    }, [
+                        el('div', {
+                            className: 'sp-empty-state',
+                            role: 'status'
+                        }, [getMessage('ui_empty_group')])
+                    ]));
                 }
 
                 const groupEl = el('div', {
                     className: 'group-container sp-list-item-enter' + (isGated ? ' gated' : '') + (group.isNewlyCreated ? ' sp-folder-enter' : ''),
+                    role: 'listitem',
                     dataset: { groupId: group.id },
                     style: `padding-left: ${level * 20}px;${motionStyle}`
                 }, [
@@ -1333,15 +1399,29 @@
 	                            type: 'button',
 	                            className: 'sp-caret' + (isCollapsed ? ' collapsed' : ''),
 	                            title: isCollapsed ? getMessage('ui_expand') : getMessage('ui_collapse'),
-	                            'aria-label': isCollapsed ? getMessage('ui_expand') : getMessage('ui_collapse')
+	                            'aria-label': getMessage(
+                                    isCollapsed ? 'ui_expand_group_named' : 'ui_collapse_group_named',
+                                    [groupTitle]
+                                ),
+                                'aria-expanded': isCollapsed ? 'false' : 'true',
+                                'aria-controls': groupChildrenId
 	                        }, [
-                            el('span', { className: 'google-symbols' }, ['arrow_drop_down'])
+                            el('span', { className: 'google-symbols', 'aria-hidden': 'true' }, ['arrow_drop_down'])
                         ]),
                         !state.isBatchMode ? el('label', {
                             className: 'sp-toggle-switch',
                             title: group.enabled ? getMessage('ui_disable_group') : getMessage('ui_enable_group')
                         }, [
-                            el('input', { type: 'checkbox', className: 'sp-group-toggle-checkbox', dataset: { groupId: group.id }, checked: group.enabled }),
+                            el('input', {
+                                type: 'checkbox',
+                                className: 'sp-group-toggle-checkbox',
+                                dataset: { groupId: group.id },
+                                checked: group.enabled,
+                                'aria-label': getMessage(
+                                    group.enabled ? 'ui_disable_group_named' : 'ui_enable_group_named',
+                                    [groupTitle]
+                                )
+                            }),
                             el('span', { className: 'sp-toggle-slider' })
                         ]) : '',
                         createGroupTitleIconElement(),
@@ -1350,31 +1430,37 @@
                             treeOrderControls,
 	                        el('button', {
 	                            type: 'button',
-	                            className: 'sp-add-subgroup-button sp-glare-hover',
+                            className: 'sp-add-subgroup-button sp-glare-hover',
                             title: getMessage('ui_add_subgroup'),
-                            'aria-label': getMessage('ui_add_subgroup')
-                        }, [el('span', { className: 'google-symbols' }, ['create_new_folder'])]),
+                            'aria-label': getMessage('ui_add_subgroup_to', [groupTitle])
+                        }, [el('span', { className: 'google-symbols', 'aria-hidden': 'true' }, ['create_new_folder'])]),
                         el('button', {
                             type: 'button',
                             className: 'sp-isolate-button sp-glare-hover' + (activeIsolationGroupId === group.id ? ' is-active' : ''),
                             title: getMessage('ui_isolate_group'),
-                            'aria-label': getMessage('ui_isolate_group'),
+                            'aria-label': getMessage('ui_isolate_group_named', [groupTitle]),
                             'aria-pressed': activeIsolationGroupId === group.id ? 'true' : 'false'
-                        }, [el('span', { className: 'google-symbols' }, ['filter_center_focus'])]),
+                        }, [el('span', { className: 'google-symbols', 'aria-hidden': 'true' }, ['filter_center_focus'])]),
                         el('button', {
                             type: 'button',
                             className: 'sp-edit-button sp-glare-hover',
                             title: getMessage('ui_rename'),
-                            'aria-label': getMessage('ui_rename')
-                        }, [el('span', { className: 'google-symbols' }, ['edit'])]),
+                            'aria-label': getMessage('ui_rename_group_named', [groupTitle])
+                        }, [el('span', { className: 'google-symbols', 'aria-hidden': 'true' }, ['edit'])]),
                         el('button', {
                             type: 'button',
                             className: 'sp-delete-button sp-glare-hover',
                             title: getMessage('ui_delete_group'),
-                            'aria-label': getMessage('ui_delete_group')
-                        }, [el('span', { className: 'google-symbols' }, ['delete'])])
+                            'aria-label': getMessage('ui_delete_group_named', [groupTitle])
+                        }, [el('span', { className: 'google-symbols', 'aria-hidden': 'true' }, ['delete'])])
                     ]),
-	                    el('div', { className: 'group-children' + (isCollapsed ? ' collapsed' : '') }, childrenElements)
+	                    el('div', {
+                            id: groupChildrenId,
+                            className: 'group-children' + (isCollapsed ? ' collapsed' : ''),
+                            role: 'list',
+                            'aria-hidden': isCollapsed ? 'true' : 'false',
+                            inert: isCollapsed ? true : null
+                        }, childrenElements)
 	                ]);
 
                 if (group.isNewlyCreated) {
@@ -1385,10 +1471,26 @@
             };
 
             if (activeIsolationGroupId) {
+                const renderedRootGroupIds = new Set();
                 const isolatedGroupElement = renderGroup(groupsById.get(activeIsolationGroupId), 0);
                 if (isolatedGroupElement) {
                     fragment.appendChild(isolatedGroupElement);
+                    renderedRootGroupIds.add(activeIsolationGroupId);
                 }
+                rootEntries.forEach((entry) => {
+                    if (
+                        entry?.type !== 'group'
+                        || renderedRootGroupIds.has(entry.id)
+                        || !pendingInitialRenamePathGroupIds.has(entry.id)
+                    ) {
+                        return;
+                    }
+                    const pendingGroupElement = renderGroup(groupsById.get(entry.id), 0);
+                    if (pendingGroupElement) {
+                        fragment.appendChild(pendingGroupElement);
+                        renderedRootGroupIds.add(entry.id);
+                    }
+                });
             } else {
                 rootEntries.forEach((entry) => {
                     if (!entry) return;
@@ -1415,26 +1517,81 @@
                 });
 
                 if (matchingUngrouped.length > 0) {
-                    const ungroupedSection = el('div', { className: 'ungrouped-section' });
+                    const ungroupedSection = el('div', {
+                        className: 'ungrouped-section',
+                        role: 'listitem'
+                    });
 
                     const ungroupedHeader = doc.createElement('h4');
                     ungroupedHeader.className = 'ungrouped-header';
                     ungroupedHeader.textContent = getMessage('ui_ungrouped');
                     ungroupedSection.appendChild(ungroupedHeader);
 
+                    const ungroupedList = el('div', {
+                        className: 'ungrouped-list',
+                        role: 'list',
+                        'aria-label': getMessage('ui_ungrouped')
+                    });
                     matchingUngrouped.forEach((key) => {
                         const sourceElement = renderSourceItem(sourcesByKey.get(key));
                         if (sourceElement) {
-                            ungroupedSection.appendChild(sourceElement);
+                            ungroupedList.appendChild(sourceElement);
                         }
                     });
+                    ungroupedSection.appendChild(ungroupedList);
 
                     fragment.appendChild(ungroupedSection);
                 }
             }
 
             if (fragment.childNodes.length === 0) {
-                fragment.appendChild(el('div', { className: 'sp-empty-state' }, [getMessage('ui_no_matching_sources')]));
+                let messageKey = 'ui_no_matching_sources';
+                let actionKey = '';
+                let actionClass = '';
+
+                const activeFilterCount = (
+                    Number(Boolean(searchCriteria.hasQuery))
+                    + Number(Boolean(activeIsolationGroupId))
+                    + Number(Boolean(state.activeTagId || state.activeQuickViewKind))
+                );
+                if (sourcesByKey.size === 0) {
+                    messageKey = 'ui_empty_no_sources';
+                } else if (activeFilterCount > 1) {
+                    messageKey = 'ui_empty_filter_results';
+                    actionKey = 'ui_clear_filters';
+                    actionClass = 'sp-empty-clear-filters-btn';
+                } else if (activeIsolationGroupId) {
+                    messageKey = 'ui_empty_isolation_results';
+                    actionKey = 'ui_show_all_sources';
+                    actionClass = 'sp-empty-clear-isolation-btn';
+                } else if (searchCriteria.hasQuery) {
+                    messageKey = 'ui_empty_search_results';
+                    actionKey = 'ui_clear_search';
+                    actionClass = 'sp-empty-clear-search-btn';
+                } else if (state.activeTagId || state.activeQuickViewKind) {
+                    messageKey = 'ui_empty_filter_results';
+                    actionKey = 'ui_clear_filters';
+                    actionClass = 'sp-empty-clear-filters-btn';
+                }
+
+                const emptyStatusChildren = [
+                    el('span', { className: 'sp-contextual-empty-copy' }, [getMessage(messageKey)])
+                ];
+                if (actionKey) {
+                    emptyStatusChildren.push(el('button', {
+                        type: 'button',
+                        className: `sp-button sp-glare-hover ${actionClass}`
+                    }, [getMessage(actionKey)]));
+                }
+                fragment.appendChild(el('div', {
+                    className: 'sp-contextual-empty-list-item',
+                    role: 'listitem'
+                }, [
+                    el('div', {
+                        className: 'sp-empty-state sp-contextual-empty-state',
+                        role: 'status'
+                    }, emptyStatusChildren)
+                ]));
             }
             updateSearchResultCount(state.filterQuery, countedSearchResultKeys.size);
 
@@ -1449,31 +1606,56 @@
             }
 
             if (state.isBatchMode) {
-                const actionBar = el('div', { className: 'sp-batch-action-bar', role: 'toolbar', 'aria-label': getMessage('ui_batch_actions_region') }, [
-                    el('button', { className: 'sp-button sp-cancel-batch-btn' }, [getMessage('ui_cancel')]),
-                    el('div', { className: 'sp-batch-actions' }, [
-	                        el('button', {
-	                            className: 'sp-button sp-glare-hover sp-batch-add-folder-btn',
-	                            disabled: pendingBatchKeys.size === 0 || getIsDeletingSources()
-	                        }, [getMessage('ui_batch_add')]),
-	                        el('button', {
-	                            className: 'sp-button sp-glare-hover sp-batch-add-tags-btn',
-	                            disabled: pendingBatchKeys.size === 0 || getIsDeletingSources()
-	                        }, [getMessage('ui_batch_add_tags_title')]),
-	                        el('button', {
-	                            className: 'sp-button sp-glare-hover sp-batch-remove-tags-btn',
-	                            disabled: pendingBatchKeys.size === 0 || getIsDeletingSources()
-	                        }, [getMessage('ui_batch_remove_tags_title')]),
-	                        el('button', {
-	                            className: 'sp-button sp-glare-hover sp-batch-ungroup-btn',
-	                            disabled: pendingBatchKeys.size === 0 || getIsDeletingSources()
-	                        }, [getMessage('ui_move_to_ungrouped')]),
-	                        el('button', {
-                            className: 'sp-button sp-glare-hover sp-confirm-delete-btn',
+                const allVisibleSelected = visibleBatchOperableKeys.size > 0
+                    && Array.from(visibleBatchOperableKeys).every((key) => pendingBatchKeys.has(key));
+                const actionBar = el('div', {
+                    className: 'sp-batch-action-bar',
+                    role: 'listitem'
+                }, [
+                    el('div', {
+                        className: 'sp-batch-toolbar',
+                        role: 'toolbar',
+                        'aria-label': getMessage('ui_batch_actions_region')
+                    }, [
+                        el('button', { className: 'sp-button sp-cancel-batch-btn' }, [getMessage('ui_cancel')]),
+                        el('span', {
+                            className: 'sp-batch-selection-count',
+                            role: 'status',
+                            'aria-live': 'polite',
+                            'aria-atomic': 'true'
+                        }, [getMessage('ui_batch_selected_count', [String(pendingBatchKeys.size)])]),
+                        el('button', {
+                            className: 'sp-button sp-glare-hover sp-batch-select-visible-btn',
+                            disabled: visibleBatchOperableKeys.size === 0 || allVisibleSelected || getIsDeletingSources()
+                        }, [getMessage('ui_batch_select_visible')]),
+                        el('button', {
+                            className: 'sp-button sp-glare-hover sp-batch-clear-selection-btn',
                             disabled: pendingBatchKeys.size === 0 || getIsDeletingSources()
-                        }, getIsDeletingSources()
-                            ? [getMessage('ui_deleting')]
-                            : createBatchCountMessageChildren('ui_delete_count', pendingBatchKeys.size, 'batch-delete'))
+                        }, [getMessage('ui_batch_clear_selection')]),
+                        el('div', { className: 'sp-batch-actions' }, [
+                            el('button', {
+                                className: 'sp-button sp-glare-hover sp-batch-add-folder-btn',
+                                disabled: pendingBatchKeys.size === 0 || getIsDeletingSources()
+                            }, [getMessage('ui_batch_add')]),
+                            el('button', {
+                                className: 'sp-button sp-glare-hover sp-batch-add-tags-btn',
+                                disabled: pendingBatchKeys.size === 0 || getIsDeletingSources()
+                            }, [getMessage('ui_batch_add_tags_title')]),
+                            el('button', {
+                                className: 'sp-button sp-glare-hover sp-batch-remove-tags-btn',
+                                disabled: pendingBatchKeys.size === 0 || getIsDeletingSources()
+                            }, [getMessage('ui_batch_remove_tags_title')]),
+                            el('button', {
+                                className: 'sp-button sp-glare-hover sp-batch-ungroup-btn',
+                                disabled: pendingBatchKeys.size === 0 || getIsDeletingSources()
+                            }, [getMessage('ui_move_to_ungrouped')]),
+                            el('button', {
+                                className: 'sp-button sp-glare-hover sp-confirm-delete-btn',
+                                disabled: pendingBatchKeys.size === 0 || getIsDeletingSources()
+                            }, getIsDeletingSources()
+                                ? [getMessage('ui_deleting')]
+                                : createBatchCountMessageChildren('ui_delete_count', pendingBatchKeys.size, 'batch-delete'))
+                        ])
                     ])
                 ]);
                 fragment.appendChild(actionBar);

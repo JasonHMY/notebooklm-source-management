@@ -1,8 +1,14 @@
 (function () {
     'use strict';
 
-    const NOTEBOOKLM_HOME_URL = 'https://notebooklm.google.com/';
-    const NOTEBOOKLM_NOTEBOOK_PREFIX = 'https://notebooklm.google.com/notebook/';
+    const NOTEBOOKLM_HOME_URL = 'https://notebook.google.com/';
+    const LEGACY_NOTEBOOKLM_HOME_URL = 'https://notebooklm.google.com/';
+    const NOTEBOOKLM_HOME_URLS = [
+        NOTEBOOKLM_HOME_URL,
+        LEGACY_NOTEBOOKLM_HOME_URL
+    ];
+    const NOTEBOOKLM_URL_PATTERNS = NOTEBOOKLM_HOME_URLS.map(homeUrl => `${homeUrl}*`);
+    const NOTEBOOKLM_NOTEBOOK_PREFIXES = NOTEBOOKLM_HOME_URLS.map(homeUrl => `${homeUrl}notebook/`);
     const SOURCE_VIEW_LIST = 'list';
     const SOURCE_VIEW_LABEL = 'label';
     const ERROR_MESSAGE_KEYS = {
@@ -38,13 +44,13 @@
 
     function getPageContext(url) {
         if (typeof url !== 'string' || !url) return 'external';
-        if (url.startsWith(NOTEBOOKLM_NOTEBOOK_PREFIX)) return 'notebook';
-        if (url.startsWith(NOTEBOOKLM_HOME_URL)) return 'notebook-home';
+        if (NOTEBOOKLM_NOTEBOOK_PREFIXES.some(prefix => url.startsWith(prefix))) return 'notebook';
+        if (NOTEBOOKLM_HOME_URLS.some(homeUrl => url.startsWith(homeUrl))) return 'notebook-home';
         return 'external';
     }
 
     function isNotebookTab(tab) {
-        return Boolean(tab && typeof tab.url === 'string' && tab.url.startsWith(NOTEBOOKLM_NOTEBOOK_PREFIX));
+        return Boolean(tab && getPageContext(tab.url) === 'notebook');
     }
 
     function deriveLaunchContext(activeTab, notebookLmTabs) {
@@ -171,7 +177,7 @@
 
     function queryNotebookLmTabs() {
         return new Promise((resolve, reject) => {
-            chrome.tabs.query({ url: `${NOTEBOOKLM_HOME_URL}*` }, (tabs) => {
+            chrome.tabs.query({ url: NOTEBOOKLM_URL_PATTERNS }, (tabs) => {
                 if (chrome.runtime.lastError) {
                     const error = new Error(chrome.runtime.lastError.message || 'NotebookLM tabs query failed');
                     error.errorCode = 'tabs_query_failed';
@@ -231,9 +237,19 @@
                     return;
                 }
 
-                resolve(response || { success: true, enabled });
+                resolve(response || null);
             });
         });
+    }
+
+    function hasSuccessfulActionAcknowledgement(response) {
+        return Boolean(response && response.success === true);
+    }
+
+    function getActionFailureResponse(response) {
+        return response && typeof response === 'object'
+            ? response
+            : { success: false, errorCode: 'runtime_failure' };
     }
 
     function shouldReloadAfterToggle(tab) {
@@ -243,7 +259,7 @@
 
     function shouldReloadAfterSoftToggleFailure(tab, response) {
         if (!shouldReloadAfterToggle(tab)) return false;
-        if (!response || response.success === false) return false;
+        if (!hasSuccessfulActionAcknowledgement(response)) return false;
         return response.forwarded === false || Boolean(response.forwardErrorCode);
     }
 
@@ -493,8 +509,8 @@
         const response = await setExtensionEnabled(enabled, tabId);
         let syncErrorCode = null;
 
-        if (response && response.success === false) {
-            return response;
+        if (!hasSuccessfulActionAcknowledgement(response)) {
+            return getActionFailureResponse(response);
         }
 
         if (shouldReloadAfterSoftToggleFailure(tab, response)) {
@@ -552,10 +568,16 @@
 
             try {
                 const result = await switchSourceView(activeTab, viewKind);
-                if (result && result.success === false) {
+                if (!hasSuccessfulActionAcknowledgement(result)) {
                     elements.detail.hidden = false;
                     elements.detail.textContent = resolveErrorMessage(result);
-                    setSourceViewSelection(elements, result.sourceViewDisplayKind || result.detectedSourceViewKind || state.sourceViewKind || SOURCE_VIEW_LIST);
+                    setSourceViewSelection(
+                        elements,
+                        result?.sourceViewDisplayKind ||
+                            result?.detectedSourceViewKind ||
+                            state.sourceViewKind ||
+                            SOURCE_VIEW_LIST
+                    );
                     setSourceViewButtonsDisabled(elements, false);
                     elements.primaryButton.disabled = false;
                     return;
@@ -592,7 +614,7 @@
 
             try {
                 const result = await applyExtensionEnabledState(doc, activeTab, nextEnabled);
-                if (result && result.success === false) {
+                if (!hasSuccessfulActionAcknowledgement(result)) {
                     elements.toggleInput.checked = !nextEnabled;
                     elements.toggleInput.disabled = false;
                     elements.primaryButton.disabled = false;
@@ -623,7 +645,7 @@
 
             try {
                 const result = await performPrimaryAction(doc, state, activeTab, launchContext);
-                if (result && result.success === false) {
+                if (!hasSuccessfulActionAcknowledgement(result)) {
                     elements.detail.hidden = false;
                     elements.detail.textContent = resolveErrorMessage(result);
                     elements.primaryButton.disabled = false;

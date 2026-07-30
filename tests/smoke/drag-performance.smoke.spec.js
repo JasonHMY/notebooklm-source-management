@@ -338,7 +338,6 @@ test.describe.serial('drag performance baseline', () => {
             const allResults = [];
             for (const rowCount of rowCounts) {
                 const page = await env.context.newPage();
-                page.on('dialog', (dialog) => dialog.accept('Benchmark group').catch(() => {}));
                 await page.goto(`https://notebooklm.google.com/notebook/drag-benchmark-${rowCount}`);
                 await expect(page.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
 
@@ -476,6 +475,29 @@ test.describe.serial('drag performance baseline', () => {
                             const button = getRoot()?.querySelector('#sp-new-group-btn');
                             if (!button) throw new Error('New group button missing.');
                             button.click();
+                            let groupNameInput = null;
+                            await waitFor(() => {
+                                groupNameInput = getRoot()?.querySelector('.sp-inline-group-name-input') || null;
+                                return Boolean(groupNameInput);
+                            }, `Benchmark group ${index} name input did not render.`);
+                            const groupId = groupNameInput.closest('.group-container')?.dataset.groupId;
+                            if (!groupId) {
+                                throw new Error(`Benchmark group ${index} is missing data-group-id.`);
+                            }
+                            const groupName = `Benchmark group ${index}`;
+                            groupNameInput.value = groupName;
+                            groupNameInput.dispatchEvent(new Event('input', { bubbles: true }));
+                            groupNameInput.dispatchEvent(new KeyboardEvent('keydown', {
+                                key: 'Enter',
+                                bubbles: true,
+                                cancelable: true
+                            }));
+                            await waitFor(() => {
+                                const title = getRoot()?.querySelector(
+                                    `.group-container[data-group-id="${groupId}"] .group-title`
+                                );
+                                return title?.textContent?.trim() === groupName;
+                            }, `${groupName} did not persist after inline naming.`);
                             await waitFor(() => getRoot()?.querySelectorAll('#sources-list > .group-container').length === index,
                                 `Benchmark group ${index} did not render.`);
                         }

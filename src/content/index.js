@@ -485,13 +485,28 @@
         setLanguageOverride,
         getCommandShortcuts,
         getCommandShortcut,
-        setCommandShortcut,
+        setCommandShortcut: persistCommandShortcut,
         getVisibleQuickViewKinds,
         setVisibleQuickViewKinds,
         loadDeveloperPreferences,
         ensureDeveloperPreferencesLoaded,
         _resetForTest: resetPreferencesForTest
     } = preferencesModule;
+    const RESERVED_HISTORY_SHORTCUTS = new Set([
+        'Meta+Z',
+        'Ctrl+Z',
+        'Meta+Shift+Z',
+        'Ctrl+Shift+Z',
+        'Ctrl+Y'
+    ]);
+
+    function setCommandShortcut(commandId, shortcut) {
+        const normalizedShortcut = String(shortcut || '').trim();
+        if (RESERVED_HISTORY_SHORTCUTS.has(normalizedShortcut)) {
+            return Promise.reject(new Error('reserved_history_shortcut'));
+        }
+        return persistCommandShortcut(commandId, normalizedShortcut);
+    }
 
     const developerLoggerModule = createContentDeveloperLogger({
         chrome,
@@ -973,6 +988,12 @@
         onBeforeRowsPatch: () => {
             if (
                 treeInteractionsModule
+                && typeof treeInteractionsModule.preparePendingInitialRenamesForRender === 'function'
+            ) {
+                treeInteractionsModule.preparePendingInitialRenamesForRender();
+            }
+            if (
+                treeInteractionsModule
                 && typeof treeInteractionsModule.invalidateDragGeometry === 'function'
             ) {
                 treeInteractionsModule.invalidateDragGeometry('render_rows_replaced');
@@ -986,6 +1007,12 @@
         // treeInteractionsModule because it's wired AFTER renderModule below; the
         // hook only fires inside render() which can't run before both are wired.
         onAfterRender: () => {
+            if (
+                treeInteractionsModule
+                && typeof treeInteractionsModule.restorePendingInitialRenamesAfterRender === 'function'
+            ) {
+                treeInteractionsModule.restorePendingInitialRenamesAfterRender();
+            }
             if (treeInteractionsModule && typeof treeInteractionsModule.applyReflowAfterRender === 'function') {
                 treeInteractionsModule.applyReflowAfterRender();
             }
@@ -1097,7 +1124,8 @@
         getMessage,
         closeSourceActionMenu: (...args) => closeSourceActionMenu(...args),
         render: (...args) => render(...args),
-        runSaveAfterUndo: (options) => saveState(options),
+        runSaveAfterHistory: (options) => saveState(options),
+        onHistoryStateChange: () => updateUndoRedoControls(),
         stackLimit: UNDO_STACK_LIMIT
     });
     const {
@@ -1105,7 +1133,8 @@
         setUndoBaselineSnapshot,
         resetUndoHistoryBaseline,
         recordUndoBaselineForSave,
-        undoLastOperation
+        undoLastOperation,
+        redoLastOperation
     } = undoHistoryModule;
 
     function saveState(options = {}) {
@@ -1119,6 +1148,19 @@
         return persistState(normalizedOptions);
     }
 
+    function updateUndoRedoControls() {
+        if (!shadowRoot || typeof shadowRoot.getElementById !== 'function') return;
+        [
+            ['sp-undo-btn', undoHistoryModule.canUndo()],
+            ['sp-redo-btn', undoHistoryModule.canRedo()]
+        ].forEach(([buttonId, enabled]) => {
+            const button = shadowRoot.getElementById(buttonId);
+            if (!button) return;
+            button.disabled = !enabled;
+            button.setAttribute?.('aria-disabled', enabled ? 'false' : 'true');
+        });
+    }
+
     function isEditableUndoTarget(target) {
         if (!target) return false;
         const tagName = String(target.tagName || '').toLowerCase();
@@ -1127,16 +1169,45 @@
         return Boolean(target.closest?.('[contenteditable="true"]'));
     }
 
+    function isEditableUndoEvent(event) {
+        const eventPath = typeof event?.composedPath === 'function' ? event.composedPath() : [];
+        return eventPath.some((target) => isEditableUndoTarget(target))
+            || isEditableUndoTarget(event?.target);
+    }
+
     function handleUndoKeydown(event) {
         const key = String(event?.key || '').toLowerCase();
-        if (key !== 'z' || (!event.metaKey && !event.ctrlKey) || event.shiftKey || event.altKey) {
-            return;
+        const hasPrimaryModifier = Boolean(event?.metaKey || event?.ctrlKey);
+        const isUndo = key === 'z' && hasPrimaryModifier && !event?.shiftKey;
+        const isRedo = (
+            (key === 'z' && hasPrimaryModifier && event?.shiftKey)
+            || (key === 'y' && event?.ctrlKey && !event?.metaKey && !event?.shiftKey)
+        );
+        if (
+            !event
+            || event.defaultPrevented
+            || event.repeat
+            || event.isComposing
+            || !isExtensionEnabled
+            || isCommandPaletteModalOpen()
+            || event.altKey
+            || (!isUndo && !isRedo)
+            || isEditableUndoEvent(event)
+        ) {
+            return false;
         }
-        if (isEditableUndoTarget(event.target)) return;
+
+        const canApplyHistoryAction = isRedo
+            ? undoHistoryModule.canRedo()
+            : undoHistoryModule.canUndo();
+        if (!canApplyHistoryAction) {
+            return false;
+        }
 
         event.preventDefault?.();
         event.stopPropagation?.();
-        undoLastOperation();
+        event.stopImmediatePropagation?.();
+        return isRedo ? redoLastOperation() : undoLastOperation();
     }
 
     const dragMulti = typeof globalThis.NSM_CREATE_CONTENT_DRAG_MULTI === 'function'
@@ -1183,7 +1254,7 @@
         isSourceEffectivelyEnabled: (...args) => isSourceEffectivelyEnabled(...args),
         collectEffectiveSourceStates: (...args) => collectEffectiveSourceStates(...args),
         syncSourcesToEffectiveState: (...args) => syncSourcesToEffectiveState(...args),
-        executeBatchDelete: (...args) => executeBatchDelete(...args),
+        executeBatchDelete: (...args) => requestBatchDeleteConfirmation(...args),
         renderMoveToFolderModal: (...args) => renderMoveToFolderModal(...args),
         renderBatchTagModal: (...args) => renderBatchTagModal(...args),
         getSourceActionInvokers,
@@ -1705,54 +1776,64 @@
 
     function renderSaveStatus(status = null) {
         if (!shadowRoot) return null;
-        const container = typeof shadowRoot.getElementById === 'function'
-            ? shadowRoot.getElementById('sp-settings-save-status')
-            : shadowRoot.querySelector?.('#sp-settings-save-status');
-        if (!container) return null;
-        const section = typeof shadowRoot.getElementById === 'function'
-            ? shadowRoot.getElementById('sp-settings-save-status-section')
-            : shadowRoot.querySelector?.('#sp-settings-save-status-section');
-
         const saveStatus = status || getSaveStatus();
         const stateName = saveStatus?.state || 'idle';
         const messageKey = getSaveStatusMessageKey(stateName);
         const shouldShow = Boolean(messageKey && stateName !== 'idle');
+        const targetIds = [
+            ['sp-manager-save-status', 'sp-manager-save-status-section'],
+            ['sp-settings-save-status', 'sp-settings-save-status-section']
+        ];
+        const targets = targetIds
+            .map(([containerId, sectionId]) => {
+                const container = typeof shadowRoot.getElementById === 'function'
+                    ? shadowRoot.getElementById(containerId)
+                    : shadowRoot.querySelector?.(`#${containerId}`);
+                if (!container) return null;
+                const section = typeof shadowRoot.getElementById === 'function'
+                    ? shadowRoot.getElementById(sectionId)
+                    : shadowRoot.querySelector?.(`#${sectionId}`);
+                return { container, section };
+            })
+            .filter(Boolean);
 
-        if (section) {
-            section.hidden = !shouldShow;
-        }
-        container.hidden = !shouldShow;
-        container.className = `sp-save-status sp-save-status-${stateName}`;
-        if (typeof container.setAttribute === 'function') {
-            container.setAttribute('role', stateName === 'failed' || stateName === 'stale' ? 'alert' : 'status');
-            container.setAttribute('aria-live', stateName === 'failed' || stateName === 'stale' ? 'assertive' : 'polite');
-        }
-        clearElementChildren(container);
+        targets.forEach(({ container, section }) => {
+            if (section) {
+                section.hidden = !shouldShow;
+            }
+            container.hidden = !shouldShow;
+            container.className = `sp-save-status sp-save-status-${stateName}`;
+            if (typeof container.setAttribute === 'function') {
+                container.setAttribute('role', stateName === 'failed' || stateName === 'stale' ? 'alert' : 'status');
+                container.setAttribute('aria-live', stateName === 'failed' || stateName === 'stale' ? 'assertive' : 'polite');
+            }
+            clearElementChildren(container);
 
-        if (!shouldShow) return container;
+            if (!shouldShow) return;
 
-        if (typeof container.appendChild !== 'function') {
-            container.textContent = getMessage(messageKey);
-            return container;
-        }
+            if (typeof container.appendChild !== 'function') {
+                container.textContent = getMessage(messageKey);
+                return;
+            }
 
-        const label = document.createElement('span');
-        label.className = 'sp-save-status-label';
-        label.textContent = getMessage(messageKey);
-        container.appendChild(label);
+            const label = document.createElement('span');
+            label.className = 'sp-save-status-label';
+            label.textContent = getMessage(messageKey);
+            container.appendChild(label);
 
-        if (stateName === 'failed' || stateName === 'stale') {
-            appendSaveStatusAction(container, 'ui_save_status_retry', retryCurrentSave);
-        }
-        if (stateName === 'stale') {
-            appendSaveStatusAction(container, 'ui_save_status_refresh', refreshForLatestState, 'sp-save-status-action sp-save-status-action-muted');
-        }
-        if (stateName === 'recovery_available') {
-            appendSaveStatusAction(container, 'ui_recovery_restore', restoreRecoverySnapshotFromUi);
-            appendSaveStatusAction(container, 'ui_recovery_dismiss', dismissRecoverySnapshotFromUi, 'sp-save-status-action sp-save-status-action-muted');
-        }
+            if (stateName === 'failed' || stateName === 'stale') {
+                appendSaveStatusAction(container, 'ui_save_status_retry', retryCurrentSave);
+            }
+            if (stateName === 'stale') {
+                appendSaveStatusAction(container, 'ui_save_status_refresh', refreshForLatestState, 'sp-save-status-action sp-save-status-action-muted');
+            }
+            if (stateName === 'recovery_available') {
+                appendSaveStatusAction(container, 'ui_recovery_restore', restoreRecoverySnapshotFromUi);
+                appendSaveStatusAction(container, 'ui_recovery_dismiss', dismissRecoverySnapshotFromUi, 'sp-save-status-action sp-save-status-action-muted');
+            }
+        });
 
-        return container;
+        return targets[0]?.container || null;
     }
 
     function getDiagnosticsInfo() {
@@ -3530,7 +3611,9 @@
         if (!normalizedTagId || !tagsById.has(normalizedTagId)) return false;
         activeIsolationGroupId = null;
         state.activeQuickViewKind = null;
-        state.activeTagId = normalizedTagId;
+        state.activeTagId = state.activeTagId === normalizedTagId
+            ? null
+            : normalizedTagId;
         closeSourceActionMenu();
         render();
         return true;
@@ -3657,6 +3740,27 @@
                 keywords: ['search', 'filter']
             });
         }
+
+        commands.push(
+            {
+                id: 'undo',
+                action: 'undo',
+                icon: 'undo',
+                title: getMessage('ui_undo_action'),
+                subtitle: getMessage('ui_command_undo_subtitle'),
+                disabled: !undoHistoryModule.canUndo(),
+                keywords: ['undo', 'history', 'back']
+            },
+            {
+                id: 'redo',
+                action: 'redo',
+                icon: 'redo',
+                title: getMessage('ui_redo_action'),
+                subtitle: getMessage('ui_command_redo_subtitle'),
+                disabled: !undoHistoryModule.canRedo(),
+                keywords: ['redo', 'history', 'forward']
+            }
+        );
 
         [
             ['all', 'ui_quick_view_all', 'select_all'],
@@ -3796,9 +3900,10 @@
     function handleCommandShortcutKeydown(event) {
         if (!event || event.defaultPrevented || event.repeat || !isExtensionEnabled) return false;
         if (isCommandPaletteModalOpen()) return false;
-        if (isEditableUndoTarget(event.target)) return false;
+        if (isEditableUndoEvent(event)) return false;
 
         const shortcut = getCommandShortcutComboFromEvent(event);
+        if (RESERVED_HISTORY_SHORTCUTS.has(shortcut)) return false;
         const command = getCommandPaletteCommandForShortcut(shortcut);
         if (!command || command.disabled) return false;
 
@@ -3816,6 +3921,15 @@
         const payload = command.payload || {};
         const triggeredByShortcut = Boolean(command.triggeredByShortcut);
         if (command.disabled) return false;
+
+        if (commandAction === 'undo') {
+            void undoLastOperation();
+            return true;
+        }
+        if (commandAction === 'redo') {
+            void redoLastOperation();
+            return true;
+        }
 
         if (commandAction === 'search-sources') {
             if (triggeredByShortcut && isSearchUiCurrentlyExpanded()) {
@@ -3936,6 +4050,113 @@
 
     function shouldStopBatchDeleteAfterFailure(reason) {
         return !NON_BLOCKING_BATCH_DELETE_FAILURE_REASONS.has(reason || '');
+    }
+
+    function closeBatchDeleteConfirmModal(options = {}) {
+        return closeManagedModal(
+            'sp-batch-delete-confirm-modal',
+            'sp-batch-delete-confirm-backdrop',
+            options
+        );
+    }
+
+    function requestBatchDeleteConfirmation() {
+        if (!shadowRoot || pendingBatchKeys.size === 0 || isDeletingSources) return false;
+
+        const keysToDelete = Array.from(pendingBatchKeys)
+            .filter((key) => sourcesByKey.has(key));
+        if (keysToDelete.length === 0) return false;
+
+        prepareModalOpen('sp-batch-delete-confirm-modal', 'sp-batch-delete-confirm-backdrop');
+        const backdrop = el('div', {
+            className: 'sp-overlay-backdrop',
+            id: 'sp-batch-delete-confirm-backdrop'
+        });
+        const modal = el('div', {
+            className: 'sp-folder-modal sp-batch-delete-confirm-modal',
+            id: 'sp-batch-delete-confirm-modal',
+            role: 'alertdialog',
+            'aria-modal': 'true',
+            'aria-labelledby': 'sp-batch-delete-confirm-title',
+            'aria-describedby': 'sp-batch-delete-confirm-warning',
+            tabindex: '-1'
+        });
+        const previewSources = keysToDelete
+            .slice(0, 5)
+            .map((key) => sourcesByKey.get(key))
+            .filter(Boolean);
+        const remainingCount = Math.max(0, keysToDelete.length - previewSources.length);
+        const previewChildren = previewSources.map((source) => (
+            el('li', { className: 'sp-batch-delete-preview-item' }, [
+                source.title || getMessage('ui_source_untitled')
+            ])
+        ));
+        if (remainingCount > 0) {
+            previewChildren.push(el('li', {
+                className: 'sp-batch-delete-preview-item sp-batch-delete-preview-more'
+            }, [getMessage('ui_batch_delete_preview_more', [String(remainingCount)])]));
+        }
+
+        const cancelButton = el('button', {
+            type: 'button',
+            className: 'sp-button sp-modal-cancel sp-glare-hover'
+        }, [getMessage('ui_cancel')]);
+        const confirmButton = el('button', {
+            type: 'button',
+            className: 'sp-button sp-batch-delete-confirm-final-btn sp-glare-hover'
+        }, [getMessage('ui_batch_delete_confirm_action', [String(keysToDelete.length)])]);
+
+        modal.appendChild(el('div', { className: 'sp-folder-modal-header' }, [
+            el('h3', {
+                className: 'sp-folder-modal-title',
+                id: 'sp-batch-delete-confirm-title'
+            }, [getMessage('ui_batch_delete_confirm_title')])
+        ]));
+        modal.appendChild(el('div', { className: 'sp-folder-modal-content' }, [
+            el('p', { className: 'sp-batch-delete-confirm-summary' }, [
+                getMessage('ui_batch_delete_confirm_summary', [String(keysToDelete.length)])
+            ]),
+            el('ul', { className: 'sp-batch-delete-preview-list' }, previewChildren),
+            el('p', {
+                className: 'sp-batch-delete-confirm-warning',
+                id: 'sp-batch-delete-confirm-warning'
+            }, [getMessage('ui_batch_delete_confirm_warning')])
+        ]));
+        modal.appendChild(el('div', { className: 'sp-folder-modal-footer' }, [
+            cancelButton,
+            confirmButton
+        ]));
+
+        cancelButton.addEventListener('click', () => closeBatchDeleteConfirmModal());
+        confirmButton.addEventListener('click', () => {
+            closeBatchDeleteConfirmModal({ immediate: true, restoreFocus: false });
+            Promise.resolve(executeBatchDelete()).catch((error) => {
+                console.error('GeminiNotebook-Source-Management: Confirmed batch delete failed.', error);
+            });
+        });
+        backdrop.addEventListener('click', (event) => {
+            if (event.target === backdrop) {
+                closeBatchDeleteConfirmModal();
+            }
+        });
+
+        shadowRoot.appendChild(backdrop);
+        shadowRoot.appendChild(modal);
+        const modalKeyboard = bindModalKeyboardNavigation(modal, {
+            closeModal: closeBatchDeleteConfirmModal,
+            initialFocusTarget: () => cancelButton
+        });
+        const showModal = () => {
+            backdrop.classList.add('visible');
+            modal.classList.add('visible');
+            modalKeyboard.focusInitial();
+        };
+        if (typeof globalThis.requestAnimationFrame === 'function') {
+            globalThis.requestAnimationFrame(showModal);
+        } else {
+            showModal();
+        }
+        return true;
     }
 
     async function executeBatchDelete() {
@@ -4700,6 +4921,7 @@
         const containerHtml = createManagerShell(el, getMessage);
         shadowRoot.appendChild(containerHtml);
         renderSaveStatus();
+        updateUndoRedoControls();
 
         if (window && typeof window.addEventListener === 'function') {
             window.addEventListener('pagehide', handlePageLifecyclePersistence);
@@ -4750,6 +4972,12 @@
         shadowRoot.getElementById('sp-settings-btn').addEventListener('click', () => {
             loadStateHistory().finally(() => renderSettingsModal());
         });
+        shadowRoot.getElementById('sp-undo-btn')?.addEventListener('click', () => {
+            void undoLastOperation();
+        });
+        shadowRoot.getElementById('sp-redo-btn')?.addEventListener('click', () => {
+            void redoLastOperation();
+        });
         shadowRoot.getElementById('sp-new-group-btn').addEventListener('click', () => handleAddNewGroup());
         shadowRoot.getElementById('sp-manage-tags-btn').addEventListener('click', () => renderTagModal());
 
@@ -4799,8 +5027,8 @@
         shadowRoot.addEventListener('scroll', handleSourceActionMenuViewportChange, true);
         document.addEventListener('click', handleDocumentOutsideClick, true);
         bindNativeDocumentListeners();
-        document.addEventListener('keydown', handleCommandShortcutKeydown, true);
         document.addEventListener('keydown', handleUndoKeydown, true);
+        document.addEventListener('keydown', handleCommandShortcutKeydown, true);
         syncSearchUi();
 
         const listContainer = shadowRoot.querySelector('#sources-list');
@@ -5080,6 +5308,7 @@
             applyQuickViewKind,
             applyTagQuickFilter,
             undoLastOperation,
+            redoLastOperation,
             executeMoveToFolder,
             executeBatchTagUpdate,
             renderBatchTagModal,
@@ -5271,6 +5500,8 @@
             _getModalTagColorPresetsForTest: () => getModalTagColorPresets(),
             _getClickQueueLength: () => clickQueue.length,
             _getIsDeletingSources: () => isDeletingSources,
+            _requestBatchDeleteConfirmationForTest: requestBatchDeleteConfirmation,
+            _closeBatchDeleteConfirmModalForTest: closeBatchDeleteConfirmModal,
             _getIsSyncingState: () => isSyncingState,
             _showToastForTest: showToast,
             _showUndoableToastForTest: showUndoableToast,
@@ -5278,9 +5509,12 @@
             _getActiveToastItemForTest: () => toastModule.getActiveToastItem(),
             _hideActiveToastForTest: hideActiveToast,
             _getUndoStackLengthForTest: () => undoHistoryModule.getUndoStackLength(),
+            _getRedoStackLengthForTest: () => undoHistoryModule.getRedoStackLength(),
             _resetUndoHistoryBaselineForTest: resetUndoHistoryBaseline,
             _setUndoBaselineSnapshotForTest: setUndoBaselineSnapshot,
             _handleUndoKeydownForTest: handleUndoKeydown,
+            _handleHistoryKeydownForTest: handleUndoKeydown,
+            _updateUndoRedoControlsForTest: updateUndoRedoControls,
             _handleCommandShortcutKeydownForTest: handleCommandShortcutKeydown,
             _getCommandShortcutComboFromEventForTest: getCommandShortcutComboFromEvent,
             _formatCommandShortcutForTest: formatCommandShortcut,
@@ -5291,6 +5525,7 @@
             _getVisibleQuickViewKindsForTest: getVisibleQuickViewKinds,
             _setVisibleQuickViewKindsForTest: setVisibleQuickViewKinds,
             _isEditableUndoTargetForTest: isEditableUndoTarget,
+            _isEditableUndoEventForTest: isEditableUndoEvent,
             _setIsDeletingSources: (val) => { isDeletingSources = val; },
             _getFreshRowCache: () => freshRowCache,
             _getPendingStorageUpgrade: () => pendingStorageUpgrade,

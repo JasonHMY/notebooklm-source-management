@@ -515,6 +515,11 @@
                         : '';
                 }
                 delete canonicalGroup.isNewlyCreated;
+                delete canonicalGroup.isPendingInitialRename;
+                delete canonicalGroup.pendingInitialRenameDraft;
+                delete canonicalGroup.pendingInitialRenameFocusReturnSelector;
+                delete canonicalGroup.pendingInitialRenameCollapsedAncestorIds;
+                delete canonicalGroup.isPendingInitialRenameRender;
                 return [groupId, canonicalGroup];
             }));
         }

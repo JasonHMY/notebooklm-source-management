@@ -26,6 +26,28 @@
                     }, [
                         el('span', { className: 'google-symbols' }, ['settings'])
                     ]),
+                    el('button', {
+                        id: 'sp-undo-btn',
+                        className: 'sp-icon-button sp-toolbar-history-action',
+                        type: 'button',
+                        title: getMessage('ui_undo_action'),
+                        'aria-label': getMessage('ui_undo_action'),
+                        'aria-disabled': 'true',
+                        disabled: true
+                    }, [
+                        el('span', { className: 'google-symbols', 'aria-hidden': 'true' }, ['undo'])
+                    ]),
+                    el('button', {
+                        id: 'sp-redo-btn',
+                        className: 'sp-icon-button sp-toolbar-history-action',
+                        type: 'button',
+                        title: getMessage('ui_redo_action'),
+                        'aria-label': getMessage('ui_redo_action'),
+                        'aria-disabled': 'true',
+                        disabled: true
+                    }, [
+                        el('span', { className: 'google-symbols', 'aria-hidden': 'true' }, ['redo'])
+                    ]),
                     el('button', { id: 'sp-new-group-btn', className: 'sp-button sp-toolbar-action' }, [getMessage("ui_new_group")]),
                     el('button', { id: 'sp-manage-tags-btn', className: 'sp-button sp-toolbar-action' }, [getMessage("ui_manage_tags")]),
                     el('button', { id: 'sp-batch-action-btn', className: 'sp-button sp-toolbar-action' }, [getMessage("ui_batch_action")])
@@ -67,9 +89,22 @@
                     ])
                 ])
             ]),
+            el('div', {
+                id: 'sp-manager-save-status-section',
+                className: 'sp-manager-save-status-region',
+                hidden: true
+            }, [
+                el('div', {
+                    id: 'sp-manager-save-status',
+                    className: 'sp-save-status sp-save-status-idle',
+                    role: 'status',
+                    'aria-live': 'polite',
+                    hidden: true
+                })
+            ]),
             el('div', { id: 'sp-quick-view-rail', className: 'sp-quick-view-rail', role: 'group', 'aria-label': getMessage('ui_quick_view_rail_label') }),
             el('div', { id: 'sp-view-state', className: 'sp-view-state', hidden: true }),
-            el('div', { id: 'sources-list' }),
+            el('div', { id: 'sources-list', role: 'list' }),
             el('div', {
                 id: 'sp-tree-order-status',
                 className: 'sp-sr-only',

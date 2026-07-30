@@ -173,7 +173,8 @@ function makeMockShadowList({ items = [], ungroupedSection = null, listRect = { 
     recurseContainers(rootChildren);
 
     // Optional non-empty "Ungrouped" bin region. Rendered by render() as a sibling
-    // <div class="ungrouped-section"> (header + the bin's .source-item rows), so the
+    // <div class="ungrouped-section"> containing a header and an inner
+    // <div class="ungrouped-list"> that owns the bin's .source-item rows, so the
     // bin items are NOT direct children of #sources-list. `bounds` is the section's
     // own rect; `items` are { key, top, height? } in state.ungrouped order.
     let ungroupedSectionEl = null;
@@ -192,19 +193,33 @@ function makeMockShadowList({ items = [], ungroupedSection = null, listRect = { 
             return el;
         });
         const b = ungroupedSection.bounds || { top: 0, bottom: 0, height: 0 };
-        ungroupedSectionEl = {
-            classList: makeMockClassList(['ungrouped-section']),
+        const ungroupedListEl = {
+            classList: makeMockClassList(['ungrouped-list']),
             style: {},
-            rect: { top: b.top, bottom: b.bottom, height: typeof b.height === 'number' ? b.height : (b.bottom - b.top), left: 0, right: 200, width: 200 },
-            getBoundingClientRect() { return this.rect; },
             querySelectorAll(selector) {
                 if (selector === ':scope > .source-item') return binItemEls.slice();
                 return [];
             }
         };
+        ungroupedSectionEl = {
+            classList: makeMockClassList(['ungrouped-section']),
+            style: {},
+            rect: { top: b.top, bottom: b.bottom, height: typeof b.height === 'number' ? b.height : (b.bottom - b.top), left: 0, right: 200, width: 200 },
+            getBoundingClientRect() { return this.rect; },
+            querySelector(selector) {
+                if (selector === '.ungrouped-list') return ungroupedListEl;
+                return null;
+            },
+            querySelectorAll(selector) {
+                if (selector === '.source-item') return binItemEls.slice();
+                return [];
+            }
+        };
+        ungroupedListEl.parentElement = ungroupedSectionEl;
         binItemEls.forEach((binItemEl) => {
-            binItemEl.parentElement = ungroupedSectionEl;
+            binItemEl.parentElement = ungroupedListEl;
         });
+        ungroupedSectionEl._itemsHost = ungroupedListEl;
     }
 
     const geometryElements = [];
@@ -220,7 +235,7 @@ function makeMockShadowList({ items = [], ungroupedSection = null, listRect = { 
     appendGeometryElements(rootChildren);
     if (ungroupedSectionEl) {
         geometryElements.push(ungroupedSectionEl);
-        const binItems = ungroupedSectionEl.querySelectorAll(':scope > .source-item');
+        const binItems = ungroupedSectionEl.querySelectorAll('.source-item');
         geometryElements.push(...binItems);
     }
 
@@ -418,6 +433,35 @@ describe('drag and drop ordering guards', () => {
         expect(indexSource).not.toContain('_isNoopTreeMoveForTest');
     });
 
+    it('rolls back a new group when inline naming cannot mount', () => {
+        const state = { root: [], ungrouped: [] };
+        const groupsById = new Map();
+        const parentMap = new Map();
+        const saveState = jest.fn();
+        const render = jest.fn();
+        const createContentTreePlacement = require('../../src/content/content-tree-placement.js');
+        const treePlacement = createContentTreePlacement({
+            getState: () => state,
+            getGroupsById: () => groupsById
+        });
+        const interactions = createContentTreeInteractions({
+            treePlacement,
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getParentMap: () => parentMap,
+            getShadowRoot: () => null,
+            saveState,
+            render,
+            getMessage: (key) => key
+        });
+
+        expect(interactions.handleAddNewGroup()).toBe(false);
+        expect(state.root).toEqual([]);
+        expect(groupsById.size).toBe(0);
+        expect(saveState).not.toHaveBeenCalled();
+        expect(render).toHaveBeenCalledTimes(2);
+    });
+
     it('creates unique group ids when multiple groups are added in the same millisecond', () => {
         const state = { root: [], ungrouped: [] };
         const groupsById = new Map();
@@ -433,11 +477,29 @@ describe('drag and drop ordering guards', () => {
         jest.spyOn(treePlacement, 'addGroup');
         jest.spyOn(treePlacement, 'rebuildParentMap');
         const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(12345);
+        const containersById = new Map();
+        const shadowRoot = {
+            querySelector: jest.fn((selector) => {
+                const match = selector.match(/data-group-id="([^"]+)"/);
+                if (!match) return null;
+                if (!containersById.has(match[1])) {
+                    const titleSpan = global.document.createElement('span');
+                    containersById.set(match[1], {
+                        dataset: { groupId: match[1] },
+                        querySelector: jest.fn((childSelector) => (
+                            childSelector === '.group-title' ? titleSpan : null
+                        ))
+                    });
+                }
+                return containersById.get(match[1]);
+            })
+        };
         const interactions = createContentTreeInteractions({
             treePlacement,
             getState: () => state,
             getGroupsById: () => groupsById,
             getParentMap: () => parentMap,
+            getShadowRoot: () => shadowRoot,
             saveState,
             render,
             buildParentMap,
@@ -456,7 +518,7 @@ describe('drag and drop ordering guards', () => {
             { type: 'group', id: 'group_12345_1' }
         ]);
         expect(Array.from(groupsById.keys())).toEqual(['group_12345', 'group_12345_1']);
-        expect(saveState).toHaveBeenCalledTimes(2);
+        expect(saveState).not.toHaveBeenCalled();
         expect(render).toHaveBeenCalledTimes(2);
         expect(treePlacement.addGroup).toHaveBeenCalledTimes(2);
         expect(treePlacement.rebuildParentMap).toHaveBeenCalledTimes(2);
@@ -497,12 +559,22 @@ describe('drag and drop ordering guards', () => {
         const buildParentMap = jest.fn(assertCommitted);
         const render = jest.fn(assertCommitted);
         const saveState = jest.fn(assertCommitted);
+        const titleSpan = global.document.createElement('span');
+        const groupContainer = {
+            dataset: { groupId: 'group_12345' },
+            querySelector: jest.fn((selector) => (
+                selector === '.group-title' ? titleSpan : null
+            ))
+        };
         const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(12345);
         const interactions = createContentTreeInteractions({
             treePlacement,
             getState: () => state,
             getGroupsById: () => groupsById,
             getParentMap: () => parentMap,
+            getShadowRoot: () => ({
+                querySelector: jest.fn(() => groupContainer)
+            }),
             buildParentMap,
             render,
             saveState,
@@ -522,7 +594,340 @@ describe('drag and drop ordering guards', () => {
         expect(parentMap.get('group_12345')).toBe('parent');
         expect(buildParentMap).not.toHaveBeenCalled();
         expect(render).toHaveBeenCalledTimes(1);
+        expect(saveState).not.toHaveBeenCalled();
+    });
+
+    it('starts inline naming for a new group and persists only the confirmed title', () => {
+        const state = { root: [], ungrouped: [] };
+        const groupsById = new Map();
+        const parentMap = new Map();
+        const saveState = jest.fn();
+        const input = global.document.createElement('input');
+        input.focus = jest.fn();
+        input.select = jest.fn();
+        const originalCreateElement = global.document.createElement;
+        global.document.createElement = jest.fn((tag) => (
+            tag === 'input' ? input : originalCreateElement(tag)
+        ));
+        const titleSpan = global.document.createElement('span');
+        const groupContainer = {
+            dataset: {},
+            querySelector: jest.fn((selector) => (
+                selector === '.group-title' ? titleSpan : null
+            ))
+        };
+        const newGroupButton = { focus: jest.fn() };
+        const editButton = { focus: jest.fn() };
+        const shadowRoot = {
+            querySelector: jest.fn((selector) => {
+                if (selector.includes('.group-container[data-group-id=')) {
+                    const match = selector.match(/data-group-id="([^"]+)"/);
+                    if (match) groupContainer.dataset.groupId = match[1];
+                    if (selector.endsWith(' .sp-edit-button')) {
+                        return editButton;
+                    }
+                    return groupContainer;
+                }
+                if (selector === '#sp-new-group-btn') return newGroupButton;
+                return null;
+            })
+        };
+        const interactions = createContentTreeInteractions({
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getParentMap: () => parentMap,
+            getShadowRoot: () => shadowRoot,
+            getSetTimeout: () => (callback) => callback(),
+            saveState,
+            render: jest.fn(),
+            getMessage: (key) => key
+        });
+
+        expect(interactions.handleAddNewGroup()).toBe(true);
+        expect(saveState).not.toHaveBeenCalled();
+        expect(input.value).toBe('');
+        expect(input.placeholder).toBe('ui_new_group');
+        expect(input.className).toBe('sp-inline-group-name-input');
+        expect(input.attributes['aria-label']).toBe('ui_group_name_input');
+
+        input.value = 'Research';
+        input.dispatchEvent({ type: 'keydown', key: 'Enter', preventDefault: jest.fn() });
+
+        const groupId = state.root[0].id;
+        expect(groupsById.get(groupId).title).toBe('Research');
+        expect(groupsById.get(groupId).isNewlyCreated).toBe(false);
+        expect(saveState).toHaveBeenCalledTimes(1);
         expect(saveState).toHaveBeenCalledWith({ immediate: true, critical: true });
+        expect(editButton.focus).toHaveBeenCalledTimes(1);
+    });
+
+    it('commits a newly created group name on blur and restores focus', () => {
+        const state = {
+            root: [{ type: 'group', id: 'new-group' }],
+            ungrouped: []
+        };
+        const group = {
+            id: 'new-group',
+            title: 'ui_new_group',
+            children: [],
+            enabled: true,
+            collapsed: false,
+            isNewlyCreated: true
+        };
+        const groupsById = new Map([[group.id, group]]);
+        const input = global.document.createElement('input');
+        const originalCreateElement = global.document.createElement;
+        global.document.createElement = jest.fn((tag) => (
+            tag === 'input' ? input : originalCreateElement(tag)
+        ));
+        const titleSpan = global.document.createElement('span');
+        const groupContainer = {
+            dataset: { groupId: group.id },
+            querySelector: jest.fn((selector) => (
+                selector === '.group-title' ? titleSpan : null
+            ))
+        };
+        const editButton = { focus: jest.fn() };
+        const saveState = jest.fn();
+        const interactions = createContentTreeInteractions({
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getShadowRoot: () => ({
+                querySelector: jest.fn((selector) => (
+                    selector.endsWith(' .sp-edit-button') ? editButton : groupContainer
+                ))
+            }),
+            getSetTimeout: () => (callback) => callback(),
+            saveState,
+            render: jest.fn(),
+            getMessage: (key) => key
+        });
+
+        expect(interactions.triggerRename(groupContainer, { isNewlyCreated: true })).toBe(true);
+        input.value = 'Blurred title';
+        input.dispatchEvent({ type: 'blur' });
+
+        expect(group.title).toBe('Blurred title');
+        expect(group.isNewlyCreated).toBe(false);
+        expect(saveState).toHaveBeenCalledTimes(1);
+        expect(saveState).toHaveBeenCalledWith({ immediate: true, critical: true });
+        expect(editButton.focus).toHaveBeenCalledTimes(1);
+    });
+
+    it('restores a pending initial-name editor and draft after a render replaces it', () => {
+        const state = {
+            root: [{ type: 'group', id: 'new-group' }],
+            ungrouped: []
+        };
+        const group = {
+            id: 'new-group',
+            title: 'ui_new_group',
+            children: [],
+            enabled: true,
+            collapsed: false,
+            isPendingInitialRename: true,
+            pendingInitialRenameDraft: '',
+            pendingInitialRenameFocusReturnSelector: '#sp-new-group-btn'
+        };
+        const groupsById = new Map([[group.id, group]]);
+        const saveState = jest.fn();
+        const render = jest.fn();
+        const editButton = { focus: jest.fn() };
+        let titleSpan = global.document.createElement('span');
+        let groupContainer = null;
+        const buildGroupContainer = () => ({
+            dataset: { groupId: group.id },
+            querySelector: jest.fn((selector) => {
+                if (selector === '.group-title') return titleSpan;
+                if (selector === '.sp-inline-group-name-input') {
+                    return titleSpan.childNodes.find?.(
+                        (child) => child?.className === 'sp-inline-group-name-input'
+                    ) || null;
+                }
+                return null;
+            })
+        });
+        groupContainer = buildGroupContainer();
+        const shadowRoot = {
+            querySelector: jest.fn((selector) => {
+                if (selector.endsWith(' .sp-edit-button')) return editButton;
+                if (selector === '#sp-new-group-btn') return { focus: jest.fn() };
+                if (selector.includes(`data-group-id="${group.id}"`)) return groupContainer;
+                return null;
+            })
+        };
+        const interactions = createContentTreeInteractions({
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getShadowRoot: () => shadowRoot,
+            getSetTimeout: () => (callback) => callback(),
+            saveState,
+            render,
+            getMessage: (key) => key
+        });
+
+        expect(interactions.triggerRename(groupContainer, { isNewlyCreated: true })).toBe(true);
+        const firstInput = titleSpan.childNodes[0];
+        firstInput.value = 'Draft folder';
+        firstInput.dispatchEvent({ type: 'input' });
+
+        interactions.preparePendingInitialRenamesForRender();
+        expect(group.pendingInitialRenameDraft).toBe('Draft folder');
+        expect(group.isPendingInitialRenameRender).toBe(true);
+
+        titleSpan = global.document.createElement('span');
+        groupContainer = buildGroupContainer();
+        firstInput.dispatchEvent({ type: 'blur' });
+
+        expect(groupsById.has(group.id)).toBe(true);
+        expect(saveState).not.toHaveBeenCalled();
+        expect(interactions.restorePendingInitialRenamesAfterRender()).toBe(1);
+
+        const restoredInput = titleSpan.childNodes[0];
+        expect(restoredInput).not.toBe(firstInput);
+        expect(restoredInput.value).toBe('Draft folder');
+        expect(group.isPendingInitialRename).toBe(true);
+        expect(group.isPendingInitialRenameRender).toBeUndefined();
+        firstInput.dispatchEvent({ type: 'blur' });
+        expect(groupsById.has(group.id)).toBe(true);
+        expect(saveState).not.toHaveBeenCalled();
+
+        restoredInput.dispatchEvent({
+            type: 'keydown',
+            key: 'Enter',
+            preventDefault: jest.fn()
+        });
+
+        expect(group.title).toBe('Draft folder');
+        expect(group.isPendingInitialRename).toBeUndefined();
+        expect(group.pendingInitialRenameDraft).toBeUndefined();
+        expect(saveState).toHaveBeenCalledTimes(1);
+        expect(saveState).toHaveBeenCalledWith({ immediate: true, critical: true });
+    });
+
+    it('reveals a confirmed initial-name subgroup by clearing view filters and expanding its ancestors', () => {
+        const state = {
+            root: [{ type: 'group', id: 'parent' }],
+            ungrouped: [],
+            filterQuery: 'missing',
+            activeTagId: 'tag-1',
+            activeQuickViewKind: 'issues'
+        };
+        const parent = {
+            id: 'parent',
+            title: 'Parent',
+            children: [{ type: 'group', id: 'pending-child' }],
+            enabled: true,
+            collapsed: true
+        };
+        const child = {
+            id: 'pending-child',
+            title: 'ui_new_subgroup',
+            children: [],
+            enabled: true,
+            collapsed: false,
+            isPendingInitialRename: true,
+            pendingInitialRenameDraft: '',
+            pendingInitialRenameCollapsedAncestorIds: ['parent']
+        };
+        const groupsById = new Map([
+            [parent.id, parent],
+            [child.id, child]
+        ]);
+        const titleSpan = global.document.createElement('span');
+        const groupContainer = {
+            dataset: { groupId: child.id },
+            querySelector: jest.fn((selector) => (
+                selector === '.group-title' ? titleSpan : null
+            ))
+        };
+        let activeIsolationGroupId = parent.id;
+        const effectiveStates = new Map([['source-1', false]]);
+        const collectEffectiveSourceStates = jest.fn(() => effectiveStates);
+        const syncSourcesToEffectiveState = jest.fn();
+        const saveState = jest.fn();
+        const interactions = createContentTreeInteractions({
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getActiveIsolationGroupId: () => activeIsolationGroupId,
+            setActiveIsolationGroupId: (value) => {
+                activeIsolationGroupId = value;
+            },
+            collectEffectiveSourceStates,
+            syncSourcesToEffectiveState,
+            getShadowRoot: () => ({
+                querySelector: jest.fn(() => groupContainer)
+            }),
+            saveState,
+            render: jest.fn(),
+            getMessage: (key) => key
+        });
+
+        expect(interactions.triggerRename(groupContainer, { isNewlyCreated: true })).toBe(true);
+        const input = titleSpan.childNodes[0];
+        input.value = 'Confirmed child';
+        input.dispatchEvent({
+            type: 'keydown',
+            key: 'Enter',
+            preventDefault: jest.fn()
+        });
+
+        expect(child.title).toBe('Confirmed child');
+        expect(parent.collapsed).toBe(false);
+        expect(state).toMatchObject({
+            filterQuery: '',
+            activeTagId: null,
+            activeQuickViewKind: null
+        });
+        expect(activeIsolationGroupId).toBeNull();
+        expect(collectEffectiveSourceStates).toHaveBeenCalledTimes(1);
+        expect(syncSourcesToEffectiveState).toHaveBeenCalledWith(effectiveStates);
+        expect(child.pendingInitialRenameCollapsedAncestorIds).toBeUndefined();
+        expect(saveState).toHaveBeenCalledTimes(1);
+        expect(saveState).toHaveBeenCalledWith({ immediate: true, critical: true });
+    });
+
+    it('cancels a newly created group when inline naming is escaped', () => {
+        const state = { root: [], ungrouped: [] };
+        const groupsById = new Map();
+        const input = global.document.createElement('input');
+        input.focus = jest.fn();
+        input.select = jest.fn();
+        const originalCreateElement = global.document.createElement;
+        global.document.createElement = jest.fn((tag) => (
+            tag === 'input' ? input : originalCreateElement(tag)
+        ));
+        const titleSpan = global.document.createElement('span');
+        const groupContainer = {
+            dataset: {},
+            querySelector: jest.fn(() => titleSpan)
+        };
+        const newGroupButton = { focus: jest.fn() };
+        const saveState = jest.fn();
+        const interactions = createContentTreeInteractions({
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getShadowRoot: () => ({
+                querySelector: jest.fn((selector) => {
+                    if (selector === '#sp-new-group-btn') return newGroupButton;
+                    const match = selector.match(/data-group-id="([^"]+)"/);
+                    if (match) groupContainer.dataset.groupId = match[1];
+                    return groupContainer;
+                })
+            }),
+            getSetTimeout: () => (callback) => callback(),
+            saveState,
+            render: jest.fn(),
+            getMessage: (key) => key
+        });
+
+        expect(interactions.handleAddNewGroup()).toBe(true);
+        input.dispatchEvent({ type: 'keydown', key: 'Escape', preventDefault: jest.fn() });
+
+        expect(state.root).toEqual([]);
+        expect(groupsById.size).toBe(0);
+        expect(saveState).not.toHaveBeenCalled();
+        expect(newGroupButton.focus).toHaveBeenCalledTimes(1);
     });
 
     it('does not create an orphan subgroup when the parent group has gone stale', () => {
@@ -547,6 +952,88 @@ describe('drag and drop ordering guards', () => {
         expect(saveState).not.toHaveBeenCalled();
         expect(render).not.toHaveBeenCalled();
         expect(buildParentMap).not.toHaveBeenCalled();
+    });
+
+    it('updates collapse semantics and focus isolation immediately in both directions', () => {
+        const group = {
+            id: 'group-1',
+            title: 'Named folder',
+            children: [{ type: 'source', key: 'source-1' }],
+            enabled: true,
+            collapsed: false
+        };
+        const caretAttrs = {
+            'aria-expanded': 'true',
+            'aria-label': 'old'
+        };
+        const childrenAttrs = {
+            'aria-hidden': 'false'
+        };
+        const caret = {
+            classList: createClassList(['sp-caret']),
+            setAttribute: jest.fn((name, value) => { caretAttrs[name] = value; })
+        };
+        const children = {
+            classList: createClassList(['group-children']),
+            style: {},
+            scrollHeight: 120,
+            offsetHeight: 120,
+            inert: false,
+            setAttribute: jest.fn((name, value) => { childrenAttrs[name] = value; }),
+            removeAttribute: jest.fn((name) => { delete childrenAttrs[name]; }),
+            addEventListener: jest.fn(),
+            removeEventListener: jest.fn()
+        };
+        const groupContainer = {
+            dataset: { groupId: group.id },
+            querySelector: jest.fn((selector) => (
+                selector === '.sp-caret' ? caret : (selector === '.group-children' ? children : null)
+            ))
+        };
+        const target = {
+            classList: { contains: jest.fn(() => false) },
+            closest: jest.fn((selector) => {
+                if (selector === '.group-container') return groupContainer;
+                if (selector === '.source-item') return null;
+                if (selector === '.sp-caret') return caret;
+                return null;
+            })
+        };
+        const saveState = jest.fn();
+        const interactions = createContentTreeInteractions({
+            getState: () => ({ isBatchMode: false }),
+            getGroupsById: () => new Map([[group.id, group]]),
+            getSourcesByKey: () => new Map(),
+            saveState,
+            getMessage: (key, substitutions = []) => `${key}:${substitutions.join('|')}`
+        });
+
+        interactions.handleInteraction({ target });
+
+        expect(group.collapsed).toBe(true);
+        expect(caretAttrs).toMatchObject({
+            'aria-expanded': 'false',
+            'aria-label': 'ui_expand_group_named:Named folder'
+        });
+        expect(childrenAttrs['aria-hidden']).toBe('true');
+        expect(childrenAttrs.inert).toBe('');
+        expect(children.inert).toBe(true);
+        expect(children.classList.add).toHaveBeenCalledWith('collapsed');
+
+        interactions.handleInteraction({ target });
+
+        expect(group.collapsed).toBe(false);
+        expect(caretAttrs).toMatchObject({
+            'aria-expanded': 'true',
+            'aria-label': 'ui_collapse_group_named:Named folder'
+        });
+        expect(childrenAttrs['aria-hidden']).toBe('false');
+        expect(childrenAttrs.inert).toBeUndefined();
+        expect(children.inert).toBe(false);
+        expect(children.classList.remove).toHaveBeenCalledWith('collapsed');
+        expect(saveState).toHaveBeenCalledTimes(2);
+        expect(saveState).toHaveBeenNthCalledWith(1, { immediate: true });
+        expect(saveState).toHaveBeenNthCalledWith(2, { immediate: true });
     });
 
     it('ignores stale source row clicks when the source record no longer exists', () => {
@@ -2173,6 +2660,264 @@ describe('drag and drop ordering guards', () => {
 
         expect(renderBatchTagModal).toHaveBeenNthCalledWith(1, 'add', pendingBatchKeys);
         expect(renderBatchTagModal).toHaveBeenNthCalledWith(2, 'remove', pendingBatchKeys);
+    });
+
+    it('selects only visible operable batch sources and can clear the selection', () => {
+        const state = { isBatchMode: true };
+        const pendingBatchKeys = new Set(['already-selected']);
+        const sourcesByKey = new Map([
+            ['already-selected', { key: 'already-selected' }],
+            ['visible-ready', { key: 'visible-ready' }],
+            ['visible-loading', { key: 'visible-loading', isLoading: true }],
+            ['visible-failed', { key: 'visible-failed', isFailed: true }],
+            ['visible-disabled', { key: 'visible-disabled', isDisabled: true }],
+            ['visible-without-checkbox', { key: 'visible-without-checkbox', hasNativeCheckbox: false }],
+            ['collapsed-ready', { key: 'collapsed-ready' }],
+            ['aria-hidden-ready', { key: 'aria-hidden-ready' }],
+            ['inert-ready', { key: 'inert-ready' }],
+            ['hidden-ready', { key: 'hidden-ready' }]
+        ]);
+        const createAncestor = ({
+            className = '',
+            ariaHidden = null,
+            inert = false,
+            inertAttribute = false,
+            hidden = false,
+            hiddenAttribute = false
+        } = {}) => ({
+            classList: {
+                contains: (candidate) => String(className).split(/\s+/).includes(candidate)
+            },
+            hidden,
+            inert,
+            parentElement: null,
+            getAttribute(name) {
+                if (name === 'aria-hidden') return ariaHidden;
+                if (name === 'inert') return inertAttribute ? '' : null;
+                if (name === 'hidden') return hiddenAttribute ? '' : null;
+                return null;
+            },
+            hasAttribute(name) {
+                if (name === 'inert') return inertAttribute;
+                if (name === 'hidden') return hiddenAttribute;
+                return false;
+            }
+        });
+        const createBatchCheckbox = (sourceKey, ancestor = createAncestor()) => ({
+            dataset: { sourceKey },
+            parentElement: ancestor
+        });
+        let visibleCheckboxes = [
+            createBatchCheckbox('visible-ready'),
+            createBatchCheckbox('visible-loading'),
+            createBatchCheckbox('visible-failed'),
+            createBatchCheckbox('visible-disabled'),
+            createBatchCheckbox('visible-without-checkbox'),
+            createBatchCheckbox('collapsed-ready', createAncestor({ className: 'group-children collapsed' })),
+            createBatchCheckbox('aria-hidden-ready', createAncestor({ ariaHidden: 'true' })),
+            createBatchCheckbox('inert-ready', createAncestor({ inert: true, inertAttribute: true })),
+            createBatchCheckbox('hidden-ready', createAncestor({ hidden: true, hiddenAttribute: true }))
+        ];
+        const render = jest.fn();
+        const interactions = createContentTreeInteractions({
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getSourcesByKey: () => sourcesByKey,
+            getPendingBatchKeys: () => pendingBatchKeys,
+            getShadowRoot: () => ({
+                querySelectorAll: jest.fn(() => visibleCheckboxes)
+            }),
+            render
+        });
+        const createEvent = (buttonClass) => ({
+            target: {
+                classList: { contains: jest.fn(() => false) },
+                closest: jest.fn((selector) => {
+                    if (selector === '.group-container' || selector === '.source-item') return null;
+                    if (selector === buttonClass) return {};
+                    return null;
+                })
+            }
+        });
+
+        interactions.handleInteraction(createEvent('.sp-batch-select-visible-btn'));
+
+        expect(Array.from(pendingBatchKeys).sort()).toEqual([
+            'already-selected',
+            'visible-ready'
+        ]);
+        expect(pendingBatchKeys.has('hidden-ready')).toBe(false);
+        expect(pendingBatchKeys.has('visible-loading')).toBe(false);
+        expect(pendingBatchKeys.has('visible-failed')).toBe(false);
+        expect(pendingBatchKeys.has('visible-disabled')).toBe(false);
+        expect(pendingBatchKeys.has('visible-without-checkbox')).toBe(false);
+        expect(pendingBatchKeys.has('collapsed-ready')).toBe(false);
+        expect(pendingBatchKeys.has('aria-hidden-ready')).toBe(false);
+        expect(pendingBatchKeys.has('inert-ready')).toBe(false);
+        expect(pendingBatchKeys.has('hidden-ready')).toBe(false);
+
+        interactions.handleInteraction(createEvent('.sp-batch-select-visible-btn'));
+        expect(Array.from(pendingBatchKeys).sort()).toEqual([
+            'already-selected',
+            'visible-ready'
+        ]);
+
+        visibleCheckboxes = [createBatchCheckbox('hidden-ready')];
+        interactions.handleInteraction(createEvent('.sp-batch-select-visible-btn'));
+
+        expect(Array.from(pendingBatchKeys).sort()).toEqual([
+            'already-selected',
+            'hidden-ready',
+            'visible-ready'
+        ]);
+
+        interactions.handleInteraction(createEvent('.sp-batch-clear-selection-btn'));
+
+        expect(pendingBatchKeys.size).toBe(0);
+        expect(render).toHaveBeenCalledTimes(4);
+    });
+
+    it('ignores direct batch row clicks for every inoperable source kind', () => {
+        const state = { isBatchMode: true };
+        const pendingBatchKeys = new Set();
+        const sourcesByKey = new Map([
+            ['ready', { key: 'ready' }],
+            ['failed', { key: 'failed', isFailed: true }],
+            ['loading', { key: 'loading', isLoading: true }],
+            ['disabled', { key: 'disabled', isDisabled: true }],
+            ['without-checkbox', { key: 'without-checkbox', hasNativeCheckbox: false }]
+        ]);
+        const render = jest.fn();
+        const interactions = createContentTreeInteractions({
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getSourcesByKey: () => sourcesByKey,
+            getPendingBatchKeys: () => pendingBatchKeys,
+            render
+        });
+        const createRowEvent = (sourceKey) => {
+            const sourceRow = {
+                dataset: { sourceKey },
+                querySelector: jest.fn()
+            };
+            return {
+                target: {
+                    classList: { contains: jest.fn(() => false) },
+                    closest: jest.fn((selector) => (
+                        selector === '.source-item' ? sourceRow : null
+                    ))
+                }
+            };
+        };
+
+        ['failed', 'loading', 'disabled', 'without-checkbox'].forEach((sourceKey) => {
+            interactions.handleInteraction(createRowEvent(sourceKey));
+        });
+
+        expect(pendingBatchKeys.size).toBe(0);
+        expect(render).not.toHaveBeenCalled();
+
+        interactions.handleInteraction(createRowEvent('ready'));
+        interactions.handleInteraction(createRowEvent('ready'));
+
+        expect(pendingBatchKeys.size).toBe(0);
+        expect(render).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not mutate batch selection while a delete is in progress', () => {
+        const pendingBatchKeys = new Set(['selected']);
+        const render = jest.fn();
+        const interactions = createContentTreeInteractions({
+            getState: () => ({ isBatchMode: true }),
+            getGroupsById: () => new Map(),
+            getSourcesByKey: () => new Map([['visible', { key: 'visible' }]]),
+            getPendingBatchKeys: () => pendingBatchKeys,
+            getIsDeletingSources: () => true,
+            getShadowRoot: () => ({
+                querySelectorAll: jest.fn(() => [{ dataset: { sourceKey: 'visible' } }])
+            }),
+            render
+        });
+        const createEvent = (buttonClass) => ({
+            target: {
+                classList: { contains: jest.fn(() => false) },
+                closest: jest.fn((selector) => (
+                    selector === '.group-container' || selector === '.source-item'
+                        ? null
+                        : (selector === buttonClass ? {} : null)
+                ))
+            }
+        });
+
+        interactions.handleInteraction(createEvent('.sp-batch-select-visible-btn'));
+        interactions.handleInteraction(createEvent('.sp-batch-clear-selection-btn'));
+
+        expect(Array.from(pendingBatchKeys)).toEqual(['selected']);
+        expect(render).not.toHaveBeenCalled();
+    });
+
+    it('clears contextual empty-state filters without mutating source data', () => {
+        const state = {
+            filterQuery: 'missing',
+            activeTagId: 'tag-1',
+            activeQuickViewKind: 'issues'
+        };
+        let isolationGroupId = 'group-1';
+        const sourcesByKey = new Map([['source-1', { key: 'source-1' }]]);
+        const render = jest.fn();
+        const focus = jest.fn();
+        const effectiveStates = new Map([['source-1', false]]);
+        const collectEffectiveSourceStates = jest.fn(() => effectiveStates);
+        const syncSourcesToEffectiveState = jest.fn();
+        const interactions = createContentTreeInteractions({
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getSourcesByKey: () => sourcesByKey,
+            getActiveIsolationGroupId: () => isolationGroupId,
+            setActiveIsolationGroupId: (value) => { isolationGroupId = value; },
+            collectEffectiveSourceStates,
+            syncSourcesToEffectiveState,
+            getShadowRoot: () => ({
+                getElementById: jest.fn(() => ({ focus }))
+            }),
+            render
+        });
+        const event = {
+            target: {
+                classList: { contains: jest.fn(() => false) },
+                closest: jest.fn((selector) => (
+                    selector === '.sp-empty-clear-filters-btn' ? {} : null
+                ))
+            }
+        };
+
+        interactions.handleInteraction(event);
+
+        expect(state).toMatchObject({
+            filterQuery: '',
+            activeTagId: null,
+            activeQuickViewKind: null
+        });
+        expect(isolationGroupId).toBeNull();
+        expect(sourcesByKey.has('source-1')).toBe(true);
+        expect(collectEffectiveSourceStates).toHaveBeenCalledTimes(1);
+        expect(syncSourcesToEffectiveState).toHaveBeenCalledWith(effectiveStates);
+        expect(render).toHaveBeenCalledTimes(1);
+        expect(focus).toHaveBeenCalledTimes(1);
+
+        isolationGroupId = 'group-2';
+        render.mockClear();
+        focus.mockClear();
+        event.target.closest = jest.fn((selector) => (
+            selector === '.sp-empty-clear-isolation-btn' ? {} : null
+        ));
+        interactions.handleInteraction(event);
+
+        expect(isolationGroupId).toBeNull();
+        expect(collectEffectiveSourceStates).toHaveBeenCalledTimes(2);
+        expect(syncSourcesToEffectiveState).toHaveBeenLastCalledWith(effectiveStates);
+        expect(render).toHaveBeenCalledTimes(1);
+        expect(focus).toHaveBeenCalledTimes(1);
     });
 
     it('moves grouped and positioned-root sources to ungrouped through batch placement', () => {

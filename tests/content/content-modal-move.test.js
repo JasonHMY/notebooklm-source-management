@@ -89,7 +89,9 @@ function createDeps(overrides = {}) {
                 moved: [],
                 skipped: []
             })),
-            rebuildParentMap: jest.fn()
+            rebuildParentMap: jest.fn(),
+            addGroup: jest.fn(),
+            removeGroup: jest.fn()
         },
         requestAnimationFrame: undefined,
         ...overrides
@@ -471,6 +473,86 @@ describe('content modal move-to-folder', () => {
         });
     });
 
+    describe('createFolderAndMove', () => {
+        it('creates a root folder, moves the sources, and saves once', () => {
+            const state = {
+                root: [{ type: 'source', key: 's1' }],
+                ungrouped: [],
+                isBatchMode: false
+            };
+            const groupsById = new Map();
+            const parentMap = new Map();
+            const createContentTreePlacement = require('../../src/content/content-tree-placement.js');
+            const treePlacement = createContentTreePlacement({
+                getState: () => state,
+                getGroupsById: () => groupsById
+            });
+            const deps = createDeps({
+                getState: () => state,
+                getGroupsById: () => groupsById,
+                getParentMap: () => parentMap,
+                treePlacement,
+                getSourcesByKey: () => new Map([['s1', { key: 's1' }]])
+            });
+            const helper = createContentModalMove(deps);
+
+            const result = helper.createFolderAndMove(['s1'], '  Research   Notes  ');
+
+            expect(result).toEqual(expect.objectContaining({
+                ok: true,
+                changed: true,
+                createdGroupId: expect.any(String)
+            }));
+            const group = groupsById.get(result.createdGroupId);
+            expect(group).toMatchObject({
+                title: 'Research Notes',
+                enabled: true,
+                collapsed: false
+            });
+            expect(group.children).toEqual([{ type: 'source', key: 's1' }]);
+            expect(state.root).toEqual([{ type: 'group', id: result.createdGroupId }]);
+            expect(deps.saveState).toHaveBeenCalledTimes(1);
+        });
+
+        it('rolls back the new folder when no requested source can be moved', () => {
+            const state = { root: [], ungrouped: [], isBatchMode: false };
+            const groupsById = new Map();
+            const parentMap = new Map();
+            const createContentTreePlacement = require('../../src/content/content-tree-placement.js');
+            const treePlacement = createContentTreePlacement({
+                getState: () => state,
+                getGroupsById: () => groupsById
+            });
+            const deps = createDeps({
+                getState: () => state,
+                getGroupsById: () => groupsById,
+                getParentMap: () => parentMap,
+                getSourcesByKey: () => new Map(),
+                treePlacement
+            });
+            const helper = createContentModalMove(deps);
+
+            const result = helper.createFolderAndMove(['missing'], 'New folder');
+
+            expect(result).toMatchObject({ ok: false, changed: false, reason: 'not_found' });
+            expect(state.root).toEqual([]);
+            expect(groupsById.size).toBe(0);
+            expect(deps.saveState).not.toHaveBeenCalled();
+        });
+
+        it('rejects an empty folder name without changing the tree', () => {
+            const deps = createDeps();
+            const helper = createContentModalMove(deps);
+
+            expect(helper.createFolderAndMove(['s1'], '   ')).toMatchObject({
+                ok: false,
+                changed: false,
+                reason: 'invalid_name'
+            });
+            expect(deps.treePlacement.addGroup).not.toHaveBeenCalled();
+        });
+    });
+
     describe('renderMoveToFolderModal', () => {
         it('bails when shadowRoot is missing', () => {
             const deps = createDeps({ getShadowRoot: () => null });
@@ -495,6 +577,52 @@ describe('content modal move-to-folder', () => {
             const emptyMessageCall = deps.el.mock.calls.find(([, attrs]) => attrs?.className === 'sp-folder-empty');
             expect(emptyMessageCall).toBeDefined();
             expect(deps.getMessage).toHaveBeenCalledWith('ui_empty_folders');
+            expect(deps.getShadowRoot().querySelector('.sp-move-new-folder-input')).toBeDefined();
+            expect(deps.getShadowRoot().querySelector('.sp-move-create-folder-btn')).toBeDefined();
+        });
+
+        it('ignores a repeated create submission after the first move succeeds', () => {
+            const state = {
+                root: [{ type: 'source', key: 's1' }],
+                ungrouped: [],
+                isBatchMode: false
+            };
+            const groupsById = new Map();
+            const parentMap = new Map();
+            const createContentTreePlacement = require('../../src/content/content-tree-placement.js');
+            const treePlacement = createContentTreePlacement({
+                getState: () => state,
+                getGroupsById: () => groupsById
+            });
+            const deps = createDeps({
+                getState: () => state,
+                getGroupsById: () => groupsById,
+                getParentMap: () => parentMap,
+                getSourcesByKey: () => new Map([['s1', { key: 's1' }]]),
+                treePlacement
+            });
+            const helper = createContentModalMove(deps);
+            helper.renderMoveToFolderModal(['s1']);
+            const shadow = deps.getShadowRoot();
+            const input = shadow.querySelector('.sp-move-new-folder-input');
+            const createButton = shadow.querySelector('.sp-move-create-folder-btn');
+            input.value = 'Research';
+
+            createButton.listeners.click[0]();
+            input.listeners.keydown[0]({
+                key: 'Enter',
+                preventDefault: jest.fn()
+            });
+
+            expect(groupsById.size).toBe(1);
+            expect(state.root).toHaveLength(1);
+            expect(state.root[0].type).toBe('group');
+            expect(groupsById.get(state.root[0].id).children).toEqual([
+                { type: 'source', key: 's1' }
+            ]);
+            expect(deps.saveState).toHaveBeenCalledTimes(1);
+            expect(input.disabled).toBe(true);
+            expect(createButton.disabled).toBe(true);
         });
 
         it('renders a folder button per group; clicking it executes the move', () => {

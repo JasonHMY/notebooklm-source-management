@@ -46,6 +46,7 @@
             const tags = orderedTagIds
                 .map((tagId) => tagsById.get(tagId))
                 .filter(Boolean);
+            const normalizeSearchValue = (value) => String(value || '').trim().toLocaleLowerCase();
 
             prepareModalOpen('sp-tag-filter-modal', 'sp-tag-filter-backdrop');
 
@@ -63,16 +64,61 @@
                     getMessage('ui_tag_filter_title')
                 ])
             ]);
+            const tagOptionEntries = tags.map((tag) => {
+                const label = String(tag.label || tag.id || '');
+                const isActive = String(state.activeTagId || '') === String(tag.id || '');
+                const button = el('button', {
+                    type: 'button',
+                    className: 'sp-tag-filter-option sp-glare-hover' + (isActive ? ' is-active' : ''),
+                    dataset: { tagId: tag.id },
+                    'aria-pressed': isActive ? 'true' : 'false'
+                }, [label]);
+                return {
+                    button,
+                    normalizedLabel: normalizeSearchValue(label)
+                };
+            });
+            const searchInput = tags.length > 0
+                ? el('input', {
+                    type: 'search',
+                    className: 'sp-command-palette-input sp-tag-filter-search',
+                    placeholder: getMessage('ui_tag_filter_search'),
+                    'aria-label': getMessage('ui_tag_filter_search'),
+                    'aria-controls': 'sp-tag-filter-list',
+                    'aria-describedby': 'sp-tag-filter-results-count',
+                    autocomplete: 'off'
+                })
+                : null;
+            const resultsCount = tags.length > 0
+                ? el('div', {
+                    className: 'sp-tag-filter-results-count',
+                    id: 'sp-tag-filter-results-count',
+                    role: 'status',
+                    'aria-live': 'polite',
+                    'aria-atomic': 'true'
+                }, [getMessage('ui_search_results_count', [String(tags.length)])])
+                : null;
+            const tagList = tags.length > 0
+                ? el('div', {
+                    className: 'sp-tag-filter-list',
+                    id: 'sp-tag-filter-list',
+                    role: 'group',
+                    'aria-labelledby': 'sp-tag-filter-title'
+                }, tagOptionEntries.map(({ button }) => button))
+                : null;
+            const noMatchingTags = tags.length > 0
+                ? el('div', {
+                    className: 'sp-settings-empty-state sp-tag-filter-no-results',
+                    hidden: true
+                }, [getMessage('ui_no_matching_tags')])
+                : null;
             const content = el('div', { className: 'sp-folder-modal-content sp-tag-filter-content' }, [
                 tags.length === 0
                     ? el('div', { className: 'sp-settings-empty-state' }, [getMessage('ui_no_tags')])
-                    : el('div', { className: 'sp-tag-filter-list' }, tags.map((tag) => (
-                        el('button', {
-                            type: 'button',
-                            className: 'sp-tag-filter-option sp-glare-hover',
-                            dataset: { tagId: tag.id }
-                        }, [tag.label || tag.id])
-                    )))
+                    : searchInput,
+                resultsCount,
+                tagList,
+                noMatchingTags
             ]);
             const footer = el('div', { className: 'sp-folder-modal-footer' }, [
                 el('button', { type: 'button', className: 'sp-button sp-modal-cancel sp-glare-hover' }, [
@@ -80,13 +126,29 @@
                 ])
             ]);
 
-            content.querySelectorAll?.('.sp-tag-filter-option')?.forEach((button) => {
+            tagOptionEntries.forEach(({ button }) => {
                 button.addEventListener('click', () => {
                     if (typeof applyTagQuickFilter === 'function' && applyTagQuickFilter(button.dataset.tagId)) {
                         closeTagFilterModal();
                     }
                 });
             });
+            if (searchInput) {
+                const updateSearchResults = () => {
+                    const query = normalizeSearchValue(searchInput.value);
+                    let visibleCount = 0;
+                    tagOptionEntries.forEach(({ button, normalizedLabel }) => {
+                        const matches = !query || normalizedLabel.includes(query);
+                        button.hidden = !matches;
+                        if (matches) visibleCount += 1;
+                    });
+                    tagList.hidden = visibleCount === 0;
+                    noMatchingTags.hidden = visibleCount !== 0;
+                    resultsCount.textContent = getMessage('ui_search_results_count', [String(visibleCount)]);
+                };
+                searchInput.addEventListener('input', updateSearchResults);
+                updateSearchResults();
+            }
             footer.querySelector('.sp-modal-cancel')?.addEventListener('click', () => closeTagFilterModal());
             backdrop.addEventListener('click', () => closeTagFilterModal());
 
@@ -98,7 +160,7 @@
 
             const modalKeyboard = bindModalKeyboardNavigation(modal, {
                 closeModal: closeTagFilterModal,
-                initialFocusTarget: () => modal.querySelector('.sp-tag-filter-option') || modal.querySelector('.sp-modal-cancel')
+                initialFocusTarget: () => searchInput || modal.querySelector('.sp-modal-cancel')
             });
             if (typeof rafFn === 'function') {
                 rafFn(() => {

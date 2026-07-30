@@ -173,6 +173,12 @@
     "ui_tag_filter_title": {
         "message": "按标签筛选"
     },
+    "ui_tag_filter_search": {
+        "message": "搜索标签"
+    },
+    "ui_no_matching_tags": {
+        "message": "没有符合搜索条件的标签。"
+    },
     "ui_command_palette": {
         "message": "命令面板"
     },
@@ -890,6 +896,27 @@
     "ui_undo_empty": {
         "message": "没有可撤销的操作"
     },
+    "ui_undo_failed": {
+        "message": "撤销结果无法保存，已恢复操作前的状态。"
+    },
+    "ui_redo_action": {
+        "message": "重做"
+    },
+    "ui_redo_toast": {
+        "message": "已重做上一步操作"
+    },
+    "ui_redo_empty": {
+        "message": "没有可重做的操作"
+    },
+    "ui_redo_failed": {
+        "message": "重做结果无法保存，已恢复操作前的状态。"
+    },
+    "ui_command_undo_subtitle": {
+        "message": "撤销上一次已保存的管理器更改"
+    },
+    "ui_command_redo_subtitle": {
+        "message": "重新应用上一次撤销的管理器更改"
+    },
     "ui_new_group": {
         "message": "新建分组"
     },
@@ -1373,6 +1400,144 @@
         "message": "已移动 $count$ 项来源",
         "placeholders": {
             "count": { "content": "$1" }
+        }
+    },
+    "ui_group_name_input": {
+        "message": "文件夹 $1 的名称",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_batch_selected_count": {
+        "message": "已选择 $1 项",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_batch_select_visible": {
+        "message": "选择当前可见项"
+    },
+    "ui_batch_clear_selection": {
+        "message": "清空选择"
+    },
+    "ui_empty_no_sources": {
+        "message": "目前还没有来源。请先在 Gemini Notebook 中添加来源，再回来进行整理。"
+    },
+    "ui_empty_search_results": {
+        "message": "没有来源符合这次搜索。"
+    },
+    "ui_clear_search": {
+        "message": "清除搜索"
+    },
+    "ui_empty_isolation_results": {
+        "message": "当前视图下，此文件夹没有可显示的来源。"
+    },
+    "ui_show_all_sources": {
+        "message": "显示全部来源"
+    },
+    "ui_empty_filter_results": {
+        "message": "没有来源符合当前筛选条件。"
+    },
+    "ui_clear_filters": {
+        "message": "清除筛选"
+    },
+    "ui_move_new_folder_placeholder": {
+        "message": "新文件夹名称"
+    },
+    "ui_move_new_folder_name": {
+        "message": "新文件夹名称"
+    },
+    "ui_move_create_folder": {
+        "message": "新建文件夹并移动"
+    },
+    "ui_batch_delete_preview_more": {
+        "message": "以及另外 $1 项",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_batch_delete_confirm_action": {
+        "message": "删除 $1 个来源",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_batch_delete_confirm_title": {
+        "message": "删除所选来源？"
+    },
+    "ui_batch_delete_confirm_summary": {
+        "message": "Gemini Notebook 将永久删除所选的 $1 个来源：",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_batch_delete_confirm_warning": {
+        "message": "此操作无法通过扩展的“撤销”恢复。"
+    },
+    "ui_source_actions_for": {
+        "message": "$1 的操作",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_batch_select_source": {
+        "message": "选择 $1 进行批量操作",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_source_enabled_checkbox": {
+        "message": "在 Gemini Notebook 回答中使用 $1",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_expand_group_named": {
+        "message": "展开 $1",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_collapse_group_named": {
+        "message": "折叠 $1",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_disable_group_named": {
+        "message": "停用 $1",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_enable_group_named": {
+        "message": "启用 $1",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_add_subgroup_to": {
+        "message": "在 $1 中新建子文件夹",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_isolate_group_named": {
+        "message": "只显示 $1",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_rename_group_named": {
+        "message": "重命名 $1",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_delete_group_named": {
+        "message": "删除 $1",
+        "placeholders": {
+            "1": { "content": "$1" }
         }
     }
 }

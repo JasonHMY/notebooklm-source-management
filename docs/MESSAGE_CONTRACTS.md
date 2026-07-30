@@ -21,7 +21,7 @@ Popup/content -> background
 └── CLEAR_DEVELOPER_LOGS
 ```
 
-Notebook-scoped storage messages require a sender tab whose URL starts with `https://notebooklm.google.com/notebook/`. Beyond the URL prefix, `SAVE_STATE` / `LOAD_STATE` require `request.key` to equal `sourcesPlusState_<sender projectId>`, while `APPEND_STATE_HISTORY` / `LOAD_STATE_HISTORY` require exact equality with `sourcesPlusHistory_<sender projectId>`; otherwise the worker returns `unauthorized_sender`. Prefix/suffix lookalikes, including notebook `123` trying to use a key for `1234`, are not ownership matches. For those state/history messages only, a bare `/notebook/` URL does not add an extra project-id rejection.
+Notebook-scoped storage messages require a sender tab on either the current `https://notebook.google.com/notebook/` origin or the compatibility `https://notebooklm.google.com/notebook/` origin. Beyond the exact allowed origin and URL prefix, `SAVE_STATE` / `LOAD_STATE` require `request.key` to equal `sourcesPlusState_<sender projectId>`, while `APPEND_STATE_HISTORY` / `LOAD_STATE_HISTORY` require exact equality with `sourcesPlusHistory_<sender projectId>`; otherwise the worker returns `unauthorized_sender`. Prefix/suffix lookalikes, including notebook `123` trying to use a key for `1234`, are not ownership matches. For those state/history messages only, a bare `/notebook/` URL does not add an extra project-id rejection.
 
 Developer-log messages use a stricter ownership rule. `APPEND_DEVELOPER_LOG` / `LOAD_DEVELOPER_LOGS` / `CLEAR_DEVELOPER_LOGS` require a non-empty project id parsed from the sender tab URL and require `request.key` to equal `sourcesPlusDeveloperLogs_<projectId>` exactly. Suffix matches, longer shared-prefix ids, extra key segments, cross-notebook keys, and a bare `/notebook/` URL all return `unauthorized_sender` before any storage read or write.
 
@@ -133,6 +133,8 @@ Popup/background -> content
 `GET_MANAGER_STATUS` should report whether the manager is ready, the current reason when it is not ready, notebook/project context, and source view controls.
 
 `SWITCH_SOURCE_VIEW` must preserve label-view selection state before clicking Gemini Notebook native view controls.
+
+The popup treats an action as complete only when the content response contains `success: true`. A missing response, `null`, or an object without explicit success is a retryable failure: the popup remains open and must not display the requested state as completed.
 
 `ENABLE_MANAGER` and `DISABLE_MANAGER` toggle the in-page manager without changing stored notebook organization data.
 

@@ -14,6 +14,20 @@ const {
     createTreeEl
 } = require('../helpers/content-test-harness');
 
+const installReadyNativeSourcePanel = (mod) => {
+    const panel = {
+        hidden: false,
+        contains: jest.fn(() => false),
+        getAttribute: jest.fn(() => null),
+        querySelector: jest.fn(() => null),
+        querySelectorAll: jest.fn((selector) => global.document.querySelectorAll(selector))
+    };
+    global.document.querySelector = jest.fn((selector) => (
+        mod.DEPS.panel.includes(selector) ? panel : null
+    ));
+    return panel;
+};
+
 describe('executeBatchDelete', () => {
     let mod;
 
@@ -28,9 +42,77 @@ describe('executeBatchDelete', () => {
 
         mod = loadContentModule();
         if (mod._resetState) mod._resetState();
+        installReadyNativeSourcePanel(mod);
     });
 
     afterEach(teardownGlobalMocks);
+
+    it('gates the production batch-delete entry behind an explicit alert dialog', () => {
+        const childNodes = [];
+        const shadowRoot = {
+            host: { isConnected: true },
+            childNodes,
+            appendChild(node) {
+                childNodes.push(node);
+                return node;
+            },
+            getElementById(id) {
+                return childNodes.find((node) => node?.id === id) || null;
+            },
+            querySelector(selector) {
+                if (!selector.startsWith('#')) return null;
+                return this.getElementById(selector.slice(1));
+            }
+        };
+        const findCreatedByClass = (className) => (
+            global.document.createElement.mock.results
+                .map((result) => result.value)
+                .find((node) => String(node?.className || '').split(/\s+/).includes(className))
+            || null
+        );
+        mod._setShadowRootForTest(shadowRoot);
+        mod.pendingBatchKeys.add('key1');
+        mod.state.isBatchMode = true;
+        const nativeSourceElement = {
+            querySelector: jest.fn(() => null)
+        };
+        mod.sourcesByKey.set('key1', {
+            key: 'key1',
+            title: 'Important source',
+            isDisabled: false,
+            element: nativeSourceElement
+        });
+
+        expect(mod._requestBatchDeleteConfirmationForTest()).toBe(true);
+
+        const modal = shadowRoot.getElementById('sp-batch-delete-confirm-modal');
+        const cancelButton = findCreatedByClass('sp-modal-cancel');
+        const finalConfirmButton = findCreatedByClass('sp-batch-delete-confirm-final-btn');
+        expect(modal).toBeDefined();
+        expect(modal.getAttribute('role')).toBe('alertdialog');
+        expect(global.document.createTextNode).toHaveBeenCalledWith('Important source');
+        expect(cancelButton).toBeDefined();
+        expect(finalConfirmButton).toBeDefined();
+        expect(mod._getIsDeletingSources()).toBe(false);
+        expect(mod.pendingBatchKeys.has('key1')).toBe(true);
+
+        cancelButton.dispatchEvent({ type: 'click' });
+
+        expect(mod._getIsDeletingSources()).toBe(false);
+        expect(mod.pendingBatchKeys.has('key1')).toBe(true);
+        expect(mod.sourcesByKey.has('key1')).toBe(true);
+        expect(nativeSourceElement.querySelector).not.toHaveBeenCalled();
+        expect(mod._getRecentNativeDeleteMarkersForTest().sourceKeys.size).toBe(0);
+        expect(mod._getRecentNativeDeleteMarkersForTest().identityKeys.size).toBe(0);
+        expect(global.chrome.runtime.sendMessage).not.toHaveBeenCalled();
+        const indexSource = fs.readFileSync(
+            path.join(__dirname, '../../src/content/index.js'),
+            'utf8'
+        );
+        expect(indexSource).toContain(
+            'executeBatchDelete: (...args) => requestBatchDeleteConfirmation(...args)'
+        );
+    });
 
     it('returns early if pendingBatchKeys is empty', async () => {
         mod.pendingBatchKeys.clear();
@@ -464,6 +546,7 @@ describe('toast feedback', () => {
 
 describe('deleteNativeSource', () => {
     let mod;
+    let nativeSourcePanel;
 
     beforeEach(() => {
         jest.resetModules();
@@ -474,6 +557,7 @@ describe('deleteNativeSource', () => {
 
         mod = loadContentModule();
         if (mod._resetState) mod._resetState();
+        nativeSourcePanel = installReadyNativeSourcePanel(mod);
     });
 
     afterEach(teardownGlobalMocks);
@@ -635,7 +719,7 @@ describe('deleteNativeSource', () => {
         expect(confirmButton.click).toHaveBeenCalled();
     });
 
-    it('treats a closed delete dialog as accepted even when NotebookLM keeps the source row until refresh', async () => {
+    it('fails closed when the delete dialog closes but NotebookLM keeps the source row', async () => {
         const { isNativeMenuOpened } = seedSourceWithMoreButton();
         const sourceRow = mod.sourcesByKey.get('key1').element;
         let dialogOpen = false;
@@ -663,11 +747,15 @@ describe('deleteNativeSource', () => {
             return [];
         });
 
-        await expect(mod.deleteNativeSource('key1')).resolves.toEqual({ deleted: true });
+        await expect(mod.deleteNativeSource('key1')).resolves.toEqual({
+            deleted: false,
+            reason: 'delete_not_confirmed'
+        });
         expect(confirmButton.click).toHaveBeenCalled();
+        expect(mod.sourcesByKey.has('key1')).toBe(true);
     });
 
-    it('treats a closed delete dialog as accepted when the row stays but native actions disappear', async () => {
+    it('fails closed when the row stays but its native actions disappear', async () => {
         let nativeMenuOpened = false;
         let dialogOpen = false;
         let deletionAccepted = false;
@@ -715,13 +803,128 @@ describe('deleteNativeSource', () => {
             return [];
         });
 
-        await expect(mod.deleteNativeSource('key1')).resolves.toEqual({ deleted: true });
+        await expect(mod.deleteNativeSource('key1')).resolves.toEqual({
+            deleted: false,
+            reason: 'delete_not_confirmed'
+        });
         expect(confirmButton.click).toHaveBeenCalled();
+        expect(mod.sourcesByKey.has('key1')).toBe(true);
+    });
+
+    it('fails closed while the native source panel is still busy after confirmation', async () => {
+        const { isNativeMenuOpened } = seedSourceWithMoreButton();
+        let dialogOpen = false;
+        let confirmClicked = false;
+        const deleteMenuItem = createDeleteMenuItem({
+            onClick: () => {
+                dialogOpen = true;
+            }
+        });
+        const confirmButton = {
+            textContent: 'Delete',
+            className: 'warn',
+            click: jest.fn(() => {
+                confirmClicked = true;
+                dialogOpen = false;
+            }),
+            querySelector: jest.fn(() => null),
+            getAttribute: jest.fn(() => null)
+        };
+        const dialog = createConfirmDialog([confirmButton]);
+        nativeSourcePanel.getAttribute = jest.fn((name) => (
+            name === 'aria-busy' && confirmClicked ? 'true' : null
+        ));
+
+        global.document.querySelectorAll = jest.fn((selector) => {
+            if (selector.includes('[role="menuitem"]')) return isNativeMenuOpened() ? [deleteMenuItem] : [];
+            if (selector.includes('dialog')) return dialogOpen ? [dialog] : [];
+            return [];
+        });
+
+        await expect(mod.deleteNativeSource('key1')).resolves.toEqual({
+            deleted: false,
+            reason: 'delete_not_confirmed'
+        });
+        expect(confirmButton.click).toHaveBeenCalled();
+        expect(mod.sourcesByKey.has('key1')).toBe(true);
+    });
+
+    it('fails closed when a complete scan cannot prove the expected one-row decrease', async () => {
+        let nativeMenuOpened = false;
+        let dialogOpen = false;
+        let confirmClicked = false;
+        const moreButton = {
+            click: jest.fn(() => {
+                nativeMenuOpened = true;
+            })
+        };
+        const targetRow = createMockSourceRow({
+            title: 'Target Source',
+            stableToken: 'target-doc',
+            nativeMoreButton: moreButton
+        });
+        const survivorRow = createMockSourceRow({
+            title: 'Survivor Source',
+            stableToken: 'survivor-doc'
+        });
+        const concurrentRow = createMockSourceRow({
+            title: 'Concurrent Source',
+            stableToken: 'concurrent-doc'
+        });
+        const targetDescriptor = mod.createSourceDescriptor(targetRow.row, new Map(), new Map());
+        mod.sourcesByKey.set('key1', {
+            key: 'key1',
+            title: 'Target Source',
+            stableToken: targetDescriptor.stableToken,
+            fingerprint: targetDescriptor.fingerprint,
+            element: targetRow.row,
+            isDisabled: false,
+            isLoading: false
+        });
+        const deleteMenuItem = createDeleteMenuItem({
+            onClick: () => {
+                dialogOpen = true;
+            }
+        });
+        const confirmButton = {
+            textContent: 'Delete',
+            className: 'warn',
+            click: jest.fn(() => {
+                confirmClicked = true;
+                dialogOpen = false;
+            }),
+            querySelector: jest.fn(() => null),
+            getAttribute: jest.fn(() => null)
+        };
+        const dialog = createConfirmDialog([confirmButton]);
+        const getCurrentRows = () => (
+            confirmClicked
+                ? [survivorRow.row, concurrentRow.row]
+                : [targetRow.row, survivorRow.row]
+        );
+        nativeSourcePanel.contains = jest.fn((element) => getCurrentRows().includes(element));
+        global.document.body.contains = jest.fn((element) => (
+            element === nativeSourcePanel || getCurrentRows().includes(element)
+        ));
+        global.document.querySelectorAll = jest.fn((selector) => {
+            if (mod.DEPS.row.includes(selector)) return getCurrentRows();
+            if (selector.includes('[role="menuitem"]')) return nativeMenuOpened ? [deleteMenuItem] : [];
+            if (selector.includes('dialog')) return dialogOpen ? [dialog] : [];
+            return [];
+        });
+
+        await expect(mod.deleteNativeSource('key1')).resolves.toEqual({
+            deleted: false,
+            reason: 'delete_not_confirmed'
+        });
+        expect(confirmButton.click).toHaveBeenCalled();
+        expect(mod.sourcesByKey.has('key1')).toBe(true);
     });
 
     it('finds the native more button on a fresh row even when the checkbox selector no longer matches', async () => {
         let nativeMenuOpened = false;
         let deleteClicked = false;
+        let sourceDeleted = false;
         const moreButton = {
             click: jest.fn(() => {
                 nativeMenuOpened = true;
@@ -742,7 +945,9 @@ describe('deleteNativeSource', () => {
         const confirmButton = {
             textContent: 'Delete',
             className: 'warn',
-            click: jest.fn(),
+            click: jest.fn(() => {
+                sourceDeleted = true;
+            }),
             querySelector: jest.fn(() => null),
             getAttribute: jest.fn(() => null)
         };
@@ -757,9 +962,9 @@ describe('deleteNativeSource', () => {
             isDisabled: false,
             isLoading: false
         });
-        global.document.body.contains = jest.fn(() => false);
+        global.document.body.contains = jest.fn((element) => element === nativeSourcePanel);
         global.document.querySelectorAll = jest.fn(sel => {
-            if (mod.DEPS.row.includes(sel)) return [freshRow.row];
+            if (mod.DEPS.row.includes(sel)) return sourceDeleted ? [] : [freshRow.row];
             if (sel.includes('[role="menuitem"]')) return nativeMenuOpened ? [deleteMenuItem] : [];
             if (sel.includes('dialog')) return deleteClicked ? [dialog] : [];
             return [];
@@ -1415,6 +1620,7 @@ describe('source action menu', () => {
         global.clearTimeout = jest.fn();
         mod = loadContentModule();
         mod._resetState();
+        installReadyNativeSourcePanel(mod);
     });
 
     afterEach(teardownGlobalMocks);
@@ -2073,7 +2279,7 @@ describe('source action menu', () => {
         };
 
         global.document.querySelectorAll = jest.fn((selector) => {
-            if (mod.DEPS.row.includes(selector)) return [sourceElement.row];
+            if (mod.DEPS.row.includes(selector)) return dialogOpen ? [sourceElement.row] : [];
             if (selector.includes('[role="menuitem"]')) return nativeMenuOpened ? [deleteMenuItem] : [];
             if (selector.includes('dialog')) return deleteClicked && dialogOpen ? [confirmDialog] : [];
             return [];

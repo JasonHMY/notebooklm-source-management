@@ -114,7 +114,10 @@
             }
 
             if (typeof modal.setAttribute === 'function') {
-                modal.setAttribute('role', 'dialog');
+                const existingRole = modal.getAttribute?.('role');
+                if (existingRole !== 'dialog' && existingRole !== 'alertdialog') {
+                    modal.setAttribute('role', 'dialog');
+                }
                 modal.setAttribute('aria-modal', 'true');
                 modal.setAttribute('tabindex', '-1');
             }

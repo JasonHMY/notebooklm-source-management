@@ -32,6 +32,7 @@
         "_locales/zh_CN/messages.json"
       ],
       "matches": [
+        "https://notebook.google.com/*",
         "https://notebooklm.google.com/*"
       ]
     }
@@ -39,6 +40,7 @@
   "content_scripts": [
     {
       "matches": [
+        "https://notebook.google.com/*",
         "https://notebooklm.google.com/*"
       ],
       "js": [

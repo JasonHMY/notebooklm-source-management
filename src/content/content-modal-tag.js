@@ -160,6 +160,7 @@
                 className: 'sp-tag-color-native-input',
                 type: 'color',
                 value: currentColor || fallbackColor,
+                tabindex: '-1',
                 'aria-label': getMessage('ui_tag_color_custom')
             });
             const colorTriggerSwatch = el('span', {
@@ -169,7 +170,8 @@
             const colorTrigger = el('button', {
                 type: 'button',
                 className: 'sp-button sp-tag-color-trigger',
-                title: getMessage('ui_tag_color_custom')
+                title: getMessage('ui_tag_color_custom'),
+                'aria-label': getMessage('ui_tag_color_custom')
             }, [
                 colorTriggerSwatch,
                 el('span', {}, [getMessage('ui_tag_color_custom')])

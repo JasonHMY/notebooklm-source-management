@@ -576,6 +576,18 @@ describe('modal option motion', () => {
         expect(shadowRoot.querySelector('#sp-tag-name-input').focus).toHaveBeenCalled();
     });
 
+    it('keeps the visually hidden native color input out of the tab order', () => {
+        const { modals, shadowRoot } = createModalMotionTestRuntime();
+
+        modals.renderTagModal();
+
+        const nativeColorInput = shadowRoot.querySelector('.sp-tag-color-native-input');
+        const colorTrigger = shadowRoot.querySelector('.sp-tag-color-trigger');
+        expect(nativeColorInput).toBeTruthy();
+        expect(nativeColorInput.attrs.tabindex).toBe('-1');
+        expect(colorTrigger.tagName).toBe('BUTTON');
+    });
+
     it('renders batch tag options with modal item stagger indexes', () => {
         const state = { tagOrder: ['alpha', 'beta'] };
         const pendingBatchKeys = new Set(['source-1']);
@@ -1963,7 +1975,8 @@ describe('tag persistence and filtering', () => {
     });
 
     it('generates style variables only for colored tags', () => {
-        expect(mod.getTagStyleVars({ color: '#007AFF' }, true)).toContain('--sp-tag-active-text:#007AFF');
+        expect(mod.getTagStyleVars({ color: '#007AFF' }, true)).toContain('--sp-tag-active-text:#1A1A1C');
+        expect(mod.getTagStyleVars({ color: '#007AFF' }, true)).toContain('--sp-tag-dark-active-text:#F5F5F7');
         expect(mod.getTagStyleVars({ color: '#007AFF' }, false)).toContain('--sp-tag-bg:rgba(0, 122, 255, 0.1)');
         expect(mod.getTagStyleVars({ color: null }, false)).toBe('');
     });

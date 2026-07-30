@@ -143,7 +143,7 @@ test.describe.serial('extension smoke', () => {
         expect(errors).toEqual([]);
     });
 
-    test('injects the manager and handles the message bridge on the notebook fixture', async () => {
+    test('injects the manager and handles the message bridge on the current Notebook host', async () => {
         const pageErrors = [];
         const notebookPage = await env.context.newPage();
 
@@ -154,7 +154,7 @@ test.describe.serial('extension smoke', () => {
             }
         });
 
-        await notebookPage.goto('https://notebooklm.google.com/notebook/a');
+        await notebookPage.goto('https://notebook.google.com/notebook/a');
         env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
         const bridgePage = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
 
@@ -162,7 +162,12 @@ test.describe.serial('extension smoke', () => {
         await expect(notebookPage.locator('[data-testid="source-panel"]')).toBeVisible();
 
         const status = await bridgePage.evaluate(async () => {
-            const tabs = await chrome.tabs.query({ url: 'https://notebooklm.google.com/*' });
+            const tabs = await chrome.tabs.query({
+                url: [
+                    'https://notebook.google.com/*',
+                    'https://notebooklm.google.com/*'
+                ]
+            });
             const targetTab = tabs.find((tab) => tab.url && tab.url.includes('/notebook/a'));
 
             if (!targetTab || typeof targetTab.id !== 'number') {
@@ -175,7 +180,12 @@ test.describe.serial('extension smoke', () => {
         expect(status).toMatchObject({ ready: true, reason: 'ready' });
 
         const focusResult = await bridgePage.evaluate(async () => {
-            const tabs = await chrome.tabs.query({ url: 'https://notebooklm.google.com/*' });
+            const tabs = await chrome.tabs.query({
+                url: [
+                    'https://notebook.google.com/*',
+                    'https://notebooklm.google.com/*'
+                ]
+            });
             const targetTab = tabs.find((tab) => tab.url && tab.url.includes('/notebook/a'));
 
             if (!targetTab || typeof targetTab.id !== 'number') {
@@ -884,7 +894,31 @@ test.describe.serial('extension smoke', () => {
 
             await clickSelector('#sp-new-group-btn', 'New group button missing.');
 
-            const groupTitleNode = await waitForSelector('.group-title', 'Initial group title missing.');
+            const groupNameInput = await waitForSelector(
+                '.sp-inline-group-name-input',
+                'New group name input missing.'
+            );
+            const groupContainer = groupNameInput.closest('.group-container');
+            const groupId = groupContainer?.dataset.groupId;
+            if (!groupId) {
+                throw new Error('New group container is missing data-group-id.');
+            }
+            groupNameInput.value = 'Persistence group';
+            groupNameInput.dispatchEvent(new Event('input', { bubbles: true }));
+            groupNameInput.dispatchEvent(new KeyboardEvent('keydown', {
+                key: 'Enter',
+                bubbles: true,
+                cancelable: true
+            }));
+
+            const groupTitleNode = await waitForValue(() => {
+                const titleNode = getRoot()?.querySelector(
+                    `.group-container[data-group-id="${groupId}"] .group-title`
+                );
+                return titleNode?.textContent?.trim() === 'Persistence group'
+                    ? titleNode
+                    : null;
+            }, 'Confirmed group title missing.');
             const sourceTitleNode = await waitForSelector('.source-item .source-title-text', 'Initial source title missing.');
 
             const sourceTitle = sourceTitleNode.textContent?.trim();
@@ -1227,15 +1261,38 @@ test.describe.serial('extension smoke', () => {
         await notebookPage.evaluate(async () => {
             const getRoot = () => document.querySelector('#sources-plus-root')?.shadowRoot || null;
             const start = Date.now();
+            let clickedNewGroup = false;
             while ((Date.now() - start) < 5_000) {
                 const button = getRoot()?.querySelector('#sp-new-group-btn');
                 if (button) {
                     button.click();
-                    return;
+                    clickedNewGroup = true;
+                    break;
                 }
                 await new Promise((resolve) => window.setTimeout(resolve, 25));
             }
-            throw new Error('New group button missing.');
+            if (!clickedNewGroup) {
+                throw new Error('New group button missing.');
+            }
+
+            const inputStart = Date.now();
+            let groupNameInput = null;
+            while ((Date.now() - inputStart) < 5_000) {
+                groupNameInput = getRoot()?.querySelector('.sp-inline-group-name-input') || null;
+                if (groupNameInput) break;
+                await new Promise((resolve) => window.setTimeout(resolve, 25));
+            }
+            if (!groupNameInput) {
+                throw new Error('New group name input missing.');
+            }
+
+            groupNameInput.value = 'Stale save attempt';
+            groupNameInput.dispatchEvent(new Event('input', { bubbles: true }));
+            groupNameInput.dispatchEvent(new KeyboardEvent('keydown', {
+                key: 'Enter',
+                bubbles: true,
+                cancelable: true
+            }));
         });
 
         await expect.poll(async () => {

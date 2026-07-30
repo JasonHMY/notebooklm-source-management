@@ -1218,50 +1218,159 @@
             return Boolean(element.isConnected);
         }
 
-        function isNativeControlUsable(control) {
-            if (!control) return false;
-            if (control.disabled === true) return false;
-            if (String(control.getAttribute?.('aria-disabled') || '').toLowerCase() === 'true') return false;
-            return typeof control.click === 'function' || typeof control.dispatchEvent === 'function';
+        function findNativeSourcePanel() {
+            const doc = getDocument();
+            const panelSelectors = Array.isArray(getDEPS().panel)
+                ? getDEPS().panel
+                : [getDEPS().panel];
+            return findElement(
+                panelSelectors.filter((selector) => typeof selector === 'string' && selector.trim()),
+                doc
+            );
         }
 
-        function isNativeSourceRowPendingDeletion(row) {
-            if (!row || !isElementInDocument(row)) return false;
+        function isElementWithinNativeSourcePanel(element, panel) {
+            if (!element || !panel) return false;
+            if (element === panel) return true;
+            if (typeof panel.contains === 'function') {
+                try {
+                    return Boolean(panel.contains(element));
+                } catch (error) {
+                    // Fall back to parent traversal for framework-owned or mocked nodes.
+                }
+            }
 
-            const identity = getNativeRowIdentity(row);
-            if (identity?.hasProcessingSignal) return true;
-
-            const nativeMoreButton = findNativeMoreButtonInRow(row);
-            if (isNativeControlUsable(nativeMoreButton)) return false;
-
-            const checkbox = findElement(getDEPS().checkbox, row);
-            if (isNativeControlUsable(checkbox)) return false;
-
-            return true;
+            let cursor = element.parentElement || element.parentNode || null;
+            let depth = 0;
+            while (cursor && depth < 32) {
+                if (cursor === panel) return true;
+                cursor = cursor.parentElement || cursor.parentNode || null;
+                depth += 1;
+            }
+            return false;
         }
 
-        async function waitForNativeSourceRowRemoval(sourceKey, originalRow = null, originalRowCount = 0, maxAttempts = 10, delayMs = 100) {
+        function getNativeSourcePanelVerificationState(panel, rows) {
+            if (!panel || !isElementInDocument(panel)) {
+                return { complete: false, reason: 'source_panel_missing' };
+            }
+            if (
+                panel.hidden === true
+                || String(panel.getAttribute?.('aria-hidden') || '').toLowerCase() === 'true'
+                || String(panel.getAttribute?.('aria-busy') || '').toLowerCase() === 'true'
+            ) {
+                return { complete: false, reason: 'source_panel_incomplete' };
+            }
+
+            const panelStateText = [
+                panel.getAttribute?.('data-state'),
+                panel.getAttribute?.('data-status')
+            ].filter(Boolean).join(' ').toLowerCase();
+            if (/\b(?:busy|loading|pending|processing)\b/.test(panelStateText)) {
+                return { complete: false, reason: 'source_panel_incomplete' };
+            }
+
+            try {
+                if (panel.querySelector?.('[aria-busy="true"], [role="progressbar"], mat-spinner, mat-progress-spinner')) {
+                    return { complete: false, reason: 'source_panel_incomplete' };
+                }
+            } catch (error) {
+                return { complete: false, reason: 'source_panel_incomplete' };
+            }
+
+            for (const row of rows) {
+                const identity = getNativeRowIdentity(row);
+                if (
+                    !identity
+                    || identity.hasProcessingSignal
+                    || !hasComparableSourceIdentity(identity)
+                ) {
+                    return { complete: false, reason: 'source_panel_incomplete' };
+                }
+            }
+
+            return { complete: true, reason: '' };
+        }
+
+        function getNativeDeleteAbsenceEvidence(
+            sourceKey,
+            source,
+            originalRow,
+            originalRowCount
+        ) {
+            const panel = findNativeSourcePanel();
+            const sourceRows = queryNativeSourceRows();
+            const panelState = getNativeSourcePanelVerificationState(panel, sourceRows);
+            if (!panelState.complete) {
+                return { confirmed: false, reason: panelState.reason };
+            }
+
+            const freshEntry = resolveFreshRowEntry(sourceKey);
+            if (
+                freshEntry?.row
+                && isElementWithinNativeSourcePanel(freshEntry.row, panel)
+                && doesNativeRowMatchSource(source, freshEntry.row, freshEntry.identity)
+            ) {
+                return { confirmed: false, reason: 'source_still_present' };
+            }
+            if (sourceRows.some((row) => doesNativeRowMatchSource(source, row))) {
+                return { confirmed: false, reason: 'source_still_present' };
+            }
+            if (
+                originalRow
+                && isElementWithinNativeSourcePanel(originalRow, panel)
+                && doesNativeRowMatchSource(source, originalRow)
+            ) {
+                return { confirmed: false, reason: 'source_still_present' };
+            }
+
+            const expectedRowCount = Math.max(0, Number(originalRowCount) - 1);
+            if (originalRowCount < 1 || sourceRows.length !== expectedRowCount) {
+                return { confirmed: false, reason: 'source_panel_ambiguous' };
+            }
+
+            return {
+                confirmed: true,
+                reason: '',
+                rowCount: sourceRows.length
+            };
+        }
+
+        async function waitForNativeSourceAbsenceEvidence(
+            sourceKey,
+            source,
+            originalRow = null,
+            originalRowCount = 0,
+            maxAttempts = 10,
+            delayMs = 100
+        ) {
+            let lastResult = { confirmed: false, reason: 'delete_verification_timeout' };
+            let stableEvidenceCount = 0;
+
             for (let attempt = 0; attempt < maxAttempts; attempt++) {
-                const freshRow = resolveFreshSourceRow(sourceKey);
-                const sourceRows = queryNativeSourceRows();
-                const listShrank = originalRowCount > 0 && sourceRows.length < originalRowCount;
-                if (!freshRow || !isElementInDocument(freshRow)) {
-                    return true;
-                }
-                if (originalRow && !isElementInDocument(originalRow)) {
-                    return true;
-                }
-                if (listShrank) {
-                    return true;
-                }
-                if (isNativeSourceRowPendingDeletion(freshRow || originalRow)) {
-                    return true;
+                lastResult = getNativeDeleteAbsenceEvidence(
+                    sourceKey,
+                    source,
+                    originalRow,
+                    originalRowCount
+                );
+                if (lastResult.confirmed) {
+                    stableEvidenceCount += 1;
+                    if (stableEvidenceCount >= 2) {
+                        return lastResult;
+                    }
+                } else {
+                    stableEvidenceCount = 0;
                 }
                 if (attempt < maxAttempts - 1) {
                     await new Promise((resolve) => setTimeout(resolve, delayMs));
                 }
             }
-            return false;
+
+            return {
+                confirmed: false,
+                reason: lastResult.reason || 'delete_verification_timeout'
+            };
         }
 
         function createSyntheticActivationEvent(type) {
@@ -1604,15 +1713,21 @@
                 confirmButton.click();
                 developerLog('info', 'native_action', 'delete_confirm_clicked', { sourceKey });
                 const confirmDialogClosed = await waitForNativeDialogsToClose(confirmDialogs);
-                const rowRemovedOrPending = await waitForNativeSourceRowRemoval(
+                const absenceEvidence = await waitForNativeSourceAbsenceEvidence(
                     sourceKey,
+                    source,
                     sourceRowBeforeDelete,
                     sourceRowCountBeforeDelete,
-                    confirmDialogClosed ? 2 : 10,
+                    10,
                     confirmDialogClosed ? 75 : 100
                 );
-                if (!confirmDialogClosed && !rowRemovedOrPending) {
-                    developerLog('warn', 'native_action', 'delete_failed', { sourceKey, reason: 'delete_not_confirmed' });
+                if (!absenceEvidence.confirmed) {
+                    developerLog('warn', 'native_action', 'delete_failed', {
+                        sourceKey,
+                        reason: 'delete_not_confirmed',
+                        verificationReason: absenceEvidence.reason,
+                        dialogClosed: confirmDialogClosed
+                    });
                     return { deleted: false, reason: 'delete_not_confirmed' };
                 }
                 markNativeSourceDeleted(sourceKey);
@@ -1623,7 +1738,8 @@
                 }
                 developerLog('info', 'native_action', 'delete_confirmed', {
                     sourceKey,
-                    result: rowRemovedOrPending ? 'row_removed_or_pending' : 'accepted_pending_native_refresh'
+                    result: 'source_absent_from_complete_panel',
+                    dialogClosed: confirmDialogClosed
                 });
                 return { deleted: true };
             } catch (error) {

@@ -2,7 +2,7 @@
 
 ## Overview
 
-This repository is a Manifest V3 Chrome extension that augments Google Gemini Notebook source management. It injects content scripts on `https://notebooklm.google.com/*`, builds a shadow-DOM manager UI, scans Gemini Notebook's source panel, stores per-notebook grouping and tagging state in `chrome.storage.local`, and uses a service-worker background script for privileged storage and tab operations. There is no backend service, database, authentication system, or server-side request path.
+This repository is a Manifest V3 Chrome extension that augments Google Gemini Notebook source management. It injects content scripts on the current `https://notebook.google.com/*` origin and the compatibility `https://notebooklm.google.com/*` origin, builds a shadow-DOM manager UI, scans Gemini Notebook's source panel, stores per-notebook grouping and tagging state in `chrome.storage.local`, and uses a service-worker background script for privileged storage and tab operations. There is no backend service, database, authentication system, or server-side request path.
 
 Primary assets are the user's Gemini Notebook source organization, source titles and metadata stored locally, tags, the ability to automate Gemini Notebook UI actions such as source enable/disable, rename, details, and deletion, and the extension package integrity. The extension does not intentionally store full source document content. Export/config JSON contains organization metadata and source titles/identifiers. Diagnostics intentionally omit source titles/content.
 
@@ -29,7 +29,7 @@ Assumptions: normal web pages cannot directly call this extension's internal `ch
 
 ## Attack Surface And Mitigations
 
-Manifest and permissions: `manifest.json` requests only `storage` and `tabs`, matches HTTPS Gemini Notebook, and exposes only the bundled symbol font and the three locale `messages.json` catalogs as web-accessible resources (both non-sensitive). No remote code or broad host permissions are present. The `tabs` permission is still sensitive because popup/background can inspect and focus Gemini Notebook tabs.
+Manifest and permissions: `manifest.json` requests only `storage` and `tabs`, matches the two exact HTTPS Gemini Notebook origins above, and exposes only the bundled symbol font and the three locale `messages.json` catalogs as web-accessible resources (both non-sensitive). No remote code or broad host permissions are present. The `tabs` permission is still sensitive because popup/background can inspect and focus Gemini Notebook tabs.
 
 Background messages and storage: `src/background/index.js` handles state save/load/history messages, enforces notebook-page senders from Gemini Notebook, validates storage key prefixes, binds each notebook-scoped key to the sender tab's own notebook (the `projectId` in the key must match the sender's `/notebook/<id>`, so a content script can only read/write its own notebook's state/history — prefix validation is not the only key-auth boundary), queues writes per key, applies revision guards, preserves backups/history, trims history for quota pressure, and returns explicit error codes. Non-state messages primarily open/focus Gemini Notebook or update an extension-enabled boolean.
 
@@ -41,7 +41,7 @@ User import/export: settings import accepts pasted or user-selected JSON. Contro
 
 Gemini Notebook DOM scanning and reconciliation: source identity is extracted from untrusted DOM and matched using stable tokens/fingerprints. Stable tokens reduce accidental cross-source actions but remain heuristic. A maliciously changed Gemini Notebook DOM could make the extension misidentify rows if checks are weakened. DOM lookups keyed on untrusted source keys / group IDs are funneled through a `cssEscape` helper (`CSS.escape` with a manual fallback) so a crafted key cannot inject a CSS selector that matches the wrong row.
 
-Native UI automation: source details, rename, and deletion actions click Gemini Notebook controls on the user's behalf. Destructive actions must re-resolve and validate the fresh native source row before clicking, only act on newly opened native menus/dialogs, and fail closed on row mismatch, ambiguous delete confirmations, or dialogs that clearly reference a different source.
+Native UI automation: source details, rename, and deletion actions click Gemini Notebook controls on the user's behalf. Destructive actions must re-resolve and validate the fresh native source row before clicking, only act on newly opened native menus/dialogs, and fail closed on row mismatch, ambiguous delete confirmations, or dialogs that clearly reference a different source. Batch deletion additionally requires an extension-owned confirmation before any native click. After the native confirmation, success requires two consecutive complete, ready-panel scans that prove the intended identity is absent and the native row count decreased by exactly one; a closed dialog, partial/busy scan, remaining row, ambiguous identity, or timeout must not authorize the local deletion.
 
 Privacy and diagnostics: diagnostics deliberately omit source titles/content. Export, storage, recovery, and history include organization metadata and titles, so users should treat exported JSON and local extension storage as private.
 

@@ -13,7 +13,8 @@ function createDeps(overrides = {}) {
         getMessage: jest.fn((key) => key),
         closeSourceActionMenu: jest.fn(),
         render: jest.fn(),
-        runSaveAfterUndo: jest.fn(),
+        runSaveAfterHistory: jest.fn(async () => ({ ok: true })),
+        onHistoryStateChange: jest.fn(),
         ...overrides
     };
 }
@@ -34,156 +35,281 @@ describe('content undo history helper', () => {
         expect(deps.cloneSerializableData).toHaveBeenCalled();
     });
 
-    it('clones the explicit baseline so external mutation does not leak in', () => {
-        const deps = createDeps();
-        const helper = createContentUndoHistory(deps);
-        const external = { items: ['a'] };
-
-        helper.setUndoBaselineSnapshot(external);
-        external.items.push('b');
-
-        const cloneCalls = deps.cloneSerializableData.mock.calls;
-        expect(cloneCalls[0][0]).toBe(external);
-        expect(cloneCalls[0][0].items.length).toBeGreaterThanOrEqual(1);
-    });
-
     it('returns an empty signature when JSON.stringify throws', () => {
-        const deps = createDeps();
-        const helper = createContentUndoHistory(deps);
+        const helper = createContentUndoHistory(createDeps());
         const cyclic = {};
         cyclic.self = cyclic;
 
         expect(helper.getUndoSnapshotSignature(cyclic)).toBe('');
     });
 
-    it('pushes the previous baseline onto the undo stack when the signature changes', () => {
-        const deps = createDeps();
-        const helper = createContentUndoHistory(deps);
-        helper.setUndoBaselineSnapshot({ rev: 1 });
-
-        helper.recordUndoBaselineForSave({ rev: 2 });
-
-        expect(helper.getUndoStackLength()).toBe(1);
-    });
-
-    it('does not push when recordUndo is explicitly false', () => {
-        const deps = createDeps();
-        const helper = createContentUndoHistory(deps);
-        helper.setUndoBaselineSnapshot({ rev: 1 });
-
-        helper.recordUndoBaselineForSave({ rev: 2 }, { recordUndo: false });
-
-        expect(helper.getUndoStackLength()).toBe(0);
-    });
-
-    it('does not push when the next snapshot has the same signature', () => {
-        const deps = createDeps();
-        const helper = createContentUndoHistory(deps);
-        helper.setUndoBaselineSnapshot({ rev: 1 });
-
-        helper.recordUndoBaselineForSave({ rev: 1 });
-
-        expect(helper.getUndoStackLength()).toBe(0);
-    });
-
-    it('trims the stack to the configured limit when pushes exceed it', () => {
-        const deps = createDeps();
-        const helper = createContentUndoHistory({ ...deps, stackLimit: 3 });
+    it('records changed normal saves, ignores excluded or identical saves, and stays bounded', () => {
+        const helper = createContentUndoHistory({ ...createDeps(), stackLimit: 3 });
         helper.setUndoBaselineSnapshot({ rev: 0 });
 
-        for (let i = 1; i <= 5; i += 1) {
-            helper.recordUndoBaselineForSave({ rev: i });
+        helper.recordUndoBaselineForSave({ rev: 0 });
+        helper.recordUndoBaselineForSave({ rev: 1 }, { recordUndo: false });
+        expect(helper.getUndoStackLength()).toBe(0);
+
+        for (let rev = 2; rev <= 6; rev += 1) {
+            helper.recordUndoBaselineForSave({ rev });
         }
 
         expect(helper.getUndoStackLength()).toBe(3);
+        expect(helper.getUndoStack().map((snapshot) => snapshot.rev)).toEqual([3, 4, 5]);
     });
 
-    it('resetUndoHistoryBaseline empties the stack and re-baselines', () => {
-        const deps = createDeps();
+    it('clears redo when a divergent normal save is recorded', async () => {
+        let runtimeSnapshot = { rev: 2 };
+        const deps = createDeps({
+            buildPersistableState: jest.fn(() => runtimeSnapshot),
+            applyPersistableSnapshotToRuntime: jest.fn((snapshot) => {
+                runtimeSnapshot = passThroughClone(snapshot);
+                return true;
+            })
+        });
         const helper = createContentUndoHistory(deps);
         helper.setUndoBaselineSnapshot({ rev: 1 });
         helper.recordUndoBaselineForSave({ rev: 2 });
-        helper.recordUndoBaselineForSave({ rev: 3 });
-        expect(helper.getUndoStackLength()).toBe(2);
+
+        await expect(helper.undoLastOperation()).resolves.toBe(true);
+        expect(helper.getRedoStackLength()).toBe(1);
+
+        runtimeSnapshot = { rev: 3 };
+        helper.recordUndoBaselineForSave(runtimeSnapshot);
+
+        expect(helper.getUndoStackLength()).toBe(1);
+        expect(helper.getRedoStackLength()).toBe(0);
+    });
+
+    it('resetUndoHistoryBaseline clears both stacks and re-baselines', async () => {
+        let runtimeSnapshot = { rev: 2 };
+        const deps = createDeps({
+            buildPersistableState: jest.fn(() => runtimeSnapshot),
+            applyPersistableSnapshotToRuntime: jest.fn((snapshot) => {
+                runtimeSnapshot = passThroughClone(snapshot);
+                return true;
+            })
+        });
+        const helper = createContentUndoHistory(deps);
+        helper.setUndoBaselineSnapshot({ rev: 1 });
+        helper.recordUndoBaselineForSave({ rev: 2 });
+        await helper.undoLastOperation();
+        expect(helper.getRedoStackLength()).toBe(1);
 
         helper.resetUndoHistoryBaseline({ rev: 99 });
 
         expect(helper.getUndoStackLength()).toBe(0);
+        expect(helper.getRedoStackLength()).toBe(0);
     });
 
-    it('undoLastOperation shows an info toast and returns false when the stack is empty', () => {
+    it.each([
+        ['undo', 'undoLastOperation', 'ui_undo_empty'],
+        ['redo', 'redoLastOperation', 'ui_redo_empty']
+    ])('%s reports an empty stack without applying runtime state', async (_action, method, messageKey) => {
         const deps = createDeps();
         const helper = createContentUndoHistory(deps);
 
-        const result = helper.undoLastOperation();
+        await expect(helper[method]()).resolves.toBe(false);
 
-        expect(result).toBe(false);
-        expect(deps.showToast).toHaveBeenCalledWith('ui_undo_empty', { variant: 'info' });
+        expect(deps.showToast).toHaveBeenCalledWith(messageKey, { variant: 'info' });
         expect(deps.applyPersistableSnapshotToRuntime).not.toHaveBeenCalled();
     });
 
-    it('undoLastOperation applies the popped snapshot, renders, saves, re-baselines and toasts', () => {
-        const deps = createDeps();
-        const helper = createContentUndoHistory(deps);
-        helper.setUndoBaselineSnapshot({ rev: 1 });
-        helper.recordUndoBaselineForSave({ rev: 2 });
-
-        const result = helper.undoLastOperation();
-
-        expect(result).toBe(true);
-        expect(deps.applyPersistableSnapshotToRuntime).toHaveBeenCalledTimes(1);
-        expect(deps.closeSourceActionMenu).toHaveBeenCalledTimes(1);
-        expect(deps.render).toHaveBeenCalledTimes(1);
-        expect(deps.runSaveAfterUndo).toHaveBeenCalledWith({ immediate: true, critical: true, recordUndo: false });
-        expect(deps.showToast).toHaveBeenCalledWith('ui_undo_toast', { variant: 'success' });
-        expect(helper.getUndoStackLength()).toBe(0);
-    });
-
-    it('undoLastOperation returns false with info toast when apply rejects the snapshot', () => {
-        const deps = createDeps({ applyPersistableSnapshotToRuntime: jest.fn(() => false) });
-        const helper = createContentUndoHistory(deps);
-        helper.setUndoBaselineSnapshot({ rev: 1 });
-        helper.recordUndoBaselineForSave({ rev: 2 });
-
-        const result = helper.undoLastOperation();
-
-        expect(result).toBe(false);
-        expect(deps.showToast).toHaveBeenLastCalledWith('ui_undo_empty', { variant: 'info' });
-        expect(deps.render).not.toHaveBeenCalled();
-    });
-
-    it('records isApplyingUndo as true while an undo is in flight and clears it afterwards', () => {
-        let snapshotDuringApply;
+    it('commits undo and redo only after critical save acknowledgements', async () => {
+        let runtimeSnapshot = { rev: 2 };
+        let resolveSave;
+        const firstSave = new Promise((resolve) => {
+            resolveSave = resolve;
+        });
         const deps = createDeps({
-            applyPersistableSnapshotToRuntime: jest.fn(() => {
-                snapshotDuringApply = helperRef.isApplyingUndo();
+            buildPersistableState: jest.fn(() => runtimeSnapshot),
+            applyPersistableSnapshotToRuntime: jest.fn((snapshot) => {
+                runtimeSnapshot = passThroughClone(snapshot);
+                return true;
+            }),
+            runSaveAfterHistory: jest.fn()
+                .mockReturnValueOnce(firstSave)
+                .mockResolvedValueOnce({ ok: true })
+        });
+        const helper = createContentUndoHistory(deps);
+        helper.setUndoBaselineSnapshot({ rev: 1 });
+        helper.recordUndoBaselineForSave({ rev: 2 });
+
+        const undoPromise = helper.undoLastOperation();
+        expect(runtimeSnapshot).toEqual({ rev: 1 });
+        expect(helper.getUndoStackLength()).toBe(1);
+        expect(helper.getRedoStackLength()).toBe(0);
+        expect(helper.isApplyingHistory()).toBe(true);
+        expect(deps.runSaveAfterHistory).toHaveBeenCalledWith({
+            immediate: true,
+            critical: true,
+            recordUndo: false
+        });
+
+        resolveSave({ ok: true });
+        await expect(undoPromise).resolves.toBe(true);
+
+        expect(helper.getUndoStackLength()).toBe(0);
+        expect(helper.getRedoStackLength()).toBe(1);
+        expect(helper.isApplyingHistory()).toBe(false);
+        expect(deps.showToast).toHaveBeenCalledWith('ui_undo_toast', { variant: 'success' });
+
+        await expect(helper.redoLastOperation()).resolves.toBe(true);
+
+        expect(runtimeSnapshot).toEqual({ rev: 2 });
+        expect(helper.getUndoStackLength()).toBe(1);
+        expect(helper.getRedoStackLength()).toBe(0);
+        expect(deps.showToast).toHaveBeenCalledWith('ui_redo_toast', { variant: 'success' });
+    });
+
+    it('rolls runtime back and preserves both stacks when the critical save is rejected', async () => {
+        let runtimeSnapshot = { rev: 2 };
+        const deps = createDeps({
+            buildPersistableState: jest.fn(() => runtimeSnapshot),
+            applyPersistableSnapshotToRuntime: jest.fn((snapshot) => {
+                runtimeSnapshot = passThroughClone(snapshot);
+                return true;
+            }),
+            runSaveAfterHistory: jest.fn(async () => ({ ok: false, reason: 'save_failed' }))
+        });
+        const helper = createContentUndoHistory(deps);
+        helper.setUndoBaselineSnapshot({ rev: 1 });
+        helper.recordUndoBaselineForSave({ rev: 2 });
+
+        await expect(helper.undoLastOperation()).resolves.toBe(false);
+
+        expect(runtimeSnapshot).toEqual({ rev: 2 });
+        expect(deps.applyPersistableSnapshotToRuntime.mock.calls.map(([snapshot]) => snapshot.rev)).toEqual([1, 2]);
+        expect(deps.render).toHaveBeenCalledTimes(2);
+        expect(helper.getUndoStackLength()).toBe(1);
+        expect(helper.getRedoStackLength()).toBe(0);
+        expect(deps.showToast).toHaveBeenLastCalledWith('ui_undo_failed', { variant: 'error' });
+    });
+
+    it('preserves populated undo and redo stacks when a redo save is rejected', async () => {
+        let runtimeSnapshot = { rev: 3 };
+        const deps = createDeps({
+            buildPersistableState: jest.fn(() => runtimeSnapshot),
+            applyPersistableSnapshotToRuntime: jest.fn((snapshot) => {
+                runtimeSnapshot = passThroughClone(snapshot);
+                return true;
+            }),
+            runSaveAfterHistory: jest.fn()
+                .mockResolvedValueOnce({ ok: true })
+                .mockResolvedValueOnce({ ok: false, reason: 'save_failed' })
+        });
+        const helper = createContentUndoHistory(deps);
+        helper.setUndoBaselineSnapshot({ rev: 1 });
+        helper.recordUndoBaselineForSave({ rev: 2 });
+        helper.recordUndoBaselineForSave({ rev: 3 });
+        await helper.undoLastOperation();
+        expect(helper.getUndoStack().map((snapshot) => snapshot.rev)).toEqual([1]);
+        expect(helper.getRedoStack().map((snapshot) => snapshot.rev)).toEqual([3]);
+
+        await expect(helper.redoLastOperation()).resolves.toBe(false);
+
+        expect(runtimeSnapshot).toEqual({ rev: 2 });
+        expect(helper.getUndoStack().map((snapshot) => snapshot.rev)).toEqual([1]);
+        expect(helper.getRedoStack().map((snapshot) => snapshot.rev)).toEqual([3]);
+        expect(deps.showToast).toHaveBeenLastCalledWith('ui_redo_failed', { variant: 'error' });
+    });
+
+    it('rolls runtime back and preserves history when saving throws', async () => {
+        let runtimeSnapshot = { rev: 2 };
+        const deps = createDeps({
+            buildPersistableState: jest.fn(() => runtimeSnapshot),
+            applyPersistableSnapshotToRuntime: jest.fn((snapshot) => {
+                runtimeSnapshot = passThroughClone(snapshot);
+                return true;
+            }),
+            runSaveAfterHistory: jest.fn(async () => {
+                throw new Error('context invalidated');
+            })
+        });
+        const helper = createContentUndoHistory(deps);
+        helper.setUndoBaselineSnapshot({ rev: 1 });
+        helper.recordUndoBaselineForSave({ rev: 2 });
+
+        await expect(helper.undoLastOperation()).resolves.toBe(false);
+
+        expect(runtimeSnapshot).toEqual({ rev: 2 });
+        expect(helper.getUndoStackLength()).toBe(1);
+        expect(helper.getRedoStackLength()).toBe(0);
+    });
+
+    it('rolls back a rejected runtime apply without attempting persistence', async () => {
+        const deps = createDeps({
+            buildPersistableState: jest.fn(() => ({ rev: 2 })),
+            applyPersistableSnapshotToRuntime: jest.fn()
+                .mockReturnValueOnce(false)
+                .mockReturnValueOnce(true)
+        });
+        const helper = createContentUndoHistory(deps);
+        helper.setUndoBaselineSnapshot({ rev: 1 });
+        helper.recordUndoBaselineForSave({ rev: 2 });
+
+        await expect(helper.undoLastOperation()).resolves.toBe(false);
+
+        expect(deps.runSaveAfterHistory).not.toHaveBeenCalled();
+        expect(deps.applyPersistableSnapshotToRuntime).toHaveBeenCalledTimes(2);
+        expect(helper.getUndoStackLength()).toBe(1);
+        expect(helper.getRedoStackLength()).toBe(0);
+    });
+
+    it('blocks overlapping history operations and publishes disabled-state transitions', async () => {
+        let resolveSave;
+        const savePromise = new Promise((resolve) => {
+            resolveSave = resolve;
+        });
+        const deps = createDeps({
+            buildPersistableState: jest.fn(() => ({ rev: 2 })),
+            runSaveAfterHistory: jest.fn(() => savePromise)
+        });
+        const helper = createContentUndoHistory(deps);
+        helper.setUndoBaselineSnapshot({ rev: 1 });
+        helper.recordUndoBaselineForSave({ rev: 2 });
+
+        const firstUndo = helper.undoLastOperation();
+        await expect(helper.undoLastOperation()).resolves.toBe(false);
+
+        expect(deps.onHistoryStateChange).toHaveBeenCalledWith(expect.objectContaining({
+            canUndo: false,
+            canRedo: false,
+            isApplying: true,
+            action: 'undo'
+        }));
+
+        resolveSave({ ok: true });
+        await firstUndo;
+
+        expect(deps.onHistoryStateChange).toHaveBeenLastCalledWith(expect.objectContaining({
+            canUndo: false,
+            canRedo: true,
+            isApplying: false
+        }));
+    });
+
+    it('keeps the redo destination bounded while undoing repeatedly', async () => {
+        let runtimeSnapshot = { rev: 5 };
+        const deps = createDeps({
+            buildPersistableState: jest.fn(() => runtimeSnapshot),
+            applyPersistableSnapshotToRuntime: jest.fn((snapshot) => {
+                runtimeSnapshot = passThroughClone(snapshot);
                 return true;
             })
         });
-        const helperRef = createContentUndoHistory(deps);
-        helperRef.setUndoBaselineSnapshot({ rev: 1 });
-        helperRef.recordUndoBaselineForSave({ rev: 2 });
+        const helper = createContentUndoHistory({ ...deps, stackLimit: 3 });
+        helper.setUndoBaselineSnapshot({ rev: 0 });
+        for (let rev = 1; rev <= 5; rev += 1) {
+            helper.recordUndoBaselineForSave({ rev });
+        }
 
-        helperRef.undoLastOperation();
+        await helper.undoLastOperation();
+        await helper.undoLastOperation();
+        await helper.undoLastOperation();
 
-        expect(snapshotDuringApply).toBe(true);
-        expect(helperRef.isApplyingUndo()).toBe(false);
-    });
-
-    it('does not push to the undo stack when recordUndoBaselineForSave runs during an undo apply', () => {
-        let helperRef;
-        const deps = createDeps({
-            applyPersistableSnapshotToRuntime: jest.fn(() => true),
-            runSaveAfterUndo: jest.fn(() => {
-                helperRef.recordUndoBaselineForSave({ rev: 999 });
-            })
-        });
-        helperRef = createContentUndoHistory(deps);
-        helperRef.setUndoBaselineSnapshot({ rev: 1 });
-        helperRef.recordUndoBaselineForSave({ rev: 2 });
-
-        helperRef.undoLastOperation();
-
-        expect(helperRef.getUndoStackLength()).toBe(0);
+        expect(helper.getRedoStackLength()).toBe(3);
+        expect(helper.getRedoStack().map((snapshot) => snapshot.rev)).toEqual([5, 4, 3]);
     });
 });

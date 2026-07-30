@@ -39,6 +39,7 @@
             in: 'ui_tree_order_moved_in_status',
             out: 'ui_tree_order_moved_out_status'
         };
+        const activeInitialRenameInputsByGroupId = new Map();
 
         const getState = typeof deps.getState === 'function'
             ? deps.getState
@@ -1027,6 +1028,7 @@
 
             const rootItems = [];
             const binItems = [];
+            const binItemsContainer = binElement?.querySelector?.('.ungrouped-list') || binElement;
             for (const element of elements) {
                 const sourceKey = element && element.dataset
                     ? element.dataset.sourceKey
@@ -1040,7 +1042,11 @@
                 if (!entry || entry.element !== element) continue;
                 if (entry.element.parentElement === rootElement) {
                     rootItems.push(entry);
-                } else if (sourceKey && binElement && entry.element.parentElement === binElement) {
+                } else if (
+                    sourceKey
+                    && binElement
+                    && entry.element.parentElement === binItemsContainer
+                ) {
                     entry.inBin = true;
                     binItems.push(entry);
                 } else if (entry.parentGroupId) {
@@ -1883,6 +1889,26 @@
             return candidate;
         }
 
+        function collectCollapsedAncestorGroupIds(parentGroupId) {
+            const groupsById = getGroupsById();
+            const parentMap = getParentMap();
+            const collapsedAncestorIds = [];
+            const seenGroupIds = new Set();
+            let currentGroupId = parentGroupId;
+            while (
+                currentGroupId
+                && groupsById.has(currentGroupId)
+                && !seenGroupIds.has(currentGroupId)
+            ) {
+                seenGroupIds.add(currentGroupId);
+                if (groupsById.get(currentGroupId)?.collapsed) {
+                    collapsedAncestorIds.push(currentGroupId);
+                }
+                currentGroupId = parentMap.get(currentGroupId) || null;
+            }
+            return collapsedAncestorIds;
+        }
+
         function handleAddNewGroup(parentGroupId = null) {
             const state = getState();
             const groupsById = getGroupsById();
@@ -1902,7 +1928,14 @@
                 children: [],
                 enabled: true,
                 collapsed: false,
-                isNewlyCreated: true
+                isNewlyCreated: true,
+                isPendingInitialRename: true,
+                pendingInitialRenameDraft: '',
+                pendingInitialRenameFocusReturnSelector: parentGroupId
+                    ? `.group-container[data-group-id="${cssEscape(parentGroupId)}"] .sp-add-subgroup-button`
+                    : '#sp-new-group-btn',
+                pendingInitialRenameCollapsedAncestorIds:
+                    collectCollapsedAncestorGroupIds(parentGroupId)
             };
 
             const target = parentGroupId
@@ -1923,7 +1956,24 @@
 
             rebuildPlacementParentMap();
             render();
-            saveState({ immediate: true, critical: true });
+            const shadowRoot = getShadowRoot();
+            const groupContainer = shadowRoot?.querySelector?.(
+                `.group-container[data-group-id="${cssEscape(newGroup.id)}"]`
+            );
+            const renameStarted = Boolean(groupContainer && triggerRename(groupContainer, {
+                    isNewlyCreated: true,
+                    focusReturnSelector: newGroup.pendingInitialRenameFocusReturnSelector
+                }));
+            if (!renameStarted) {
+                const rollback = treePlacement.removeGroup?.({
+                    item: { kind: 'group', id: newGroup.id }
+                });
+                if (rollback?.changed) {
+                    rebuildPlacementParentMap();
+                }
+                render();
+                return false;
+            }
             return true;
         }
 
@@ -2044,7 +2094,36 @@
         }
 
         function isBatchOperableSource(source) {
-            return Boolean(source && !source.isDisabled && !source.isLoading);
+            return Boolean(
+                source
+                && !source.isDisabled
+                && !source.isFailed
+                && !source.isLoading
+                && source.hasNativeCheckbox !== false
+            );
+        }
+
+        function isBatchSelectionElementVisible(element) {
+            let current = element;
+            while (current) {
+                const ariaHidden = current.getAttribute?.('aria-hidden');
+                const hasHiddenAttribute = current.hasAttribute?.('hidden') === true
+                    || current.getAttribute?.('hidden') != null;
+                const hasInertAttribute = current.hasAttribute?.('inert') === true
+                    || current.getAttribute?.('inert') != null;
+                if (
+                    current.hidden === true
+                    || current.inert === true
+                    || ariaHidden === 'true'
+                    || hasHiddenAttribute
+                    || hasInertAttribute
+                    || current.classList?.contains?.('collapsed')
+                ) {
+                    return false;
+                }
+                current = current.parentElement || current.parentNode || null;
+            }
+            return true;
         }
 
         function collectSourceKeysInTreeOrder() {
@@ -2343,6 +2422,11 @@
 
             if (group.collapsed) {
                 caret.classList.add('collapsed');
+                caret.setAttribute?.('aria-expanded', 'false');
+                caret.setAttribute?.('aria-label', getMessage('ui_expand_group_named', [group.title || getMessage('ui_group_untitled')]));
+                childrenContainer.setAttribute?.('aria-hidden', 'true');
+                childrenContainer.setAttribute?.('inert', '');
+                childrenContainer.inert = true;
                 childrenContainer.style.overflow = 'hidden';
                 childrenContainer.style.height = `${childrenContainer.scrollHeight}px`;
                 childrenContainer.offsetHeight;
@@ -2350,6 +2434,11 @@
                 childrenContainer.classList.add('collapsed');
             } else {
                 caret.classList.remove('collapsed');
+                caret.setAttribute?.('aria-expanded', 'true');
+                caret.setAttribute?.('aria-label', getMessage('ui_collapse_group_named', [group.title || getMessage('ui_group_untitled')]));
+                childrenContainer.setAttribute?.('aria-hidden', 'false');
+                childrenContainer.removeAttribute?.('inert');
+                childrenContainer.inert = false;
                 childrenContainer.style.overflow = 'hidden';
                 childrenContainer.style.height = '0px';
                 childrenContainer.classList.remove('collapsed');
@@ -2440,6 +2529,36 @@
                 return;
             }
 
+            if (target.closest('.sp-empty-clear-search-btn')) {
+                state.filterQuery = '';
+                render();
+                getShadowRoot()?.getElementById?.('sp-search')?.focus?.();
+                return;
+            }
+
+            if (target.closest('.sp-empty-clear-filters-btn')) {
+                const oldStates = isolationGroupId ? collectEffectiveSourceStates() : null;
+                state.filterQuery = '';
+                state.activeTagId = null;
+                state.activeQuickViewKind = null;
+                setActiveIsolationGroupId(null);
+                if (oldStates) {
+                    syncSourcesToEffectiveState(oldStates);
+                }
+                render();
+                getShadowRoot()?.getElementById?.('sp-search')?.focus?.();
+                return;
+            }
+
+            if (target.closest('.sp-empty-clear-isolation-btn')) {
+                const oldStates = collectEffectiveSourceStates();
+                setActiveIsolationGroupId(null);
+                syncSourcesToEffectiveState(oldStates);
+                render();
+                getShadowRoot()?.getElementById?.('sp-search')?.focus?.();
+                return;
+            }
+
             if (target.closest('#sp-import-native-labels-btn')) {
                 Promise.resolve(applyNativeLabelImportFromUi()).catch((error) => {
                     console.error('GeminiNotebook-Source-Management: Failed to prepare native label import preview.', error);
@@ -2486,7 +2605,7 @@
                 const batchSourceKey = batchCheckbox.dataset.sourceKey;
                 const source = batchSourceKey ? sourcesByKey.get(batchSourceKey) : null;
 
-                if (!source || source.isDisabled || source.isLoading) {
+                if (!isBatchOperableSource(source)) {
                     if (batchSourceKey) {
                         pendingBatchKeys.delete(batchSourceKey);
                     }
@@ -2530,12 +2649,12 @@
             if (sourceRow && !target.closest('.sp-source-actions-anchor, .sp-source-actions-menu, .sp-tag-pill, input, .sp-batch-checkbox')) {
                 const source = sourcesByKey.get(sourceKey);
 
-                if (!source || source.isDisabled) {
+                if (!source) {
                     return;
                 }
 
                 if (state.isBatchMode) {
-                    if (source.isLoading) {
+                    if (!isBatchOperableSource(source)) {
                         return;
                     }
 
@@ -2545,6 +2664,10 @@
                         pendingBatchKeys.add(sourceKey);
                     }
                     render();
+                    return;
+                }
+
+                if (source.isDisabled) {
                     return;
                 }
 
@@ -2572,6 +2695,31 @@
 
             if (target.closest('.sp-cancel-batch-btn')) {
                 state.isBatchMode = false;
+                pendingBatchKeys.clear();
+                render();
+                return;
+            }
+
+            if (target.closest('.sp-batch-select-visible-btn') && !getIsDeletingSources()) {
+                const shadowRoot = getShadowRoot();
+                const visibleCheckboxes = Array.from(
+                    shadowRoot?.querySelectorAll?.('.source-item .sp-batch-checkbox:not(:disabled)') || []
+                );
+                visibleCheckboxes.forEach((checkbox) => {
+                    const sourceKey = checkbox?.dataset?.sourceKey;
+                    if (
+                        sourceKey
+                        && isBatchOperableSource(sourcesByKey.get(sourceKey))
+                        && isBatchSelectionElementVisible(checkbox)
+                    ) {
+                        pendingBatchKeys.add(sourceKey);
+                    }
+                });
+                render();
+                return;
+            }
+
+            if (target.closest('.sp-batch-clear-selection-btn') && !getIsDeletingSources()) {
                 pendingBatchKeys.clear();
                 render();
                 return;
@@ -2693,31 +2841,137 @@
             }
         }
 
-        function triggerRename(groupContainer) {
+        function triggerRename(groupContainer, options = {}) {
             const documentObj = getDocument();
             const groupsById = getGroupsById();
             const groupId = groupContainer.dataset.groupId;
             const group = groupsById.get(groupId);
-            if (!group || !documentObj?.createElement) return;
+            if (!group || !documentObj?.createElement) return false;
 
             const titleSpan = groupContainer.querySelector('.group-title');
+            if (!titleSpan || typeof titleSpan.replaceChildren !== 'function') return false;
             const originalTitle = group.title;
+            const isNewlyCreated = Boolean(
+                options.isNewlyCreated
+                || group.isPendingInitialRename
+                || group.isNewlyCreated
+            );
+            const existingInput = titleSpan.querySelector?.('.sp-inline-group-name-input');
+            if (existingInput) {
+                if (isNewlyCreated) {
+                    activeInitialRenameInputsByGroupId.set(groupId, existingInput);
+                }
+                return true;
+            }
+            if (isNewlyCreated) {
+                group.isPendingInitialRename = true;
+                if (typeof group.pendingInitialRenameDraft !== 'string') {
+                    group.pendingInitialRenameDraft = '';
+                }
+                if (options.focusReturnSelector) {
+                    group.pendingInitialRenameFocusReturnSelector = options.focusReturnSelector;
+                }
+            }
             const input = documentObj.createElement('input');
             input.type = 'text';
-            input.value = originalTitle;
+            input.className = 'sp-inline-group-name-input';
+            input.maxLength = 120;
+            input.value = isNewlyCreated ? group.pendingInitialRenameDraft : originalTitle;
+            input.placeholder = isNewlyCreated ? originalTitle : '';
+            input.setAttribute?.('aria-label', getMessage('ui_group_name_input', [originalTitle]));
             titleSpan.replaceChildren(input);
-            input.focus();
-            input.select();
+            if (isNewlyCreated) {
+                activeInitialRenameInputsByGroupId.set(groupId, input);
+            }
+            input.focus?.();
+            input.select?.();
 
-            const cleanup = () => {
-                input.removeEventListener('blur', handleSave);
-                input.removeEventListener('keydown', handleKey);
+            let settled = false;
+            const restoreFocus = (selector) => {
+                if (!selector) return;
+                const focusTarget = getShadowRoot()?.querySelector?.(selector);
+                focusTarget?.focus?.();
+            };
+            const cleanup = (focusSelector) => {
+                if (settled) return false;
+                settled = true;
+                input.removeEventListener?.('blur', handleSave);
+                input.removeEventListener?.('keydown', handleKey);
+                input.removeEventListener?.('input', handleInput);
+                if (activeInitialRenameInputsByGroupId.get(groupId) === input) {
+                    activeInitialRenameInputsByGroupId.delete(groupId);
+                }
                 render();
+                const setTimeoutFn = getSetTimeout();
+                if (typeof setTimeoutFn === 'function') {
+                    setTimeoutFn(() => restoreFocus(focusSelector), 0);
+                } else {
+                    restoreFocus(focusSelector);
+                }
+                return true;
+            };
+            const cancelNewGroup = () => {
+                const result = treePlacement?.removeGroup?.({
+                    item: { kind: 'group', id: groupId }
+                });
+                if (result?.changed) {
+                    rebuildPlacementParentMap();
+                }
+                cleanup(options.focusReturnSelector || '#sp-new-group-btn');
             };
             const handleSave = () => {
+                if (settled) return;
+                if (
+                    isNewlyCreated
+                    && activeInitialRenameInputsByGroupId.get(groupId) !== input
+                ) {
+                    return;
+                }
+                if (isNewlyCreated && group.isPendingInitialRenameRender) return;
                 const newTitle = input.value.trim();
-                if (newTitle) group.title = newTitle;
-                cleanup();
+                if (!newTitle && isNewlyCreated) {
+                    cancelNewGroup();
+                    return;
+                }
+                if (newTitle) {
+                    group.title = newTitle;
+                }
+                if (isNewlyCreated) {
+                    const isolatedGroupId = getActiveIsolationGroupId();
+                    const oldStates = isolatedGroupId
+                        ? collectEffectiveSourceStates()
+                        : null;
+                    const state = getState();
+                    state.filterQuery = '';
+                    state.activeTagId = null;
+                    state.activeQuickViewKind = null;
+                    setActiveIsolationGroupId(null);
+                    if (oldStates) {
+                        syncSourcesToEffectiveState(oldStates);
+                    }
+                    const collapsedAncestorIds = Array.isArray(
+                        group.pendingInitialRenameCollapsedAncestorIds
+                    )
+                        ? group.pendingInitialRenameCollapsedAncestorIds
+                        : [];
+                    collapsedAncestorIds.forEach((ancestorGroupId) => {
+                        const ancestorGroup = groupsById.get(ancestorGroupId);
+                        if (ancestorGroup) {
+                            ancestorGroup.collapsed = false;
+                        }
+                    });
+                }
+                group.isNewlyCreated = false;
+                delete group.isPendingInitialRename;
+                delete group.pendingInitialRenameDraft;
+                delete group.pendingInitialRenameFocusReturnSelector;
+                delete group.pendingInitialRenameCollapsedAncestorIds;
+                delete group.isPendingInitialRenameRender;
+                const changed = group.title !== originalTitle || isNewlyCreated;
+                cleanup(
+                    `.group-container[data-group-id="${cssEscape(groupId)}"] .sp-edit-button`
+                );
+                if (!changed) return;
                 saveState({ immediate: true, critical: true });
             };
             const handleKey = (e) => {
@@ -2726,13 +2980,61 @@
                     handleSave();
                 } else if (e.key === 'Escape') {
                     e.preventDefault();
-                    group.title = originalTitle;
-                    cleanup();
+                    if (isNewlyCreated) {
+                        cancelNewGroup();
+                    } else {
+                        group.title = originalTitle;
+                        cleanup(
+                            `.group-container[data-group-id="${cssEscape(groupId)}"] .sp-edit-button`
+                        );
+                    }
+                }
+            };
+            const handleInput = () => {
+                if (isNewlyCreated && group.isPendingInitialRename) {
+                    group.pendingInitialRenameDraft = input.value;
                 }
             };
 
             input.addEventListener('blur', handleSave);
             input.addEventListener('keydown', handleKey);
+            input.addEventListener('input', handleInput);
+            return true;
+        }
+
+        function preparePendingInitialRenamesForRender() {
+            const shadowRoot = getShadowRoot();
+            getGroupsById().forEach((group, groupId) => {
+                if (!group?.isPendingInitialRename) return;
+                const selector = `.group-container[data-group-id="${cssEscape(groupId)}"]`;
+                const input = shadowRoot?.querySelector?.(selector)
+                    ?.querySelector?.('.sp-inline-group-name-input');
+                if (input && typeof input.value === 'string') {
+                    group.pendingInitialRenameDraft = input.value;
+                }
+                group.isPendingInitialRenameRender = true;
+            });
+        }
+
+        function restorePendingInitialRenamesAfterRender() {
+            const shadowRoot = getShadowRoot();
+            let restoredCount = 0;
+            getGroupsById().forEach((group, groupId) => {
+                if (!group?.isPendingInitialRename) return;
+                const groupContainer = shadowRoot?.querySelector?.(
+                    `.group-container[data-group-id="${cssEscape(groupId)}"]`
+                );
+                const restored = Boolean(groupContainer && triggerRename(groupContainer, {
+                    isNewlyCreated: true,
+                    focusReturnSelector: group.pendingInitialRenameFocusReturnSelector
+                }));
+                delete group.isPendingInitialRenameRender;
+                if (!restored) {
+                    activeInitialRenameInputsByGroupId.delete(groupId);
+                }
+                if (restored) restoredCount += 1;
+            });
+            return restoredCount;
         }
 
         function handleDragStart(e) {
@@ -5451,6 +5753,8 @@
             handleInteraction,
             handleOriginalCheckboxChange,
             triggerRename,
+            preparePendingInitialRenamesForRender,
+            restorePendingInitialRenamesAfterRender,
             handleDragStart,
             handleDragOver,
             handleDragLeave,

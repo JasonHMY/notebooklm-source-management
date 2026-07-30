@@ -101,13 +101,16 @@
             if (!normalizedColor) return '';
 
             return [
-                `--sp-tag-text:${normalizedColor}`,
+                '--sp-tag-text:#1A1A1C',
+                '--sp-tag-dark-text:#F5F5F7',
                 `--sp-tag-border:${getTagColorRgba(normalizedColor, isActive ? 0.38 : 0.22)}`,
                 `--sp-tag-bg:${getTagColorRgba(normalizedColor, isActive ? 0.18 : 0.1)}`,
-                `--sp-tag-hover-text:${normalizedColor}`,
+                '--sp-tag-hover-text:#1A1A1C',
+                '--sp-tag-dark-hover-text:#F5F5F7',
                 `--sp-tag-hover-border:${getTagColorRgba(normalizedColor, isActive ? 0.42 : 0.32)}`,
                 `--sp-tag-hover-bg:${getTagColorRgba(normalizedColor, isActive ? 0.22 : 0.16)}`,
-                `--sp-tag-active-text:${normalizedColor}`,
+                '--sp-tag-active-text:#1A1A1C',
+                '--sp-tag-dark-active-text:#F5F5F7',
                 `--sp-tag-active-border:${getTagColorRgba(normalizedColor, 0.42)}`,
                 `--sp-tag-active-bg:${getTagColorRgba(normalizedColor, 0.2)}`
             ].join(';');

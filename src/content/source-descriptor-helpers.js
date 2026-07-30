@@ -19,8 +19,13 @@
     const MAX_FALLBACK_ICON_CANDIDATES = 18;
     const MAX_QUERY_RESULTS_PER_SELECTOR = 12;
     const MAX_SAFE_DATA_IMAGE_URL_LENGTH = 32 * 1024;
-    const NOTEBOOKLM_IMAGE_ORIGIN = 'https://notebooklm.google.com';
+    const NOTEBOOKLM_IMAGE_ORIGIN = 'https://notebook.google.com';
+    const NOTEBOOKLM_IMAGE_ORIGINS = new Set([
+        NOTEBOOKLM_IMAGE_ORIGIN,
+        'https://notebooklm.google.com'
+    ]);
     const TRUSTED_IMAGE_HOSTS = new Set([
+        'notebook.google.com',
         'notebooklm.google.com',
         'gstatic.com',
         'googleusercontent.com',
@@ -511,7 +516,7 @@
         if (!String(value || '').toLowerCase().startsWith('blob:')) return false;
         try {
             const blobInnerUrl = new URL(String(value).slice('blob:'.length));
-            return blobInnerUrl.origin === NOTEBOOKLM_IMAGE_ORIGIN;
+            return NOTEBOOKLM_IMAGE_ORIGINS.has(blobInnerUrl.origin);
         } catch (error) {
             return false;
         }

@@ -88,6 +88,10 @@ describe('popup motion styles', () => {
 });
 
 describe('popup launcher', () => {
+    const NOTEBOOK_URL_PATTERNS = [
+        'https://notebook.google.com/*',
+        'https://notebooklm.google.com/*'
+    ];
     let popup;
     let popupDocument;
     let activeTab;
@@ -134,7 +138,16 @@ describe('popup launcher', () => {
 
                     cb(notebookLmTabs);
                 }),
-                sendMessage: jest.fn((tabId, message, cb) => cb({ ready: true })),
+                sendMessage: jest.fn((tabId, message, cb) => {
+                    if (message.type === 'GET_MANAGER_STATUS') {
+                        cb({ ready: true });
+                        return;
+                    }
+                    cb({
+                        success: true,
+                        confirmedSourceViewKind: message.viewKind
+                    });
+                }),
                 reload: jest.fn((tabId, options, cb) => {
                     if (cb) cb();
                     tabUpdatedListeners.slice().forEach((listener) => {
@@ -186,9 +199,20 @@ describe('popup launcher', () => {
     });
 
     it('detects page context correctly', () => {
+        expect(popup.getPageContext('https://notebook.google.com/notebook/123')).toBe('notebook');
+        expect(popup.getPageContext('https://notebook.google.com/')).toBe('notebook-home');
         expect(popup.getPageContext('https://notebooklm.google.com/notebook/123')).toBe('notebook');
         expect(popup.getPageContext('https://notebooklm.google.com/')).toBe('notebook-home');
         expect(popup.getPageContext('https://example.com')).toBe('external');
+    });
+
+    it('queries tabs on both the current and legacy Notebook hosts', async () => {
+        await expect(popup.queryNotebookLmTabs()).resolves.toEqual(notebookLmTabs);
+
+        expect(global.chrome.tabs.query).toHaveBeenCalledWith(
+            { url: NOTEBOOK_URL_PATTERNS },
+            expect.any(Function)
+        );
     });
 
     it('builds launcher states for notebook, notebook-home, and external pages', () => {
@@ -272,6 +296,24 @@ describe('popup launcher', () => {
         expect(global.window.close).toHaveBeenCalled();
     });
 
+    it('keeps the popup open when a primary action lacks an explicit success acknowledgement', async () => {
+        global.chrome.tabs.sendMessage.mockImplementation((tabId, message, cb) => {
+            if (message.type === 'GET_MANAGER_STATUS') {
+                cb({ ready: true });
+                return;
+            }
+            cb({ acknowledged: true });
+        });
+
+        await popup.initializePopup(popupDocument);
+        await popupDocument.elements['popup-primary-btn'].onclick();
+
+        expect(global.window.close).not.toHaveBeenCalled();
+        expect(popupDocument.elements['popup-detail'].hidden).toBe(false);
+        expect(popupDocument.elements['popup-detail'].textContent).toBe('popup_reason_generic');
+        expect(popupDocument.elements['popup-primary-btn'].disabled).toBe(false);
+    });
+
     it('renders source view switcher and sends view switch messages to the notebook tab', async () => {
         await popup.initializePopup(popupDocument);
 
@@ -303,6 +345,26 @@ describe('popup launcher', () => {
         );
         expect(popupDocument.elements['popup-source-view-status'].textContent).toBe('popup_source_view_switched_list');
         expect(popupDocument.elements['popup-source-view-list-btn'].setAttribute).toHaveBeenLastCalledWith('aria-pressed', 'true');
+    });
+
+    it('does not confirm a source view switch without success true', async () => {
+        global.chrome.tabs.sendMessage.mockImplementation((tabId, message, cb) => {
+            if (message.type === 'GET_MANAGER_STATUS') {
+                cb({ ready: true, sourceViewKind: 'list' });
+                return;
+            }
+            cb({ confirmedSourceViewKind: 'label' });
+        });
+
+        await popup.initializePopup(popupDocument);
+        await popupDocument.elements['popup-source-view-label-btn'].onclick();
+
+        expect(popupDocument.elements['popup-detail'].hidden).toBe(false);
+        expect(popupDocument.elements['popup-detail'].textContent).toBe('popup_reason_generic');
+        expect(popupDocument.elements['popup-source-view-status'].textContent)
+            .not.toBe('popup_source_view_switched_label');
+        expect(popupDocument.elements['popup-source-view-label-btn'].setAttribute)
+            .toHaveBeenLastCalledWith('aria-pressed', 'false');
     });
 
     it('renders a disabled state without inspecting the notebook manager', async () => {
@@ -464,6 +526,29 @@ describe('popup launcher', () => {
         expect(popupDocument.elements['popup-toggle-state'].textContent).toBe('popup_toggle_state_disabled');
         expect(popupDocument.elements['popup-title'].textContent).toBe('popup_title_disabled');
         expect(global.chrome.tabs.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('rolls back the toggle when enablement lacks success true', async () => {
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message.type === 'GET_EXTENSION_ENABLED') {
+                cb({ success: true, enabled: true });
+                return;
+            }
+            if (message.type === 'SET_EXTENSION_ENABLED') {
+                cb({ enabled: message.enabled });
+                return;
+            }
+            cb({ success: true });
+        });
+
+        await popup.initializePopup(popupDocument);
+        popupDocument.elements['popup-toggle-input'].checked = false;
+        await popupDocument.elements['popup-toggle-input'].onchange();
+
+        expect(popupDocument.elements['popup-toggle-input'].checked).toBe(true);
+        expect(popupDocument.elements['popup-toggle-input'].disabled).toBe(false);
+        expect(popupDocument.elements['popup-detail'].hidden).toBe(false);
+        expect(popupDocument.elements['popup-detail'].textContent).toBe('popup_reason_generic');
     });
 
     it('does not reload the current NotebookLM home tab when soft toggling succeeds', async () => {

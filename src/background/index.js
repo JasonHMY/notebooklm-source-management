@@ -49,9 +49,15 @@ const {
     normalizeAppearancePreferences
 } = globalThis.NSM_PREFERENCE_NORMALIZERS;
 
-const NOTEBOOKLM_HOME_URL = 'https://notebooklm.google.com/';
-const NOTEBOOKLM_URL_PATTERN = 'https://notebooklm.google.com/*';
-const NOTEBOOKLM_NOTEBOOK_PREFIX = 'https://notebooklm.google.com/notebook/';
+const NOTEBOOKLM_HOME_URL = 'https://notebook.google.com/';
+const LEGACY_NOTEBOOKLM_HOME_URL = 'https://notebooklm.google.com/';
+const NOTEBOOKLM_HOME_URLS = [
+    NOTEBOOKLM_HOME_URL,
+    LEGACY_NOTEBOOKLM_HOME_URL
+];
+const NOTEBOOKLM_URL_PATTERNS = NOTEBOOKLM_HOME_URLS.map(homeUrl => `${homeUrl}*`);
+const NOTEBOOKLM_NOTEBOOK_PREFIX = `${NOTEBOOKLM_HOME_URL}notebook/`;
+const NOTEBOOKLM_NOTEBOOK_PREFIXES = NOTEBOOKLM_HOME_URLS.map(homeUrl => `${homeUrl}notebook/`);
 const CHROME_WEB_STORE_DETAIL_URL_PREFIX = 'https://chrome.google.com/webstore/detail/';
 const EXTENSION_ENABLED_KEY = 'extensionEnabled';
 const PREFERENCES_KEY = 'sourcesPlusPreferences';
@@ -184,18 +190,23 @@ function createStorageResponseFields(usageInfo = {}, extra = {}) {
     }, extra);
 }
 
+function getNotebookPrefixForUrl(url) {
+    if (typeof url !== 'string') return '';
+    return NOTEBOOKLM_NOTEBOOK_PREFIXES.find(prefix => url.startsWith(prefix)) || '';
+}
+
+function isNotebookTabUrl(url) {
+    return Boolean(getNotebookPrefixForUrl(url));
+}
+
 function isAuthorizedNotebookSender(sender) {
-    return Boolean(
-        sender &&
-        sender.tab &&
-        typeof sender.tab.url === 'string' &&
-        sender.tab.url.startsWith(NOTEBOOKLM_NOTEBOOK_PREFIX)
-    );
+    return Boolean(sender && sender.tab && isNotebookTabUrl(sender.tab.url));
 }
 
 function getNotebookProjectIdFromSenderUrl(url) {
-    if (typeof url !== 'string' || !url.startsWith(NOTEBOOKLM_NOTEBOOK_PREFIX)) return '';
-    return url.slice(NOTEBOOKLM_NOTEBOOK_PREFIX.length).split(/[/?#]/)[0] || '';
+    const notebookPrefix = getNotebookPrefixForUrl(url);
+    if (!notebookPrefix) return '';
+    return url.slice(notebookPrefix.length).split(/[/?#]/)[0] || '';
 }
 
 function senderOwnsExactDeveloperLogKey(sender, key) {
@@ -222,11 +233,20 @@ function senderOwnsNotebookKey(sender, key) {
 
 function pickPreferredNotebookTab(tabs) {
     if (!Array.isArray(tabs) || tabs.length === 0) return null;
-    return tabs.find(tab => typeof tab.url === 'string' && tab.url.startsWith(NOTEBOOKLM_NOTEBOOK_PREFIX)) || tabs[0];
+    for (const notebookPrefix of NOTEBOOKLM_NOTEBOOK_PREFIXES) {
+        const matchingTab = tabs.find(tab => (
+            typeof tab.url === 'string' &&
+            tab.url.startsWith(notebookPrefix)
+        ));
+        if (matchingTab) return matchingTab;
+    }
+    return tabs[0];
 }
 
 function isNotebookHomeTab(tab) {
-    return Boolean(tab && typeof tab.url === 'string' && tab.url.startsWith(NOTEBOOKLM_HOME_URL) && !tab.url.startsWith(NOTEBOOKLM_NOTEBOOK_PREFIX));
+    if (!tab || typeof tab.url !== 'string') return false;
+    const matchingHomeUrl = NOTEBOOKLM_HOME_URLS.find(homeUrl => tab.url.startsWith(homeUrl));
+    return Boolean(matchingHomeUrl && !isNotebookTabUrl(tab.url));
 }
 
 function focusTab(tab, action, sendResponse) {
@@ -643,13 +663,13 @@ function openOrFocusNotebookLm(request, sendResponse) {
     const currentTabId = typeof request.currentTabId === 'number' ? request.currentTabId : null;
     const currentContext = typeof request.currentContext === 'string' ? request.currentContext : 'external';
 
-    chrome.tabs.query({ url: NOTEBOOKLM_URL_PATTERN }, (tabs) => {
+    chrome.tabs.query({ url: NOTEBOOKLM_URL_PATTERNS }, (tabs) => {
         if (chrome.runtime.lastError) {
             sendResponse({ success: false, errorCode: ERROR_CODES.TABS_QUERY_FAILED });
             return;
         }
 
-        const notebookTabs = tabs.filter(tab => typeof tab.url === 'string' && tab.url.startsWith(NOTEBOOKLM_NOTEBOOK_PREFIX));
+        const notebookTabs = tabs.filter(tab => isNotebookTabUrl(tab.url));
         const preferredNotebookTab = pickPreferredNotebookTab(notebookTabs);
         if (preferredNotebookTab) {
             focusTab(preferredNotebookTab, 'focused-existing-notebook', sendResponse);

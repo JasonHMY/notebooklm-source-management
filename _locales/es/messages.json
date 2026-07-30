@@ -173,6 +173,12 @@
     "ui_tag_filter_title": {
         "message": "Filtrar por etiqueta"
     },
+    "ui_tag_filter_search": {
+        "message": "Buscar etiquetas"
+    },
+    "ui_no_matching_tags": {
+        "message": "Ninguna etiqueta coincide con la búsqueda."
+    },
     "ui_command_palette": {
         "message": "Paleta de comandos"
     },
@@ -890,6 +896,27 @@
     "ui_undo_empty": {
         "message": "No hay nada que deshacer"
     },
+    "ui_undo_failed": {
+        "message": "No se pudo guardar el cambio al deshacer. Se restauró el estado anterior."
+    },
+    "ui_redo_action": {
+        "message": "Rehacer"
+    },
+    "ui_redo_toast": {
+        "message": "Se rehizo la última acción"
+    },
+    "ui_redo_empty": {
+        "message": "No hay nada que rehacer"
+    },
+    "ui_redo_failed": {
+        "message": "No se pudo guardar el cambio al rehacer. Se restauró el estado anterior."
+    },
+    "ui_command_undo_subtitle": {
+        "message": "Revierte el último cambio guardado del gestor"
+    },
+    "ui_command_redo_subtitle": {
+        "message": "Vuelve a aplicar el último cambio deshecho del gestor"
+    },
     "ui_new_group": {
         "message": "Nuevo grupo"
     },
@@ -1373,6 +1400,144 @@
         "message": "Se movieron $count$ fuentes",
         "placeholders": {
             "count": { "content": "$1" }
+        }
+    },
+    "ui_group_name_input": {
+        "message": "Nombre de la carpeta $1",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_batch_selected_count": {
+        "message": "$1 seleccionadas",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_batch_select_visible": {
+        "message": "Seleccionar visibles"
+    },
+    "ui_batch_clear_selection": {
+        "message": "Borrar selección"
+    },
+    "ui_empty_no_sources": {
+        "message": "Aún no hay fuentes. Añade fuentes en Gemini Notebook y vuelve aquí para organizarlas."
+    },
+    "ui_empty_search_results": {
+        "message": "Ninguna fuente coincide con esta búsqueda."
+    },
+    "ui_clear_search": {
+        "message": "Borrar búsqueda"
+    },
+    "ui_empty_isolation_results": {
+        "message": "Esta carpeta no tiene fuentes que mostrar en la vista actual."
+    },
+    "ui_show_all_sources": {
+        "message": "Mostrar todas las fuentes"
+    },
+    "ui_empty_filter_results": {
+        "message": "Ninguna fuente coincide con los filtros actuales."
+    },
+    "ui_clear_filters": {
+        "message": "Borrar filtros"
+    },
+    "ui_move_new_folder_placeholder": {
+        "message": "Nombre de la nueva carpeta"
+    },
+    "ui_move_new_folder_name": {
+        "message": "Nombre de la nueva carpeta"
+    },
+    "ui_move_create_folder": {
+        "message": "Crear carpeta y mover"
+    },
+    "ui_batch_delete_preview_more": {
+        "message": "y $1 más",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_batch_delete_confirm_action": {
+        "message": "Eliminar $1 fuentes",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_batch_delete_confirm_title": {
+        "message": "¿Eliminar las fuentes seleccionadas?"
+    },
+    "ui_batch_delete_confirm_summary": {
+        "message": "Gemini Notebook eliminará permanentemente $1 fuentes seleccionadas:",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_batch_delete_confirm_warning": {
+        "message": "Esta acción no se puede restaurar con Deshacer de la extensión."
+    },
+    "ui_source_actions_for": {
+        "message": "Acciones para $1",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_batch_select_source": {
+        "message": "Seleccionar $1 para acciones por lotes",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_source_enabled_checkbox": {
+        "message": "Incluir $1 en las respuestas de Gemini Notebook",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_expand_group_named": {
+        "message": "Expandir $1",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_collapse_group_named": {
+        "message": "Contraer $1",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_disable_group_named": {
+        "message": "Desactivar $1",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_enable_group_named": {
+        "message": "Activar $1",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_add_subgroup_to": {
+        "message": "Añadir subcarpeta a $1",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_isolate_group_named": {
+        "message": "Mostrar solo $1",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_rename_group_named": {
+        "message": "Renombrar $1",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_delete_group_named": {
+        "message": "Eliminar $1",
+        "placeholders": {
+            "1": { "content": "$1" }
         }
     }
 }

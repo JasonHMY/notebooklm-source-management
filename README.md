@@ -7,6 +7,8 @@ A Chrome extension that makes source management inside Google Gemini Notebook (f
 
 It runs directly inside Gemini Notebook's source panel. The toolbar icon is only a launcher that helps you jump back to the in-page manager; it is not a separate popup app.
 
+The extension supports the current `https://notebook.google.com/` site and keeps the former `https://notebooklm.google.com/` address as a compatibility entry.
+
 ## What It Does
 
 - Group sources into custom folders.
@@ -15,11 +17,14 @@ It runs directly inside Gemini Notebook's source panel. The toolbar icon is only
 - Choose your drag mode in Settings → Appearance: **classic** (default — a blue insertion line, loose sources land in folders or the bottom "Ungrouped" bin) or **reflow (Beta)** — other sources move aside as you drag and you can drop a source anywhere at the root level, including between two folders.
 - Search by source title, tag, or folder, with simple `tag:` and `folder:` filters.
 - Automatically expand folders that contain search results, then restore the previous collapsed state when search is cleared.
-- Add color-coded tags, filter by tag, and batch add or remove tags.
-- Move sources into folders one at a time or in batches, including moving selected sources back to ungrouped.
-- Delete multiple sources at once through Gemini Notebook's native delete confirmation flow.
+- Add color-coded tags, search the tag picker, filter by tag, and batch add or remove tags.
+- Move sources into folders one at a time or in batches, create the destination folder without leaving the move dialog, and move selected sources back to ungrouped.
+- Select every currently visible, operable source or clear the selection from the batch action bar.
+- Delete multiple sources only after an extension confirmation and Gemini Notebook's native confirmation; local state is updated only after a complete source-panel scan proves that the native row is gone.
 - Open source details, rename sources, and delete sources from a single plugin menu.
-- Undo recent plugin-side organization changes with `Command+Z` on macOS or `Ctrl+Z` on Windows/Linux.
+- Undo and redo recent plugin-side organization changes from the toolbar, command palette, or keyboard. Undo uses `Command+Z` on macOS or `Ctrl+Z` on Windows/Linux; redo uses `Command+Shift+Z`, `Ctrl+Shift+Z`, or `Ctrl+Y`.
+- See persistent save, stale-state, and recovery status in the main manager, with the relevant retry, refresh, restore, or dismiss action.
+- Get distinct guidance for an empty notebook, a search with no matches, a filtered view with no matches, or an isolated folder with nothing to show.
 - Show a one-time welcome panel with a feedback shortcut the first time the in-page manager loads.
 - Show a one-time What's New panel for larger feature updates.
 - Export and import a notebook's organization config from the settings panel.
@@ -86,6 +91,7 @@ See [PRIVACY.md](PRIVACY.md) for the full privacy note.
 
 - **The manager disappears after you switch notebooks.** Give the page a moment to finish the in-place rebuild. If it still does not come back, refresh once and try again.
 - **Batch actions are disabled.** Make sure the source list has finished loading. Controls stay disabled while Gemini Notebook is still rendering placeholders.
+- **Undo or redo reports that it could not be saved.** The manager restores the state from before that history action and leaves the history entry available. Resolve the persistent save-status warning, then try again.
 - **The popup still says a refresh is needed, or it cannot find the source panel.** Refresh the page, then open the launcher again so the extension can rebuild its state.
 - **A source loses its saved enabled state.** The extension prefers stable DOM identifiers when it can find them. If Gemini Notebook does not expose one, it falls back to a normalized fingerprint based on `title + aria-label + icon`. That works most of the time, but duplicate or unnamed sources can still be matched imperfectly after a major UI change.
 - **Import preview reports unmatched sources.** The imported folders and tags can still be applied, but unmatched sources cannot inherit source-specific state until Gemini Notebook exposes matching source identities in the current notebook.
@@ -108,10 +114,13 @@ Use this checklist after changes to the content script, popup launcher, or sourc
 5. Switch between notebooks without closing the tab and confirm the manager reattaches.
 6. Walk through the core interactions once:
    - create a group
-   - rename a group
+   - name the group immediately, cancel once with Escape, then create and name it again
    - drag a source or group
    - enter batch mode
+   - use Select visible and Clear selection
+   - create a destination folder from the Move dialog
    - open the batch delete flow
+   - cancel the extension confirmation once and confirm that Gemini Notebook was not touched
    - confirm untitled sources or groups show localized fallback text
    - enter batch mode, select 3 sources, drag one of them into a folder, verify all three move
    - in single-source mode, drag any source toward the bottom edge of the list and verify the list auto-scrolls

@@ -173,6 +173,12 @@
     "ui_tag_filter_title": {
         "message": "Filter by tag"
     },
+    "ui_tag_filter_search": {
+        "message": "Search tags"
+    },
+    "ui_no_matching_tags": {
+        "message": "No tags match your search."
+    },
     "ui_command_palette": {
         "message": "Command palette"
     },
@@ -890,6 +896,27 @@
     "ui_undo_empty": {
         "message": "Nothing to undo"
     },
+    "ui_undo_failed": {
+        "message": "Undo could not be saved. Your previous state was restored."
+    },
+    "ui_redo_action": {
+        "message": "Redo"
+    },
+    "ui_redo_toast": {
+        "message": "Redid last action"
+    },
+    "ui_redo_empty": {
+        "message": "Nothing to redo"
+    },
+    "ui_redo_failed": {
+        "message": "Redo could not be saved. Your previous state was restored."
+    },
+    "ui_command_undo_subtitle": {
+        "message": "Reverse the last saved manager change"
+    },
+    "ui_command_redo_subtitle": {
+        "message": "Reapply the last undone manager change"
+    },
     "ui_new_group": {
         "message": "New Group"
     },
@@ -1373,6 +1400,144 @@
         "message": "Moved $count$ sources",
         "placeholders": {
             "count": { "content": "$1" }
+        }
+    },
+    "ui_group_name_input": {
+        "message": "Folder name for $1",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_batch_selected_count": {
+        "message": "$1 selected",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_batch_select_visible": {
+        "message": "Select visible"
+    },
+    "ui_batch_clear_selection": {
+        "message": "Clear selection"
+    },
+    "ui_empty_no_sources": {
+        "message": "No sources are available yet. Add sources in Gemini Notebook, then return here to organize them."
+    },
+    "ui_empty_search_results": {
+        "message": "No sources match this search."
+    },
+    "ui_clear_search": {
+        "message": "Clear search"
+    },
+    "ui_empty_isolation_results": {
+        "message": "This folder has no sources to show in the current view."
+    },
+    "ui_show_all_sources": {
+        "message": "Show all sources"
+    },
+    "ui_empty_filter_results": {
+        "message": "No sources match the current filters."
+    },
+    "ui_clear_filters": {
+        "message": "Clear filters"
+    },
+    "ui_move_new_folder_placeholder": {
+        "message": "New folder name"
+    },
+    "ui_move_new_folder_name": {
+        "message": "New folder name"
+    },
+    "ui_move_create_folder": {
+        "message": "Create folder and move"
+    },
+    "ui_batch_delete_preview_more": {
+        "message": "and $1 more",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_batch_delete_confirm_action": {
+        "message": "Delete $1 sources",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_batch_delete_confirm_title": {
+        "message": "Delete selected sources?"
+    },
+    "ui_batch_delete_confirm_summary": {
+        "message": "Gemini Notebook will permanently delete $1 selected sources:",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_batch_delete_confirm_warning": {
+        "message": "This cannot be restored with the extension's Undo."
+    },
+    "ui_source_actions_for": {
+        "message": "Actions for $1",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_batch_select_source": {
+        "message": "Select $1 for batch actions",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_source_enabled_checkbox": {
+        "message": "Use $1 in Gemini Notebook answers",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_expand_group_named": {
+        "message": "Expand $1",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_collapse_group_named": {
+        "message": "Collapse $1",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_disable_group_named": {
+        "message": "Disable $1",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_enable_group_named": {
+        "message": "Enable $1",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_add_subgroup_to": {
+        "message": "Add subfolder to $1",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_isolate_group_named": {
+        "message": "Show only $1",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_rename_group_named": {
+        "message": "Rename $1",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_delete_group_named": {
+        "message": "Delete $1",
+        "placeholders": {
+            "1": { "content": "$1" }
         }
     }
 }

@@ -2,6 +2,10 @@ require('../src/utils/preference-normalizers.js');
 
 describe('background.js message listener', () => {
     const DEFAULT_VISIBLE_QUICK_VIEW_KINDS = ['all', 'ungrouped', 'disabled', 'tag', 'recent', 'issues'];
+    const NOTEBOOK_URL_PATTERNS = [
+        'https://notebook.google.com/*',
+        'https://notebooklm.google.com/*'
+    ];
     let listener;
     let mockSendResponse;
 
@@ -175,6 +179,33 @@ describe('background.js message listener', () => {
             historyEntryCount: 1
         }));
         expect(result).toBe(true); // Should return true to keep channel open
+    });
+
+    it('accepts notebook-scoped messages from the current Notebook host', () => {
+        const request = {
+            type: 'LOAD_STATE',
+            key: 'sourcesPlusState_current-host'
+        };
+        const currentHostSender = {
+            tab: {
+                url: 'https://notebook.google.com/notebook/current-host'
+            }
+        };
+
+        const result = listener(request, currentHostSender, mockSendResponse);
+
+        expect(global.chrome.storage.local.get).toHaveBeenCalledWith(
+            [
+                'sourcesPlusState_current-host',
+                'sourcesPlusState_current-host__backup',
+                'sourcesPlusHistory_current-host'
+            ],
+            expect.any(Function)
+        );
+        expect(mockSendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: true
+        }));
+        expect(result).toBe(true);
     });
 
     it('should ignore stale SAVE_STATE revisions without overwriting newer stored state', () => {
@@ -2129,7 +2160,7 @@ describe('background.js message listener', () => {
         }, {}, mockSendResponse);
 
         expect(global.chrome.tabs.query).toHaveBeenCalledWith(
-            { url: 'https://notebooklm.google.com/*' },
+            { url: NOTEBOOK_URL_PATTERNS },
             expect.any(Function)
         );
         expect(global.chrome.tabs.update).toHaveBeenCalledWith(
@@ -2167,6 +2198,36 @@ describe('background.js message listener', () => {
         expect(mockSendResponse).toHaveBeenCalledWith({
             success: false,
             errorCode: 'tabs_query_failed'
+        });
+        expect(result).toBe(true);
+    });
+
+    it('should focus an existing notebook on the current Notebook host', () => {
+        global.chrome.tabs.query.mockImplementationOnce((queryInfo, cb) => {
+            cb([
+                { id: 45, url: 'https://notebook.google.com/notebook/current', windowId: 6 }
+            ]);
+        });
+        global.chrome.tabs.update.mockImplementationOnce((tabId, updateInfo, cb) => {
+            cb({ id: tabId, url: 'https://notebook.google.com/notebook/current' });
+        });
+
+        const result = listener({
+            type: 'OPEN_OR_FOCUS_NOTEBOOKLM',
+            currentTabId: 12,
+            currentContext: 'external'
+        }, {}, mockSendResponse);
+
+        expect(global.chrome.tabs.update).toHaveBeenCalledWith(
+            45,
+            { active: true },
+            expect.any(Function)
+        );
+        expect(mockSendResponse).toHaveBeenCalledWith({
+            success: true,
+            action: 'focused-existing-notebook',
+            tabId: 45,
+            url: 'https://notebook.google.com/notebook/current'
         });
         expect(result).toBe(true);
     });
@@ -2313,7 +2374,7 @@ describe('background.js message listener', () => {
     it('should open a new NotebookLM home tab when the current tab is the only home tab', () => {
         global.chrome.tabs.query.mockImplementationOnce((queryInfo, cb) => {
             cb([
-                { id: 12, url: 'https://notebooklm.google.com/', windowId: 3 }
+                { id: 12, url: 'https://notebook.google.com/', windowId: 3 }
             ]);
         });
 
@@ -2325,14 +2386,14 @@ describe('background.js message listener', () => {
 
         expect(global.chrome.tabs.update).not.toHaveBeenCalled();
         expect(global.chrome.tabs.create).toHaveBeenCalledWith(
-            { url: 'https://notebooklm.google.com/' },
+            { url: 'https://notebook.google.com/' },
             expect.any(Function)
         );
         expect(mockSendResponse).toHaveBeenCalledWith({
             success: true,
             action: 'opened-new-home',
             tabId: 99,
-            url: 'https://notebooklm.google.com/'
+            url: 'https://notebook.google.com/'
         });
         expect(result).toBe(true);
     });
@@ -2379,14 +2440,14 @@ describe('background.js message listener', () => {
         }, {}, mockSendResponse);
 
         expect(global.chrome.tabs.create).toHaveBeenCalledWith(
-            { url: 'https://notebooklm.google.com/' },
+            { url: 'https://notebook.google.com/' },
             expect.any(Function)
         );
         expect(mockSendResponse).toHaveBeenCalledWith({
             success: true,
             action: 'opened-new-home',
             tabId: 99,
-            url: 'https://notebooklm.google.com/'
+            url: 'https://notebook.google.com/'
         });
         expect(result).toBe(true);
     });

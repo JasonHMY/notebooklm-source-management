@@ -182,6 +182,44 @@ function getRequiredMessageKeys() {
         'ui_undo_action',
         'ui_undo_toast',
         'ui_undo_empty',
+        'ui_undo_failed',
+        'ui_redo_action',
+        'ui_redo_toast',
+        'ui_redo_empty',
+        'ui_redo_failed',
+        'ui_command_undo_subtitle',
+        'ui_command_redo_subtitle',
+        'ui_group_name_input',
+        'ui_batch_actions_region',
+        'ui_batch_selected_count',
+        'ui_batch_select_visible',
+        'ui_batch_clear_selection',
+        'ui_empty_no_sources',
+        'ui_empty_search_results',
+        'ui_clear_search',
+        'ui_empty_isolation_results',
+        'ui_show_all_sources',
+        'ui_empty_filter_results',
+        'ui_clear_filters',
+        'ui_move_new_folder_placeholder',
+        'ui_move_new_folder_name',
+        'ui_move_create_folder',
+        'ui_batch_delete_preview_more',
+        'ui_batch_delete_confirm_action',
+        'ui_batch_delete_confirm_title',
+        'ui_batch_delete_confirm_summary',
+        'ui_batch_delete_confirm_warning',
+        'ui_source_actions_for',
+        'ui_batch_select_source',
+        'ui_source_enabled_checkbox',
+        'ui_expand_group_named',
+        'ui_collapse_group_named',
+        'ui_disable_group_named',
+        'ui_enable_group_named',
+        'ui_add_subgroup_to',
+        'ui_isolate_group_named',
+        'ui_rename_group_named',
+        'ui_delete_group_named',
         'ui_history_retention_label',
         'ui_history_retention_body',
         'ui_history_retention_option',
@@ -283,6 +321,32 @@ describe('locale message catalogs', () => {
             for (const key of getRequiredMessageKeys()) {
                 expect(messages[key]).toBeDefined();
                 expect(messages[key].message).not.toBe('');
+            }
+        }
+    });
+
+    it('keeps contextual control names wired to their entity placeholder', () => {
+        const contextualKeys = [
+            'ui_group_name_input',
+            'ui_source_actions_for',
+            'ui_batch_select_source',
+            'ui_source_enabled_checkbox',
+            'ui_expand_group_named',
+            'ui_collapse_group_named',
+            'ui_disable_group_named',
+            'ui_enable_group_named',
+            'ui_add_subgroup_to',
+            'ui_isolate_group_named',
+            'ui_rename_group_named',
+            'ui_delete_group_named'
+        ];
+
+        for (const localeId of localeIds) {
+            for (const key of contextualKeys) {
+                expect(localeMessages[localeId][key].message).toContain('$1');
+                expect(getPlaceholderSignature(localeMessages[localeId][key])).toEqual([
+                    { key: '1', content: '$1' }
+                ]);
             }
         }
     });

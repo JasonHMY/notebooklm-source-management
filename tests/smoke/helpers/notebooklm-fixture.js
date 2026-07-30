@@ -610,7 +610,7 @@ function renderHomeHtml() {
 }
 
 async function installNotebookFixture(context) {
-    await context.route('https://notebooklm.google.com/**', async (route) => {
+    const handleNotebookRoute = async (route) => {
         const request = route.request();
         const url = new URL(request.url());
 
@@ -667,7 +667,10 @@ async function installNotebookFixture(context) {
                 ariaCheckboxes: fixtureName === 'material-labels-aria'
             })
         });
-    });
+    };
+
+    await context.route('https://notebook.google.com/**', handleNotebookRoute);
+    await context.route('https://notebooklm.google.com/**', handleNotebookRoute);
 }
 
 module.exports = {

@@ -362,21 +362,49 @@ describe('manager shell structure', () => {
 
         expect(controls.attrs.className).toBe('sp-controls');
         expect(actionsGroup.attrs.className).toBe('sp-toolbar-actions');
-        expect(actionsGroup.children).toHaveLength(4);
+        expect(actionsGroup.children).toHaveLength(6);
         expect(actionsGroup.children.map((child) => child.attrs.id)).toEqual([
             'sp-settings-btn',
+            'sp-undo-btn',
+            'sp-redo-btn',
             'sp-new-group-btn',
             'sp-manage-tags-btn',
             'sp-batch-action-btn'
         ]);
+        expect(actionsGroup.children[1].attrs).toMatchObject({
+            type: 'button',
+            title: 'ui_undo_action',
+            'aria-label': 'ui_undo_action',
+            'aria-disabled': 'true',
+            disabled: true
+        });
+        expect(actionsGroup.children[1].children[0].children).toEqual(['undo']);
+        expect(actionsGroup.children[1].children[0].attrs['aria-hidden']).toBe('true');
+        expect(actionsGroup.children[2].attrs).toMatchObject({
+            type: 'button',
+            title: 'ui_redo_action',
+            'aria-label': 'ui_redo_action',
+            'aria-disabled': 'true',
+            disabled: true
+        });
+        expect(actionsGroup.children[2].children[0].children).toEqual(['redo']);
+        expect(actionsGroup.children[2].children[0].attrs['aria-hidden']).toBe('true');
         expect(searchRail.attrs.className).toBe('sp-search-cluster');
         expect(searchTrigger.attrs.id).toBe('sp-search-btn');
         expect(searchSurface.attrs.className).toBe('sp-search-container');
         expect(searchSurface.children[0].attrs.id).toBe('sp-search');
         expect(searchSurface.children[1].attrs.id).toBe('sp-search-count');
         expect(searchClose.attrs.id).toBe('sp-search-close-btn');
-        expect(shell.children[1].attrs.id).toBe('sp-quick-view-rail');
-        expect(shell.children[1].attrs.className).toBe('sp-quick-view-rail');
+        const saveStatusRegion = shell.children[1];
+        expect(saveStatusRegion.attrs.id).toBe('sp-manager-save-status-section');
+        expect(saveStatusRegion.attrs.className).toBe('sp-manager-save-status-region');
+        expect(saveStatusRegion.attrs.hidden).toBe(true);
+        expect(saveStatusRegion.children[0].attrs.id).toBe('sp-manager-save-status');
+        expect(saveStatusRegion.children[0].attrs['aria-live']).toBe('polite');
+        expect(shell.children[2].attrs.id).toBe('sp-quick-view-rail');
+        expect(shell.children[2].attrs.className).toBe('sp-quick-view-rail');
+        const sourcesList = shell.children.find((child) => child.attrs.id === 'sources-list');
+        expect(sourcesList.attrs.role).toBe('list');
     });
 
     it('exposes the search-results count as a polite live region for screen readers', () => {
@@ -419,7 +447,7 @@ describe('manager shell structure', () => {
             i18n: { getMessage: (key) => key }
         });
 
-        const rail = shell.children[1];
+        const rail = shell.children[2];
         expect(rail.attrs.id).toBe('sp-quick-view-rail');
         expect(rail.attrs.role).toBe('group');
         expect(rail.attrs['aria-label']).toBe('ui_quick_view_rail_label');
@@ -439,13 +467,42 @@ describe('manager shell structure', () => {
         expect(resizer.attrs.tabIndex).toBe(0);
     });
 
-    it('keeps the toolbar controls defined as a single-row flex layout', () => {
+    it('lets narrow-panel toolbar controls wrap without shrinking the actions', () => {
         jest.resetModules();
         require('../../src/content/content-style-text.js');
 
-        expect(global.NSM_CONTENT_STYLE_TEXT).toContain('.sp-controls {');
-        expect(global.NSM_CONTENT_STYLE_TEXT).toContain('display: flex;');
-        expect(global.NSM_CONTENT_STYLE_TEXT).toContain('flex-wrap: nowrap;');
+        const toolbarCss = global.NSM_CONTENT_STYLE_TEXT.slice(
+            global.NSM_CONTENT_STYLE_TEXT.indexOf('/* Sticky Header */')
+        );
+        const controlsBlock = extractCssBlock(toolbarCss, '.sp-controls {');
+        const actionsBlock = extractCssBlock(toolbarCss, '.sp-toolbar-actions {');
+        expect(controlsBlock).toContain('display: flex;');
+        expect(controlsBlock).toContain('flex-wrap: wrap;');
+        expect(actionsBlock).toContain('flex-wrap: wrap;');
+        expect(actionsBlock).toContain('max-width: 100%;');
+    });
+
+    it('keeps batch controls operable in a narrow panel and exposes visible focus', () => {
+        jest.resetModules();
+        require('../../src/content/content-style-text.js');
+
+        const css = global.NSM_CONTENT_STYLE_TEXT;
+        const batchActionBar = extractCssBlock(css, '.sp-batch-action-bar {');
+        const batchToolbar = extractCssBlock(css, '.sp-batch-toolbar {');
+        const batchActions = extractCssBlock(css, '.sp-batch-actions {');
+        const groupSwitchFocus = extractCssBlock(
+            css,
+            '.sp-group-toggle-checkbox:focus-visible + .sp-toggle-slider {'
+        );
+
+        expect(batchActionBar).toContain('max-width: 100%;');
+        expect(batchActionBar).toContain('box-sizing: border-box;');
+        expect(batchToolbar).toContain('flex-wrap: wrap;');
+        expect(batchToolbar).toContain('max-width: 100%;');
+        expect(batchActions).toContain('flex-wrap: wrap;');
+        expect(batchActions).toContain('max-width: 100%;');
+        expect(groupSwitchFocus).toContain('box-shadow: var(--sp-focus-ring-strong);');
+        expect(css).toContain('--sp-text-tertiary: #6e6e73;');
     });
 
     it('declares an .ungrouped-section base block in the shadow DOM style', () => {
@@ -464,6 +521,30 @@ describe('manager shell structure', () => {
         expect(global.NSM_CONTENT_STYLE_TEXT).toContain('.sp-controls.is-search-expanded .sp-toolbar-actions {');
         expect(global.NSM_CONTENT_STYLE_TEXT).toContain('max-width: 0;');
         expect(global.NSM_CONTENT_STYLE_TEXT).toContain('pointer-events: none;');
+    });
+
+    it('renders unavailable history actions as neutral disabled icon buttons', () => {
+        jest.resetModules();
+        require('../../src/content/content-style-text.js');
+
+        const disabledHistoryBlock = extractCssBlock(
+            global.NSM_CONTENT_STYLE_TEXT,
+            '.sp-toolbar-history-action:disabled,'
+        );
+        expect(disabledHistoryBlock).toContain('cursor: not-allowed;');
+        expect(disabledHistoryBlock).toContain('opacity: 0.42;');
+        expect(disabledHistoryBlock).toContain('transform: none;');
+    });
+
+    it('hides history actions in native-label view where the managed tree is unavailable', () => {
+        jest.resetModules();
+        require('../../src/content/content-style-text.js');
+
+        const nativeLabelToolbarBlock = extractCssBlock(
+            global.NSM_CONTENT_STYLE_TEXT,
+            '.sp-container.is-native-label-view .sp-toolbar-actions > button:not(.sp-toolbar-settings),'
+        );
+        expect(nativeLabelToolbarBlock).toContain('display: none;');
     });
 
     it('keeps the search trigger and rail on the same shared surface palette', () => {
@@ -543,23 +624,29 @@ describe('manager shell structure', () => {
         )).not.toContain('max-height');
     });
 
-    it('renders folder icon-only controls with button semantics and labels', () => {
+    it('renders contextual folder controls and collapsed-list semantics', () => {
         const source = fs.readFileSync(path.join(__dirname, '../../src/content/content-render.js'), 'utf8');
 
         expect(source).toContain("className: 'sp-caret'");
-        expect(source).toContain("'aria-label': isCollapsed ? getMessage('ui_expand') : getMessage('ui_collapse')");
+        expect(source).toContain("isCollapsed ? 'ui_expand_group_named' : 'ui_collapse_group_named'");
+        expect(source).toContain("'aria-expanded': isCollapsed ? 'false' : 'true'");
+        expect(source).toContain("'aria-controls': groupChildrenId");
         expect(source).toContain("className: 'sp-tree-order-controls'");
         expect(source).toContain("className: 'sp-tree-order-button sp-glare-hover'");
         expect(source).toContain("dataset: { groupId: group.id, treeDirection: direction }");
         expect(source).toContain("className: 'sp-add-subgroup-button sp-glare-hover'");
-        expect(source).toContain("'aria-label': getMessage('ui_add_subgroup')");
+        expect(source).toContain("'aria-label': getMessage('ui_add_subgroup_to', [groupTitle])");
         expect(source).toContain("className: 'sp-isolate-button sp-glare-hover'");
-        expect(source).toContain("'aria-label': getMessage('ui_isolate_group')");
+        expect(source).toContain("'aria-label': getMessage('ui_isolate_group_named', [groupTitle])");
         expect(source).toContain("'aria-pressed': activeIsolationGroupId === group.id ? 'true' : 'false'");
         expect(source).toContain("className: 'sp-edit-button sp-glare-hover'");
-        expect(source).toContain("'aria-label': getMessage('ui_rename')");
+        expect(source).toContain("'aria-label': getMessage('ui_rename_group_named', [groupTitle])");
         expect(source).toContain("className: 'sp-delete-button sp-glare-hover'");
-        expect(source).toContain("'aria-label': getMessage('ui_delete_group')");
+        expect(source).toContain("'aria-label': getMessage('ui_delete_group_named', [groupTitle])");
+        expect(source).toContain("role: 'listitem'");
+        expect(source).toContain("role: 'list'");
+        expect(source).toContain("'aria-hidden': isCollapsed ? 'true' : 'false'");
+        expect(source).toContain("inert: isCollapsed ? true : null");
     });
 
     it('defines unified content motion tokens and reduced motion handling', () => {
@@ -981,7 +1068,7 @@ describe('batch count and source menu motion rendering', () => {
         expect(pendingBatchKeys.has('ghost')).toBe(false);
     });
 
-    it('exposes the batch action bar as a labeled toolbar region', () => {
+    it('keeps the batch surface list-owned and exposes a nested labeled toolbar', () => {
         const listContainer = createRenderTestElement('div', { id: 'sources-list' });
         const renderModule = createContentRender({
             el: createRenderTestElement,
@@ -1006,9 +1093,13 @@ describe('batch count and source menu motion rendering', () => {
         renderModule.render();
 
         const bar = findRenderTestNodesByClass(listContainer, 'sp-batch-action-bar')[0];
+        const toolbar = findRenderTestNodesByClass(listContainer, 'sp-batch-toolbar')[0];
         expect(bar).toBeDefined();
-        expect(bar.attrs.role).toBe('toolbar');
-        expect(bar.attrs['aria-label']).toBe('ui_batch_actions_region');
+        expect(bar.attrs.role).toBe('listitem');
+        expect(toolbar).toBeDefined();
+        expect(toolbar.attrs.role).toBe('toolbar');
+        expect(toolbar.attrs['aria-label']).toBe('ui_batch_actions_region');
+        expect(listContainer.childNodes.every((child) => child.attrs?.role === 'listitem')).toBe(true);
     });
 
     it('renders only the configured quick view buttons and hides the rail when none are visible', () => {
@@ -1202,7 +1293,7 @@ describe('batch count and source menu motion rendering', () => {
             }),
             getState: () => ({
                 groups: [],
-                ungrouped: [],
+                ungrouped: ['source-1', 'source-2'],
                 isBatchMode: true,
                 activeTagId: null
             }),
@@ -1232,11 +1323,18 @@ describe('batch count and source menu motion rendering', () => {
         const removeTagsButton = findRenderTestNodesByClass(listContainer, 'sp-batch-remove-tags-btn')[0];
         const ungroupButton = findRenderTestNodesByClass(listContainer, 'sp-batch-ungroup-btn')[0];
         const deleteButton = findRenderTestNodesByClass(listContainer, 'sp-confirm-delete-btn')[0];
+        const selectedCount = findRenderTestNodesByClass(listContainer, 'sp-batch-selection-count')[0];
+        const selectVisibleButton = findRenderTestNodesByClass(listContainer, 'sp-batch-select-visible-btn')[0];
+        const clearSelectionButton = findRenderTestNodesByClass(listContainer, 'sp-batch-clear-selection-btn')[0];
         expect(addFolderButton.textContent).toBe('Add');
         expect(addTagsButton.textContent).toBe('Add Tags');
         expect(removeTagsButton.textContent).toBe('Remove Tags');
         expect(ungroupButton.textContent).toBe('Ungroup');
         expect(deleteButton.textContent).toBe('Delete (2)');
+        expect(selectedCount.textContent).toBe('ui_batch_selected_count');
+        expect(selectedCount.attrs['aria-live']).toBe('polite');
+        expect(selectVisibleButton.attrs.disabled).toBe(true);
+        expect(clearSelectionButton.attrs.disabled).toBe(false);
         expect(findRenderTestNodesByClass(addFolderButton, 'sp-count-up-number')).toHaveLength(0);
         expect(findRenderTestNodesByClass(addTagsButton, 'sp-count-up-number')).toHaveLength(0);
         expect(findRenderTestNodesByClass(removeTagsButton, 'sp-count-up-number')).toHaveLength(0);
@@ -1245,6 +1343,155 @@ describe('batch count and source menu motion rendering', () => {
             countId: 'batch-delete',
             countValue: '2'
         });
+    });
+
+    it('excludes collapsed descendants from the select-visible state but includes search-expanded matches', () => {
+        const listContainer = createRenderTestElement('div', { id: 'sources-list' });
+        const state = {
+            root: [{ type: 'group', id: 'group-1' }],
+            ungrouped: [],
+            filterQuery: '',
+            isBatchMode: true,
+            activeTagId: null
+        };
+        const groupsById = new Map([['group-1', {
+            id: 'group-1',
+            title: 'Collapsed group',
+            enabled: true,
+            collapsed: true,
+            children: [{ type: 'source', key: 'source-1' }]
+        }]]);
+        const sourcesByKey = new Map([['source-1', {
+            key: 'source-1',
+            title: 'Alpha source',
+            lowercaseTitle: 'alpha source',
+            enabled: true
+        }]]);
+        const renderModule = createContentRender({
+            el: createRenderTestElement,
+            getDocument: () => ({
+                createDocumentFragment: createRenderTestFragment,
+                createElement: (tag) => createRenderTestElement(tag)
+            }),
+            getShadowRoot: () => ({
+                querySelector: jest.fn((selector) => (selector === '#sources-list' ? listContainer : null)),
+                getElementById: jest.fn((id) => (id === 'sources-list' ? listContainer : null)),
+                appendChild: jest.fn()
+            }),
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getSourcesByKey: () => sourcesByKey,
+            getPendingBatchKeys: () => new Set(),
+            sourceMatchesCurrentFilters: () => true,
+            getMessage: (key) => key
+        });
+
+        renderModule.render();
+
+        let groupChildren = findRenderTestNodesByClass(listContainer, 'group-children');
+        let selectVisibleButton = findRenderTestNodesByClass(
+            listContainer,
+            'sp-batch-select-visible-btn'
+        )[0];
+        expect(groupChildren).toHaveLength(1);
+        expect(groupChildren[0].attrs['aria-hidden']).toBe('true');
+        expect(groupChildren[0].attrs.inert).toBe(true);
+        expect(selectVisibleButton.attrs.disabled).toBe(true);
+
+        state.filterQuery = 'alpha';
+        listContainer.childNodes = [];
+        listContainer.children = [];
+        renderModule.render();
+
+        groupChildren = findRenderTestNodesByClass(listContainer, 'group-children');
+        selectVisibleButton = findRenderTestNodesByClass(
+            listContainer,
+            'sp-batch-select-visible-btn'
+        )[0];
+        expect(groupChildren).toHaveLength(1);
+        expect(groupChildren[0].attrs['aria-hidden']).toBe('false');
+        expect(groupChildren[0].attrs.inert).toBeNull();
+        expect(selectVisibleButton.attrs.disabled).toBe(false);
+        expect(groupsById.get('group-1').collapsed).toBe(true);
+    });
+
+    it('keeps pending initial-name folders visible through filters, isolation, and collapsed ancestors', () => {
+        const listContainer = createRenderTestElement('div', { id: 'sources-list' });
+        const state = {
+            root: [
+                { type: 'group', id: 'isolated-root' },
+                { type: 'group', id: 'pending-root' }
+            ],
+            ungrouped: [],
+            filterQuery: 'no-match',
+            isBatchMode: false,
+            activeTagId: 'tag-1'
+        };
+        const groupsById = new Map([
+            ['isolated-root', {
+                id: 'isolated-root',
+                title: 'Collapsed isolated root',
+                enabled: true,
+                collapsed: true,
+                children: [{ type: 'group', id: 'pending-child' }]
+            }],
+            ['pending-child', {
+                id: 'pending-child',
+                title: 'ui_new_subgroup',
+                enabled: true,
+                collapsed: false,
+                children: [],
+                isPendingInitialRename: true
+            }],
+            ['pending-root', {
+                id: 'pending-root',
+                title: 'ui_new_group',
+                enabled: true,
+                collapsed: false,
+                children: [],
+                isPendingInitialRename: true
+            }]
+        ]);
+        const renderModule = createContentRender({
+            el: createRenderTestElement,
+            getDocument: () => ({
+                createDocumentFragment: createRenderTestFragment,
+                createElement: (tag) => createRenderTestElement(tag)
+            }),
+            getShadowRoot: () => ({
+                querySelector: jest.fn((selector) => (selector === '#sources-list' ? listContainer : null)),
+                getElementById: jest.fn((id) => (id === 'sources-list' ? listContainer : null)),
+                appendChild: jest.fn()
+            }),
+            getState: () => state,
+            getGroupsById: () => groupsById,
+            getParentMap: () => new Map([['pending-child', 'isolated-root']]),
+            getSourcesByKey: () => new Map(),
+            getActiveIsolationGroupId: () => 'isolated-root',
+            hasActiveRenderFilters: () => true,
+            shouldRenderGroup: () => false,
+            sourceMatchesCurrentFilters: () => false,
+            getMessage: (key) => key
+        });
+
+        renderModule.render();
+
+        const renderedGroups = findRenderTestNodesByClass(listContainer, 'group-container');
+        expect(renderedGroups.map((group) => group.dataset.groupId).sort()).toEqual([
+            'isolated-root',
+            'pending-child',
+            'pending-root'
+        ]);
+        const isolatedRoot = renderedGroups.find(
+            (group) => group.dataset.groupId === 'isolated-root'
+        );
+        const isolatedChildren = findRenderTestNodesByClass(
+            isolatedRoot,
+            'group-children'
+        )[0];
+        expect(isolatedChildren.attrs['aria-hidden']).toBe('false');
+        expect(isolatedChildren.attrs.inert).toBeNull();
+        expect(groupsById.get('isolated-root').collapsed).toBe(true);
     });
 
     it('keeps the source title in the title grid column while batch mode hides action buttons', () => {
@@ -1702,6 +1949,10 @@ describe('batch count and source menu motion rendering', () => {
 
         const childContainers = findRenderTestNodesByClass(listContainer, 'group-children');
         expect(childContainers.every((container) => !String(container.className).includes('collapsed'))).toBe(true);
+        expect(childContainers.every((container) => container.attrs['aria-hidden'] === 'false')).toBe(true);
+        expect(childContainers.every((container) => container.attrs.inert == null)).toBe(true);
+        expect(findRenderTestNodesByClass(listContainer, 'sp-caret')
+            .every((caret) => caret.attrs['aria-expanded'] === 'true')).toBe(true);
         expect(rootGroup.collapsed).toBe(true);
         expect(childGroup.collapsed).toBe(true);
 
@@ -1711,6 +1962,10 @@ describe('batch count and source menu motion rendering', () => {
         renderModule.render();
         const restoredChildren = findRenderTestNodesByClass(listContainer, 'group-children');
         expect(restoredChildren.every((container) => String(container.className).includes('collapsed'))).toBe(true);
+        expect(restoredChildren.every((container) => container.attrs['aria-hidden'] === 'true')).toBe(true);
+        expect(restoredChildren.every((container) => container.attrs.inert === true)).toBe(true);
+        expect(findRenderTestNodesByClass(listContainer, 'sp-caret')
+            .every((caret) => caret.attrs['aria-expanded'] === 'false')).toBe(true);
     });
 
     it('renders source action menu item stagger indexes for main menu and submenu separately', () => {
@@ -1924,6 +2179,10 @@ describe('batch count and source menu motion rendering', () => {
             ['source-2', { key: 'source-2', title: 'Source 2', enabled: true }],
             ['loose', { key: 'loose', title: 'Loose', enabled: true }]
         ]);
+        const tagsById = new Map([[
+            'tag-1',
+            { id: 'tag-1', label: 'Important', color: '#007AFF' }
+        ]]);
         const resolveDirectionalTargetForRender = jest.fn((item, direction) => ({
             ok: (
                 (item.id === 'root' && direction === 'down') ||
@@ -1950,16 +2209,22 @@ describe('batch count and source menu motion rendering', () => {
                 root: [{ type: 'group', id: 'root' }],
                 ungrouped: ['loose'],
                 isBatchMode: false,
-                activeTagId: null
+                activeTagId: 'tag-1'
             }),
             getGroupsById: () => groupsById,
+            getTagsById: () => tagsById,
             getSourcesByKey: () => sourcesByKey,
+            getSourceTagIds: (sourceKey) => (
+                sourceKey === 'source-1' ? ['tag-1'] : []
+            ),
             canOpenSourceActionMenu: () => true,
             resolveDirectionalTarget: jest.fn(() => {
                 throw new Error('render should use its one snapshot resolver');
             }),
             createDirectionalTargetResolver,
-            getMessage: (key) => key
+            getMessage: (key, substitutions = []) => (
+                substitutions.length > 0 ? `${key}:${substitutions.join('|')}` : key
+            )
         });
 
         renderModule.render();
@@ -1968,6 +2233,17 @@ describe('batch count and source menu motion rendering', () => {
         const groupHeaders = findRenderTestNodesByClass(listContainer, 'group-header');
         const sources = findRenderTestNodesByClass(listContainer, 'source-item');
         const sourceActionButtons = findRenderTestNodesByClass(listContainer, 'sp-source-actions-button');
+        const sourceCheckboxes = findRenderTestNodesByClass(listContainer, 'sp-checkbox');
+        const groupChildren = findRenderTestNodesByClass(listContainer, 'group-children');
+        const carets = findRenderTestNodesByClass(listContainer, 'sp-caret');
+        const groupSwitches = findRenderTestNodesByClass(listContainer, 'sp-group-toggle-checkbox');
+        const addSubgroupButtons = findRenderTestNodesByClass(listContainer, 'sp-add-subgroup-button');
+        const isolateButtons = findRenderTestNodesByClass(listContainer, 'sp-isolate-button');
+        const editButtons = findRenderTestNodesByClass(listContainer, 'sp-edit-button');
+        const deleteButtons = findRenderTestNodesByClass(listContainer, 'sp-delete-button');
+        const tagPills = findRenderTestNodesByClass(listContainer, 'sp-tag-pill');
+        const ungroupedSections = findRenderTestNodesByClass(listContainer, 'ungrouped-section');
+        const ungroupedLists = findRenderTestNodesByClass(listContainer, 'ungrouped-list');
         const treeOrderControls = findRenderTestNodesByClass(listContainer, 'sp-tree-order-controls');
         const treeOrderButtons = findRenderTestNodesByClass(listContainer, 'sp-tree-order-button');
         const glareButtons = findRenderTestNodesByClass(listContainer, 'sp-glare-hover');
@@ -1983,6 +2259,57 @@ describe('batch count and source menu motion rendering', () => {
         expect(sources.every((source) => source.className.includes('sp-spotlight-surface'))).toBe(true);
         expect(groupHeaders.every((header) => header.className.includes('sp-spotlight-surface'))).toBe(true);
         expect(sourceActionButtons.every((button) => button.className.includes('sp-glare-hover'))).toBe(true);
+        expect(groups.every((group) => group.attrs.role === 'listitem')).toBe(true);
+        expect(sources.every((source) => source.attrs.role === 'listitem')).toBe(true);
+        expect(groupChildren.every((children) => children.attrs.role === 'list')).toBe(true);
+        expect(groupChildren.every((children) => children.attrs['aria-hidden'] === 'false')).toBe(true);
+        expect(groupChildren.every((children) => children.attrs.inert == null)).toBe(true);
+        expect(carets.every((caret) => caret.attrs['aria-expanded'] === 'true')).toBe(true);
+        expect(carets.map((caret) => caret.attrs['aria-controls'])).toEqual(
+            groupChildren.map((children) => children.attrs.id)
+        );
+        expect(carets.map((caret) => caret.attrs['aria-label'])).toEqual([
+            'ui_collapse_group_named:Root',
+            'ui_collapse_group_named:Child'
+        ]);
+        expect(groupSwitches.map((control) => control.attrs['aria-label'])).toEqual([
+            'ui_disable_group_named:Root',
+            'ui_disable_group_named:Child'
+        ]);
+        expect(addSubgroupButtons.map((button) => button.attrs['aria-label'])).toEqual([
+            'ui_add_subgroup_to:Root',
+            'ui_add_subgroup_to:Child'
+        ]);
+        expect(isolateButtons.map((button) => button.attrs['aria-label'])).toEqual([
+            'ui_isolate_group_named:Root',
+            'ui_isolate_group_named:Child'
+        ]);
+        expect(editButtons.map((button) => button.attrs['aria-label'])).toEqual([
+            'ui_rename_group_named:Root',
+            'ui_rename_group_named:Child'
+        ]);
+        expect(deleteButtons.map((button) => button.attrs['aria-label'])).toEqual([
+            'ui_delete_group_named:Root',
+            'ui_delete_group_named:Child'
+        ]);
+        expect(sourceActionButtons.map((button) => button.attrs['aria-label'])).toEqual([
+            'ui_source_actions_for:Source 1',
+            'ui_source_actions_for:Source 2',
+            'ui_source_actions_for:Loose'
+        ]);
+        expect(sourceCheckboxes.map((control) => control.attrs['aria-label'])).toEqual([
+            'ui_source_enabled_checkbox:Source 1',
+            'ui_source_enabled_checkbox:Source 2',
+            'ui_source_enabled_checkbox:Loose'
+        ]);
+        expect(tagPills).toHaveLength(1);
+        expect(tagPills[0].attrs['aria-pressed']).toBe('true');
+        expect(ungroupedSections).toHaveLength(1);
+        expect(ungroupedSections[0].attrs.role).toBe('listitem');
+        expect(ungroupedLists).toHaveLength(1);
+        expect(ungroupedLists[0].attrs.role).toBe('list');
+        expect(ungroupedLists[0].attrs['aria-label']).toBe('ui_ungrouped');
+        expect(listContainer.childNodes.every((child) => child.attrs?.role === 'listitem')).toBe(true);
         expect(treeOrderControls).toHaveLength(2);
         expect(treeOrderControls.every((controls) => controls.attrs.role === 'group')).toBe(true);
         expect(treeOrderControls.every((controls) => controls.attrs['aria-label'] === 'ui_tree_order')).toBe(true);
@@ -2132,8 +2459,12 @@ describe('batch count and source menu motion rendering', () => {
         const sections = findRenderTestNodesByClass(listContainer, 'ungrouped-section');
         expect(sections).toHaveLength(1);
         const section = sections[0];
+        const ungroupedList = findRenderTestNodesByClass(section, 'ungrouped-list')[0];
         // bin source-items + header are children of the section, NOT direct children of #sources-list
         expect(listContainer.childNodes).toContain(section);
+        expect(section.attrs.role).toBe('listitem');
+        expect(ungroupedList.attrs.role).toBe('list');
+        expect(ungroupedList.attrs['aria-label']).toBe('ui_ungrouped');
         expect(findRenderTestNodesByClass(listContainer, 'ungrouped-header')).toHaveLength(1);
         const headerInSection = findRenderTestNodesByClass(section, 'ungrouped-header');
         expect(headerInSection).toHaveLength(1);
@@ -2181,6 +2512,134 @@ describe('batch count and source menu motion rendering', () => {
         expect(() => renderModule.render()).not.toThrow();
         expect(findRenderTestNodesByClass(listContainer, 'group-container')).toHaveLength(1);
         expect(findRenderTestNodesByClass(listContainer, 'sp-empty-state')).toHaveLength(1);
+    });
+
+    it('renders distinct empty states for empty, search, filter, isolation, and combined views', () => {
+        const renderScenario = ({
+            state,
+            sourcesByKey,
+            matches,
+            activeIsolationGroupId = null
+        }) => {
+            const listContainer = createRenderTestElement('div', { id: 'sources-list' });
+            const renderModule = createContentRender({
+                el: createRenderTestElement,
+                getDocument: () => ({
+                    createDocumentFragment: createRenderTestFragment,
+                    createElement: (tag) => createRenderTestElement(tag)
+                }),
+                getShadowRoot: () => ({
+                    querySelector: jest.fn((selector) => (selector === '#sources-list' ? listContainer : null)),
+                    getElementById: jest.fn((id) => (id === 'sources-list' ? listContainer : null)),
+                    appendChild: jest.fn()
+                }),
+                getState: () => state,
+                getGroupsById: () => new Map(),
+                getSourcesByKey: () => sourcesByKey,
+                getActiveIsolationGroupId: () => activeIsolationGroupId,
+                sourceMatchesCurrentFilters: matches,
+                getMessage: (key) => key
+            });
+            renderModule.render();
+            return listContainer;
+        };
+
+        const emptyNotebook = renderScenario({
+            state: { root: [], ungrouped: [], filterQuery: '', isBatchMode: false },
+            sourcesByKey: new Map(),
+            matches: () => true
+        });
+        expect(findRenderTestNodesByClass(emptyNotebook, 'sp-contextual-empty-copy')[0].textContent)
+            .toBe('ui_empty_no_sources');
+        expect(findRenderTestNodesByClass(emptyNotebook, 'sp-button')).toHaveLength(0);
+        expect(emptyNotebook.childNodes).toHaveLength(1);
+        expect(emptyNotebook.childNodes[0].attrs.role).toBe('listitem');
+        expect(findRenderTestNodesByClass(emptyNotebook, 'sp-contextual-empty-state')[0].attrs.role)
+            .toBe('status');
+
+        const noSearchResults = renderScenario({
+            state: {
+                root: [],
+                ungrouped: ['source-1'],
+                filterQuery: 'missing',
+                isBatchMode: false
+            },
+            sourcesByKey: new Map([[
+                'source-1',
+                { key: 'source-1', title: 'Existing source', enabled: true }
+            ]]),
+            matches: () => false
+        });
+        expect(findRenderTestNodesByClass(noSearchResults, 'sp-contextual-empty-copy')[0].textContent)
+            .toBe('ui_empty_search_results');
+        expect(findRenderTestNodesByClass(noSearchResults, 'sp-empty-clear-search-btn')).toHaveLength(1);
+
+        const existingSources = new Map([[
+            'source-1',
+            { key: 'source-1', title: 'Existing source', enabled: true }
+        ]]);
+        const noTagResults = renderScenario({
+            state: {
+                root: [],
+                ungrouped: ['source-1'],
+                filterQuery: '',
+                isBatchMode: false,
+                activeTagId: 'tag-1'
+            },
+            sourcesByKey: existingSources,
+            matches: () => false
+        });
+        expect(findRenderTestNodesByClass(noTagResults, 'sp-contextual-empty-copy')[0].textContent)
+            .toBe('ui_empty_filter_results');
+        expect(findRenderTestNodesByClass(noTagResults, 'sp-empty-clear-filters-btn')).toHaveLength(1);
+
+        const noIsolationResults = renderScenario({
+            state: {
+                root: [],
+                ungrouped: ['source-1'],
+                filterQuery: '',
+                isBatchMode: false
+            },
+            sourcesByKey: existingSources,
+            matches: () => true,
+            activeIsolationGroupId: 'missing-group'
+        });
+        expect(findRenderTestNodesByClass(noIsolationResults, 'sp-contextual-empty-copy')[0].textContent)
+            .toBe('ui_empty_isolation_results');
+        expect(findRenderTestNodesByClass(noIsolationResults, 'sp-empty-clear-isolation-btn')).toHaveLength(1);
+
+        const noCombinedResults = renderScenario({
+            state: {
+                root: [],
+                ungrouped: ['source-1'],
+                filterQuery: 'missing',
+                isBatchMode: false,
+                activeQuickViewKind: 'issues'
+            },
+            sourcesByKey: existingSources,
+            matches: () => false
+        });
+        expect(findRenderTestNodesByClass(noCombinedResults, 'sp-contextual-empty-copy')[0].textContent)
+            .toBe('ui_empty_filter_results');
+        expect(findRenderTestNodesByClass(noCombinedResults, 'sp-empty-clear-filters-btn')).toHaveLength(1);
+        expect(findRenderTestNodesByClass(noCombinedResults, 'sp-empty-clear-search-btn')).toHaveLength(0);
+
+        const noCombinedScopedResults = renderScenario({
+            state: {
+                root: [],
+                ungrouped: ['source-1'],
+                filterQuery: '',
+                isBatchMode: false,
+                activeTagId: 'tag-1'
+            },
+            sourcesByKey: existingSources,
+            matches: () => false,
+            activeIsolationGroupId: 'missing-group'
+        });
+        expect(findRenderTestNodesByClass(noCombinedScopedResults, 'sp-contextual-empty-copy')[0].textContent)
+            .toBe('ui_empty_filter_results');
+        expect(findRenderTestNodesByClass(noCombinedScopedResults, 'sp-empty-clear-filters-btn')).toHaveLength(1);
+        expect(findRenderTestNodesByClass(noCombinedScopedResults, 'sp-empty-clear-isolation-btn')).toHaveLength(0);
     });
 });
 
@@ -2659,6 +3118,19 @@ describe('group rendering rules', () => {
         expect(mod.hasActiveRenderFilters()).toBe(true);
         expect(mod.shouldRenderGroup(emptyGroup)).toBe(false);
     });
+
+    it('clears an active tag filter when the same tag is selected again', () => {
+        mod.tagsById.set('tag_alpha', {
+            id: 'tag_alpha',
+            label: 'Alpha',
+            color: '#007AFF'
+        });
+
+        expect(mod._applyTagQuickFilterForTest('tag_alpha')).toBe(true);
+        expect(mod.state.activeTagId).toBe('tag_alpha');
+        expect(mod._applyTagQuickFilterForTest('tag_alpha')).toBe(true);
+        expect(mod.state.activeTagId).toBeNull();
+    });
 });
 
 describe('isolate runtime state', () => {
@@ -2784,6 +3256,8 @@ describe('command palette commands', () => {
             expect.objectContaining({ action: 'switch-source-view', payload: { kind: 'label' } }),
             expect.objectContaining({ action: 'open-settings' }),
             expect.objectContaining({ action: 'manage-tags' }),
+            expect.objectContaining({ action: 'undo', disabled: true }),
+            expect.objectContaining({ action: 'redo', disabled: true }),
             expect.objectContaining({ action: 'batch-add-tags', disabled: false }),
             expect.objectContaining({ action: 'batch-move-ungrouped', disabled: false })
         ]));

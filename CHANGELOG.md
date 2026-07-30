@@ -27,6 +27,22 @@
 
 ## [Unreleased] (未发布)
 
+### Added
+- **事务式撤销与重做 (Add Transactional Undo and Redo)**: **影响**: 用户现在可从工具栏、命令面板或常用快捷键连续撤销和重做分组整理；只有 critical save 明确成功后历史栈才前进，失败会恢复操作前界面并保留可重试的历史项。
+- **常用整理任务就地完成 (Complete Common Organization Tasks In Place)**: **影响**: 新建文件夹或子文件夹后会立即命名；即使当前有搜索、标签、快速视图、隔离或折叠祖先，临时命名路径仍保持可见，确认后会退出这些视图约束并展开必要祖先。命名中的重绘会恢复已输入草稿，确认前的临时文件夹不会进入任何持久化快照；“移动到文件夹”可在弹窗内新建目标并一次完成移动；批量栏提供真实选中数、“选择当前可见”和“清空选择”，并严格排除折叠、隐藏、加载失败或缺少原生复选框的来源，不再要求逐项勾选或退出当前流程。
+- **主面板持续显示保存与恢复状态 (Show Persistent Save and Recovery Status)**: **影响**: Saving、Failed、Stale 和可恢复状态会持续显示在来源管理器中，并提供对应 Retry、Refresh、Restore 或 Dismiss 操作；短暂成功状态仍会自动收起。
+- **可搜索的标签筛选 (Add Searchable Tag Filtering)**: **影响**: 标签筛选弹窗现在支持忽略大小写与首尾空白的搜索、结果计数、无匹配状态和辅助技术可读的选中状态。
+
+### Changed
+- **空状态提供准确诊断与恢复入口 (Make Empty States Contextual and Actionable)**: **影响**: 真正没有来源、搜索无匹配、筛选无匹配和隔离文件夹无内容现在显示不同说明，并分别提供 Clear search、Clear filters 或 Show all；退出隔离的组合清除操作会同步恢复 Gemini Notebook 原生来源启用状态，不再把所有情况误报为筛选无结果或留下界面与原生状态不一致。
+- **核心树与窄面板无障碍改进 (Improve Core Tree Accessibility and Narrow-Panel Layout)**: **影响**: 来源与嵌套文件夹使用 list/listitem 关系，重复控件名称带来源或文件夹上下文，折叠内容从 Tab 和辅助技术路径中移除，标签状态与 switch focus 更清晰；工具栏和批量栏在窄宽度及长译文下可换行，浅色次要文字和自定义标签文字保持可读。
+
+### Fixed
+- **支持当前 Gemini Notebook 域名 (Support the Current Gemini Notebook Origin)**: **影响**: 扩展会在当前 `notebook.google.com` 页面正常注入、识别、聚焦和启动，同时保留 `notebooklm.google.com` 兼容入口；Popup 只有收到明确的 `success: true` 才报告动作完成。
+
+### Security
+- **原生批量删除双重确认与缺失证明 (Require Dual Confirmation and Absence Proof for Native Batch Delete)**: **影响**: 批量删除会先显示扩展确认、数量和有限标题预览，再进入 Gemini Notebook 原生确认；取消不会触发原生操作，确认后也只有两次完整 ready-panel 扫描共同证明唯一来源身份消失且行数准确减少，才提交本地删除。 对话框关闭、扫描不完整、来源仍存在、身份歧义或超时都会安全失败。
+
 ## [2026-07-27] [26.7.27]
 
 ### Added

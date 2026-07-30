@@ -7,6 +7,9 @@ function createElement(tag, attrs = {}, children = []) {
         id: attrs.id || '',
         attrs,
         dataset: attrs.dataset || {},
+        hidden: Boolean(attrs.hidden),
+        value: attrs.value || '',
+        textContent: '',
         children: [],
         listeners: {},
         addEventListener(event, handler) {
@@ -30,6 +33,7 @@ function createElement(tag, attrs = {}, children = []) {
         if (typeof child === 'object') child.parentNode = node;
         node.children.push(child);
     });
+    node.textContent = (children || []).filter((child) => typeof child === 'string').join('');
     return node;
 }
 
@@ -128,6 +132,83 @@ describe('content modal tag filter', () => {
         expect(buttonCalls.map(([, attrs]) => attrs.dataset.tagId)).toEqual(['t2', 't1', 't3']);
     });
 
+    it('marks only the active tag option as pressed', () => {
+        const tagsById = new Map([
+            ['t1', { id: 't1', label: 'One' }],
+            ['t2', { id: 't2', label: 'Two' }]
+        ]);
+        const deps = createDeps({
+            getState: () => ({ tagOrder: ['t1', 't2'], activeTagId: 't2' }),
+            getTagsById: () => tagsById
+        });
+        const helper = createContentModalTagFilter(deps);
+
+        helper.renderTagFilterModal();
+
+        const options = deps.getShadowRoot().querySelectorAll('.sp-tag-filter-option');
+        expect(options.map((option) => option.attrs['aria-pressed'])).toEqual(['false', 'true']);
+        expect(options[0].className).not.toContain('is-active');
+        expect(options[1].className).toContain('is-active');
+    });
+
+    it('filters tags with a trimmed case-insensitive query and updates the result count', () => {
+        const tagsById = new Map([
+            ['t1', { id: 't1', label: 'Alpha' }],
+            ['t2', { id: 't2', label: 'Beta' }],
+            ['t3', { id: 't3', label: 'Alphabet' }]
+        ]);
+        const deps = createDeps({
+            getMessage: jest.fn((key, substitutions = []) => (
+                key === 'ui_search_results_count' ? `${substitutions[0]} results` : key
+            )),
+            getState: () => ({ tagOrder: ['t1', 't2', 't3'] }),
+            getTagsById: () => tagsById
+        });
+        const helper = createContentModalTagFilter(deps);
+        helper.renderTagFilterModal();
+
+        const search = deps.getShadowRoot().querySelector('.sp-tag-filter-search');
+        search.value = '  ALP  ';
+        search.listeners.input[0]();
+
+        const options = deps.getShadowRoot().querySelectorAll('.sp-tag-filter-option');
+        expect(options.map((option) => option.hidden)).toEqual([false, true, false]);
+        expect(deps.getShadowRoot().querySelector('.sp-tag-filter-results-count').textContent).toBe('2 results');
+        expect(deps.getShadowRoot().querySelector('.sp-tag-filter-list').hidden).toBe(false);
+        expect(deps.getShadowRoot().querySelector('.sp-tag-filter-no-results').hidden).toBe(true);
+
+        search.value = '';
+        search.listeners.input[0]();
+
+        expect(options.map((option) => option.hidden)).toEqual([false, false, false]);
+        expect(options.map((option) => option.dataset.tagId)).toEqual(['t1', 't2', 't3']);
+        expect(deps.getShadowRoot().querySelector('.sp-tag-filter-results-count').textContent).toBe('3 results');
+        expect(deps.getShadowRoot().querySelector('.sp-tag-filter-list').hidden).toBe(false);
+        expect(deps.getShadowRoot().querySelector('.sp-tag-filter-no-results').hidden).toBe(true);
+    });
+
+    it('shows a no-match state and zero result count when search finds no tags', () => {
+        const tagsById = new Map([['t1', { id: 't1', label: 'Alpha' }]]);
+        const deps = createDeps({
+            getMessage: jest.fn((key, substitutions = []) => (
+                key === 'ui_search_results_count' ? `${substitutions[0]} results` : key
+            )),
+            getState: () => ({ tagOrder: ['t1'] }),
+            getTagsById: () => tagsById
+        });
+        const helper = createContentModalTagFilter(deps);
+        helper.renderTagFilterModal();
+
+        const search = deps.getShadowRoot().querySelector('.sp-tag-filter-search');
+        search.value = 'missing';
+        search.listeners.input[0]();
+
+        expect(deps.getShadowRoot().querySelector('.sp-tag-filter-results-count').textContent).toBe('0 results');
+        expect(deps.getShadowRoot().querySelector('.sp-tag-filter-list').hidden).toBe(true);
+        expect(deps.getShadowRoot().querySelector('.sp-tag-filter-no-results').hidden).toBe(false);
+        expect(deps.getMessage).toHaveBeenCalledWith('ui_no_matching_tags');
+    });
+
     it('clicking a tag option triggers applyTagQuickFilter and closes the modal on success', () => {
         const tagsById = new Map([['t1', { id: 't1', label: 'One' }]]);
         const deps = createDeps({
@@ -208,5 +289,31 @@ describe('content modal tag filter', () => {
         expect(typeof options.closeModal).toBe('function');
         options.closeModal();
         expect(deps.closeManagedModal).toHaveBeenCalled();
+    });
+
+    it('focuses the search input first when tags exist', () => {
+        const tagsById = new Map([['t1', { id: 't1', label: 'One' }]]);
+        const deps = createDeps({
+            getState: () => ({ tagOrder: ['t1'] }),
+            getTagsById: () => tagsById
+        });
+        const helper = createContentModalTagFilter(deps);
+        helper.renderTagFilterModal();
+
+        const [, options] = deps.bindModalKeyboardNavigation.mock.calls[0];
+        const search = deps.getShadowRoot().querySelector('.sp-tag-filter-search');
+        expect(options.initialFocusTarget()).toBe(search);
+        expect(search.attrs['aria-controls']).toBe('sp-tag-filter-list');
+        expect(search.attrs['aria-describedby']).toBe('sp-tag-filter-results-count');
+    });
+
+    it('focuses Cancel first when no tags exist', () => {
+        const deps = createDeps();
+        const helper = createContentModalTagFilter(deps);
+        helper.renderTagFilterModal();
+
+        const [, options] = deps.bindModalKeyboardNavigation.mock.calls[0];
+        const cancel = deps.getShadowRoot().querySelector('.sp-modal-cancel');
+        expect(options.initialFocusTarget()).toBe(cancel);
     });
 });

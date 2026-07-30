@@ -95,9 +95,28 @@ test.describe.serial('batch drag smoke', () => {
 
             // Create a destination folder via the toolbar button.
             await clickSelector('#sp-new-group-btn', 'New group button missing.');
-            const groupEl = await waitForSelector('.group-container', 'Group container missing after creation.');
-            const groupId = groupEl.dataset.groupId;
+            const groupNameInput = await waitForSelector(
+                '.sp-inline-group-name-input',
+                'New group name input missing.'
+            );
+            const groupEl = groupNameInput.closest('.group-container');
+            const groupId = groupEl?.dataset.groupId;
             if (!groupId) throw new Error('Group container is missing data-group-id.');
+            groupNameInput.value = 'Batch drag destination';
+            groupNameInput.dispatchEvent(new Event('input', { bubbles: true }));
+            groupNameInput.dispatchEvent(new KeyboardEvent('keydown', {
+                key: 'Enter',
+                bubbles: true,
+                cancelable: true
+            }));
+            await waitForValue(() => {
+                const title = getRoot()?.querySelector(
+                    `.group-container[data-group-id="${groupId}"] .group-title`
+                );
+                return title?.textContent?.trim() === 'Batch drag destination'
+                    ? title
+                    : null;
+            }, 'Confirmed batch destination group missing.');
 
             // Enter batch mode via the toolbar.
             await clickSelector('#sp-batch-action-btn', 'Batch action button missing.');

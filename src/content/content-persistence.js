@@ -1328,6 +1328,34 @@
             const groupsById = ctx.groupsById instanceof Map ? ctx.groupsById : new Map(getMapLikeEntries(ctx.groupsById));
             const sourceStateById = {};
             const persistedSourceTagsById = {};
+            const pendingInitialRenameGroupIds = new Set(
+                Array.from(groupsById.entries())
+                    .filter(([, group]) => Boolean(group?.isPendingInitialRename))
+                    .map(([groupId]) => groupId)
+            );
+            const withoutPendingInitialRenameGroups = (entries) => (
+                (Array.isArray(entries) ? entries : []).filter((entry) => !(
+                    entry?.type === 'group'
+                    && pendingInitialRenameGroupIds.has(entry.id)
+                ))
+            );
+            const persistedGroupsById = Object.fromEntries(
+                Array.from(groupsById.entries())
+                    .filter(([groupId]) => !pendingInitialRenameGroupIds.has(groupId))
+                    .map(([groupId, group]) => {
+                        const persistedGroup = cloneSerializableData(group) || {};
+                        persistedGroup.children = withoutPendingInitialRenameGroups(
+                            persistedGroup.children
+                        );
+                        delete persistedGroup.isNewlyCreated;
+                        delete persistedGroup.isPendingInitialRename;
+                        delete persistedGroup.pendingInitialRenameDraft;
+                        delete persistedGroup.pendingInitialRenameFocusReturnSelector;
+                        delete persistedGroup.pendingInitialRenameCollapsedAncestorIds;
+                        delete persistedGroup.isPendingInitialRenameRender;
+                        return [groupId, persistedGroup];
+                    })
+            );
 
             sourcesByKey.forEach((source, sourceKey) => {
                 // Source keys can be attacker-influenced after an import round-trip.
@@ -1360,8 +1388,8 @@
 
             const persistableState = {
                 schemaVersion: storageSchemaVersion,
-                root: Array.isArray(state.root) ? state.root : [],
-                groupsById: Object.fromEntries(groupsById),
+                root: withoutPendingInitialRenameGroups(state.root),
+                groupsById: persistedGroupsById,
                 ungrouped: Array.isArray(state.ungrouped) ? state.ungrouped : [],
                 sourceStateById,
                 customHeight: ctx.customHeight ?? null,

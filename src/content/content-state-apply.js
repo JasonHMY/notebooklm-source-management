@@ -131,6 +131,11 @@
                             : '';
                     }
                     delete candidateGroup.isNewlyCreated;
+                    delete candidateGroup.isPendingInitialRename;
+                    delete candidateGroup.pendingInitialRenameDraft;
+                    delete candidateGroup.pendingInitialRenameFocusReturnSelector;
+                    delete candidateGroup.pendingInitialRenameCollapsedAncestorIds;
+                    delete candidateGroup.isPendingInitialRenameRender;
                     candidateGroupsById.set(groupId, candidateGroup);
                 });
                 Object.entries(normalizedState.tagsById || {}).forEach(([tagId, tag]) => {
