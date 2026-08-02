@@ -46,6 +46,7 @@
 - **Manager 基准记录隔离世界 DOM 调用 (Record Isolated-World Manager DOM Calls)**: **影响**: 对扩展使用无可感知变化。 `benchmark:manager` 现在在临时 content-script 隔离世界中按样本记录 DOM mutation、querySelector/querySelectorAll 与 layout-read 调用，并在成功、异常或清理路径都还原被测原型；恢复失败会让基准明确失败，避免样本之间相互污染。
 
 ### Fixed
+- **Linux 窄面板批量栏不再横向溢出 (Prevent Narrow Batch Toolbar Overflow on Linux)**: **影响**: 240px、320px 侧栏、200%/400% 缩放、长译文或平台字体稍宽时，批量选择状态与操作按钮会在边界内换行，不再撑宽工具栏或被裁切。相关 smoke 现使用长批量文案显式覆盖该跨平台布局边界。
 - **搜索合并不再受迟到动画帧阻塞 (Keep Coalesced Search Independent of Delayed Animation Frames)**: **影响**: 来源列表较大或浏览器延迟下一帧时，输入筛选仍会在短暂合并后立即更新结果，不再偶发等待多个动画帧而越过交互门槛。搜索继续合并快速连续输入；若已有列表刷新待执行，则复用并立即完成同一个刷新、取消旧 rAF，避免重复渲染。
 - **窗口化拖拽基准按完整逻辑状态验证 (Verify Windowed Drag Benchmarks Against Complete Logical State)**: **影响**: 对扩展使用无可感知变化。 `benchmark:drag` 在 500 个合成来源时不再把当前 `.source-item` 挂载数误当成来源总数；它会验证完整逻辑投影、windowing 仍启用且物理行少于逻辑行，临时挂载 origin 和测量目标。50 项选择同时校验 `pendingSelected` 与 drag DataTransfer 的完整键集合，几何读取按实际 materialized subset 审计；既有 timing、强制布局和 geometry/query 门槛未降低。
 - **窄面板文件夹标题保持可读 (Keep Folder Titles Readable in Narrow Panels)**: **影响**: 在 240px、320px 侧栏及高倍缩放下，文件夹标题不再被计数和悬浮操作挤成单字或完全消失；标题与文件夹操作会自动换行，同时保留计数、精准排序、新建子文件夹、隔离、编辑和删除入口。

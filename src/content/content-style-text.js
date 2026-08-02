@@ -3365,23 +3365,40 @@
                 justify-content: space-between;
                 align-items: center;
                 gap: 8px;
+                width: 100%;
                 min-width: 0;
                 max-width: 100%;
+                box-sizing: border-box;
             }
             .sp-batch-actions {
                 display: flex;
                 flex-wrap: wrap;
                 justify-content: flex-end;
                 gap: 8px;
+                width: 100%;
                 min-width: 0;
                 max-width: 100%;
+                box-sizing: border-box;
             }
-                .sp-batch-selection-count {
-                    color: var(--sp-text-secondary);
-                    font-size: 11px;
-                    font-weight: 700;
-                    white-space: nowrap;
-                }
+            .sp-batch-toolbar > .sp-button,
+            .sp-batch-actions > .sp-button {
+                min-width: 0;
+                max-width: 100%;
+                box-sizing: border-box;
+                white-space: normal;
+                overflow-wrap: anywhere;
+            }
+            .sp-batch-selection-count {
+                flex: 1 1 160px;
+                min-width: 0;
+                max-width: 100%;
+                color: var(--sp-text-secondary);
+                font-size: 11px;
+                font-weight: 700;
+                line-height: 1.3;
+                white-space: normal;
+                overflow-wrap: anywhere;
+            }
 	            .sp-batch-add-folder-btn,
 	            .sp-batch-add-tags-btn {
 	                background-color: var(--sp-accent);

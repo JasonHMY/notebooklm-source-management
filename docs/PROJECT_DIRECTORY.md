@@ -807,7 +807,7 @@ content runtime memory
 ├── 扩展真实上下文 smoke
 │   ├── 命令: npm run test:smoke
 │   ├── 文件: tests/smoke/extension-smoke.spec.js, tests/smoke/batch-drag.smoke.spec.js, tests/smoke/drag-reflow-layout.smoke.spec.js
-│   └── 默认: headless，不应该弹出可见浏览器窗口
+│   └── 默认: headless，不应该弹出可见浏览器窗口；extension smoke 同时用长批量文案验证 240/320px 窄面板、高倍缩放与跨平台字体度量下无水平溢出
 ├── 拖拽性能基准（opt-in）
 │   ├── 命令: npm run benchmark:drag
 │   ├── 文件: tests/smoke/drag-performance.smoke.spec.js, docs/DRAG_PERFORMANCE_BASELINE.md

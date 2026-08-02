@@ -1164,6 +1164,10 @@ Required rules:
   clipping actions. At 200% and 400% browser zoom, the same rule applies: no
   essential control or status may require horizontal scrolling, overlap another
   action, or become hover-only.
+- Batch toolbar buttons and selection status must override the shared button
+  `white-space: nowrap` rule with bounded border-box sizing and wrapping. This
+  prevents long translations and platform font metrics from increasing the
+  toolbar's intrinsic width beyond the manager container.
 
 Recommended rules:
 

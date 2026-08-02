@@ -406,6 +406,16 @@ test.describe.serial('extension smoke', () => {
         await setPanelWidth(null);
         await notebookPage.locator('#sp-batch-action-btn').click();
         await expect(notebookPage.locator('.sp-batch-action-bar')).toBeVisible();
+        await notebookPage.evaluate(() => {
+            const root = document.querySelector('#sources-plus-root')?.shadowRoot || null;
+            const count = root?.querySelector('.sp-batch-selection-count') || null;
+            const clearHidden = root?.querySelector('.sp-batch-clear-hidden-selection-btn') || null;
+            if (!count || !clearHidden) {
+                throw new Error('Synthetic batch controls are missing.');
+            }
+            count.textContent = '888 visible selected · 888 hidden selected';
+            clearHidden.textContent = 'Clear 888 hidden selections from this filtered view';
+        });
 
         const readHorizontalLayout = async () => notebookPage.evaluate(() => {
             const root = document.querySelector('#sources-plus-root')?.shadowRoot || null;
@@ -424,6 +434,7 @@ test.describe.serial('extension smoke', () => {
             const regions = regionSelectors
                 .map((selector) => root.querySelector(selector))
                 .filter(Boolean);
+            const batchSelectionCount = root.querySelector('.sp-batch-selection-count');
             const controls = Array.from(root.querySelectorAll(
                 '.sp-controls button, .sp-batch-action-bar button, .sp-batch-selection-count'
             )).filter((element) => {
@@ -464,6 +475,9 @@ test.describe.serial('extension smoke', () => {
                 panelWidth: document.querySelector('[data-testid="source-panel"]')?.getBoundingClientRect().width || 0,
                 containerWidth: containerRect.width,
                 hostOverflow: Math.max(0, host.scrollWidth - host.clientWidth),
+                batchSelectionOverflow: batchSelectionCount
+                    ? Math.max(0, batchSelectionCount.scrollWidth - batchSelectionCount.clientWidth)
+                    : null,
                 regionOverflow: regions
                     .filter((element) => element.scrollWidth > element.clientWidth + 1)
                     .map((element) => element.className),
@@ -485,6 +499,7 @@ test.describe.serial('extension smoke', () => {
             expect(layout.panelWidth).toBeCloseTo(layout.containerWidth + 2, 0);
             expect(layout.controlCount).toBeGreaterThan(10);
             expect(layout.hostOverflow).toBeLessThanOrEqual(1);
+            expect(layout.batchSelectionOverflow).toBeLessThanOrEqual(1);
             expect(layout.regionOverflow).toEqual([]);
             expect(layout.clippedControls).toEqual([]);
             expect(layout.overlaps).toEqual([]);

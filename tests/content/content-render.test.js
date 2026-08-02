@@ -490,6 +490,8 @@ describe('manager shell structure', () => {
         const batchActionBar = extractCssBlock(css, '.sp-batch-action-bar {');
         const batchToolbar = extractCssBlock(css, '.sp-batch-toolbar {');
         const batchActions = extractCssBlock(css, '.sp-batch-actions {');
+        const batchButtons = extractCssBlock(css, '.sp-batch-toolbar > .sp-button,');
+        const batchSelectionCount = extractCssBlock(css, '.sp-batch-selection-count {');
         const groupSwitchFocus = extractCssBlock(
             css,
             '.sp-group-toggle-checkbox:focus-visible + .sp-toggle-slider {'
@@ -498,9 +500,20 @@ describe('manager shell structure', () => {
         expect(batchActionBar).toContain('max-width: 100%;');
         expect(batchActionBar).toContain('box-sizing: border-box;');
         expect(batchToolbar).toContain('flex-wrap: wrap;');
+        expect(batchToolbar).toContain('width: 100%;');
         expect(batchToolbar).toContain('max-width: 100%;');
         expect(batchActions).toContain('flex-wrap: wrap;');
+        expect(batchActions).toContain('width: 100%;');
         expect(batchActions).toContain('max-width: 100%;');
+        expect(batchButtons).toContain('max-width: 100%;');
+        expect(batchButtons).toContain('box-sizing: border-box;');
+        expect(batchButtons).toContain('white-space: normal;');
+        expect(batchButtons).toContain('overflow-wrap: anywhere;');
+        expect(batchSelectionCount).toContain('flex: 1 1 160px;');
+        expect(batchSelectionCount).toContain('min-width: 0;');
+        expect(batchSelectionCount).toContain('max-width: 100%;');
+        expect(batchSelectionCount).toContain('white-space: normal;');
+        expect(batchSelectionCount).toContain('overflow-wrap: anywhere;');
         expect(groupSwitchFocus).toContain('box-shadow: var(--sp-focus-ring-strong);');
         expect(css).toContain('--sp-text-tertiary: #6e6e73;');
     });
