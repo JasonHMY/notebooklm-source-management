@@ -128,9 +128,36 @@
 
             tagOptionEntries.forEach(({ button }) => {
                 button.addEventListener('click', () => {
-                    if (typeof applyTagQuickFilter === 'function' && applyTagQuickFilter(button.dataset.tagId)) {
-                        closeTagFilterModal();
+                    if (typeof applyTagQuickFilter !== 'function' || button.disabled) return;
+                    let result;
+                    try {
+                        result = applyTagQuickFilter(button.dataset.tagId);
+                    } catch (error) {
+                        return;
                     }
+                    if (!result || typeof result.then !== 'function') {
+                        if (result) closeTagFilterModal();
+                        return;
+                    }
+                    button.disabled = true;
+                    button.setAttribute?.('aria-busy', 'true');
+                    Promise.resolve(result)
+                        .then((resolved) => {
+                            if (
+                                resolved === true
+                                || resolved?.success === true
+                                || resolved?.ok === true
+                            ) {
+                                closeTagFilterModal();
+                                return;
+                            }
+                            button.disabled = false;
+                            button.removeAttribute?.('aria-busy');
+                        })
+                        .catch(() => {
+                            button.disabled = false;
+                            button.removeAttribute?.('aria-busy');
+                        });
                 });
             });
             if (searchInput) {

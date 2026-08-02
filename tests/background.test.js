@@ -40,7 +40,11 @@ describe('background.js message listener', () => {
                     if (cb) cb({ id: tabId, url: 'https://notebooklm.google.com/notebook/123' });
                 }),
                 sendMessage: jest.fn((tabId, message, cb) => {
-                    if (cb) cb();
+                    if (cb) {
+                        cb(message?.type === 'FOCUS_MANAGER'
+                            ? { success: true }
+                            : undefined);
+                    }
                 }),
                 create: jest.fn((createProperties, cb) => {
                     if (cb) cb({ id: 99, url: createProperties.url });
@@ -179,6 +183,155 @@ describe('background.js message listener', () => {
             historyEntryCount: 1
         }));
         expect(result).toBe(true); // Should return true to keep channel open
+    });
+
+    it('rotates the previous verified primary into backup on a subsequent save', () => {
+        const previousPrimary = {
+            schemaVersion: 5,
+            root: [{ type: 'group', id: 'previous' }],
+            groupsById: { previous: { id: 'previous', children: [] } },
+            ungrouped: [],
+            sourceStateById: {},
+            _saveRevision: 4,
+            _savedAt: '2026-07-30T00:00:00.000Z'
+        };
+        const previousBackup = {
+            schemaVersion: 5,
+            root: [{ type: 'group', id: 'older' }],
+            groupsById: { older: { id: 'older', children: [] } },
+            ungrouped: [],
+            sourceStateById: {},
+            _saveRevision: 4,
+            _savedAt: '2026-07-31T00:00:00.000Z'
+        };
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({
+                sourcesPlusState_123: previousPrimary,
+                sourcesPlusState_123__backup: previousBackup,
+                sourcesPlusHistory_123: []
+            });
+        });
+
+        listener({
+            type: 'SAVE_STATE',
+            key: 'sourcesPlusState_123',
+            baseRevision: 4,
+            data: {
+                schemaVersion: 5,
+                root: [{ type: 'group', id: 'next' }],
+                groupsById: { next: { id: 'next', children: [] } },
+                ungrouped: [],
+                sourceStateById: {}
+            }
+        }, validSender, mockSendResponse);
+
+        const payload = global.chrome.storage.local.set.mock.calls[0][0];
+        expect(payload.sourcesPlusState_123).toMatchObject({
+            root: [{ type: 'group', id: 'next' }],
+            _saveRevision: 5
+        });
+        expect(payload.sourcesPlusState_123__backup).toEqual(previousPrimary);
+    });
+
+    it('preserves a verified backup when the previous primary cannot be rotated', () => {
+        const previousBackup = {
+            schemaVersion: 5,
+            root: [{ type: 'group', id: 'safe' }],
+            groupsById: { safe: { id: 'safe', children: [] } },
+            ungrouped: [],
+            sourceStateById: {},
+            _saveRevision: 2,
+            _savedAt: '2026-07-29T00:00:00.000Z'
+        };
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({
+                sourcesPlusState_123: { schemaVersion: 'broken', value: true },
+                sourcesPlusState_123__backup: previousBackup,
+                sourcesPlusHistory_123: []
+            });
+        });
+
+        listener({
+            type: 'SAVE_STATE',
+            key: 'sourcesPlusState_123',
+            baseRevision: 2,
+            data: {
+                schemaVersion: 5,
+                root: [{ type: 'group', id: 'next' }],
+                groupsById: { next: { id: 'next', children: [] } },
+                ungrouped: [],
+                sourceStateById: {}
+            }
+        }, validSender, mockSendResponse);
+
+        expect(global.chrome.storage.local.set.mock.calls[0][0].sourcesPlusState_123__backup)
+            .toEqual(previousBackup);
+    });
+
+    it('counts retained backup and history bytes when saving a non-restorable empty state', () => {
+        const previousPrimary = {
+            schemaVersion: 5,
+            root: [{ type: 'source', key: 'source-1' }],
+            groupsById: {},
+            ungrouped: [],
+            sourceStateById: {
+                'source-1': { enabled: true, title: 'Previous source' }
+            },
+            _saveRevision: 4,
+            _savedAt: '2026-07-30T00:00:00.000Z'
+        };
+        const previousBackup = {
+            schemaVersion: 5,
+            root: [{ type: 'source', key: 'source-backup' }],
+            groupsById: {},
+            ungrouped: [],
+            sourceStateById: {
+                'source-backup': { enabled: true, title: 'Retained backup source' }
+            },
+            _saveRevision: 3,
+            _savedAt: '2026-07-29T00:00:00.000Z'
+        };
+        const retainedHistory = [{
+            id: 'history-retained',
+            createdAt: '2026-07-30T00:00:00.000Z',
+            reason: 'save',
+            snapshot: previousPrimary
+        }];
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({
+                sourcesPlusState_123: previousPrimary,
+                sourcesPlusState_123__backup: previousBackup,
+                sourcesPlusHistory_123: retainedHistory
+            });
+        });
+
+        listener({
+            type: 'SAVE_STATE',
+            key: 'sourcesPlusState_123',
+            baseRevision: 4,
+            data: {
+                schemaVersion: 5,
+                root: [],
+                groupsById: {},
+                ungrouped: [],
+                sourceStateById: {}
+            }
+        }, validSender, mockSendResponse);
+
+        const payload = global.chrome.storage.local.set.mock.calls[0][0];
+        expect(payload.sourcesPlusState_123).toMatchObject({
+            root: [],
+            _saveRevision: 5
+        });
+        expect(payload.sourcesPlusState_123__backup).toEqual(previousPrimary);
+        expect(payload.sourcesPlusHistory_123).toEqual(retainedHistory);
+        expect(mockSendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: true,
+            historyEntryCount: 1
+        }));
+        expect(mockSendResponse.mock.calls[0][0].storageUsageBytes).toBe(
+            Buffer.byteLength(JSON.stringify(payload))
+        );
     });
 
     it('accepts notebook-scoped messages from the current Notebook host', () => {
@@ -337,9 +490,10 @@ describe('background.js message listener', () => {
                     _savedAt: expect.any(String)
                 }),
                 sourcesPlusState_123__backup: expect.objectContaining({
-                    ...request.data,
-                    _saveRevision: 6,
-                    _savedAt: expect.any(String)
+                    _saveRevision: 5,
+                    groups: ['newer'],
+                    groupsById: { newer: { id: 'newer', children: [] } },
+                    sourceStateById: {}
                 }),
                 sourcesPlusHistory_123: expect.any(Array)
             }),
@@ -660,16 +814,14 @@ describe('background.js message listener', () => {
 
         listener(request, validSender, mockSendResponse);
 
-        expect(global.chrome.storage.local.set).toHaveBeenCalledWith(
-            {
-                'sourcesPlusState_123': expect.objectContaining({
-                    ...request.data,
-                    _saveRevision: 1,
-                    _savedAt: expect.any(String)
-                })
-            },
-            expect.any(Function)
-        );
+        const payload = global.chrome.storage.local.set.mock.calls[0][0];
+        expect(payload.sourcesPlusState_123).toEqual(expect.objectContaining({
+            ...request.data,
+            _saveRevision: 1,
+            _savedAt: expect.any(String)
+        }));
+        expect(payload).not.toHaveProperty('sourcesPlusState_123__backup');
+        expect(payload.sourcesPlusHistory_123).toEqual([]);
     });
 
     it('should reject SAVE_STATE with invalid key', () => {
@@ -2041,6 +2193,259 @@ describe('background.js message listener', () => {
         expect(loadResponses[0].history.map((historyEntry) => historyEntry.id)).toEqual(['entry-1']);
     });
 
+    it('deletes one state history entry and reports projected notebook storage usage', () => {
+        const makeEntry = (id, manual = false) => ({
+            id,
+            createdAt: '2026-07-31T00:00:00.000Z',
+            reason: manual ? 'manual_restore_point' : 'save',
+            manual,
+            snapshot: {
+                schemaVersion: 5,
+                root: [{ type: 'group', id: `group-${id}` }],
+                groupsById: { [`group-${id}`]: { id: `group-${id}`, children: [] } },
+                sourceStateById: {}
+            }
+        });
+        const primary = {
+            schemaVersion: 5,
+            root: [{ type: 'group', id: 'current' }],
+            groupsById: { current: { id: 'current', children: [] } },
+            sourceStateById: {},
+            _saveRevision: 7
+        };
+        const backup = {
+            schemaVersion: 5,
+            root: [{ type: 'group', id: 'previous' }],
+            groupsById: { previous: { id: 'previous', children: [] } },
+            sourceStateById: {},
+            _saveRevision: 6
+        };
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({
+                sourcesPlusState_123: primary,
+                sourcesPlusState_123__backup: backup,
+                sourcesPlusHistory_123: [makeEntry('delete-me'), makeEntry('keep-me', true)]
+            });
+        });
+
+        listener({
+            type: 'DELETE_STATE_HISTORY_ENTRY',
+            key: 'sourcesPlusHistory_123',
+            entryId: 'delete-me'
+        }, validSender, mockSendResponse);
+
+        const savedHistory = global.chrome.storage.local.set.mock.calls[0][0].sourcesPlusHistory_123;
+        expect(savedHistory.map((entry) => entry.id)).toEqual(['keep-me']);
+        expect(mockSendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: true,
+            changed: true,
+            deletedCount: 1,
+            freedBytes: expect.any(Number),
+            history: savedHistory,
+            historyEntryCount: 1,
+            storageUsageBytes: expect.any(Number)
+        }));
+        const response = mockSendResponse.mock.calls[0][0];
+        expect(response.storageUsageBytes).toBeGreaterThan(
+            Buffer.byteLength(JSON.stringify({ sourcesPlusHistory_123: savedHistory }))
+        );
+    });
+
+    it('clears automatic history while preserving manual restore points', () => {
+        const automatic = {
+            id: 'automatic',
+            createdAt: '2026-07-31T00:00:00.000Z',
+            reason: 'save',
+            snapshot: {
+                groups: ['automatic'],
+                groupsById: { automatic: { id: 'automatic', children: [] } }
+            }
+        };
+        const manual = {
+            id: 'manual',
+            createdAt: '2026-07-31T00:01:00.000Z',
+            reason: 'manual_restore_point',
+            manual: true,
+            snapshot: {
+                groups: ['manual'],
+                groupsById: { manual: { id: 'manual', children: [] } }
+            }
+        };
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({ sourcesPlusHistory_123: [automatic, manual] });
+        });
+
+        listener({
+            type: 'CLEAR_STATE_HISTORY',
+            key: 'sourcesPlusHistory_123',
+            scope: 'automatic'
+        }, validSender, mockSendResponse);
+
+        const savedHistory = global.chrome.storage.local.set.mock.calls[0][0].sourcesPlusHistory_123;
+        expect(savedHistory).toEqual([expect.objectContaining({ id: 'manual', manual: true })]);
+        expect(mockSendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: true,
+            changed: true,
+            deletedCount: 1,
+            historyEntryCount: 1
+        }));
+    });
+
+    it('clears all state history entries when scope is all', () => {
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({
+                sourcesPlusHistory_123: [{
+                    id: 'manual',
+                    createdAt: '2026-07-31T00:01:00.000Z',
+                    manual: true,
+                    snapshot: {
+                        groups: ['manual'],
+                        groupsById: { manual: { id: 'manual', children: [] } }
+                    }
+                }]
+            });
+        });
+
+        listener({
+            type: 'CLEAR_STATE_HISTORY',
+            key: 'sourcesPlusHistory_123',
+            scope: 'all'
+        }, validSender, mockSendResponse);
+
+        expect(global.chrome.storage.local.set).toHaveBeenCalledWith(
+            { sourcesPlusHistory_123: [] },
+            expect.any(Function)
+        );
+        expect(mockSendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: true,
+            deletedCount: 1,
+            history: []
+        }));
+    });
+
+    it('reports retained history usage when a history mutation write fails', () => {
+        const retainedEntry = {
+            id: 'retained',
+            createdAt: '2026-07-31T00:01:00.000Z',
+            snapshot: {
+                groups: ['retained'],
+                groupsById: { retained: { id: 'retained', children: [] } }
+            }
+        };
+        global.chrome.storage.local.get.mockImplementationOnce((keys, cb) => {
+            cb({ sourcesPlusHistory_123: [retainedEntry] });
+        });
+        global.chrome.storage.local.set.mockImplementationOnce((payload, cb) => {
+            global.chrome.runtime.lastError = { message: 'write failed' };
+            cb();
+            global.chrome.runtime.lastError = undefined;
+        });
+
+        listener({
+            type: 'CLEAR_STATE_HISTORY',
+            key: 'sourcesPlusHistory_123',
+            scope: 'all'
+        }, validSender, mockSendResponse);
+
+        expect(mockSendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: false,
+            errorCode: 'runtime_failure',
+            historyEntryCount: 1,
+            storageUsageBytes: expect.any(Number)
+        }));
+        expect(mockSendResponse.mock.calls[0][0].storageUsageBytes).toBeGreaterThan(
+            Buffer.byteLength(JSON.stringify({ sourcesPlusHistory_123: [] }))
+        );
+    });
+
+    it('binds history deletion and clearing to the sender notebook key', () => {
+        listener({
+            type: 'DELETE_STATE_HISTORY_ENTRY',
+            key: 'sourcesPlusHistory_999',
+            entryId: 'entry-1'
+        }, validSender, mockSendResponse);
+        listener({
+            type: 'CLEAR_STATE_HISTORY',
+            key: 'sourcesPlusHistory_999',
+            scope: 'all'
+        }, validSender, mockSendResponse);
+
+        expect(global.chrome.storage.local.get).not.toHaveBeenCalled();
+        expect(global.chrome.storage.local.set).not.toHaveBeenCalled();
+        expect(mockSendResponse).toHaveBeenNthCalledWith(1, {
+            success: false,
+            errorCode: 'unauthorized_sender'
+        });
+        expect(mockSendResponse).toHaveBeenNthCalledWith(2, {
+            success: false,
+            errorCode: 'unauthorized_sender'
+        });
+    });
+
+    it('serializes history deletion behind a pending save for the same notebook', async () => {
+        const pendingGets = [];
+        const pendingSets = [];
+        global.chrome.storage.local.get.mockImplementation((keys, cb) => {
+            pendingGets.push({ keys, cb });
+        });
+        global.chrome.storage.local.set.mockImplementation((payload, cb) => {
+            pendingSets.push({ payload, cb });
+        });
+
+        listener({
+            type: 'SAVE_STATE',
+            key: 'sourcesPlusState_123',
+            data: {
+                groups: ['current'],
+                groupsById: { current: { id: 'current', children: [] } },
+                sourceStateById: {}
+            }
+        }, validSender, jest.fn());
+        listener({
+            type: 'DELETE_STATE_HISTORY_ENTRY',
+            key: 'sourcesPlusHistory_123',
+            entryId: 'entry-1'
+        }, validSender, jest.fn());
+
+        expect(pendingGets).toHaveLength(1);
+        pendingGets[0].cb({});
+        expect(pendingSets).toHaveLength(1);
+        pendingSets[0].cb();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(pendingGets).toHaveLength(2);
+        expect(pendingGets[1].keys).toEqual([
+            'sourcesPlusState_123',
+            'sourcesPlusState_123__backup',
+            'sourcesPlusHistory_123',
+            'sourcesPlusPreferences'
+        ]);
+    });
+
+    it('rejects malformed state history mutation requests without touching storage', () => {
+        listener({
+            type: 'DELETE_STATE_HISTORY_ENTRY',
+            key: 'sourcesPlusHistory_123',
+            entryId: '   '
+        }, validSender, mockSendResponse);
+        listener({
+            type: 'CLEAR_STATE_HISTORY',
+            key: 'sourcesPlusHistory_123',
+            scope: 'manual'
+        }, validSender, mockSendResponse);
+
+        expect(global.chrome.storage.local.get).not.toHaveBeenCalled();
+        expect(mockSendResponse).toHaveBeenNthCalledWith(1, {
+            success: false,
+            errorCode: 'runtime_failure'
+        });
+        expect(mockSendResponse).toHaveBeenNthCalledWith(2, {
+            success: false,
+            errorCode: 'runtime_failure'
+        });
+    });
+
     it('rejects state history messages with invalid keys', () => {
         listener({ type: 'LOAD_STATE_HISTORY', key: 'sourcesPlusState_123' }, validSender, mockSendResponse);
 
@@ -2173,6 +2578,11 @@ describe('background.js message listener', () => {
             { focused: true },
             expect.any(Function)
         );
+        expect(global.chrome.tabs.sendMessage).toHaveBeenCalledWith(
+            44,
+            { type: 'FOCUS_MANAGER' },
+            expect.any(Function)
+        );
         expect(mockSendResponse).toHaveBeenCalledWith({
             success: true,
             action: 'focused-existing-notebook',
@@ -2221,6 +2631,11 @@ describe('background.js message listener', () => {
         expect(global.chrome.tabs.update).toHaveBeenCalledWith(
             45,
             { active: true },
+            expect.any(Function)
+        );
+        expect(global.chrome.tabs.sendMessage).toHaveBeenCalledWith(
+            45,
+            { type: 'FOCUS_MANAGER' },
             expect.any(Function)
         );
         expect(mockSendResponse).toHaveBeenCalledWith({
@@ -2320,6 +2735,30 @@ describe('background.js message listener', () => {
         expect(result).toBe(true);
     });
 
+    it('should report a manager focus failure after activating an existing notebook tab', () => {
+        global.chrome.tabs.query.mockImplementationOnce((queryInfo, cb) => {
+            cb([
+                { id: 21, url: 'https://notebook.google.com/notebook/abc', windowId: 5 }
+            ]);
+        });
+        global.chrome.tabs.sendMessage.mockImplementationOnce((tabId, message, cb) => {
+            cb({ success: false, reason: 'source_panel_missing' });
+        });
+
+        const result = listener({
+            type: 'OPEN_OR_FOCUS_NOTEBOOKLM',
+            currentTabId: 12,
+            currentContext: 'external'
+        }, {}, mockSendResponse);
+
+        expect(mockSendResponse).toHaveBeenCalledWith({
+            success: false,
+            errorCode: 'tab_message_failed',
+            reason: 'source_panel_missing'
+        });
+        expect(result).toBe(true);
+    });
+
     it('should surface a window focus failure when the tab is activated but the window cannot focus', () => {
         global.chrome.tabs.query.mockImplementationOnce((queryInfo, cb) => {
             cb([
@@ -2371,11 +2810,14 @@ describe('background.js message listener', () => {
         expect(result).toBe(true);
     });
 
-    it('should open a new NotebookLM home tab when the current tab is the only home tab', () => {
+    it('should reuse the current Gemini Notebook home tab instead of opening a duplicate', () => {
         global.chrome.tabs.query.mockImplementationOnce((queryInfo, cb) => {
             cb([
                 { id: 12, url: 'https://notebook.google.com/', windowId: 3 }
             ]);
+        });
+        global.chrome.tabs.update.mockImplementationOnce((tabId, updateInfo, cb) => {
+            cb({ id: tabId, url: 'https://notebook.google.com/' });
         });
 
         const result = listener({
@@ -2384,15 +2826,48 @@ describe('background.js message listener', () => {
             currentContext: 'notebook-home'
         }, {}, mockSendResponse);
 
-        expect(global.chrome.tabs.update).not.toHaveBeenCalled();
-        expect(global.chrome.tabs.create).toHaveBeenCalledWith(
-            { url: 'https://notebook.google.com/' },
+        expect(global.chrome.tabs.update).toHaveBeenCalledWith(
+            12,
+            { active: true },
             expect.any(Function)
         );
+        expect(global.chrome.tabs.create).not.toHaveBeenCalled();
         expect(mockSendResponse).toHaveBeenCalledWith({
             success: true,
-            action: 'opened-new-home',
-            tabId: 99,
+            action: 'focused-existing-home',
+            tabId: 12,
+            url: 'https://notebook.google.com/'
+        });
+        expect(result).toBe(true);
+    });
+
+    it('should keep the current home tab when a notebook manager tab also exists', () => {
+        global.chrome.tabs.query.mockImplementationOnce((queryInfo, cb) => {
+            cb([
+                { id: 12, url: 'https://notebook.google.com/', windowId: 3 },
+                { id: 44, url: 'https://notebook.google.com/notebook/abc', windowId: 5 }
+            ]);
+        });
+        global.chrome.tabs.update.mockImplementationOnce((tabId, updateInfo, cb) => {
+            cb({ id: tabId, url: 'https://notebook.google.com/' });
+        });
+
+        const result = listener({
+            type: 'OPEN_OR_FOCUS_NOTEBOOKLM',
+            currentTabId: 12,
+            currentContext: 'notebook-home'
+        }, {}, mockSendResponse);
+
+        expect(global.chrome.tabs.update).toHaveBeenCalledWith(
+            12,
+            { active: true },
+            expect.any(Function)
+        );
+        expect(global.chrome.tabs.create).not.toHaveBeenCalled();
+        expect(mockSendResponse).toHaveBeenCalledWith({
+            success: true,
+            action: 'focused-existing-home',
+            tabId: 12,
             url: 'https://notebook.google.com/'
         });
         expect(result).toBe(true);

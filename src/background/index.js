@@ -75,6 +75,7 @@ const ERROR_CODES = {
     TABS_QUERY_FAILED: 'tabs_query_failed',
     TAB_FOCUS_FAILED: 'tab_focus_failed',
     WINDOW_FOCUS_FAILED: 'window_focus_failed',
+    TAB_MESSAGE_FAILED: 'tab_message_failed',
     TAB_CREATE_FAILED: 'tab_create_failed',
     STALE_REVISION: 'stale_revision',
     STORAGE_QUOTA_EXCEEDED: 'storage_quota_exceeded'
@@ -249,7 +250,21 @@ function isNotebookHomeTab(tab) {
     return Boolean(matchingHomeUrl && !isNotebookTabUrl(tab.url));
 }
 
-function focusTab(tab, action, sendResponse) {
+function focusTab(tab, action, sendResponse, onFocused = null) {
+    const finishFocus = (updatedTab) => {
+        const response = {
+            success: true,
+            action,
+            tabId: (updatedTab && updatedTab.id) || tab.id,
+            url: (updatedTab && updatedTab.url) || tab.url
+        };
+        if (typeof onFocused === 'function') {
+            onFocused(response);
+            return;
+        }
+        sendResponse(response);
+    };
+
     chrome.tabs.update(tab.id, { active: true }, (updatedTab) => {
         if (chrome.runtime.lastError) {
             sendResponse({ success: false, errorCode: ERROR_CODES.TAB_FOCUS_FAILED });
@@ -262,22 +277,34 @@ function focusTab(tab, action, sendResponse) {
                     sendResponse({ success: false, errorCode: ERROR_CODES.WINDOW_FOCUS_FAILED });
                     return;
                 }
+                finishFocus(updatedTab);
+            });
+            return;
+        }
+        finishFocus(updatedTab);
+    });
+}
 
-                sendResponse({
-                    success: true,
-                    action,
-                    tabId: (updatedTab && updatedTab.id) || tab.id,
-                    url: (updatedTab && updatedTab.url) || tab.url
-                });
+function focusNotebookManagerTab(tab, sendResponse) {
+    focusTab(tab, 'focused-existing-notebook', sendResponse, (focusResponse) => {
+        if (!chrome.tabs || typeof chrome.tabs.sendMessage !== 'function') {
+            sendResponse({
+                success: false,
+                errorCode: ERROR_CODES.TAB_MESSAGE_FAILED
             });
             return;
         }
 
-        sendResponse({
-            success: true,
-            action,
-            tabId: (updatedTab && updatedTab.id) || tab.id,
-            url: (updatedTab && updatedTab.url) || tab.url
+        chrome.tabs.sendMessage(tab.id, { type: 'FOCUS_MANAGER' }, (response) => {
+            if (chrome.runtime.lastError || !response || response.success !== true) {
+                sendResponse({
+                    success: false,
+                    errorCode: ERROR_CODES.TAB_MESSAGE_FAILED,
+                    reason: response?.reason || null
+                });
+                return;
+            }
+            sendResponse(focusResponse);
         });
     });
 }
@@ -669,19 +696,22 @@ function openOrFocusNotebookLm(request, sendResponse) {
             return;
         }
 
+        const currentHomeTab = currentContext === 'notebook-home'
+            ? tabs.find(tab => isNotebookHomeTab(tab) && tab.id === currentTabId)
+            : null;
+        if (currentHomeTab) {
+            focusTab(currentHomeTab, 'focused-existing-home', sendResponse);
+            return;
+        }
+
         const notebookTabs = tabs.filter(tab => isNotebookTabUrl(tab.url));
         const preferredNotebookTab = pickPreferredNotebookTab(notebookTabs);
         if (preferredNotebookTab) {
-            focusTab(preferredNotebookTab, 'focused-existing-notebook', sendResponse);
+            focusNotebookManagerTab(preferredNotebookTab, sendResponse);
             return;
         }
 
-        if (currentContext === 'notebook-home') {
-            openNewNotebookLmHome(sendResponse);
-            return;
-        }
-
-        const reusableHomeTab = tabs.find(tab => isNotebookHomeTab(tab) && tab.id !== currentTabId);
+        const reusableHomeTab = tabs.find(tab => isNotebookHomeTab(tab));
         if (reusableHomeTab) {
             focusTab(reusableHomeTab, 'focused-existing-home', sendResponse);
             return;
@@ -921,25 +951,65 @@ function createSavedStateSnapshot(data, currentRevision, baseRevision = null) {
     return snapshot;
 }
 
+function isVerifiedBackupSnapshot(snapshot) {
+    const compatibility = storageContract.getStateSchemaCompatibility(snapshot);
+    return hasRestorableStateSnapshot(snapshot) && (
+        compatibility === 'legacy' ||
+        compatibility === 'supported'
+    );
+}
+
+function resolveRotatedBackupSnapshot(savedState, previousPrimaryState, previousBackupState) {
+    const verifiedPrimary = isVerifiedBackupSnapshot(previousPrimaryState)
+        ? previousPrimaryState
+        : null;
+    const verifiedBackup = isVerifiedBackupSnapshot(previousBackupState)
+        ? previousBackupState
+        : null;
+    if (verifiedPrimary) return cloneSerializableData(verifiedPrimary);
+    if (verifiedBackup) return cloneSerializableData(verifiedBackup);
+    return hasRestorableStateSnapshot(savedState)
+        ? cloneSerializableData(savedState)
+        : null;
+}
+
 function createStateStoragePayload({
     key,
     backupKey,
     historyKey,
     savedState,
+    previousPrimaryState = null,
+    previousBackupState = null,
     existingHistory,
     reason = 'save',
     historyLimit = STATE_HISTORY_LIMIT,
     extraBytes = 0
 }) {
     const storagePayload = { [key]: savedState };
+    const rotatedBackup = resolveRotatedBackupSnapshot(
+        savedState,
+        previousPrimaryState,
+        previousBackupState
+    );
+    if (rotatedBackup) {
+        storagePayload[backupKey] = rotatedBackup;
+    }
     let history = [];
     if (hasRestorableStateSnapshot(savedState)) {
-        storagePayload[backupKey] = savedState;
         history = appendHistoryEntry(
             existingHistory,
             createHistoryEntryFromSnapshot(savedState, reason),
             historyLimit
         );
+        storagePayload[historyKey] = history;
+    } else {
+        // An empty/non-restorable primary save intentionally leaves the last verified
+        // recovery generations available. Include those retained values in the write
+        // projection as well as the quota calculation; omitting them from this object
+        // does not remove them from chrome.storage.local and would under-report usage.
+        history = Array.isArray(existingHistory)
+            ? cloneSerializableData(existingHistory)
+            : [];
         storagePayload[historyKey] = history;
     }
 
@@ -1031,6 +1101,12 @@ function writeStateWithRevisionGuard(request, sendResponse) {
             existingData && typeof existingData === 'object' ? existingData[key] : null,
             existingData && typeof existingData === 'object' ? existingData[backupKey] : null
         );
+        const previousPrimaryState = existingData && typeof existingData === 'object'
+            ? existingData[key]
+            : null;
+        const previousBackupState = existingData && typeof existingData === 'object'
+            ? existingData[backupKey]
+            : null;
         const currentRevision = getSnapshotSaveRevision(currentState);
 
         if (isStaleBaseRevision(baseRevision, currentState)) {
@@ -1069,6 +1145,8 @@ function writeStateWithRevisionGuard(request, sendResponse) {
                 backupKey,
                 historyKey,
                 savedState,
+                previousPrimaryState,
+                previousBackupState,
                 existingHistory,
                 reason: request.critical ? 'critical_save' : 'save',
                 historyLimit,
@@ -1147,9 +1225,126 @@ function loadStateHistoryNow(request, sendResponse) {
     });
 }
 
+function getNotebookStorageKeysForHistoryKey(historyKey) {
+    const stateKey = storageContract.getStateKeyFromHistoryKey(historyKey);
+    return {
+        stateKey,
+        backupKey: storageContract.getStateBackupKey(stateKey),
+        historyKey
+    };
+}
+
+function createNotebookHistoryUsagePayload(data, keys, history) {
+    const payload = {
+        [keys.historyKey]: history
+    };
+    if (data && Object.prototype.hasOwnProperty.call(data, keys.stateKey)) {
+        payload[keys.stateKey] = data[keys.stateKey];
+    }
+    if (data && Object.prototype.hasOwnProperty.call(data, keys.backupKey)) {
+        payload[keys.backupKey] = data[keys.backupKey];
+    }
+    return payload;
+}
+
+function mutateStateHistoryNow(request, mutateHistory, sendResponse) {
+    const keys = getNotebookStorageKeysForHistoryKey(request.key);
+    chrome.storage.local.get([
+        keys.stateKey,
+        keys.backupKey,
+        keys.historyKey,
+        PREFERENCES_KEY
+    ], (data) => {
+        if (chrome.runtime.lastError) {
+            sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
+            return;
+        }
+
+        const existingHistory = (Array.isArray(data?.[keys.historyKey]) ? data[keys.historyKey] : [])
+            .map((entry) => normalizeHistoryEntry(entry))
+            .filter(Boolean);
+        const nextHistory = mutateHistory(existingHistory)
+            .map((entry) => normalizeHistoryEntry(entry))
+            .filter(Boolean);
+        const deletedCount = Math.max(0, existingHistory.length - nextHistory.length);
+
+        resolveExtraStorageBytes(data, [
+            keys.stateKey,
+            keys.backupKey,
+            keys.historyKey
+        ], (extraBytes) => {
+            const previousUsageInfo = createStorageUsageInfo(
+                createNotebookHistoryUsagePayload(data, keys, existingHistory),
+                getStorageQuotaBytes(),
+                extraBytes
+            );
+            const usageInfo = createStorageUsageInfo(
+                createNotebookHistoryUsagePayload(data, keys, nextHistory),
+                getStorageQuotaBytes(),
+                extraBytes
+            );
+            const payload = { [keys.historyKey]: nextHistory };
+
+            chrome.storage.local.set(payload, () => {
+                if (chrome.runtime.lastError) {
+                    sendResponse(Object.assign({
+                        success: false,
+                        errorCode: isStorageQuotaError(chrome.runtime.lastError)
+                            ? ERROR_CODES.STORAGE_QUOTA_EXCEEDED
+                            : ERROR_CODES.RUNTIME_FAILURE
+                    }, createStorageResponseFields(previousUsageInfo, {
+                        historyEntryCount: existingHistory.length,
+                        historyTrimmed: false
+                    })));
+                    return;
+                }
+
+                sendResponse(Object.assign({
+                    success: true,
+                    changed: deletedCount > 0,
+                    deletedCount,
+                    freedBytes: Math.max(
+                        0,
+                        previousUsageInfo.storageUsageBytes - usageInfo.storageUsageBytes
+                    ),
+                    history: nextHistory
+                }, createStorageResponseFields(usageInfo, {
+                    historyEntryCount: nextHistory.length,
+                    historyTrimmed: false
+                })));
+            });
+        });
+    });
+}
+
+function deleteStateHistoryEntryNow(request, sendResponse) {
+    mutateStateHistoryNow(
+        request,
+        (history) => history.filter((entry) => entry?.id !== request.entryId),
+        sendResponse
+    );
+}
+
+function clearStateHistoryNow(request, sendResponse) {
+    mutateStateHistoryNow(
+        request,
+        (history) => (
+            request.scope === 'automatic'
+                ? history.filter((entry) => entry?.manual)
+                : []
+        ),
+        sendResponse
+    );
+}
+
 function appendStateHistoryNow(request, sendResponse) {
-    const key = request.key;
-    chrome.storage.local.get([key, PREFERENCES_KEY], (data) => {
+    const keys = getNotebookStorageKeysForHistoryKey(request.key);
+    chrome.storage.local.get([
+        keys.stateKey,
+        keys.backupKey,
+        keys.historyKey,
+        PREFERENCES_KEY
+    ], (data) => {
         if (chrome.runtime.lastError) {
             sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
             return;
@@ -1157,22 +1352,34 @@ function appendStateHistoryNow(request, sendResponse) {
         const historyLimit = normalizePreferences(data?.[PREFERENCES_KEY]).historyRetentionLimit;
 
         const history = appendHistoryEntry(
-            data && typeof data === 'object' ? data[key] : [],
+            data && typeof data === 'object' ? data[keys.historyKey] : [],
             request.entry,
             historyLimit
         );
-        resolveExtraStorageBytes(data, [key], (extraBytes) => {
-            const initialPayload = { [key]: history };
+        resolveExtraStorageBytes(data, [
+            keys.stateKey,
+            keys.backupKey,
+            keys.historyKey
+        ], (extraBytes) => {
+            const initialPayload = { [keys.historyKey]: history };
             let nextHistory = history;
             let payload = initialPayload;
-            let usageInfo = createStorageUsageInfo(payload, getStorageQuotaBytes(), extraBytes);
+            let usageInfo = createStorageUsageInfo(
+                createNotebookHistoryUsagePayload(data, keys, nextHistory),
+                getStorageQuotaBytes(),
+                extraBytes
+            );
             let historyTrimmed = false;
             if (isStorageCritical(usageInfo) && history.length > 1) {
                 const trimmedHistory = trimHistoryForQuota(history);
                 if (trimmedHistory.length < history.length) {
                     nextHistory = trimmedHistory;
-                    payload = { [key]: nextHistory };
-                    usageInfo = createStorageUsageInfo(payload, getStorageQuotaBytes(), extraBytes);
+                    payload = { [keys.historyKey]: nextHistory };
+                    usageInfo = createStorageUsageInfo(
+                        createNotebookHistoryUsagePayload(data, keys, nextHistory),
+                        getStorageQuotaBytes(),
+                        extraBytes
+                    );
                     historyTrimmed = true;
                 }
             }
@@ -1309,6 +1516,15 @@ function appendStateHistory(request, sendResponse) {
     }));
 }
 
+function mutateStateHistory(request, handler, sendResponse) {
+    enqueueStorageTask(storageContract.getStateKeyFromHistoryKey(request.key), () => new Promise((resolve) => {
+        handler(request, (response) => {
+            sendResponse(response);
+            resolve(response);
+        });
+    }));
+}
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (!request || typeof request.type !== 'string') {
         return;
@@ -1380,7 +1596,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         request.type !== 'SAVE_STATE' &&
         request.type !== 'LOAD_STATE' &&
         request.type !== 'LOAD_STATE_HISTORY' &&
-        request.type !== 'APPEND_STATE_HISTORY'
+        request.type !== 'APPEND_STATE_HISTORY' &&
+        request.type !== 'DELETE_STATE_HISTORY_ENTRY' &&
+        request.type !== 'CLEAR_STATE_HISTORY'
     ) {
         return;
     }
@@ -1407,7 +1625,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return true;
     }
 
-    if (request.type === 'LOAD_STATE_HISTORY' || request.type === 'APPEND_STATE_HISTORY') {
+    if (
+        request.type === 'LOAD_STATE_HISTORY' ||
+        request.type === 'APPEND_STATE_HISTORY' ||
+        request.type === 'DELETE_STATE_HISTORY_ENTRY' ||
+        request.type === 'CLEAR_STATE_HISTORY'
+    ) {
         if (typeof request.key !== 'string' || !request.key.startsWith(storageContract.STATE_HISTORY_KEY_PREFIX)) {
             console.warn(`GeminiNotebook-Source-Management: Received ${request.type} with invalid key:`, request.key);
             sendResponse({ success: false, errorCode: ERROR_CODES.INVALID_STORAGE_KEY });
@@ -1421,6 +1644,33 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         if (request.type === 'LOAD_STATE_HISTORY') {
             loadStateHistory(request, sendResponse);
+            return true;
+        }
+
+        if (
+            request.type === 'DELETE_STATE_HISTORY_ENTRY' &&
+            (typeof request.entryId !== 'string' || !request.entryId.trim())
+        ) {
+            sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
+            return true;
+        }
+
+        if (
+            request.type === 'CLEAR_STATE_HISTORY' &&
+            request.scope !== 'automatic' &&
+            request.scope !== 'all'
+        ) {
+            sendResponse({ success: false, errorCode: ERROR_CODES.RUNTIME_FAILURE });
+            return true;
+        }
+
+        if (request.type === 'DELETE_STATE_HISTORY_ENTRY') {
+            mutateStateHistory(request, deleteStateHistoryEntryNow, sendResponse);
+            return true;
+        }
+
+        if (request.type === 'CLEAR_STATE_HISTORY') {
+            mutateStateHistory(request, clearStateHistoryNow, sendResponse);
             return true;
         }
 
@@ -1479,6 +1729,9 @@ if (typeof module !== 'undefined' && module.exports) {
         isStaleStateWrite,
         isStaleBaseRevision,
         createSavedStateSnapshot,
+        isVerifiedBackupSnapshot,
+        resolveRotatedBackupSnapshot,
+        createStateStoragePayload,
         hasRestorableStateSnapshot,
         pickPreferredStoredState,
         isNotebookHomeTab,

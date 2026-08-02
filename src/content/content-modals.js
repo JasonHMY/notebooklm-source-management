@@ -106,6 +106,15 @@
         const saveState = typeof deps.saveState === 'function'
             ? deps.saveState
             : () => {};
+        const collectEffectiveSourceStates = typeof deps.collectEffectiveSourceStates === 'function'
+            ? deps.collectEffectiveSourceStates
+            : () => null;
+        const syncSourcesToEffectiveState = typeof deps.syncSourcesToEffectiveState === 'function'
+            ? deps.syncSourcesToEffectiveState
+            : () => null;
+        const awaitEffectiveStateSync = typeof deps.awaitEffectiveStateSync === 'function'
+            ? deps.awaitEffectiveStateSync
+            : () => Promise.resolve({ ok: true, reason: 'no_native_changes' });
         const createTag = typeof deps.createTag === 'function'
             ? deps.createTag
             : () => null;
@@ -133,6 +142,15 @@
         const applyImportConfig = typeof deps.applyImportConfig === 'function'
             ? deps.applyImportConfig
             : () => ({ ok: false, reason: 'unavailable' });
+        const getImportBackupInfo = typeof deps.getImportBackupInfo === 'function'
+            ? deps.getImportBackupInfo
+            : () => null;
+        const restoreImportBackup = typeof deps.restoreImportBackup === 'function'
+            ? deps.restoreImportBackup
+            : () => Promise.resolve({ ok: false, reason: 'unavailable' });
+        const discardImportBackup = typeof deps.discardImportBackup === 'function'
+            ? deps.discardImportBackup
+            : () => Promise.resolve({ ok: false, reason: 'unavailable' });
         const applyNativeLabelImport = typeof deps.applyNativeLabelImport === 'function'
             ? deps.applyNativeLabelImport
             : () => false;
@@ -151,6 +169,12 @@
         const restoreStateHistoryEntry = typeof deps.restoreStateHistoryEntry === 'function'
             ? deps.restoreStateHistoryEntry
             : () => Promise.resolve(false);
+        const deleteStateHistoryEntry = typeof deps.deleteStateHistoryEntry === 'function'
+            ? deps.deleteStateHistoryEntry
+            : () => Promise.resolve({ ok: false, reason: 'unavailable' });
+        const clearStateHistory = typeof deps.clearStateHistory === 'function'
+            ? deps.clearStateHistory
+            : () => Promise.resolve({ ok: false, reason: 'unavailable' });
         const getDiagnosticsInfo = typeof deps.getDiagnosticsInfo === 'function'
             ? deps.getDiagnosticsInfo
             : () => ({});
@@ -465,6 +489,9 @@
                 bindModalKeyboardNavigation,
                 createModalItemStaggerStyle,
                 closeSourceActionMenu,
+                collectEffectiveSourceStates,
+                syncSourcesToEffectiveState,
+                awaitEffectiveStateSync,
                 saveState,
                 render
             })
@@ -581,9 +608,14 @@
                 clearDeveloperLogs,
                 getStateHistoryEntries,
                 restoreStateHistoryEntry: (...args) => restoreStateHistoryEntry(...args),
+                deleteStateHistoryEntry: (...args) => deleteStateHistoryEntry(...args),
+                clearStateHistory: (...args) => clearStateHistory(...args),
                 getExportConfigText,
                 previewImportConfig,
                 applyImportConfig,
+                getImportBackupInfo,
+                restoreImportBackup,
+                discardImportBackup,
                 openWebStoreFeedback: (...args) => openWebStoreFeedback(...args),
                 renderCommandPaletteModal: (...args) => renderCommandPaletteModal(...args),
                 renderWelcomeModal: (...args) => renderWelcomeModal(...args),
@@ -615,6 +647,8 @@
         const closeSettingsModal = settingsModalModule?.closeSettingsModal
             || ((options = {}) => closeManagedModal('sp-settings-modal', 'sp-settings-backdrop', options));
         const renderSettingsModal = settingsModalModule?.renderSettingsModal || (() => false);
+        const renderManageStorage = settingsModalModule?.renderManageStorage
+            || (() => renderSettingsModal({ manageStorage: true }));
         const renderQuickViewButtonsModal = settingsModalModule?.renderQuickViewButtonsModal || (() => false);
 
         function getImportPreviewMessage(preview) {
@@ -735,17 +769,22 @@
         function copySettingsTextToClipboard(text, textarea, successKey = 'ui_settings_export_copied', failureKey = 'ui_settings_export_copy_failed') {
             const navigatorObj = getWindow()?.navigator || globalThis.navigator;
             if (navigatorObj?.clipboard?.writeText) {
-                Promise.resolve(navigatorObj.clipboard.writeText(text))
-                    .then(() => showToast(getMessage(successKey), { variant: 'success' }))
-                    .catch(() => showToast(getMessage(failureKey), { variant: 'error' }));
-                return true;
+                return Promise.resolve(navigatorObj.clipboard.writeText(text))
+                    .then(() => {
+                        showToast(getMessage(successKey), { variant: 'success' });
+                        return true;
+                    })
+                    .catch(() => {
+                        showToast(getMessage(failureKey), { variant: 'error' });
+                        return false;
+                    });
             }
 
             if (textarea && typeof textarea.select === 'function') {
                 textarea.select();
             }
             showToast(getMessage(failureKey), { variant: 'error' });
-            return false;
+            return Promise.resolve(false);
         }
 
         function getSettingsExportFileName(kind = 'config') {
@@ -779,7 +818,7 @@
             return true;
         }
 
-        function readSettingsImportFile(file, onText) {
+        function readSettingsImportFile(file, onText, onError = null) {
             const windowObj = getWindow() || globalThis;
             const FileReaderCtor = windowObj.FileReader || globalThis.FileReader;
             if (!file || typeof FileReaderCtor !== 'function') {
@@ -799,9 +838,55 @@
             };
             reader.onerror = () => {
                 showToast(getMessage('ui_settings_import_file_invalid'), { variant: 'error' });
+                onError?.();
             };
             reader.readAsText(file);
             return true;
+        }
+
+        function formatStorageBytes(bytes) {
+            const value = Number(bytes) || 0;
+            if (value <= 0) return '0 B';
+            const units = ['B', 'KB', 'MB'];
+            let unitIndex = 0;
+            let nextValue = value;
+            while (nextValue >= 1024 && unitIndex < units.length - 1) {
+                nextValue /= 1024;
+                unitIndex += 1;
+            }
+            return `${nextValue >= 10 || unitIndex === 0 ? Math.round(nextValue) : nextValue.toFixed(1)} ${units[unitIndex]}`;
+        }
+
+        function getUtf8ByteLength(value) {
+            const text = String(value || '');
+            let bytes = 0;
+            for (let index = 0; index < text.length; index += 1) {
+                const codePoint = text.codePointAt(index);
+                if (codePoint <= 0x7f) bytes += 1;
+                else if (codePoint <= 0x7ff) bytes += 2;
+                else if (codePoint <= 0xffff) bytes += 3;
+                else {
+                    bytes += 4;
+                    index += 1;
+                }
+            }
+            return bytes;
+        }
+
+        function getHistoryStorageSummary(entries = getStateHistoryEntries()) {
+            const diagnostics = getDiagnosticsInfo() || {};
+            const historyEntries = Array.isArray(entries) ? entries : [];
+            let serializedHistory = '[]';
+            try {
+                serializedHistory = JSON.stringify(historyEntries);
+            } catch (error) {
+                serializedHistory = '[]';
+            }
+            return {
+                storageUsageBytes: Number(diagnostics.storageUsageBytes) || 0,
+                storageQuotaBytes: Number(diagnostics.storageQuotaBytes) || 0,
+                releasableHistoryBytes: getUtf8ByteLength(serializedHistory)
+            };
         }
 
         function getDiagnosticsDisplayRows() {
@@ -813,20 +898,8 @@
             const nativeFailureSummary = failureCount > 1
                 ? `${latestNativeFailureReason} (+${failureCount - 1})`
                 : latestNativeFailureReason;
-            const formatBytes = (bytes) => {
-                const value = Number(bytes) || 0;
-                if (value <= 0) return '0 B';
-                const units = ['B', 'KB', 'MB'];
-                let unitIndex = 0;
-                let nextValue = value;
-                while (nextValue >= 1024 && unitIndex < units.length - 1) {
-                    nextValue /= 1024;
-                    unitIndex += 1;
-                }
-                return `${nextValue >= 10 || unitIndex === 0 ? Math.round(nextValue) : nextValue.toFixed(1)} ${units[unitIndex]}`;
-            };
             const storageUsage = Number(diagnostics.storageQuotaBytes) > 0
-                ? `${formatBytes(diagnostics.storageUsageBytes)} / ${formatBytes(diagnostics.storageQuotaBytes)} (${Math.round((Number(diagnostics.storageUsageRatio) || 0) * 100)}%)`
+                ? `${formatStorageBytes(diagnostics.storageUsageBytes)} / ${formatStorageBytes(diagnostics.storageQuotaBytes)} (${Math.round((Number(diagnostics.storageUsageRatio) || 0) * 100)}%)`
                 : '-';
             return [
                 ['ui_diagnostics_notebook_id', diagnostics.notebookId || '-'],
@@ -942,7 +1015,13 @@
             ]);
         }
 
-        function createHistoryPreferenceNodes() {
+        function createHistoryPreferenceNodes(entries = getStateHistoryEntries()) {
+            const historyEntries = Array.isArray(entries) ? entries : [];
+            const storageSummary = getHistoryStorageSummary(historyEntries);
+            const usageLabel = storageSummary.storageQuotaBytes > 0
+                ? `${formatStorageBytes(storageSummary.storageUsageBytes)} / ${formatStorageBytes(storageSummary.storageQuotaBytes)}`
+                : formatStorageBytes(storageSummary.storageUsageBytes);
+            const hasAutomaticHistory = historyEntries.some((entry) => !entry?.manual);
             const retentionSelect = el('select', {
                 className: 'sp-settings-select sp-history-retention-select',
                 'aria-label': getMessage('ui_history_retention_label')
@@ -972,6 +1051,29 @@
                         className: 'sp-button sp-history-create-restore-point-btn sp-glare-hover'
                     }, [
                         getMessage('ui_history_create_restore_point')
+                    ]),
+                    el('button', {
+                        type: 'button',
+                        className: 'sp-button sp-history-clear-automatic-btn sp-glare-hover',
+                        disabled: !hasAutomaticHistory
+                    }, [
+                        getMessage('ui_history_clear_automatic')
+                    ]),
+                    el('button', {
+                        type: 'button',
+                        className: 'sp-button sp-history-clear-all-btn sp-glare-hover',
+                        disabled: historyEntries.length === 0
+                    }, [
+                        getMessage('ui_history_clear_all')
+                    ])
+                ]),
+                el('p', {
+                    className: 'sp-settings-helper-text sp-history-storage-summary',
+                    tabindex: '-1'
+                }, [
+                    getMessage('ui_history_storage_summary', [
+                        usageLabel,
+                        formatStorageBytes(storageSummary.releasableHistoryBytes)
                     ])
                 ])
             ];
@@ -1067,11 +1169,18 @@
                                 String(entry.saveRevision || 0)
                             ])
                         ]),
-                        el('button', {
-                            type: 'button',
-                            className: 'sp-button sp-history-restore-btn sp-glare-hover',
-                            dataset: { historyId: entry.id }
-                        }, [getMessage('ui_history_restore')])
+                        el('div', { className: 'sp-settings-action-row sp-history-item-actions' }, [
+                            el('button', {
+                                type: 'button',
+                                className: 'sp-button sp-history-restore-btn sp-glare-hover',
+                                dataset: { historyId: entry.id }
+                            }, [getMessage('ui_history_restore')]),
+                            el('button', {
+                                type: 'button',
+                                className: 'sp-button sp-history-delete-btn sp-glare-hover',
+                                dataset: { historyId: entry.id }
+                            }, [getMessage('ui_history_delete_entry')])
+                        ])
                     ])
                 )))
             ];
@@ -1213,6 +1322,7 @@
             renderWhatsNewModal,
             closeSettingsModal,
             renderSettingsModal,
+            renderManageStorage,
             getImportPreviewMessage,
             createNativeLabelImportPreviewNodes,
             createImportPreviewDetailNodes,

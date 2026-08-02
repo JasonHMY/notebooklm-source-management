@@ -17,6 +17,7 @@
      *   executeMoveToFolder 通过 Tree Placement 事务提交后 saveState + render。
      */
     function createContentModalMove(deps = {}) {
+        const recentTargetGroupIds = [];
         const {
             el,
             getMessage,
@@ -32,6 +33,9 @@
             bindModalKeyboardNavigation,
             createModalItemStaggerStyle,
             closeSourceActionMenu,
+            collectEffectiveSourceStates,
+            syncSourcesToEffectiveState,
+            awaitEffectiveStateSync = () => Promise.resolve({ ok: true, reason: 'no_native_changes' }),
             saveState,
             render,
             requestAnimationFrame: rafFn = globalThis.requestAnimationFrame
@@ -48,21 +52,42 @@
         function collectMoveFolderOptions(groupIds, level = 0, visitedGroupIds = new Set()) {
             const groupsById = typeof getGroupsById === 'function' ? getGroupsById() : new Map();
             const options = [];
+            const stack = (Array.isArray(groupIds) ? groupIds : [])
+                .slice()
+                .reverse()
+                .map((groupId) => ({
+                    groupId,
+                    level,
+                    breadcrumbTitles: []
+                }));
 
-            (Array.isArray(groupIds) ? groupIds : []).forEach((groupId) => {
-                if (!groupId || visitedGroupIds.has(groupId)) return;
+            while (stack.length > 0) {
+                const current = stack.pop();
+                if (!current?.groupId || visitedGroupIds.has(current.groupId)) continue;
 
-                const group = groupsById.get(groupId);
-                if (!group) return;
+                const group = groupsById.get(current.groupId);
+                if (!group) continue;
 
-                visitedGroupIds.add(groupId);
-                options.push({ group, level });
+                visitedGroupIds.add(current.groupId);
+                const title = group.title || getMessage('ui_group_untitled');
+                const breadcrumbTitles = [...current.breadcrumbTitles, title];
+                options.push({
+                    group,
+                    level: current.level,
+                    breadcrumb: breadcrumbTitles.join(' / ')
+                });
 
                 const childGroupIds = (Array.isArray(group.children) ? group.children : [])
                     .filter((child) => child && child.type === 'group')
                     .map((child) => child.id);
-                options.push(...collectMoveFolderOptions(childGroupIds, level + 1, visitedGroupIds));
-            });
+                for (let index = childGroupIds.length - 1; index >= 0; index -= 1) {
+                    stack.push({
+                        groupId: childGroupIds[index],
+                        level: current.level + 1,
+                        breadcrumbTitles
+                    });
+                }
+            }
 
             return options;
         }
@@ -83,51 +108,90 @@
             return keys.map((key) => ({ kind: 'source', key }));
         }
 
-        function createMoveFailure(items, reason = 'invalid_target') {
+        function createBatchActionResult({
+            ok = false,
+            changed = false,
+            succeeded = [],
+            failed = [],
+            skipped = [],
+            unattempted = [],
+            reason = ''
+        } = {}) {
             return {
-                ok: false,
-                changed: false,
+                ok: Boolean(ok),
+                changed: Boolean(changed),
+                succeeded,
+                failed,
+                skipped,
+                unattempted,
                 reason,
-                moved: [],
-                skipped: items.map((item) => ({ item, reason }))
+                moved: succeeded
             };
+        }
+
+        function createMoveFailure(items, reason = 'invalid_target') {
+            return createBatchActionResult({
+                reason,
+                failed: items.map((item) => ({ item, reason }))
+            });
+        }
+
+        function normalizePlacementResult(result, preflightFailed = []) {
+            const succeeded = Array.isArray(result?.moved) ? result.moved : [];
+            const skipped = Array.isArray(result?.skipped) ? result.skipped : [];
+            const normalized = createBatchActionResult({
+                ok: Boolean(result?.ok),
+                changed: Boolean(result?.changed),
+                succeeded,
+                failed: [
+                    ...(Array.isArray(result?.failed) ? result.failed : []),
+                    ...preflightFailed
+                ],
+                skipped,
+                unattempted: Array.isArray(result?.unattempted) ? result.unattempted : [],
+                reason: result?.reason || (
+                    succeeded.length > 0 && (skipped.length > 0 || preflightFailed.length > 0)
+                        ? 'partial'
+                        : ''
+                )
+            });
+            return result && typeof result === 'object'
+                ? Object.assign(result, normalized)
+                : normalized;
         }
 
         function mergePreflightSkipped(result, preflightSkipped) {
             if (!Array.isArray(preflightSkipped) || preflightSkipped.length === 0) {
-                return result;
+                return normalizePlacementResult(result);
             }
             if (!result || typeof result !== 'object') {
-                return {
-                    ok: false,
-                    changed: false,
+                return createBatchActionResult({
                     reason: 'invalid_target',
-                    moved: [],
-                    skipped: preflightSkipped
-                };
+                    failed: preflightSkipped
+                });
             }
-            const placementSkipped = Array.isArray(result?.skipped) ? result.skipped : [];
-            if (result?.ok && result.changed) {
-                return {
-                    ok: true,
-                    changed: true,
-                    reason: 'partial',
-                    moved: Array.isArray(result.moved) ? result.moved : [],
-                    skipped: [...placementSkipped, ...preflightSkipped]
-                };
-            }
-            if (result?.ok && !result.changed) {
-                return {
-                    ok: false,
-                    changed: false,
-                    reason: 'not_found',
-                    moved: [],
-                    skipped: [...placementSkipped, ...preflightSkipped]
-                };
-            }
-            return Object.assign({}, result, {
-                skipped: [...placementSkipped, ...preflightSkipped]
+            const normalized = normalizePlacementResult(result, preflightSkipped);
+            return Object.assign(normalized, {
+                ok: Boolean(result.ok && result.changed),
+                reason: result.changed ? 'partial' : 'not_found'
             });
+        }
+
+        function rememberMoveTarget(groupId) {
+            const existingIndex = recentTargetGroupIds.indexOf(groupId);
+            if (existingIndex >= 0) recentTargetGroupIds.splice(existingIndex, 1);
+            recentTargetGroupIds.unshift(groupId);
+            recentTargetGroupIds.splice(5);
+        }
+
+        function getSkippedSourceKeys(result) {
+            return [
+                ...(Array.isArray(result?.skipped) ? result.skipped : []),
+                ...(Array.isArray(result?.failed) ? result.failed : []),
+                ...(Array.isArray(result?.unattempted) ? result.unattempted : [])
+            ]
+                .map((entry) => entry?.item?.key || entry?.key || '')
+                .filter(Boolean);
         }
 
         function createUniqueMoveGroupId(groupsById) {
@@ -177,13 +241,10 @@
                 });
             });
             if (liveItems.length === 0) {
-                return {
-                    ok: false,
-                    changed: false,
+                return createBatchActionResult({
                     reason: 'not_found',
-                    moved: [],
-                    skipped: preflightSkipped
-                };
+                    failed: preflightSkipped
+                });
             }
             const target = {
                 container: 'group',
@@ -191,6 +252,9 @@
                 index: Array.isArray(targetGroup.children) ? targetGroup.children.length : 0
             };
             let result;
+            const previousEffectiveStates = typeof collectEffectiveSourceStates === 'function'
+                ? collectEffectiveSourceStates()
+                : null;
             try {
                 result = treePlacement.applyBatchPlacement({
                     items: liveItems,
@@ -203,15 +267,40 @@
             if (!result?.ok || !result.changed) return result || createMoveFailure(items);
 
             if (state.isBatchMode && pendingBatchKeys.size > 0) {
-                state.isBatchMode = false;
                 pendingBatchKeys.clear();
+                getSkippedSourceKeys(result).forEach((sourceKey) => pendingBatchKeys.add(sourceKey));
+                state.isBatchMode = pendingBatchKeys.size > 0;
             }
 
+            rememberMoveTarget(targetGroupId);
             if (typeof closeSourceActionMenu === 'function') closeSourceActionMenu();
             treePlacement.rebuildParentMap(parentMap);
+            let effectiveStateSync = null;
+            if (typeof syncSourcesToEffectiveState === 'function') {
+                effectiveStateSync = syncSourcesToEffectiveState(previousEffectiveStates);
+            }
             if (typeof render === 'function') render();
             if (typeof saveState === 'function') saveState({ immediate: true, critical: true });
-            closeMoveToFolderModal();
+            if (
+                !effectiveStateSync?.confirmation
+                || typeof effectiveStateSync.confirmation.then !== 'function'
+            ) {
+                closeMoveToFolderModal();
+                return result;
+            }
+            const confirmation = Promise.resolve(awaitEffectiveStateSync(effectiveStateSync))
+                .then((syncResult) => {
+                    if (syncResult?.ok === true) {
+                        closeMoveToFolderModal();
+                    } else if (typeof render === 'function') {
+                        render();
+                    }
+                    return syncResult;
+                });
+            Object.defineProperty(result, 'confirmation', {
+                configurable: true,
+                value: confirmation
+            });
             return result;
         }
 
@@ -292,6 +381,13 @@
             ]);
 
             const content = el('div', { className: 'sp-folder-modal-content' });
+            const searchInput = el('input', {
+                type: 'search',
+                className: 'sp-move-folder-search-input',
+                placeholder: getMessage('ui_move_folder_search_placeholder'),
+                'aria-label': getMessage('ui_move_folder_search_label'),
+                autocomplete: 'off'
+            });
             const createInput = el('input', {
                 type: 'text',
                 className: 'sp-move-new-folder-input',
@@ -340,6 +436,7 @@
                 submitNewFolder();
             });
             content.appendChild(createRow);
+            content.appendChild(searchInput);
 
             let folderFound = false;
             let modalItemIndex = 0;
@@ -350,29 +447,72 @@
             const staggerStyle = typeof createModalItemStaggerStyle === 'function'
                 ? createModalItemStaggerStyle
                 : (index, baseStyle = '') => baseStyle;
-            collectMoveFolderOptions(groupIds).forEach(({ group, level }) => {
+            const moveOptions = collectMoveFolderOptions(groupIds);
+            const recentRank = new Map(recentTargetGroupIds.map((groupId, index) => [groupId, index]));
+            moveOptions.sort((left, right) => {
+                const leftRank = recentRank.has(left.group.id) ? recentRank.get(left.group.id) : Number.MAX_SAFE_INTEGER;
+                const rightRank = recentRank.has(right.group.id) ? recentRank.get(right.group.id) : Number.MAX_SAFE_INTEGER;
+                return leftRank - rightRank;
+            });
+            const folderButtons = [];
+            moveOptions.forEach(({ group, level, breadcrumb }) => {
                 if (group) {
                     folderFound = true;
-                    const indentStyle = level > 0 ? `padding-left:${12 + (level * 18)}px;` : '';
+                    const indentStyle = level > 0
+                        ? `padding-left:${12 + (Math.min(level, 8) * 12)}px;`
+                        : '';
+                    const isRecentTarget = recentRank.has(group.id);
+                    const allAlreadyInTarget = keys.every((sourceKey) => (
+                        typeof getParentMap === 'function'
+                        && getParentMap() instanceof Map
+                        && getParentMap().get(sourceKey) === group.id
+                    ));
                     const folderBtn = el('button', {
                         type: 'button',
                         className: 'sp-folder-option',
+                        disabled: allAlreadyInTarget,
+                        title: breadcrumb,
+                        'aria-label': allAlreadyInTarget
+                            ? `${breadcrumb} · ${getMessage('ui_move_already_here')}`
+                            : breadcrumb,
                         dataset: {
                             groupId: group.id,
-                            level: String(level)
+                            level: String(level),
+                            searchText: String(breadcrumb || '').toLocaleLowerCase()
                         },
                         style: staggerStyle(modalItemIndex, indentStyle)
                     }, [
                         el('span', { className: 'google-symbols' }, ['folder']),
-                        el('span', { className: 'sp-folder-option-title' }, [group.title || getMessage('ui_group_untitled')])
+                        el('span', { className: 'sp-folder-option-title' }, [breadcrumb]),
+                        allAlreadyInTarget
+                            ? el('span', { className: 'sp-folder-option-status' }, [getMessage('ui_move_already_here')])
+                            : (
+                                isRecentTarget
+                                    ? el('span', { className: 'sp-folder-option-status' }, [getMessage('ui_move_recent_target')])
+                                    : null
+                            )
                     ]);
                     modalItemIndex += 1;
 
-                    folderBtn.addEventListener('click', () => {
-                        executeMoveToFolder(keys, group.id);
-                    });
+                    if (!allAlreadyInTarget) {
+                        folderBtn.addEventListener('click', () => {
+                            executeMoveToFolder(keys, group.id);
+                        });
+                    }
+                    folderButtons.push(folderBtn);
                     content.appendChild(folderBtn);
                 }
+            });
+
+            searchInput.addEventListener('input', () => {
+                const query = String(searchInput.value || '').trim().toLocaleLowerCase();
+                let visibleCount = 0;
+                folderButtons.forEach((folderButton) => {
+                    const matches = !query || String(folderButton.dataset?.searchText || '').includes(query);
+                    folderButton.hidden = !matches;
+                    if (matches) visibleCount += 1;
+                });
+                searchInput.setAttribute?.('aria-invalid', visibleCount === 0 && query ? 'true' : 'false');
             });
 
             if (!folderFound) {

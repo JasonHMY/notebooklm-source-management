@@ -21,7 +21,8 @@
      *     getDeveloperModeEnabled/setDeveloperModeEnabled, getHoverSpotlightEnabled/setHoverSpotlightEnabled,
      *     setLanguageOverride, setHistoryRetentionLimit
      *   - history / 导入导出: getStateHistoryEntries, restoreStateHistoryEntry, getExportConfigText,
-     *     previewImportConfig, applyImportConfig, createManualRestorePoint, createHistoryNodes
+     *     deleteStateHistoryEntry, clearStateHistory, previewImportConfig, applyImportConfig,
+     *     createManualRestorePoint, createHistoryNodes
      *   - 源指纹修复: applySourceRepairRemaps, getSourceRepairReport, createSourceRepairNodes
      *   - UI 子组件 + 跨 modal 联动: renderCommandPaletteModal, renderWelcomeModal,
      *     renderWhatsNewModal, createDiagnosticsGrid, createLanguagePreferenceSection,
@@ -54,9 +55,14 @@
             clearDeveloperLogs = () => Promise.resolve(false),
             getStateHistoryEntries = () => [],
             restoreStateHistoryEntry = () => Promise.resolve(false),
+            deleteStateHistoryEntry = () => Promise.resolve({ ok: false, reason: 'unavailable' }),
+            clearStateHistory = () => Promise.resolve({ ok: false, reason: 'unavailable' }),
             getExportConfigText = () => '{}',
             previewImportConfig = () => null,
             applyImportConfig = () => Promise.resolve({ ok: false }),
+            getImportBackupInfo = () => null,
+            restoreImportBackup = () => Promise.resolve({ ok: false }),
+            discardImportBackup = () => Promise.resolve({ ok: false }),
             openWebStoreFeedback = () => Promise.resolve(false),
             renderCommandPaletteModal = () => false,
             renderWelcomeModal = () => false,
@@ -91,6 +97,63 @@
             throw new Error('GeminiNotebook-Source-Management: createContentModalSettings requires el, getMessage and getShadowRoot.');
         }
 
+        function getSettingsFocusKey(node) {
+            if (!node || typeof node !== 'object') return '';
+            if (node.dataset?.settingsFocusKey) return `data:${node.dataset.settingsFocusKey}`;
+            if (node.id) return `id:${node.id}`;
+            for (const datasetKey of ['historyId', 'sourceKey', 'tagId', 'quickViewKind']) {
+                const datasetValue = String(node.dataset?.[datasetKey] || '');
+                if (datasetValue) return `dataset:${datasetKey}:${datasetValue}`;
+            }
+            const className = String(node.className || '').split(/\s+/).find(Boolean);
+            return className ? `class:${className}` : '';
+        }
+
+        function findSettingsFocusTarget(modal, focusKey) {
+            const focusKeyParts = String(focusKey || '').split(':');
+            const [kind, rawValue] = focusKeyParts;
+            const rawDatasetValue = focusKeyParts.slice(2).join(':');
+            const value = String(rawValue || '').replace(/[^a-zA-Z0-9_-]/g, '');
+            if (!modal || !value) return null;
+            if (kind === 'id') return modal.querySelector?.(`#${value}`) || null;
+            if (kind === 'class') return modal.querySelector?.(`.${value}`) || null;
+            if (kind === 'data') {
+                return Array.from(modal.querySelectorAll?.('[data-settings-focus-key]') || [])
+                    .find((node) => node?.dataset?.settingsFocusKey === value) || null;
+            }
+            if (kind === 'dataset') {
+                const datasetValue = String(rawDatasetValue || '');
+                return Array.from(modal.querySelectorAll?.('[data-history-id], [data-source-key], [data-tag-id], [data-quick-view-kind]') || [])
+                    .find((node) => String(node?.dataset?.[value] || '') === datasetValue) || null;
+            }
+            return null;
+        }
+
+        function captureSettingsTransientViewState() {
+            const shadowRoot = getShadowRoot();
+            const modal = shadowRoot?.querySelector?.('#sp-settings-modal');
+            const content = modal?.querySelector?.('.sp-settings-modal-content');
+            if (!modal || !content) return null;
+
+            const expandedByContentId = {};
+            Array.from(modal.querySelectorAll?.('.sp-settings-collapsible-toggle') || [])
+                .forEach((toggle) => {
+                    const contentId = toggle.getAttribute?.('aria-controls') || toggle.attrs?.['aria-controls'];
+                    if (!contentId) return;
+                    const expanded = toggle.getAttribute?.('aria-expanded') || toggle.attrs?.['aria-expanded'];
+                    expandedByContentId[contentId] = expanded === 'true';
+                });
+            const documentObj = getDocument();
+            const activeElement = documentObj?.activeElement;
+            return {
+                scrollTop: Number(content.scrollTop) || 0,
+                expandedByContentId,
+                focusKey: modal.contains?.(activeElement) === false
+                    ? ''
+                    : getSettingsFocusKey(activeElement)
+            };
+        }
+
         function closeSettingsModal(options = {}) {
             return closeManagedModal('sp-settings-modal', 'sp-settings-backdrop', options);
         }
@@ -106,12 +169,37 @@
         // backdrop (sp-toast-elevated) so they stay readable.
         function announceSettingsResult(messageKey, variant) {
             const settingsOpen = isSettingsModalOpen();
+            if (settingsOpen) {
+                const root = getShadowRoot();
+                const status = root?.querySelector?.('.sp-settings-action-status');
+                if (status) {
+                    status.textContent = getMessage(messageKey);
+                    status.hidden = false;
+                    status.setAttribute?.('aria-live', variant === 'error' ? 'assertive' : 'polite');
+                    status.classList?.toggle?.('is-error', variant === 'error');
+                    status.classList?.toggle?.('is-success', variant !== 'error');
+                    return;
+                }
+            }
             if (variant === 'success') {
-                if (settingsOpen) return;
                 showToast(getMessage(messageKey), { variant: 'success' });
                 return;
             }
             showToast(getMessage(messageKey), { variant: 'error', elevated: settingsOpen });
+        }
+
+        function isSuccessfulHistoryMutation(result) {
+            return result === true || result?.ok === true || result?.success === true;
+        }
+
+        function setButtonBusy(button, busy) {
+            if (!button) return;
+            button.disabled = Boolean(busy);
+            if (busy) {
+                button.setAttribute?.('aria-busy', 'true');
+                return;
+            }
+            button.removeAttribute?.('aria-busy');
         }
 
         function normalizeVisibleQuickViewKinds(value) {
@@ -419,6 +507,9 @@
             if (!shadowRoot || !el) return false;
 
             const normalizedModalState = modalState && typeof modalState === 'object' ? modalState : {};
+            const transientViewState = normalizedModalState.transientViewState
+                || captureSettingsTransientViewState()
+                || {};
             const importText = String(normalizedModalState.importText || '');
             const preview = Object.prototype.hasOwnProperty.call(normalizedModalState, 'preview')
                 ? normalizedModalState.preview
@@ -453,6 +544,18 @@
                 ])
             ]);
             const content = el('div', { className: 'sp-folder-modal-content sp-settings-modal-content' });
+            const settingsStatusKey = String(normalizedModalState.settingsStatusKey || '');
+            const settingsStatusVariant = normalizedModalState.settingsStatusVariant === 'error'
+                ? 'is-error'
+                : 'is-success';
+            const settingsActionStatus = el('div', {
+                className: `sp-settings-helper-text sp-settings-action-status ${settingsStatusVariant}`,
+                role: 'status',
+                'aria-live': settingsStatusVariant === 'is-error' ? 'assertive' : 'polite',
+                hidden: !settingsStatusKey
+            }, [
+                settingsStatusKey ? getMessage(settingsStatusKey) : ''
+            ]);
             const exportTextarea = el('textarea', {
                 className: 'sp-settings-textarea sp-settings-export-textarea',
                 readonly: true,
@@ -485,21 +588,25 @@
                 initiallyExpanded = false,
                 children = []
             }) => {
+                const rememberedExpanded = transientViewState.expandedByContentId?.[contentId];
+                const resolvedInitiallyExpanded = typeof rememberedExpanded === 'boolean'
+                    ? rememberedExpanded
+                    : initiallyExpanded;
                 const body = el('div', {
                     id: contentId,
                     className: 'sp-settings-collapsible-body',
-                    'aria-hidden': initiallyExpanded ? 'false' : 'true'
+                    'aria-hidden': resolvedInitiallyExpanded ? 'false' : 'true'
                 }, [
                     el('div', { className: 'sp-settings-collapsible-inner' }, children)
                 ]);
-                body.inert = !initiallyExpanded;
+                body.inert = !resolvedInitiallyExpanded;
 
                 const toggle = el('button', {
                     type: 'button',
                     className: 'sp-settings-collapsible-toggle',
-                    'aria-expanded': initiallyExpanded ? 'true' : 'false',
+                    'aria-expanded': resolvedInitiallyExpanded ? 'true' : 'false',
                     'aria-controls': contentId,
-                    title: getMessage(initiallyExpanded ? 'ui_collapse' : 'ui_expand')
+                    title: getMessage(resolvedInitiallyExpanded ? 'ui_collapse' : 'ui_expand')
                 }, [
                     el('span', { className: 'sp-settings-section-title' }, [getMessage(titleKey)]),
                     el('span', { className: 'google-symbols sp-settings-collapsible-chevron', 'aria-hidden': 'true' }, ['expand_more'])
@@ -509,7 +616,7 @@
                     'sp-settings-section',
                     'sp-settings-collapsible-section',
                     className,
-                    initiallyExpanded ? 'is-expanded' : 'is-collapsed'
+                    resolvedInitiallyExpanded ? 'is-expanded' : 'is-collapsed'
                 ].filter(Boolean).join(' ');
                 const section = el('section', { className: sectionClassName }, [
                     el('div', { className: 'sp-settings-section-header sp-settings-collapsible-header' }, [
@@ -562,18 +669,90 @@
                 ])
             ]);
 
-            const historySubsection = createSettingsSubsection('sp-settings-history-section', 'ui_history_title', [
-                ...createHistoryPreferenceNodes(),
-                ...createHistoryNodes(getStateHistoryEntries())
+            const historyEntries = getStateHistoryEntries();
+            const historyStatusKey = String(normalizedModalState.historyStatusKey || '');
+            const historyStatusArgs = Array.isArray(normalizedModalState.historyStatusArgs)
+                ? normalizedModalState.historyStatusArgs.map((value) => String(value))
+                : [];
+            const historyStatusVariant = normalizedModalState.historyStatusVariant === 'error'
+                ? 'is-error'
+                : 'is-success';
+            const historyActionStatus = el('div', {
+                className: `sp-settings-helper-text sp-history-action-status ${historyStatusVariant}`,
+                role: 'status',
+                'aria-live': 'polite',
+                hidden: !historyStatusKey
+            }, [
+                historyStatusKey ? getMessage(historyStatusKey, historyStatusArgs) : ''
             ]);
+            const historySubsection = createSettingsSubsection('sp-settings-history-section', 'ui_history_title', [
+                ...createHistoryPreferenceNodes(historyEntries),
+                historyActionStatus,
+                ...createHistoryNodes(historyEntries)
+            ]);
+            const importBackupInfo = getImportBackupInfo();
+            const importBackupStatusKey = String(normalizedModalState.importBackupStatusKey || '');
+            const importBackupStatusVariant = normalizedModalState.importBackupStatusVariant === 'error'
+                ? 'is-error'
+                : 'is-success';
+            const importBackupStatus = el('div', {
+                className: `sp-settings-helper-text sp-import-backup-status ${importBackupStatusVariant}`,
+                role: 'status',
+                'aria-live': importBackupStatusVariant === 'is-error' ? 'assertive' : 'polite',
+                hidden: !importBackupStatusKey
+            }, [
+                importBackupStatusKey ? getMessage(importBackupStatusKey) : ''
+            ]);
+            const importBackupNodes = [importBackupStatus];
+            if (importBackupInfo) {
+                const createdAt = importBackupInfo.createdAt
+                    ? new Date(importBackupInfo.createdAt).toLocaleString()
+                    : getMessage('ui_import_backup_created_unknown');
+                const sourceCount = Number(importBackupInfo.sourceCount) || 0;
+                const groupCount = Number(importBackupInfo.groupCount) || 0;
+                importBackupNodes.unshift(createSettingsSubsection(
+                    'sp-settings-import-backup-section',
+                    'ui_import_backup_title',
+                    [
+                        el('p', { className: 'sp-settings-helper-text sp-import-backup-created-at' }, [
+                            getMessage('ui_import_backup_created_at', [createdAt])
+                        ]),
+                        el('p', { className: 'sp-settings-helper-text sp-import-backup-counts' }, [
+                            getMessage('ui_import_backup_counts', [
+                                String(sourceCount),
+                                String(groupCount)
+                            ])
+                        ]),
+                        el('div', { className: 'sp-settings-action-row sp-settings-collapsible-actions' }, [
+                            el('button', {
+                                type: 'button',
+                                className: 'sp-button sp-import-backup-restore-btn sp-glare-hover',
+                                dataset: { settingsFocusKey: 'import-backup-restore' }
+                            }, [getMessage('ui_import_backup_restore')]),
+                            el('button', {
+                                type: 'button',
+                                className: 'sp-button sp-import-backup-discard-btn',
+                                dataset: { settingsFocusKey: 'import-backup-discard' }
+                            }, [getMessage('ui_import_backup_discard')])
+                        ])
+                    ]
+                ));
+            }
             const backupSection = createCollapsibleSettingsSection({
                 className: 'sp-settings-backup-section sp-settings-import-section',
                 titleKey: 'ui_settings_backup_restore_title',
                 contentId: 'sp-settings-backup-content',
-                initiallyExpanded: Boolean(importText.trim() || preview),
-                children: [exportSubsection, importSubsection, historySubsection]
+                initiallyExpanded: Boolean(
+                    importText.trim()
+                    || preview
+                    || normalizedModalState.manageStorage
+                    || importBackupInfo
+                    || importBackupStatusKey
+                ),
+                children: [exportSubsection, importSubsection, ...importBackupNodes, historySubsection]
             });
             content.appendChild(createLanguagePreferenceSection());
+            content.appendChild(settingsActionStatus);
             const appearanceSection = createAppearanceSettingsSection();
             content.appendChild(appearanceSection);
             bindAppearanceSettingsActions(appearanceSection);
@@ -589,6 +768,23 @@
                 getMessage('ui_settings_copy_diagnostics')
             ]);
             const helpChildren = [
+                createSettingsSubsection('sp-settings-onboarding-help', 'ui_onboarding_checklist_title', [
+                    el('button', {
+                        type: 'button',
+                        className: 'sp-button sp-settings-replay-onboarding-btn sp-glare-hover',
+                        dataset: { settingsFocusKey: 'replay-onboarding' }
+                    }, [getMessage('ui_settings_replay_onboarding')])
+                ]),
+                createSettingsSubsection('sp-settings-shortcuts-guide', 'ui_settings_shortcuts_guide_title', [
+                    el('p', { className: 'sp-settings-helper-text' }, [
+                        getMessage('ui_settings_shortcuts_guide_body')
+                    ])
+                ]),
+                createSettingsSubsection('sp-settings-import-guide', 'ui_settings_import_guide_title', [
+                    el('p', { className: 'sp-settings-helper-text' }, [
+                        getMessage('ui_settings_import_guide_body')
+                    ])
+                ]),
                 el('p', { className: 'sp-settings-helper-text sp-settings-feedback-body' }, [
                     getMessage('ui_settings_feedback_body')
                 ]),
@@ -658,18 +854,88 @@
             renderSaveStatus();
 
             content.querySelector('.sp-settings-copy-export-btn')?.addEventListener('click', () => {
-                copySettingsTextToClipboard(exportText, exportTextarea);
+                Promise.resolve(copySettingsTextToClipboard(exportText, exportTextarea))
+                    .then((ok) => announceSettingsResult(
+                        ok ? 'ui_settings_export_copied' : 'ui_settings_export_copy_failed',
+                        ok ? 'success' : 'error'
+                    ));
             });
             content.querySelector('.sp-settings-download-export-btn')?.addEventListener('click', () => {
-                downloadSettingsExportText(exportText);
+                const ok = downloadSettingsExportText(exportText);
+                announceSettingsResult(
+                    ok ? 'ui_settings_export_downloaded' : 'ui_settings_export_download_failed',
+                    ok ? 'success' : 'error'
+                );
             });
             Array.from(content.querySelectorAll?.('.sp-settings-copy-diagnostics-btn') || []).forEach((button) => {
                 button.addEventListener('click', () => {
-                    copyDiagnosticsTextToClipboard();
+                    Promise.resolve(copyDiagnosticsTextToClipboard())
+                        .then((ok) => announceSettingsResult(
+                            ok ? 'ui_settings_diagnostics_copied' : 'ui_settings_diagnostics_copy_failed',
+                            ok ? 'success' : 'error'
+                        ));
                 });
             });
             content.querySelector('.sp-settings-open-web-store-feedback-btn')?.addEventListener('click', () => {
                 openWebStoreFeedback();
+            });
+            content.querySelector('.sp-settings-replay-onboarding-btn')?.addEventListener('click', () => {
+                closeSettingsModal({ immediate: true, restoreFocus: false });
+                renderWelcomeModal({ markSeenOnClose: false });
+            });
+            const updateImportBackupStatus = (messageKey, variant = 'error') => {
+                importBackupStatus.textContent = getMessage(messageKey);
+                importBackupStatus.hidden = false;
+                importBackupStatus.setAttribute('aria-live', variant === 'error' ? 'assertive' : 'polite');
+                importBackupStatus.classList.toggle('is-error', variant === 'error');
+                importBackupStatus.classList.toggle('is-success', variant !== 'error');
+            };
+            const runImportBackupAction = (button, operation, successKey, failureKey) => {
+                setButtonBusy(button, true);
+                Promise.resolve()
+                    .then(operation)
+                    .then((result) => {
+                        if (!isSuccessfulHistoryMutation(result)) {
+                            updateImportBackupStatus(failureKey, 'error');
+                            setButtonBusy(button, false);
+                            return;
+                        }
+                        renderSettingsModal({
+                            ...normalizedModalState,
+                            importBackupStatusKey: successKey,
+                            importBackupStatusVariant: 'success'
+                        });
+                    })
+                    .catch(() => {
+                        updateImportBackupStatus(failureKey, 'error');
+                        setButtonBusy(button, false);
+                    });
+            };
+            content.querySelector('.sp-import-backup-restore-btn')?.addEventListener('click', () => {
+                const button = content.querySelector('.sp-import-backup-restore-btn');
+                runImportBackupAction(
+                    button,
+                    restoreImportBackup,
+                    'ui_import_backup_restore_success',
+                    'ui_import_backup_restore_failed'
+                );
+            });
+            content.querySelector('.sp-import-backup-discard-btn')?.addEventListener('click', () => {
+                const win = getWindow();
+                if (
+                    !win
+                    || typeof win.confirm !== 'function'
+                    || !win.confirm(getMessage('ui_import_backup_discard_confirm'))
+                ) {
+                    return;
+                }
+                const button = content.querySelector('.sp-import-backup-discard-btn');
+                runImportBackupAction(
+                    button,
+                    discardImportBackup,
+                    'ui_import_backup_discard_success',
+                    'ui_import_backup_discard_failed'
+                );
             });
             content.querySelector('.sp-settings-open-command-palette-btn')?.addEventListener('click', () => {
                 closeSettingsModal({ immediate: true, restoreFocus: false });
@@ -681,9 +947,17 @@
             });
             content.querySelector('.sp-settings-language-select')?.addEventListener('change', (event) => {
                 const nextLanguage = event?.target?.value || 'auto';
-                Promise.resolve(setLanguageOverride(nextLanguage)).then(() => {
-                    renderSettingsModal(normalizedModalState);
-                });
+                Promise.resolve(setLanguageOverride(nextLanguage))
+                    .then(() => {
+                        renderSettingsModal({
+                            ...normalizedModalState,
+                            settingsStatusKey: 'ui_settings_language_updated',
+                            settingsStatusVariant: 'success'
+                        });
+                    })
+                    .catch(() => {
+                        announceSettingsResult('ui_settings_language_update_failed', 'error');
+                    });
             });
             content.querySelector('.sp-history-retention-select')?.addEventListener('change', (event) => {
                 const nextLimit = Number(event?.target?.value) || 20;
@@ -710,6 +984,81 @@
                         }
                     });
             });
+            const updateHistoryStatus = (messageKey, variant = 'error', substitutions = []) => {
+                historyActionStatus.textContent = getMessage(messageKey, substitutions.map((value) => String(value)));
+                historyActionStatus.hidden = false;
+                historyActionStatus.setAttribute('aria-live', variant === 'error' ? 'assertive' : 'polite');
+                historyActionStatus.classList.toggle('is-error', variant === 'error');
+                historyActionStatus.classList.toggle('is-success', variant !== 'error');
+            };
+            const runHistoryMutation = (button, operation, successKey, failureKey) => {
+                setButtonBusy(button, true);
+                Promise.resolve()
+                    .then(operation)
+                    .then((result) => {
+                        if (!isSuccessfulHistoryMutation(result)) {
+                            updateHistoryStatus(failureKey, 'error');
+                            setButtonBusy(button, false);
+                            return;
+                        }
+                        renderSettingsModal({
+                            ...normalizedModalState,
+                            manageStorage: true,
+                            historyStatusKey: successKey,
+                            historyStatusVariant: 'success',
+                            historyStatusArgs: [String(result?.deletedCount ?? 0)]
+                        });
+                    })
+                    .catch(() => {
+                        updateHistoryStatus(failureKey, 'error');
+                        setButtonBusy(button, false);
+                    });
+            };
+            Array.from(content.querySelectorAll?.('.sp-history-delete-btn') || []).forEach((button) => {
+                button.addEventListener('click', () => {
+                    const historyId = button.dataset?.historyId || '';
+                    runHistoryMutation(
+                        button,
+                        () => deleteStateHistoryEntry(historyId),
+                        'ui_history_delete_success',
+                        'ui_history_delete_failed'
+                    );
+                });
+            });
+            content.querySelector('.sp-history-clear-automatic-btn')?.addEventListener('click', () => {
+                const win = getWindow();
+                if (
+                    !win ||
+                    typeof win.confirm !== 'function' ||
+                    !win.confirm(getMessage('ui_history_clear_automatic_confirm'))
+                ) {
+                    return;
+                }
+                const button = content.querySelector('.sp-history-clear-automatic-btn');
+                runHistoryMutation(
+                    button,
+                    () => clearStateHistory('automatic'),
+                    'ui_history_clear_automatic_success',
+                    'ui_history_clear_automatic_failed'
+                );
+            });
+            content.querySelector('.sp-history-clear-all-btn')?.addEventListener('click', () => {
+                const win = getWindow();
+                if (
+                    !win ||
+                    typeof win.confirm !== 'function' ||
+                    !win.confirm(getMessage('ui_history_clear_all_confirm'))
+                ) {
+                    return;
+                }
+                const button = content.querySelector('.sp-history-clear-all-btn');
+                runHistoryMutation(
+                    button,
+                    () => clearStateHistory('all'),
+                    'ui_history_clear_all_success',
+                    'ui_history_clear_all_failed'
+                );
+            });
             if (developerSection) {
                 bindDeveloperSettingsActions(developerSection);
             }
@@ -721,12 +1070,17 @@
             });
             importFileInput.addEventListener('change', () => {
                 const file = importFileInput.files?.[0];
-                readSettingsImportFile(file, (fileText) => {
+                const didStartRead = readSettingsImportFile(file, (fileText) => {
                     renderSettingsModal({
                         importText: fileText,
                         preview: previewImportConfig(fileText)
                     });
+                }, () => {
+                    announceSettingsResult('ui_settings_import_file_invalid', 'error');
                 });
+                if (!didStartRead) {
+                    announceSettingsResult('ui_settings_import_file_invalid', 'error');
+                }
             });
             content.querySelector('.sp-settings-preview-import-btn')?.addEventListener('click', () => {
                 renderSettingsModal({
@@ -796,12 +1150,25 @@
 
             const modalKeyboard = bindModalKeyboardNavigation(modal, {
                 closeModal: closeSettingsModal,
-                initialFocusTarget: () => modal.querySelector('.sp-settings-backup-section .sp-settings-collapsible-toggle') || modal.querySelector('.sp-modal-cancel')
+                initialFocusTarget: () => (
+                    normalizedModalState.manageStorage
+                        ? modal.querySelector('.sp-history-storage-summary')
+                        : null
+                ) || modal.querySelector('.sp-settings-backup-section .sp-settings-collapsible-toggle') || modal.querySelector('.sp-modal-cancel')
             });
             const showWindow = () => {
                 backdrop.classList.add('visible');
                 modal.classList.add('visible');
-                modalKeyboard.focusInitial();
+                content.scrollTop = Number(transientViewState.scrollTop) || 0;
+                const restoredFocusTarget = findSettingsFocusTarget(
+                    modal,
+                    transientViewState.focusKey
+                );
+                if (restoredFocusTarget?.focus) {
+                    restoredFocusTarget.focus();
+                } else {
+                    modalKeyboard.focusInitial();
+                }
             };
             if (typeof rafFn === 'function') rafFn(showWindow);
             else showWindow();
@@ -809,9 +1176,14 @@
             return true;
         }
 
+        function renderManageStorage() {
+            return renderSettingsModal({ manageStorage: true });
+        }
+
         return {
             closeSettingsModal,
             renderSettingsModal,
+            renderManageStorage,
             renderQuickViewButtonsModal,
             createDeveloperSettingsSection,
             bindDeveloperSettingsActions,

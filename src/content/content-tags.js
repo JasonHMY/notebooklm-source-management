@@ -6,7 +6,7 @@
      * 直接读写 runtime.tagsById / runtime.sourceTagsById / runtime.state.tagOrder /
      * runtime.state.activeTagId — 是 state 的 thin wrapper,不持久化(saveState 在 caller)。
      *
-     * @param {Object} deps Required: showToast, getMessage; runtime (持 tagsById / sourceTagsById / state)。
+     * @param {Object} deps runtime (持 tagsById / sourceTagsById / state)。
      *   读取 globalThis.NSM_CONTENT_CONFIG.TAG_COLOR_PRESETS + TAG_COLOR_HEX_PATTERN。
      * @returns {Object} 19 helpers,分三组:
      *   - 标签值归一化 + 颜色: normalizeTagLabel / normalizeTagColor / normalizeTagColorInputValue /
@@ -16,10 +16,6 @@
      *   - CUD: createTag / updateTag / setSourceTagIds / deleteTag(会清理 sourceTagsById + activeTagId)
      */
     function createContentTags(deps = {}) {
-        const {
-            showToast,
-            getMessage
-        } = deps;
         const runtime = deps.runtime || deps;
         const contentConfig = globalThis.NSM_CONTENT_CONFIG || {};
 
@@ -29,6 +25,24 @@
         const TAG_COLOR_HEX_PATTERN = contentConfig.TAG_COLOR_HEX_PATTERN instanceof RegExp
             ? contentConfig.TAG_COLOR_HEX_PATTERN
             : /^#([0-9A-F]{6})$/;
+        const emitOnboardingSuccess = typeof deps.emitOnboardingSuccess === 'function'
+            ? deps.emitOnboardingSuccess
+            : (step) => {
+                const EventCtor = deps.CustomEvent || globalThis.CustomEvent;
+                if (
+                    typeof globalThis.dispatchEvent !== 'function'
+                    || typeof EventCtor !== 'function'
+                ) {
+                    return false;
+                }
+                globalThis.dispatchEvent(new EventCtor('nsm:onboarding-success', {
+                    detail: { step }
+                }));
+                return true;
+            };
+        const invalidateSourceContextIndex = typeof deps.invalidateSourceContextIndex === 'function'
+            ? deps.invalidateSourceContextIndex
+            : () => {};
 
         function normalizeTagLabel(value) {
             return String(value || '')
@@ -131,6 +145,7 @@
         }
 
         function getSortedTagIds(tagIds = []) {
+            if (!Array.isArray(tagIds) || tagIds.length === 0) return [];
             const orderIndex = new Map();
             const tagOrder = Array.isArray(runtime.state?.tagOrder) ? runtime.state.tagOrder : [];
             tagOrder.forEach((tagId, index) => orderIndex.set(tagId, index));
@@ -140,7 +155,10 @@
         }
 
         function getSourceTagIds(sourceKey) {
-            return getSortedTagIds(runtime.sourceTagsById.get(sourceKey) || []);
+            const tagIds = runtime.sourceTagsById.get(sourceKey);
+            return Array.isArray(tagIds) && tagIds.length > 0
+                ? getSortedTagIds(tagIds)
+                : [];
         }
 
         function getTagUsageCounts() {
@@ -166,18 +184,25 @@
             return null;
         }
 
+        function createTagMutationResult(ok, reason, tagId = null, existingTagId = null) {
+            return {
+                ok: Boolean(ok),
+                reason,
+                tagId,
+                existingTagId
+            };
+        }
+
         function createTag(label, options = {}) {
             const normalizedOptions = typeof options === 'string' ? { color: options } : options;
             const normalizedLabel = normalizeTagLabel(label);
             if (!normalizedLabel) {
-                showToast(getMessage('ui_tag_name_required'));
-                return null;
+                return createTagMutationResult(false, 'name_required');
             }
 
             const duplicateTagId = findExistingTagIdByLabel(normalizedLabel);
             if (duplicateTagId) {
-                showToast(getMessage('ui_tag_create_duplicate'));
-                return duplicateTagId;
+                return createTagMutationResult(false, 'duplicate', null, duplicateTagId);
             }
 
             const tagId = generateTagId();
@@ -188,39 +213,58 @@
             });
             runtime.state.tagOrder = Array.isArray(runtime.state.tagOrder) ? runtime.state.tagOrder : [];
             runtime.state.tagOrder.push(tagId);
-            return tagId;
+            emitOnboardingSuccess('add-tag');
+            return createTagMutationResult(true, 'created', tagId);
         }
 
         function updateTag(tagId, updates = {}) {
             const tag = runtime.tagsById.get(tagId);
-            if (!tag) return null;
+            if (!tag) {
+                return createTagMutationResult(false, 'not_found');
+            }
 
             const normalizedLabel = normalizeTagLabel(updates.label !== undefined ? updates.label : tag.label);
             if (!normalizedLabel) {
-                showToast(getMessage('ui_tag_name_required'));
-                return null;
+                return createTagMutationResult(false, 'name_required');
             }
 
             const duplicateTagId = findExistingTagIdByLabel(normalizedLabel);
             if (duplicateTagId && duplicateTagId !== tagId) {
-                showToast(getMessage('ui_tag_create_duplicate'));
-                return duplicateTagId;
+                return createTagMutationResult(false, 'duplicate', null, duplicateTagId);
             }
 
+            const labelChanged = tag.label !== normalizedLabel;
             tag.label = normalizedLabel;
             if (Object.prototype.hasOwnProperty.call(updates, 'color')) {
                 tag.color = normalizeTagColor(updates.color);
             }
-            return tagId;
+            if (labelChanged) {
+                invalidateSourceContextIndex();
+            }
+            return createTagMutationResult(true, 'updated', tagId);
         }
 
         function setSourceTagIds(sourceKey, tagIds) {
             const normalizedIds = getSortedTagIds(tagIds);
+            const storedIds = runtime.sourceTagsById.get(sourceKey);
+            const previousIds = Array.isArray(storedIds) ? storedIds : [];
+            const searchablePreviousIds = getSortedTagIds(previousIds);
+            const storageChanged = (
+                previousIds.length !== normalizedIds.length
+                || previousIds.some((tagId, index) => tagId !== normalizedIds[index])
+            );
+            if (!storageChanged) return;
+            const searchContextChanged = (
+                searchablePreviousIds.length !== normalizedIds.length
+                || searchablePreviousIds.some((tagId, index) => tagId !== normalizedIds[index])
+            );
             if (normalizedIds.length === 0) {
                 runtime.sourceTagsById.delete(sourceKey);
+                if (searchContextChanged) invalidateSourceContextIndex();
                 return;
             }
             runtime.sourceTagsById.set(sourceKey, normalizedIds);
+            if (searchContextChanged) invalidateSourceContextIndex();
         }
 
         function deleteTag(tagId) {
@@ -232,10 +276,20 @@
                 runtime.state.activeTagId = null;
             }
 
+            let sourceAssignmentsChanged = false;
             runtime.sourceTagsById.forEach((tagIds, sourceKey) => {
                 const nextTagIds = tagIds.filter((id) => id !== tagId);
-                setSourceTagIds(sourceKey, nextTagIds);
+                if (nextTagIds.length === tagIds.length) return;
+                sourceAssignmentsChanged = true;
+                if (nextTagIds.length === 0) {
+                    runtime.sourceTagsById.delete(sourceKey);
+                } else {
+                    runtime.sourceTagsById.set(sourceKey, getSortedTagIds(nextTagIds));
+                }
             });
+            if (sourceAssignmentsChanged) {
+                invalidateSourceContextIndex();
+            }
         }
 
         return {
@@ -254,6 +308,7 @@
             getSourceTagIds,
             getTagUsageCounts,
             findExistingTagIdByLabel,
+            createTagMutationResult,
             createTag,
             updateTag,
             setSourceTagIds,

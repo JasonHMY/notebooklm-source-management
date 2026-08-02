@@ -90,8 +90,18 @@ function createDeps(overrides = {}) {
         getDefaultTagColor: () => '#007AFF',
         getTagColorPreviewStyle: () => '',
         tagColorPresets: ['#007AFF', '#FF3B30'],
-        createTag: jest.fn(() => ({ id: 'new-tag', label: 'New', color: '#007AFF' })),
-        updateTag: jest.fn(() => true),
+        createTag: jest.fn(() => ({
+            ok: true,
+            reason: 'created',
+            tagId: 'new-tag',
+            existingTagId: null
+        })),
+        updateTag: jest.fn((tagId) => ({
+            ok: true,
+            reason: 'updated',
+            tagId,
+            existingTagId: null
+        })),
         deleteTag: jest.fn(),
         getTagUsageCounts: jest.fn(() => new Map()),
         getSourceTagIds: jest.fn(() => []),
@@ -160,6 +170,64 @@ describe('content modal tag', () => {
         });
     });
 
+    describe('tag mutation feedback', () => {
+        it('maps structured validation failures to localized inline messages', () => {
+            const helper = createContentModalTag(createDeps());
+
+            expect(helper.getTagMutationErrorMessage({ reason: 'name_required' })).toBe('ui_tag_name_required');
+            expect(helper.getTagMutationErrorMessage({ reason: 'duplicate' })).toBe('ui_tag_create_duplicate');
+            expect(helper.getTagMutationErrorMessage({ reason: 'not_found' })).toBe('ui_tag_not_found');
+        });
+
+        it('keeps the entered label and focuses the input when create returns a duplicate', () => {
+            const deps = createDeps({
+                getState: () => ({ tagOrder: [] }),
+                createTag: jest.fn(() => ({
+                    ok: false,
+                    reason: 'duplicate',
+                    tagId: null,
+                    existingTagId: 'existing-tag'
+                }))
+            });
+            const helper = createContentModalTag(deps);
+            helper.renderTagModal();
+
+            const modal = deps.getShadowRoot().querySelector('#sp-tag-modal');
+            const input = modal.querySelector('#sp-tag-name-input');
+            const submit = modal.querySelector('#sp-create-tag-btn');
+            input.value = 'Existing label';
+            submit.listeners.click[0]();
+
+            const error = modal.querySelector('#sp-tag-name-input-error');
+            expect(input.value).toBe('Existing label');
+            expect(input.focus).toHaveBeenCalled();
+            expect(input.setAttribute).toHaveBeenCalledWith('aria-invalid', 'true');
+            expect(error.hidden).toBe(false);
+            expect(error.textContent).toBe('ui_tag_create_duplicate');
+            expect(deps.saveState).not.toHaveBeenCalled();
+            expect(deps.render).not.toHaveBeenCalled();
+        });
+
+        it('clears inline validation feedback when the user edits the label', () => {
+            const deps = createDeps();
+            const helper = createContentModalTag(deps);
+            const editor = helper.createTagEditor({
+                inputId: 'tag-input',
+                submitLabel: 'Create',
+                onSubmit: jest.fn()
+            });
+            editor.labelInput.value = 'Draft';
+            editor.setError('Problem');
+
+            editor.labelInput.listeners.input[0]();
+
+            expect(editor.labelInput.value).toBe('Draft');
+            expect(editor.errorNode.hidden).toBe(true);
+            expect(editor.errorNode.textContent).toBe('');
+            expect(editor.labelInput.removeAttribute).toHaveBeenCalledWith('aria-invalid');
+        });
+    });
+
     describe('executeBatchTagUpdate', () => {
         function setupBatchDeps(extras = {}) {
             const sourcesByKey = new Map([
@@ -186,20 +254,39 @@ describe('content modal tag', () => {
             });
         }
 
-        it('returns false and closes when there are no eligible sources or tags', () => {
+        it('returns a structured empty result and closes when there are no eligible sources', () => {
             const deps = setupBatchDeps();
             const helper = createContentModalTag(deps);
 
-            expect(helper.executeBatchTagUpdate('add', [], ['t1'])).toBe(false);
+            expect(helper.executeBatchTagUpdate('add', [], ['t1'])).toEqual({
+                ok: false,
+                changed: false,
+                succeeded: [],
+                failed: [],
+                skipped: [],
+                unattempted: [],
+                reason: 'empty_selection'
+            });
             expect(deps.closeManagedModal).toHaveBeenCalled();
             expect(deps.setSourceTagIds).not.toHaveBeenCalled();
         });
 
-        it('returns false when none of the tagIds are valid', () => {
+        it('returns structured unattempted items when none of the tagIds are valid', () => {
             const deps = setupBatchDeps();
             const helper = createContentModalTag(deps);
 
-            expect(helper.executeBatchTagUpdate('add', ['s1', 's2'], ['ghost'])).toBe(false);
+            expect(helper.executeBatchTagUpdate('add', ['s1', 's2'], ['ghost'])).toEqual({
+                ok: false,
+                changed: false,
+                succeeded: [],
+                failed: [],
+                skipped: [],
+                unattempted: [
+                    { key: 's1', reason: 'tag_not_found' },
+                    { key: 's2', reason: 'tag_not_found' }
+                ],
+                reason: 'tag_not_found'
+            });
             expect(deps.setSourceTagIds).not.toHaveBeenCalled();
         });
 
@@ -209,7 +296,18 @@ describe('content modal tag', () => {
 
             const result = helper.executeBatchTagUpdate('add', ['s1', 's2', 's_loading', 's_disabled'], ['t1', 't2']);
 
-            expect(result).toBe(true);
+            expect(result).toEqual({
+                ok: false,
+                changed: true,
+                succeeded: ['s1', 's2'],
+                failed: [],
+                skipped: [
+                    { key: 's_loading', reason: 'source_unavailable' },
+                    { key: 's_disabled', reason: 'source_unavailable' }
+                ],
+                unattempted: [],
+                reason: 'partial'
+            });
             expect(deps.setSourceTagIds).toHaveBeenCalledTimes(2);
             const setKeys = deps.setSourceTagIds.mock.calls.map(([key]) => key);
             expect(setKeys).toEqual(['s1', 's2']);
@@ -227,9 +325,17 @@ describe('content modal tag', () => {
             const state = deps.getState();
             const pending = deps.getPendingBatchKeys();
             const helper = createContentModalTag(deps);
+            pending.clear();
+            pending.add('s1');
 
-            helper.executeBatchTagUpdate('add', ['s1'], ['t1']);
+            const result = helper.executeBatchTagUpdate('add', ['s1'], ['t1']);
 
+            expect(result).toEqual(expect.objectContaining({
+                ok: true,
+                changed: true,
+                succeeded: ['s1'],
+                reason: 'completed'
+            }));
             expect(state.isBatchMode).toBe(false);
             expect(pending.size).toBe(0);
             expect(deps.saveState).toHaveBeenCalledWith({ immediate: true, critical: true });

@@ -16,16 +16,20 @@ Popup/content -> background
 ├── LOAD_STATE
 ├── LOAD_STATE_HISTORY
 ├── APPEND_STATE_HISTORY
+├── DELETE_STATE_HISTORY_ENTRY
+├── CLEAR_STATE_HISTORY
 ├── APPEND_DEVELOPER_LOG
 ├── LOAD_DEVELOPER_LOGS
 └── CLEAR_DEVELOPER_LOGS
 ```
 
-Notebook-scoped storage messages require a sender tab on either the current `https://notebook.google.com/notebook/` origin or the compatibility `https://notebooklm.google.com/notebook/` origin. Beyond the exact allowed origin and URL prefix, `SAVE_STATE` / `LOAD_STATE` require `request.key` to equal `sourcesPlusState_<sender projectId>`, while `APPEND_STATE_HISTORY` / `LOAD_STATE_HISTORY` require exact equality with `sourcesPlusHistory_<sender projectId>`; otherwise the worker returns `unauthorized_sender`. Prefix/suffix lookalikes, including notebook `123` trying to use a key for `1234`, are not ownership matches. For those state/history messages only, a bare `/notebook/` URL does not add an extra project-id rejection.
+Notebook-scoped storage messages require a sender tab on either the current `https://notebook.google.com/notebook/` origin or the compatibility `https://notebooklm.google.com/notebook/` origin. Beyond the exact allowed origin and URL prefix, `SAVE_STATE` / `LOAD_STATE` require `request.key` to equal `sourcesPlusState_<sender projectId>`, while `APPEND_STATE_HISTORY` / `LOAD_STATE_HISTORY` / `DELETE_STATE_HISTORY_ENTRY` / `CLEAR_STATE_HISTORY` require exact equality with `sourcesPlusHistory_<sender projectId>`; otherwise the worker returns `unauthorized_sender`. Prefix/suffix lookalikes, including notebook `123` trying to use a key for `1234`, are not ownership matches. For those state/history messages only, a bare `/notebook/` URL does not add an extra project-id rejection.
 
 Developer-log messages use a stricter ownership rule. `APPEND_DEVELOPER_LOG` / `LOAD_DEVELOPER_LOGS` / `CLEAR_DEVELOPER_LOGS` require a non-empty project id parsed from the sender tab URL and require `request.key` to equal `sourcesPlusDeveloperLogs_<projectId>` exactly. Suffix matches, longer shared-prefix ids, extra key segments, cross-notebook keys, and a bare `/notebook/` URL all return `unauthorized_sender` before any storage read or write.
 
 Global messages that are not notebook-state writes, such as extension enable/disable, preferences, tab focus/open, and web store feedback, are not tied to one notebook state key.
+
+`OPEN_OR_FOCUS_NOTEBOOKLM` reuses the sender tab when it is already on a supported Notebook home page. From an external page, the worker first focuses an existing notebook tab and requires its `FOCUS_MANAGER` response to contain `success: true`; if no notebook is open, it reuses an existing supported home tab before creating a new current-origin home tab. A missing, rejected, or negative manager response returns `tab_message_failed` instead of reporting a successful focus.
 
 `LOAD_PREFERENCES` returns `sourcesPlusPreferences` fields such as `developerModeEnabled`, `welcomeOnboardingSeenVersion`, `whatsNewSeenVersion`, `historyRetentionLimit`, `languageOverride`, `dragMode`, `commandShortcuts`, `visibleQuickViewKinds`, and `appearance`. It also returns derived `usageState.hasExistingPluginData` and `usageState.hasStoredPreferences` booleans so content code can distinguish first-time users from users upgrading with existing local extension data. `SAVE_PREFERENCES` accepts partial preference updates and merges them with the existing stored object so toggling one preference does not clear the other stored preference fields.
 
@@ -43,7 +47,7 @@ then bind the complete key to the sender notebook through that shared contract.
 SAVE_STATE / LOAD_STATE
 └── key must start with sourcesPlusState_
 
-LOAD_STATE_HISTORY / APPEND_STATE_HISTORY
+LOAD_STATE_HISTORY / APPEND_STATE_HISTORY / DELETE_STATE_HISTORY_ENTRY / CLEAR_STATE_HISTORY
 └── key must start with sourcesPlusHistory_
 
 APPEND_DEVELOPER_LOG / LOAD_DEVELOPER_LOGS / CLEAR_DEVELOPER_LOGS
@@ -51,6 +55,48 @@ APPEND_DEVELOPER_LOG / LOAD_DEVELOPER_LOGS / CLEAR_DEVELOPER_LOGS
 ```
 
 `APPEND_STATE_HISTORY` entries may include `label` and `manual` for user-created restore points. The message type is unchanged; the background worker applies the current `historyRetentionLimit` preference when saving or loading history.
+
+History deletion and clearing use the same exact notebook ownership check and the same per-notebook state FIFO as `SAVE_STATE` and `APPEND_STATE_HISTORY`:
+
+```json
+{
+  "type": "DELETE_STATE_HISTORY_ENTRY",
+  "key": "sourcesPlusHistory_<projectId>",
+  "entryId": "<non-empty history entry id>"
+}
+```
+
+```json
+{
+  "type": "CLEAR_STATE_HISTORY",
+  "key": "sourcesPlusHistory_<projectId>",
+  "scope": "automatic"
+}
+```
+
+`scope` is either `automatic` (remove automatic entries and preserve every manual restore point) or `all` (remove all entries after explicit UI confirmation). A missing/blank `entryId` or any other scope is rejected with `runtime_failure` before storage is touched.
+
+A successful mutation returns the updated bounded history and fresh notebook storage diagnostics:
+
+```json
+{
+  "success": true,
+  "changed": true,
+  "deletedCount": 2,
+  "freedBytes": 2048,
+  "history": [],
+  "storageUsageBytes": 4096,
+  "storageQuotaBytes": 10485760,
+  "storageUsageRatio": 0.0004,
+  "storageWarning": false,
+  "historyEntryCount": 0,
+  "historyTrimmed": false
+}
+```
+
+`changed` is false and `deletedCount`/`freedBytes` are zero when the requested entry or scope removes nothing. Usage includes the retained primary, rotated backup, updated history, and best-effort bytes for the remaining extension keys. A write failure uses the existing `storage_quota_exceeded` or `runtime_failure` code and reports diagnostics for the retained history when available.
+
+`DELETE_STATE_HISTORY_ENTRY` and `CLEAR_STATE_HISTORY` are serialized on the state key derived from the exact history key. Therefore they cannot race a same-notebook primary/backup/history `SAVE_STATE` or history append; history loads wait for that FIFO before reading. Different notebook keys remain independent.
 
 Invalid keys return:
 

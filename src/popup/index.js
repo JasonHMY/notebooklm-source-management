@@ -15,6 +15,7 @@
         invalid_storage_key: 'popup_error_invalid_storage_key',
         runtime_failure: 'popup_reason_generic',
         tabs_query_failed: 'popup_reason_tabs_query_failed',
+        tab_message_failed: 'popup_reason_tab_message_failed',
         extension_disabled: 'popup_reason_extension_disabled',
         source_view_switch_failed: 'popup_source_view_switch_failed'
     };
@@ -127,9 +128,9 @@
 
             return {
                 badgeKey: 'popup_badge_launcher',
-                titleKey: 'popup_title_notebook_home_new_tab',
-                bodyKey: 'popup_body_notebook_home_new_tab',
-                buttonKey: 'popup_cta_open_notebooklm_new_tab',
+                titleKey: 'popup_title_notebook_home_ready',
+                bodyKey: 'popup_body_notebook_home_reuse',
+                buttonKey: 'popup_cta_continue_current_tab',
                 detailKey: null,
                 action: 'open-notebooklm',
                 sourceViewControls: false,

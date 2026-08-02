@@ -16,7 +16,15 @@ function createElement(tag, attrs = {}, children = []) {
             this.children.push(child);
             if (child && typeof child === 'object') child.parentNode = this;
         },
-        classList: { add: jest.fn() },
+        classList: {
+            add: jest.fn(),
+            toggle: jest.fn((className, force) => {
+                const classes = new Set(String(node.className || '').split(/\s+/).filter(Boolean));
+                if (force) classes.add(className);
+                else classes.delete(className);
+                node.className = Array.from(classes).join(' ');
+            })
+        },
         focus: jest.fn(),
         querySelector(selector) {
             return collectDescendants(this).find((node) => matchesSelector(node, selector)) || null;
@@ -58,6 +66,12 @@ function matchesSelector(node, selector) {
 
 function createDeps(overrides = {}) {
     const shadowRoot = createElement('div');
+    const eventTarget = {
+        listeners: {},
+        addEventListener: jest.fn((eventName, handler) => {
+            eventTarget.listeners[eventName] = handler;
+        })
+    };
     return {
         el: jest.fn(createElement),
         getMessage: jest.fn((key) => key),
@@ -67,6 +81,7 @@ function createDeps(overrides = {}) {
         bindModalKeyboardNavigation: jest.fn(() => ({ focusInitial: jest.fn(), dispose: jest.fn() })),
         markWelcomeOnboardingSeen: jest.fn(() => Promise.resolve(true)),
         openWebStoreFeedback: jest.fn(),
+        eventTarget,
         requestAnimationFrame: undefined,
         ...overrides
     };
@@ -102,7 +117,7 @@ describe('content modal welcome', () => {
         expect(deps.prepareModalOpen).not.toHaveBeenCalled();
     });
 
-    it('renders the modal scaffolding and three feature rows', () => {
+    it('renders the modal scaffolding and a skippable three-step checklist', () => {
         const deps = createDeps();
         const helper = createContentModalWelcome(deps);
 
@@ -112,6 +127,28 @@ describe('content modal welcome', () => {
         expect(shadow.querySelector('.sp-welcome-modal')).toBeTruthy();
         expect(shadow.querySelector('.sp-overlay-backdrop')).toBeTruthy();
         expect(shadow.querySelectorAll('.sp-welcome-feature-row')).toHaveLength(3);
+        expect(shadow.querySelectorAll('.sp-welcome-checklist-row')).toHaveLength(3);
+        expect(shadow.querySelector('.sp-welcome-skip-btn')).toBeTruthy();
+    });
+
+    it('marks checklist steps complete when their first-success event is observed', () => {
+        const deps = createDeps();
+        const helper = createContentModalWelcome(deps);
+        helper.renderWelcomeModal();
+
+        expect(deps.eventTarget.addEventListener).toHaveBeenCalledWith(
+            'nsm:onboarding-success',
+            expect.any(Function)
+        );
+        deps.eventTarget.listeners['nsm:onboarding-success']({
+            detail: { step: 'create-folder' }
+        });
+
+        expect(helper.getCompletedOnboardingSteps()).toEqual(['create-folder']);
+        const completedRow = deps.getShadowRoot().querySelectorAll('.sp-welcome-checklist-row')
+            .find((row) => row.dataset.onboardingStep === 'create-folder');
+        expect(completedRow.dataset.onboardingComplete).toBe('true');
+        expect(completedRow.classList.toggle).toHaveBeenCalledWith('is-complete', true);
     });
 
     it('clicking the close button marks onboarding seen and closes the modal', async () => {
@@ -137,6 +174,30 @@ describe('content modal welcome', () => {
 
         await Promise.resolve();
         expect(deps.markWelcomeOnboardingSeen).toHaveBeenCalledTimes(1);
+        expect(deps.closeManagedModal).toHaveBeenCalled();
+    });
+
+    it('the explicit skip action marks onboarding seen without changing user data', async () => {
+        const deps = createDeps();
+        const helper = createContentModalWelcome(deps);
+        helper.renderWelcomeModal();
+
+        deps.getShadowRoot().querySelector('.sp-welcome-skip-btn').listeners.click[0]();
+
+        await Promise.resolve();
+        expect(deps.markWelcomeOnboardingSeen).toHaveBeenCalledTimes(1);
+        expect(deps.closeManagedModal).toHaveBeenCalled();
+    });
+
+    it('replay mode closes without rewriting onboarding-seen state', async () => {
+        const deps = createDeps();
+        const helper = createContentModalWelcome(deps);
+        helper.renderWelcomeModal({ markSeenOnClose: false });
+
+        deps.getShadowRoot().querySelector('.sp-welcome-skip-btn').listeners.click[0]();
+
+        await Promise.resolve();
+        expect(deps.markWelcomeOnboardingSeen).not.toHaveBeenCalled();
         expect(deps.closeManagedModal).toHaveBeenCalled();
     });
 

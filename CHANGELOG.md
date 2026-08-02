@@ -32,15 +32,18 @@
 - **常用整理任务就地完成 (Complete Common Organization Tasks In Place)**: **影响**: 新建文件夹或子文件夹后会立即命名；即使当前有搜索、标签、快速视图、隔离或折叠祖先，临时命名路径仍保持可见，确认后会退出这些视图约束并展开必要祖先。命名中的重绘会恢复已输入草稿，确认前的临时文件夹不会进入任何持久化快照；“移动到文件夹”可在弹窗内新建目标并一次完成移动；批量栏提供真实选中数、“选择当前可见”和“清空选择”，并严格排除折叠、隐藏、加载失败或缺少原生复选框的来源，不再要求逐项勾选或退出当前流程。
 - **主面板持续显示保存与恢复状态 (Show Persistent Save and Recovery Status)**: **影响**: Saving、Failed、Stale 和可恢复状态会持续显示在来源管理器中，并提供对应 Retry、Refresh、Restore 或 Dismiss 操作；短暂成功状态仍会自动收起。
 - **可搜索的标签筛选 (Add Searchable Tag Filtering)**: **影响**: 标签筛选弹窗现在支持忽略大小写与首尾空白的搜索、结果计数、无匹配状态和辅助技术可读的选中状态。
+- **可恢复的批量与存储管理 (Add Recoverable Batch and Storage Management)**: **影响**: 批量删除会保留失败与未尝试来源并提供 Retry remaining，筛选后明确区分可见/隐藏选择并可单独清除隐藏项；移动目标可搜索、显示完整路径并记住最近目标。设置页可删除单个历史点、清理自动历史或确认后清空全部历史，并从保存失败状态直接查看配额、占用与可释放历史大小。
 
 ### Changed
 - **空状态提供准确诊断与恢复入口 (Make Empty States Contextual and Actionable)**: **影响**: 真正没有来源、搜索无匹配、筛选无匹配和隔离文件夹无内容现在显示不同说明，并分别提供 Clear search、Clear filters 或 Show all；退出隔离的组合清除操作会同步恢复 Gemini Notebook 原生来源启用状态，不再把所有情况误报为筛选无结果或留下界面与原生状态不一致。
 - **核心树与窄面板无障碍改进 (Improve Core Tree Accessibility and Narrow-Panel Layout)**: **影响**: 来源与嵌套文件夹使用 list/listitem 关系，重复控件名称带来源或文件夹上下文，折叠内容从 Tab 和辅助技术路径中移除，标签状态与 switch focus 更清晰；工具栏和批量栏在窄宽度及长译文下可换行，浅色次要文字和自定义标签文字保持可读。
+- **设置、Popup 与首次引导保持操作上下文 (Preserve Context in Settings, Popup, and Onboarding)**: **影响**: 设置操作在弹窗内持续反馈并在必要重建后恢复焦点、展开区与滚动位置；导入备份会持续显示来源数量、文件夹数量与恢复/丢弃入口。Popup 优先复用当前首页或聚焦已有笔记本管理器，首次引导改为可跳过的三步检查表，Help 可重播引导并查看快捷键与导入说明。
 
 ### Fixed
 - **视图与树位置变更保持原生状态一致 (Keep Native State Consistent Across View and Tree Transitions)**: **影响**: 用户切换 Quick View、Tag、Isolation 或命令面板视图，以及移动来源、拖拽或调整文件夹位置后，Gemini Notebook 原生复选框会按操作前后有效状态差异同步；无变化和放置失败不会保存或显示成功，原生同步失败会保留可重试状态。
 - **恢复与来源盘点改为事务式 (Make Restore and Inventory Reconciliation Transactional)**: **影响**: Recovery、History、Import Backup 和 Source Repair 现在按笔记本实例串行应用，只有明确保存成功且 `sessionStorage` recovery 清理已确认才清除恢复入口；即使主状态已落盘，清理失败也会结构化失败并回滚。Recovery Restore 全程保留原始恢复目标，拒绝、空响应、过期修订、页面切换、清理失败或回滚无法确认时均保留该目标的 Restore/Refresh 入口。来源扫描会区分 complete、partial、virtualized 和 loading，单次缺失或虚拟化换窗不再丢失来源的文件夹、Tag 与启用状态。
 - **原生删除证明与复选框同步加固 (Harden Native Delete Proof and Checkbox Synchronization)**: **影响**: 删除在点击不可逆原生确认前会先验证完整 identity 清单、显式原生 totalHint 与唯一绑定目标；对话框关闭后仍需同类证据证明目标消失、总数 N→N−1 才成功。当前 DOM 行数、虚拟化卸载、等数量补位、不完整盘点或缺失/重复目标都不会误判。真实删除会清空 Undo/Redo 并明确提示不可恢复；原生复选框以每来源 last-write-wins 队列同步，快速反向操作、超时或页面切换会返回可重试的结构化失败。
+- **批量、标签与文件夹反馈保持真实结果 (Keep Batch, Tag, and Folder Feedback Truthful)**: **影响**: 批量结果会精确显示成功、失败、跳过和未尝试数量，未移动项目继续保持选择；Tag 创建/更新遇到空名、重复名或目标缺失时保留输入与颜色并显示内联错误。搜索仅命中文件夹时会计入文件夹结果，删除非空文件夹前会分别说明来源移至未分组和子文件夹提升数量。
 - **支持当前 Gemini Notebook 域名 (Support the Current Gemini Notebook Origin)**: **影响**: 扩展会在当前 `notebook.google.com` 页面正常注入、识别、聚焦和启动，同时保留 `notebooklm.google.com` 兼容入口；Popup 只有收到明确的 `success: true` 才报告动作完成。
 
 ### Security

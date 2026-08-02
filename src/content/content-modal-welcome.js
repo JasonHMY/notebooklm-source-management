@@ -12,6 +12,29 @@
      *   createWelcomeFeatureRow 是私用渲染 helper(icon + 标题 + 副本)外露给 Settings modal "Welcome again" 入口复用。
      */
     function createContentModalWelcome(deps = {}) {
+        const ONBOARDING_EVENT_NAME = 'nsm:onboarding-success';
+        const ONBOARDING_STEPS = [
+            {
+                id: 'create-folder',
+                icon: 'create_new_folder',
+                titleKey: 'ui_onboarding_step_create_folder_title',
+                bodyKey: 'ui_onboarding_step_create_folder_body'
+            },
+            {
+                id: 'move-source',
+                icon: 'drive_file_move',
+                titleKey: 'ui_onboarding_step_move_source_title',
+                bodyKey: 'ui_onboarding_step_move_source_body'
+            },
+            {
+                id: 'add-tag',
+                icon: 'new_label',
+                titleKey: 'ui_onboarding_step_add_tag_title',
+                bodyKey: 'ui_onboarding_step_add_tag_body'
+            }
+        ];
+        const onboardingStepIds = new Set(ONBOARDING_STEPS.map((step) => step.id));
+        const completedOnboardingSteps = new Set();
         const {
             el,
             getMessage,
@@ -21,6 +44,7 @@
             bindModalKeyboardNavigation,
             markWelcomeOnboardingSeen,
             openWebStoreFeedback,
+            eventTarget = globalThis,
             requestAnimationFrame: rafFn = globalThis.requestAnimationFrame
         } = deps;
 
@@ -42,12 +66,63 @@
             ]);
         }
 
-        function renderWelcomeModal() {
+        function createWelcomeChecklistRow(step) {
+            const completed = completedOnboardingSteps.has(step.id);
+            return el('div', {
+                className: `sp-welcome-feature-row sp-welcome-checklist-row${completed ? ' is-complete' : ''}`,
+                role: 'listitem',
+                dataset: {
+                    onboardingStep: step.id,
+                    onboardingComplete: completed ? 'true' : 'false'
+                }
+            }, [
+                el('span', {
+                    className: 'google-symbols sp-welcome-feature-icon sp-welcome-checklist-icon',
+                    'aria-hidden': 'true'
+                }, [completed ? 'check_circle' : step.icon]),
+                el('div', { className: 'sp-welcome-feature-copy' }, [
+                    el('h4', { className: 'sp-welcome-feature-title' }, [getMessage(step.titleKey)]),
+                    el('p', { className: 'sp-welcome-feature-body' }, [getMessage(step.bodyKey)])
+                ])
+            ]);
+        }
+
+        function syncRenderedChecklist() {
+            const shadowRoot = getShadowRoot();
+            const rows = Array.from(shadowRoot?.querySelectorAll?.('.sp-welcome-checklist-row') || []);
+            rows.forEach((row) => {
+                const stepId = String(row?.dataset?.onboardingStep || '');
+                const completed = completedOnboardingSteps.has(stepId);
+                row.dataset.onboardingComplete = completed ? 'true' : 'false';
+                row.classList?.toggle?.('is-complete', completed);
+                const icon = row.querySelector?.('.sp-welcome-checklist-icon');
+                if (icon && completed) icon.textContent = 'check_circle';
+            });
+            return rows.length;
+        }
+
+        function recordOnboardingEvent(eventOrStep) {
+            const stepId = String(
+                typeof eventOrStep === 'string'
+                    ? eventOrStep
+                    : eventOrStep?.detail?.step
+            );
+            if (!onboardingStepIds.has(stepId)) return false;
+            completedOnboardingSteps.add(stepId);
+            syncRenderedChecklist();
+            return true;
+        }
+
+        eventTarget?.addEventListener?.(ONBOARDING_EVENT_NAME, recordOnboardingEvent);
+
+        function renderWelcomeModal(options = {}) {
             const shadowRoot = getShadowRoot();
             if (!shadowRoot || !el) return false;
+            const markSeenOnClose = options.markSeenOnClose !== false;
 
             let hasMarkedSeen = false;
             const markSeenOnce = () => {
+                if (!markSeenOnClose) return Promise.resolve(true);
                 if (hasMarkedSeen) return Promise.resolve(true);
                 hasMarkedSeen = true;
                 return Promise.resolve(markWelcomeOnboardingSeen()).catch(() => false);
@@ -91,11 +166,11 @@
                 closeButton
             ]);
             const content = el('div', { className: 'sp-folder-modal-content sp-welcome-content' }, [
-                el('div', { className: 'sp-welcome-feature-list' }, [
-                    createWelcomeFeatureRow('folder', 'ui_welcome_feature_organize_title', 'ui_welcome_feature_organize_body'),
-                    createWelcomeFeatureRow('manage_search', 'ui_welcome_feature_find_title', 'ui_welcome_feature_find_body'),
-                    createWelcomeFeatureRow('history', 'ui_welcome_feature_backup_title', 'ui_welcome_feature_backup_body')
-                ]),
+                el('div', {
+                    className: 'sp-welcome-feature-list sp-welcome-checklist',
+                    role: 'list',
+                    'aria-label': getMessage('ui_onboarding_checklist_title')
+                }, ONBOARDING_STEPS.map(createWelcomeChecklistRow)),
                 el('div', { className: 'sp-welcome-feedback-inline' }, [
                     el('span', { className: 'sp-welcome-feedback-copy' }, [
                         getMessage('ui_welcome_feedback_body')
@@ -106,6 +181,9 @@
                 ])
             ]);
             const footer = el('div', { className: 'sp-folder-modal-footer sp-welcome-footer' }, [
+                el('button', { type: 'button', className: 'sp-button sp-welcome-skip-btn' }, [
+                    getMessage('ui_welcome_skip')
+                ]),
                 el('button', { type: 'button', className: 'sp-button sp-welcome-primary-btn sp-glare-hover' }, [
                     getMessage('ui_welcome_get_started')
                 ])
@@ -125,6 +203,7 @@
                 }
                 closeWelcomeModal();
             });
+            footer.querySelector('.sp-welcome-skip-btn')?.addEventListener('click', closeAfterSeen);
             footer.querySelector('.sp-welcome-primary-btn')?.addEventListener('click', closeAfterSeen);
             backdrop.addEventListener('click', closeAfterSeen);
 
@@ -150,7 +229,9 @@
         return {
             renderWelcomeModal,
             closeWelcomeModal,
-            createWelcomeFeatureRow
+            createWelcomeFeatureRow,
+            recordOnboardingEvent,
+            getCompletedOnboardingSteps: () => Array.from(completedOnboardingSteps)
         };
     }
 

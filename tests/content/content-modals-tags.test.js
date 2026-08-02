@@ -59,6 +59,9 @@ const createModalRenderElement = (tag, attrs = {}, children = []) => {
             if (name === 'id') this.id = value;
             if (name === 'class') this.className = value;
         },
+        removeAttribute(name) {
+            delete this.attrs[name];
+        },
         getAttribute(name) {
             if (name === 'id') return this.id || null;
             if (name === 'class') return this.className || null;
@@ -213,6 +216,8 @@ const createModalMotionTestRuntime = ({
     applySourceRepairRemaps = jest.fn(() => Promise.resolve(true)),
     getStateHistoryEntries = jest.fn(() => []),
     restoreStateHistoryEntry = jest.fn(() => Promise.resolve(true)),
+    deleteStateHistoryEntry = jest.fn(() => Promise.resolve({ success: true, deletedCount: 1 })),
+    clearStateHistory = jest.fn(() => Promise.resolve({ success: true, deletedCount: 1 })),
     applyNativeLabelImport = jest.fn(() => true),
     getDiagnosticsInfo = jest.fn(() => ({
         notebookId: 'notebook-test',
@@ -282,6 +287,8 @@ const createModalMotionTestRuntime = ({
         applySourceRepairRemaps,
         getStateHistoryEntries,
         restoreStateHistoryEntry,
+        deleteStateHistoryEntry,
+        clearStateHistory,
         applyNativeLabelImport,
         getDiagnosticsInfo,
         getDiagnosticsText,
@@ -420,8 +427,8 @@ describe('move-to-folder options', () => {
 
         expect(shadowRoot.querySelectorAll('.sp-folder-option').map((option) => option.attrs.style)).toEqual([
             '--sp-modal-item-index:0;',
-            'padding-left:30px;--sp-modal-item-index:1;',
-            'padding-left:48px;--sp-modal-item-index:2;',
+            'padding-left:24px;--sp-modal-item-index:1;',
+            'padding-left:36px;--sp-modal-item-index:2;',
             '--sp-modal-item-index:3;'
         ]);
     });
@@ -653,7 +660,14 @@ describe('modal option motion', () => {
             showToast
         });
 
-        expect(modals.executeBatchTagUpdate('add', pendingBatchKeys, ['beta'])).toBe(true);
+        expect(modals.executeBatchTagUpdate('add', pendingBatchKeys, ['beta'])).toEqual(
+            expect.objectContaining({
+                ok: true,
+                changed: true,
+                succeeded: ['source-1', 'source-2'],
+                reason: 'completed'
+            })
+        );
         expect(nextTags.get('source-1')).toEqual(['alpha', 'beta']);
         expect(nextTags.get('source-2')).toEqual(['beta']);
         expect(state.isBatchMode).toBe(false);
@@ -667,11 +681,20 @@ describe('modal option motion', () => {
         pendingBatchKeys.add('source-2');
         nextTags.clear();
 
-        expect(modals.executeBatchTagUpdate('remove', pendingBatchKeys, ['alpha'])).toBe(true);
+        expect(modals.executeBatchTagUpdate('remove', pendingBatchKeys, ['alpha'])).toEqual(
+            expect.objectContaining({
+                ok: true,
+                changed: true,
+                succeeded: ['source-1'],
+                skipped: [{ key: 'source-2', reason: 'no_change' }],
+                reason: 'completed'
+            })
+        );
         expect(nextTags.get('source-1')).toEqual(['beta']);
-        expect(nextTags.get('source-2')).toEqual(['beta']);
+        expect(nextTags.has('source-2')).toBe(false);
+        expect(currentTags.get('source-2')).toEqual(['beta']);
         expect(pendingBatchKeys.size).toBe(0);
-        expect(showToast).toHaveBeenLastCalledWith('ui_batch_tags_removed_toast:2', { variant: 'success' });
+        expect(showToast).toHaveBeenLastCalledWith('ui_batch_tags_removed_toast:1', { variant: 'success' });
     });
 
     it('caps modal stagger indexes while preserving any base style', () => {
@@ -1134,8 +1157,8 @@ describe('modal option motion', () => {
         });
         expect(executeCommandPaletteCommand).not.toHaveBeenCalled();
 
-        const modal = shadowRoot.getElementById('sp-command-palette-modal');
-        modal.dispatchEvent({
+        const shortcutDialog = shadowRoot.getElementById('sp-command-shortcut-dialog');
+        shortcutDialog.dispatchEvent({
             type: 'keydown',
             key: 'r',
             metaKey: true,
@@ -1200,6 +1223,155 @@ describe('modal option motion', () => {
         shadowRoot.querySelector('.sp-history-restore-btn').dispatchEvent({ type: 'click' });
         await Promise.resolve();
         expect(restoreStateHistoryEntry).toHaveBeenCalledWith('history-1');
+    });
+
+    it('manages individual, automatic, and all history entries with inline results', async () => {
+        let historyEntries = [
+            {
+                id: 'automatic-1',
+                createdAt: '2026-04-22T00:00:00.000Z',
+                reason: 'save',
+                sourceCount: 2,
+                groupCount: 1,
+                tagCount: 0,
+                saveRevision: 3,
+                manual: false,
+                snapshot: { groups: ['group1'] }
+            },
+            {
+                id: 'manual-1',
+                createdAt: '2026-04-21T00:00:00.000Z',
+                reason: 'manual_restore_point',
+                sourceCount: 2,
+                groupCount: 1,
+                tagCount: 0,
+                saveRevision: 2,
+                manual: true,
+                snapshot: { groups: ['group1'] }
+            },
+            {
+                id: 'automatic-2',
+                createdAt: '2026-04-20T00:00:00.000Z',
+                reason: 'critical_save',
+                sourceCount: 2,
+                groupCount: 1,
+                tagCount: 0,
+                saveRevision: 1,
+                manual: false,
+                snapshot: { groups: ['group1'] }
+            }
+        ];
+        const deleteStateHistoryEntry = jest.fn((entryId) => {
+            historyEntries = historyEntries.filter((entry) => entry.id !== entryId);
+            return Promise.resolve({ success: true, deletedCount: 1 });
+        });
+        const clearStateHistory = jest.fn((scope) => {
+            const previousCount = historyEntries.length;
+            historyEntries = scope === 'automatic'
+                ? historyEntries.filter((entry) => entry.manual)
+                : [];
+            return Promise.resolve({
+                success: true,
+                deletedCount: previousCount - historyEntries.length
+            });
+        });
+        global.window.confirm = jest.fn(() => true);
+        const { modals, shadowRoot } = createModalMotionTestRuntime({
+            getStateHistoryEntries: () => historyEntries,
+            deleteStateHistoryEntry,
+            clearStateHistory,
+            getDiagnosticsInfo: () => ({
+                storageUsageBytes: 2048,
+                storageQuotaBytes: 10240
+            })
+        });
+
+        expect(modals.renderManageStorage()).toBe(true);
+        expect(shadowRoot.querySelector('.sp-settings-backup-section').classList.contains('is-expanded')).toBe(true);
+        expect(shadowRoot.querySelector('.sp-history-storage-summary').textContent)
+            .toContain('ui_history_storage_summary:2.0 KB / 10 KB');
+        expect(shadowRoot.querySelectorAll('.sp-history-delete-btn')).toHaveLength(3);
+        expect(shadowRoot.querySelector('.sp-history-clear-automatic-btn').disabled).toBe(false);
+
+        shadowRoot.querySelector('.sp-history-delete-btn').dispatchEvent({ type: 'click' });
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(deleteStateHistoryEntry).toHaveBeenCalledWith('automatic-1');
+        let settingsModals = shadowRoot.querySelectorAll('#sp-settings-modal');
+        let latestSettingsModal = settingsModals[settingsModals.length - 1];
+        expect(latestSettingsModal.querySelectorAll('.sp-history-delete-btn')).toHaveLength(2);
+        expect(latestSettingsModal.querySelector('.sp-history-action-status').textContent)
+            .toContain('ui_history_delete_success:1');
+        expect(latestSettingsModal.querySelector('.sp-history-clear-automatic-btn').disabled).toBe(false);
+
+        latestSettingsModal.querySelector('.sp-history-clear-automatic-btn').dispatchEvent({ type: 'click' });
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(global.window.confirm).toHaveBeenCalledWith('ui_history_clear_automatic_confirm');
+        expect(clearStateHistory).toHaveBeenCalledWith('automatic');
+        settingsModals = shadowRoot.querySelectorAll('#sp-settings-modal');
+        latestSettingsModal = settingsModals[settingsModals.length - 1];
+        expect(latestSettingsModal.querySelectorAll('.sp-history-delete-btn')).toHaveLength(1);
+        expect(latestSettingsModal.querySelector('.sp-history-clear-automatic-btn').disabled).toBe(true);
+        expect(latestSettingsModal.querySelector('.sp-history-action-status').textContent)
+            .toContain('ui_history_clear_automatic_success:1');
+
+        latestSettingsModal.querySelector('.sp-history-clear-all-btn').dispatchEvent({ type: 'click' });
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(global.window.confirm).toHaveBeenCalledWith('ui_history_clear_all_confirm');
+        expect(clearStateHistory).toHaveBeenCalledWith('all');
+        settingsModals = shadowRoot.querySelectorAll('#sp-settings-modal');
+        latestSettingsModal = settingsModals[settingsModals.length - 1];
+        expect(latestSettingsModal.querySelector('.sp-history-empty')).toBeTruthy();
+        expect(latestSettingsModal.querySelector('.sp-history-action-status').textContent)
+            .toContain('ui_history_clear_all_success:1');
+    });
+
+    it('keeps history controls available and reports a failed mutation inline', async () => {
+        const deleteStateHistoryEntry = jest.fn(() => Promise.resolve({
+            success: false,
+            reason: 'runtime_failure'
+        }));
+        const { modals, shadowRoot } = createModalMotionTestRuntime({
+            getStateHistoryEntries: () => [{
+                id: 'history-1',
+                createdAt: '2026-04-22T00:00:00.000Z',
+                reason: 'save',
+                sourceCount: 1,
+                groupCount: 0,
+                tagCount: 0,
+                saveRevision: 1,
+                manual: false,
+                snapshot: {}
+            }],
+            deleteStateHistoryEntry
+        });
+
+        expect(modals.renderSettingsModal()).toBe(true);
+        const deleteButton = shadowRoot.querySelector('.sp-history-delete-btn');
+        deleteButton.dispatchEvent({ type: 'click' });
+        expect(deleteButton.disabled).toBe(true);
+        expect(deleteButton.getAttribute('aria-busy')).toBe('true');
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(deleteButton.disabled).toBe(false);
+        expect(deleteButton.getAttribute('aria-busy')).toBeNull();
+        expect(shadowRoot.querySelector('.sp-history-action-status').textContent)
+            .toContain('ui_history_delete_failed');
     });
 
     it('hides developer controls behind a password-protected settings entry', async () => {
@@ -1337,9 +1509,9 @@ describe('modal option motion', () => {
         expect(modal.getAttribute('aria-modal')).toBe('true');
         expect(modal.getAttribute('aria-labelledby')).toBe('sp-welcome-modal-title');
         expect(modal.textContent).toContain('ui_welcome_title');
-        expect(modal.textContent).toContain('ui_welcome_feature_organize_title');
-        expect(modal.textContent).toContain('ui_welcome_feature_find_title');
-        expect(modal.textContent).toContain('ui_welcome_feature_backup_title');
+        expect(modal.textContent).toContain('ui_onboarding_step_create_folder_title');
+        expect(modal.textContent).toContain('ui_onboarding_step_move_source_title');
+        expect(modal.textContent).toContain('ui_onboarding_step_add_tag_title');
         expect(modal.querySelector('.sp-welcome-feedback-strip')).toBeFalsy();
         const feedbackInline = modal.querySelector('.sp-welcome-feedback-inline');
         expect(feedbackInline).toBeTruthy();
@@ -1388,8 +1560,10 @@ describe('modal option motion', () => {
         expect(modal.getAttribute('aria-modal')).toBe('true');
         expect(modal.getAttribute('aria-labelledby')).toBe('sp-whats-new-modal-title');
         expect(modal.textContent).toContain('ui_whats_new_title');
-        expect(modal.textContent).toContain('ui_whats_new_drag_title');
-        expect(modal.textContent).toContain('ui_whats_new_stability_title');
+        expect(modal.textContent).toContain('ui_whats_new_transaction_title');
+        expect(modal.textContent).toContain('ui_whats_new_native_safety_title');
+        expect(modal.textContent).toContain('ui_whats_new_batch_storage_title');
+        expect(modal.textContent).toContain('ui_whats_new_accessibility_scale_title');
 
         shadowRoot.querySelector('.sp-whats-new-primary-btn').dispatchEvent({ type: 'click' });
         expect(markWhatsNewSeen).not.toHaveBeenCalled();
@@ -1449,7 +1623,14 @@ describe('modal option motion', () => {
             showUndoableToast
         });
 
-        expect(modals.executeBatchTagUpdate('add', pendingBatchKeys, ['beta'])).toBe(true);
+        expect(modals.executeBatchTagUpdate('add', pendingBatchKeys, ['beta'])).toEqual(
+            expect.objectContaining({
+                ok: true,
+                changed: true,
+                succeeded: ['source-1'],
+                reason: 'completed'
+            })
+        );
         expect(showToast).not.toHaveBeenCalled();
         expect(showUndoableToast).toHaveBeenCalledWith('ui_batch_tags_added_toast:1', { variant: 'success' });
     });
@@ -1721,8 +1902,8 @@ describe('tag persistence and filtering', () => {
         });
         mod.state.ungrouped = ['source1'];
 
-        const researchTagId = mod.createTag('Research', { color: 'ff9500' });
-        const priorityTagId = mod.createTag('Priority');
+        const researchTagId = mod.createTag('Research', { color: 'ff9500' }).tagId;
+        const priorityTagId = mod.createTag('Priority').tagId;
         mod.setSourceTagIds('source1', [researchTagId, priorityTagId]);
 
         expect(mod.buildPersistableState()).toMatchObject({
@@ -1743,6 +1924,87 @@ describe('tag persistence and filtering', () => {
         expect(mod.normalizeTagColor('#007aff')).toBe('#007AFF');
         expect(mod.normalizeTagColor('#ABC')).toBe(null);
         expect(mod.normalizeTagColor('not-a-color')).toBe(null);
+    });
+
+    it('records the onboarding add-tag step only after a tag is created successfully', () => {
+        const createContentTags = require('../../src/content/content-tags.js');
+        const emitOnboardingSuccess = jest.fn();
+        const tags = createContentTags({
+            runtime: {
+                tagsById: new Map(),
+                sourceTagsById: new Map(),
+                state: { tagOrder: [] }
+            },
+            emitOnboardingSuccess
+        });
+
+        expect(tags.createTag('   ').ok).toBe(false);
+        expect(emitOnboardingSuccess).not.toHaveBeenCalled();
+        expect(tags.createTag('Research').ok).toBe(true);
+        expect(emitOnboardingSuccess).toHaveBeenCalledWith('add-tag');
+    });
+
+    it('invalidates cached source search contexts only after searchable tag mutations', () => {
+        const createContentTags = require('../../src/content/content-tags.js');
+        const invalidateSourceContextIndex = jest.fn();
+        const runtime = {
+            tagsById: new Map(),
+            sourceTagsById: new Map(),
+            state: { tagOrder: [], activeTagId: null }
+        };
+        const tags = createContentTags({
+            runtime,
+            invalidateSourceContextIndex
+        });
+        runtime.sourceTagsById.set('stale-source', ['missing-tag']);
+        tags.setSourceTagIds('stale-source', []);
+        expect(runtime.sourceTagsById.has('stale-source')).toBe(false);
+
+        const researchTagId = tags.createTag('Research').tagId;
+
+        expect(invalidateSourceContextIndex).not.toHaveBeenCalled();
+
+        tags.setSourceTagIds('source-1', [researchTagId]);
+        tags.setSourceTagIds('source-1', [researchTagId]);
+        expect(invalidateSourceContextIndex).toHaveBeenCalledTimes(1);
+
+        tags.updateTag(researchTagId, { color: '#FF9500' });
+        expect(invalidateSourceContextIndex).toHaveBeenCalledTimes(1);
+
+        tags.updateTag(researchTagId, { label: 'Reviewed' });
+        expect(invalidateSourceContextIndex).toHaveBeenCalledTimes(2);
+
+        tags.deleteTag(researchTagId);
+        expect(invalidateSourceContextIndex).toHaveBeenCalledTimes(3);
+    });
+
+    it('returns structured tag mutation results for validation, duplicates, and missing tags', () => {
+        expect(mod.createTag('   ')).toEqual({
+            ok: false,
+            reason: 'name_required',
+            tagId: null,
+            existingTagId: null
+        });
+
+        const created = mod.createTag('Research');
+        expect(created).toMatchObject({
+            ok: true,
+            reason: 'created',
+            tagId: expect.any(String),
+            existingTagId: null
+        });
+        expect(mod.createTag(' research ')).toEqual({
+            ok: false,
+            reason: 'duplicate',
+            tagId: null,
+            existingTagId: created.tagId
+        });
+        expect(mod.updateTag('missing', { label: 'Nope' })).toEqual({
+            ok: false,
+            reason: 'not_found',
+            tagId: null,
+            existingTagId: null
+        });
     });
 
     it('uses the shared content config for tag color presets', () => {
@@ -1873,8 +2135,8 @@ describe('tag persistence and filtering', () => {
     });
 
     it('combines active tag filtering with text search', () => {
-        const alphaTagId = mod.createTag('Alpha');
-        const betaTagId = mod.createTag('Beta');
+        const alphaTagId = mod.createTag('Alpha').tagId;
+        const betaTagId = mod.createTag('Beta').tagId;
 
         mod.sourcesByKey.set('source1', { key: 'source1', title: 'Alpha notes', lowercaseTitle: 'alpha notes', enabled: true });
         mod.sourcesByKey.set('source2', { key: 'source2', title: 'Alpha draft', lowercaseTitle: 'alpha draft', enabled: true });
@@ -1892,8 +2154,8 @@ describe('tag persistence and filtering', () => {
     });
 
     it('searches tag names and folder names with scoped query syntax', () => {
-        const paperTagId = mod.createTag('Paper');
-        const draftTagId = mod.createTag('Draft');
+        const paperTagId = mod.createTag('Paper').tagId;
+        const draftTagId = mod.createTag('Draft').tagId;
 
         mod.sourcesByKey.set('source1', { key: 'source1', title: 'Notes', lowercaseTitle: 'notes', enabled: true });
         mod.sourcesByKey.set('source2', { key: 'source2', title: 'Notes', lowercaseTitle: 'notes', enabled: true });
@@ -1921,7 +2183,7 @@ describe('tag persistence and filtering', () => {
     });
 
     it('removes deleted tags from every source assignment', () => {
-        const tagId = mod.createTag('Delete Me');
+        const tagId = mod.createTag('Delete Me').tagId;
         mod.setSourceTagIds('source1', [tagId]);
         mod.setSourceTagIds('source2', [tagId]);
 
@@ -1933,17 +2195,27 @@ describe('tag persistence and filtering', () => {
     });
 
     it('preserves duplicate-name validation while allowing color-only edits', () => {
-        const alphaTagId = mod.createTag('Alpha', { color: '#007AFF' });
-        const betaTagId = mod.createTag('Beta');
+        const alphaTagId = mod.createTag('Alpha', { color: '#007AFF' }).tagId;
+        const betaTagId = mod.createTag('Beta').tagId;
 
-        expect(mod.updateTag(betaTagId, { label: 'Alpha', color: '#FF9500' })).toBe(alphaTagId);
+        expect(mod.updateTag(betaTagId, { label: 'Alpha', color: '#FF9500' })).toEqual({
+            ok: false,
+            reason: 'duplicate',
+            tagId: null,
+            existingTagId: alphaTagId
+        });
         expect(mod.tagsById.get(betaTagId)).toMatchObject({
             id: betaTagId,
             label: 'Beta',
             color: null
         });
 
-        expect(mod.updateTag(betaTagId, { label: 'Beta', color: '#FF9500' })).toBe(betaTagId);
+        expect(mod.updateTag(betaTagId, { label: 'Beta', color: '#FF9500' })).toEqual({
+            ok: true,
+            reason: 'updated',
+            tagId: betaTagId,
+            existingTagId: null
+        });
         expect(mod.tagsById.get(betaTagId)).toMatchObject({
             id: betaTagId,
             label: 'Beta',
@@ -1952,9 +2224,14 @@ describe('tag persistence and filtering', () => {
     });
 
     it('preserves an existing tag color when a label-only update is applied', () => {
-        const tagId = mod.createTag('Research', { color: '#34C759' });
+        const tagId = mod.createTag('Research', { color: '#34C759' }).tagId;
 
-        expect(mod.updateTag(tagId, { label: 'Reviewed' })).toBe(tagId);
+        expect(mod.updateTag(tagId, { label: 'Reviewed' })).toEqual({
+            ok: true,
+            reason: 'updated',
+            tagId,
+            existingTagId: null
+        });
 
         expect(mod.tagsById.get(tagId)).toMatchObject({
             id: tagId,
@@ -1966,7 +2243,7 @@ describe('tag persistence and filtering', () => {
     it('initializes a missing tag order before creating or sorting tags', () => {
         delete mod.state.tagOrder;
 
-        const tagId = mod.createTag('Inbox');
+        const tagId = mod.createTag('Inbox').tagId;
 
         expect(mod.state.tagOrder).toEqual([tagId]);
         expect(mod.getSourceTagIds('source-1')).toEqual([]);

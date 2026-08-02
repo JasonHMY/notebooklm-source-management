@@ -11,7 +11,7 @@ chrome.storage.local
 ├── sourcesPlusState_<projectId>
 │   └── Per-notebook primary manager state.
 ├── sourcesPlusState_<projectId>__backup
-│   └── Per-notebook backup snapshot written with primary state.
+│   └── Per-notebook previous-primary backup; the first verified save mirrors the current primary.
 ├── sourcesPlusHistory_<projectId>
 │   └── Per-notebook bounded history snapshots.
 ├── sourcesPlusPreferences
@@ -32,7 +32,9 @@ content scripts and the background service worker load the same contract.
 
 Separately from `chrome.storage.local`, critical saves write a per-tab recovery snapshot to `sessionStorage` under `sourcesPlusRecovery_<projectId>`, holding `{ snapshot, baseRevision, createdAt, reason, clientSaveId, failed }`. It is a last-resort fallback (e.g. a lifecycle save interrupted by runtime unavailability or quota pressure) so a tab can recover unsaved organization after an interruption. `visibilitychange:hidden` and `pagehide` enqueue a critical `SAVE_STATE` through the same background per-key FIFO as normal saves; they never directly overwrite the primary or backup key.
 
-Every queued save captures an immutable notebook-bound context: project id, primary state key, recovery key, manager instance token, client save id, save snapshot, and recovery snapshot. Revision memory is tracked per primary state key. Async completion may update only that key's revision/recovery records, and may update visible save status only while the same project and manager instance are still current. A response is a confirmed background acknowledgement only when it contains boolean `success: true`; an empty or malformed response is `empty_response` and cannot clear recovery.
+Every queued save captures an immutable notebook-bound context: project id, primary state key, recovery key, manager instance token, client save id, save snapshot, and recovery snapshot. Revision memory is tracked per primary state key. Async completion may update only that key's revision/recovery records, and may update visible save status only while the same project and manager instance are still current. A response is a confirmed background acknowledgement only when it contains boolean `success: true`; an empty or malformed response is `empty_response` and cannot clear recovery. A failed or unconfirmed `sessionStorage.removeItem` (including a client-save-id mismatch) returns `{ ok: false, reason: "recovery_cleanup_failed", persistenceCommitted: true }`, keeps the snapshot, and exposes `recovery_available` with Restore and Refresh rather than reporting saved or idle.
+
+Recovery Restore binds the original recovery payload's client-save id before it writes primary state. Its target and rollback saves preserve that payload instead of replacing it with the pre-operation snapshot; only the bound original payload may be cleared after a fully confirmed restore. Thus a cleanup or rollback failure leaves Restore pointing to the original recovery target, while History, Import Backup, and Source Repair treat the same cleanup result as a failed snapshot transaction and roll runtime back.
 
 Critical import saves use the pre-import snapshot as their recovery snapshot:
 
@@ -75,6 +77,15 @@ the same notebook's pending `SAVE_STATE`, then reads primary, backup, and histor
 together and returns both raw state candidates. Direct
 `chrome.storage.local.get` is a read-only fallback only when runtime messaging is
 unavailable; it is not attempted after an explicit background rejection.
+
+Each changed `SAVE_STATE` builds one storage payload containing the new primary,
+the rotated backup, and updated history. If the old primary is a restorable
+legacy/supported snapshot, it becomes the backup. Otherwise the worker preserves
+the previous verified backup; when neither prior candidate is verified (including
+the first save), it mirrors the newly saved primary into backup. Rotation and history mutation run
+inside the same exact-notebook FIFO, so a history delete/clear/append cannot
+interleave with primary/backup rotation. This changes backup generation semantics
+without adding a key, persisted field, or state schema version.
 
 The emergency local fallback compares `_saveRevision` before writing. A lower incoming revision is stale. A nonzero revision equal to storage but carrying a different persistable snapshot is rejected as `equal_revision_conflict` without changing primary or backup; an equivalent equal-revision retry remains idempotently successful.
 
@@ -238,12 +249,13 @@ written back.
 
 ## Backup and history
 
-- Primary saves write both `sourcesPlusState_<projectId>` and `sourcesPlusState_<projectId>__backup`.
+- A changed primary save writes `sourcesPlusState_<projectId>` and rotates `sourcesPlusState_<projectId>__backup` to the previous verified primary. The first verified save mirrors the newly saved primary; if the previous primary is not restorable, an existing verified backup is retained.
 - Background save logic chooses the preferred stored state from primary/backup by revision metadata and content quality.
 - `sourcesPlusHistory_<projectId>` is bounded by `sourcesPlusPreferences.historyRetentionLimit` and used for version history and repair recovery.
 - History entries can include `label?: string` and `manual?: boolean` for named restore points. Routine retention trimming preserves manual restore points before older automatic snapshots; if manual entries alone exceed the selected limit, the oldest manual entries are trimmed. Emergency quota trimming is stricter: it preserves every manual restore point plus only the newest automatic snapshot, in the original history order. If that protected set still exceeds quota, the growth write is rejected rather than deleting manual restore points.
+- `DELETE_STATE_HISTORY_ENTRY` removes one exact entry id. `CLEAR_STATE_HISTORY` with `scope: "automatic"` preserves manual restore points, while `scope: "all"` clears every entry after explicit UI confirmation. Both mutations return the retained history plus usage/freed-byte diagnostics and share the notebook state FIFO with save/load/history append.
 - Page lifecycle saves write session recovery first and then enter background `SAVE_STATE`; they do not use direct local primary fallback.
-- Quota guard: when projected `chrome.storage.local` usage is over the critical ratio (`STORAGE_CRITICAL_RATIO`, 0.95), `SAVE_STATE` first applies the protected emergency history trim, then rejects writes that would **grow** the stored snapshot (`storage_quota_exceeded`). `APPEND_STATE_HISTORY` applies the same trim and rejects instead of overwriting manual restore points if the protected set remains critical. Writes that shrink or keep the primary snapshot size (e.g. deleting a source to free space) are allowed through even while critical, so quota exhaustion is never a hard lock the user cannot escape.
+- Quota guard: projected usage includes the actual retained primary, rotated backup, history, and best-effort bytes for other extension storage. When that total is over the critical ratio (`STORAGE_CRITICAL_RATIO`, 0.95), `SAVE_STATE` first applies the protected emergency history trim, then rejects writes that would **grow** the stored snapshot (`storage_quota_exceeded`). `APPEND_STATE_HISTORY` applies the same trim and rejects instead of overwriting manual restore points if the protected set remains critical. Writes that shrink or keep the primary snapshot size (e.g. deleting a source to free space) are allowed through even while critical, so quota exhaustion is never a hard lock the user cannot escape.
 
 ## Privacy boundary
 

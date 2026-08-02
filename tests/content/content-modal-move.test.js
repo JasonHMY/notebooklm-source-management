@@ -76,6 +76,8 @@ function createDeps(overrides = {}) {
         bindModalKeyboardNavigation: jest.fn(() => ({ focusInitial: jest.fn(), dispose: jest.fn() })),
         createModalItemStaggerStyle: jest.fn((index, base = '') => `${base}--idx:${index};`),
         closeSourceActionMenu: jest.fn(),
+        collectEffectiveSourceStates: jest.fn(() => new Map([['s1', true]])),
+        syncSourcesToEffectiveState: jest.fn(),
         buildParentMap: jest.fn(),
         saveState: jest.fn(),
         render: jest.fn(),
@@ -159,10 +161,13 @@ describe('content modal move-to-folder', () => {
                 changed: false,
                 reason: 'invalid_target',
                 moved: [],
-                skipped: [{
+                succeeded: [],
+                failed: [{
                     item: { kind: 'source', key: 's1' },
                     reason: 'invalid_target'
-                }]
+                }],
+                skipped: [],
+                unattempted: []
             });
             expect(deps.closeManagedModal).not.toHaveBeenCalled();
             expect(deps.saveState).not.toHaveBeenCalled();
@@ -179,19 +184,35 @@ describe('content modal move-to-folder', () => {
                 { kind: 'source', key: 's1' }
             ];
             const parentMap = new Map();
+            const previousEffectiveStates = new Map([
+                ['s1', false],
+                ['s2', false]
+            ]);
+            const transitionOrder = [];
             const treePlacement = {
-                applyBatchPlacement: jest.fn(() => ({
-                    ok: true,
-                    changed: true,
-                    reason: 'moved',
-                    moved: items,
-                    skipped: []
-                })),
+                applyBatchPlacement: jest.fn(() => {
+                    transitionOrder.push('placement');
+                    return {
+                        ok: true,
+                        changed: true,
+                        reason: 'moved',
+                        moved: items,
+                        skipped: []
+                    };
+                }),
                 rebuildParentMap: jest.fn()
             };
             const deps = createDeps({
                 getGroupsById: () => groupsById,
                 getParentMap: () => parentMap,
+                collectEffectiveSourceStates: jest.fn(() => {
+                    transitionOrder.push('capture');
+                    return previousEffectiveStates;
+                }),
+                syncSourcesToEffectiveState: jest.fn((states) => {
+                    transitionOrder.push('sync');
+                    return states;
+                }),
                 treePlacement
             });
             const helper = createContentModalMove(deps);
@@ -215,6 +236,9 @@ describe('content modal move-to-folder', () => {
             expect(deps.removeSourceFromTree).not.toHaveBeenCalled();
             expect(deps.buildParentMap).not.toHaveBeenCalled();
             expect(treePlacement.rebuildParentMap).toHaveBeenCalledWith(parentMap);
+            expect(deps.collectEffectiveSourceStates).toHaveBeenCalledTimes(1);
+            expect(deps.syncSourcesToEffectiveState).toHaveBeenCalledWith(previousEffectiveStates);
+            expect(transitionOrder).toEqual(['capture', 'placement', 'sync']);
             expect(deps.saveState).toHaveBeenCalledWith({ immediate: true, critical: true });
             expect(deps.render).toHaveBeenCalledTimes(1);
             expect(deps.closeManagedModal).toHaveBeenCalled();
@@ -245,6 +269,43 @@ describe('content modal move-to-folder', () => {
 
             expect(state.isBatchMode).toBe(false);
             expect(pendingBatchKeys.size).toBe(0);
+        });
+
+        it('keeps skipped move items selected and remains in batch mode', () => {
+            const targetGroup = { id: 't', children: [{ type: 'source', key: 's2' }] };
+            const state = { isBatchMode: true };
+            const pendingBatchKeys = new Set(['s1', 's2']);
+            const skippedItem = {
+                item: { kind: 'source', key: 's2' },
+                reason: 'no_change'
+            };
+            const deps = createDeps({
+                getState: () => state,
+                getGroupsById: () => new Map([['t', targetGroup]]),
+                getPendingBatchKeys: () => pendingBatchKeys,
+                treePlacement: {
+                    applyBatchPlacement: jest.fn(() => ({
+                        ok: true,
+                        changed: true,
+                        reason: 'partial',
+                        moved: [{ kind: 'source', key: 's1' }],
+                        skipped: [skippedItem]
+                    })),
+                    rebuildParentMap: jest.fn()
+                }
+            });
+            const helper = createContentModalMove(deps);
+
+            const result = helper.executeMoveToFolder(['s1', 's2'], 't');
+
+            expect(result).toEqual(expect.objectContaining({
+                succeeded: [{ kind: 'source', key: 's1' }],
+                skipped: [skippedItem],
+                failed: [],
+                unattempted: []
+            }));
+            expect(state.isBatchMode).toBe(true);
+            expect(Array.from(pendingBatchKeys)).toEqual(['s2']);
         });
 
         it('accepts a single sourceKey string or an iterable, not only arrays', () => {
@@ -314,6 +375,7 @@ describe('content modal move-to-folder', () => {
             expect(Array.from(pendingBatchKeys)).toEqual(['s1']);
             expect(treePlacement.rebuildParentMap).not.toHaveBeenCalled();
             expect(deps.closeSourceActionMenu).not.toHaveBeenCalled();
+            expect(deps.syncSourcesToEffectiveState).not.toHaveBeenCalled();
             expect(deps.saveState).not.toHaveBeenCalled();
             expect(deps.render).not.toHaveBeenCalled();
             expect(deps.closeManagedModal).not.toHaveBeenCalled();
@@ -342,6 +404,7 @@ describe('content modal move-to-folder', () => {
             expect(helper.executeMoveToFolder(['missing'], 't')).toBe(placementResult);
             expect(treePlacement.rebuildParentMap).not.toHaveBeenCalled();
             expect(deps.closeSourceActionMenu).not.toHaveBeenCalled();
+            expect(deps.syncSourcesToEffectiveState).not.toHaveBeenCalled();
             expect(deps.saveState).not.toHaveBeenCalled();
             expect(deps.render).not.toHaveBeenCalled();
             expect(deps.closeManagedModal).not.toHaveBeenCalled();
@@ -365,13 +428,17 @@ describe('content modal move-to-folder', () => {
                 changed: false,
                 reason: 'invalid_target',
                 moved: [],
-                skipped: [{
+                succeeded: [],
+                failed: [{
                     item: { kind: 'source', key: 's1' },
                     reason: 'invalid_target'
-                }]
+                }],
+                skipped: [],
+                unattempted: []
             });
             expect(deps.saveState).not.toHaveBeenCalled();
             expect(deps.render).not.toHaveBeenCalled();
+            expect(deps.syncSourcesToEffectiveState).not.toHaveBeenCalled();
             expect(deps.closeManagedModal).not.toHaveBeenCalled();
         });
 
@@ -403,10 +470,13 @@ describe('content modal move-to-folder', () => {
                 changed: false,
                 reason: 'not_found',
                 moved: [],
-                skipped: [{
+                succeeded: [],
+                failed: [{
                     item: { kind: 'source', key: 'stale' },
                     reason: 'not_found'
-                }]
+                }],
+                skipped: [],
+                unattempted: []
             });
             expect(state.root).toEqual([
                 { type: 'source', key: 'stale' },
@@ -452,10 +522,13 @@ describe('content modal move-to-folder', () => {
                 changed: true,
                 reason: 'partial',
                 moved: [{ kind: 'source', key: 'live' }],
-                skipped: [{
+                succeeded: [{ kind: 'source', key: 'live' }],
+                failed: [{
                     item: { kind: 'source', key: 'stale' },
                     reason: 'not_found'
-                }]
+                }],
+                skipped: [],
+                unattempted: []
             });
             expect(state.root).toEqual([
                 { type: 'source', key: 'stale' },
@@ -464,8 +537,8 @@ describe('content modal move-to-folder', () => {
             expect(targetGroup.children).toEqual([
                 { type: 'source', key: 'live' }
             ]);
-            expect(state.isBatchMode).toBe(false);
-            expect(pendingBatchKeys.size).toBe(0);
+            expect(state.isBatchMode).toBe(true);
+            expect(Array.from(pendingBatchKeys)).toEqual(['stale']);
             expect(deps.saveState).toHaveBeenCalledWith({
                 immediate: true,
                 critical: true
@@ -714,6 +787,82 @@ describe('content modal move-to-folder', () => {
 
             expect(deps.createModalItemStaggerStyle).toHaveBeenNthCalledWith(1, 0, '');
             expect(deps.createModalItemStaggerStyle).toHaveBeenNthCalledWith(2, 1, '');
+        });
+
+        it('renders searchable breadcrumb paths and disables a target when every source is already there', () => {
+            const groupsById = new Map([
+                ['parent', {
+                    id: 'parent',
+                    title: 'Research',
+                    children: [{ type: 'group', id: 'child' }]
+                }],
+                ['child', {
+                    id: 'child',
+                    title: 'Reports',
+                    children: [{ type: 'source', key: 's1' }]
+                }]
+            ]);
+            const deps = createDeps({
+                getState: () => ({
+                    root: [{ type: 'group', id: 'parent' }],
+                    isBatchMode: true
+                }),
+                getGroupsById: () => groupsById,
+                getParentMap: () => new Map([['s1', 'child']])
+            });
+            const helper = createContentModalMove(deps);
+
+            helper.renderMoveToFolderModal(['s1']);
+
+            const shadow = deps.getShadowRoot();
+            const search = shadow.querySelector('.sp-move-folder-search-input');
+            const options = shadow.querySelectorAll('.sp-folder-option');
+            const childOption = options.find((option) => option.dataset.groupId === 'child');
+            expect(search).toBeDefined();
+            expect(childOption.attrs.title).toBe('Research / Reports');
+            expect(childOption.attrs.disabled).toBe(true);
+            expect(childOption.listeners.click).toBeUndefined();
+
+            search.value = 'reports';
+            search.listeners.input[0]();
+            expect(options.find((option) => option.dataset.groupId === 'parent').hidden).toBe(true);
+            expect(childOption.hidden).toBe(false);
+        });
+
+        it('orders successful in-session move targets before other folders when reopened', () => {
+            const state = {
+                root: [
+                    { type: 'source', key: 's1' },
+                    { type: 'group', id: 'g1' },
+                    { type: 'group', id: 'g2' }
+                ],
+                ungrouped: [],
+                isBatchMode: false
+            };
+            const groupsById = new Map([
+                ['g1', { id: 'g1', title: 'First', children: [] }],
+                ['g2', { id: 'g2', title: 'Recent', children: [] }]
+            ]);
+            const parentMap = new Map();
+            const createContentTreePlacement = require('../../src/content/content-tree-placement.js');
+            const treePlacement = createContentTreePlacement({
+                getState: () => state,
+                getGroupsById: () => groupsById
+            });
+            const deps = createDeps({
+                getState: () => state,
+                getGroupsById: () => groupsById,
+                getParentMap: () => parentMap,
+                treePlacement
+            });
+            const helper = createContentModalMove(deps);
+
+            expect(helper.executeMoveToFolder(['s1'], 'g2').changed).toBe(true);
+            helper.renderMoveToFolderModal(['s2']);
+
+            const options = deps.getShadowRoot().querySelectorAll('.sp-folder-option');
+            expect(options[0].dataset.groupId).toBe('g2');
+            expect(deps.getMessage).toHaveBeenCalledWith('ui_move_recent_target');
         });
     });
 });

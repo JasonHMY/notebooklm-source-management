@@ -41,8 +41,8 @@
             getDefaultTagColor = () => '#007AFF',
             getTagColorPreviewStyle = () => '',
             tagColorPresets,
-            createTag = () => null,
-            updateTag = () => null,
+            createTag = () => ({ ok: false, reason: 'not_found', tagId: null, existingTagId: null }),
+            updateTag = () => ({ ok: false, reason: 'not_found', tagId: null, existingTagId: null }),
             deleteTag = () => {},
             getTagUsageCounts = () => new Map(),
             getSourceTagIds = () => [],
@@ -94,6 +94,16 @@
                 return windowObj.CSS.escape(id);
             }
             return String(id || '').replace(/[^A-Za-z0-9_-]/g, '\\$&');
+        }
+
+        function getTagMutationErrorMessage(result) {
+            if (result?.reason === 'name_required') {
+                return getMessage('ui_tag_name_required');
+            }
+            if (result?.reason === 'duplicate') {
+                return getMessage('ui_tag_create_duplicate');
+            }
+            return getMessage('ui_tag_not_found');
         }
 
         function scheduleVisible(backdrop, modal, modalKeyboard) {
@@ -277,6 +287,7 @@
                 id: inputId || null,
                 className: 'sp-tag-input',
                 placeholder: getMessage('ui_create_tag_placeholder'),
+                'aria-label': getMessage('ui_create_tag_placeholder'),
                 value: initialLabel
             });
             const colorControl = createTagColorControl(initialColor, {
@@ -301,14 +312,37 @@
             }, [submitLabel]);
             actionChildren.push(submitButton);
 
+            const errorId = `${inputId || 'sp-tag-editor'}-error`;
+            const errorNode = el('div', {
+                id: errorId,
+                className: 'sp-settings-helper-text sp-tag-editor-error',
+                role: 'alert',
+                'aria-live': 'assertive',
+                hidden: true
+            });
+            errorNode.hidden = true;
+            labelInput.setAttribute('aria-describedby', errorId);
+
             const root = el('div', {
                 className: ['sp-tag-editor', className].filter(Boolean).join(' ')
             }, [
                 labelInput,
+                errorNode,
                 colorControl.root,
                 el('div', { className: 'sp-tag-editor-actions' }, actionChildren)
             ]);
 
+            const setError = (message) => {
+                const normalizedMessage = String(message || '');
+                errorNode.textContent = normalizedMessage;
+                errorNode.hidden = !normalizedMessage;
+                if (normalizedMessage) {
+                    labelInput.setAttribute('aria-invalid', 'true');
+                    labelInput.focus();
+                    return;
+                }
+                labelInput.removeAttribute('aria-invalid');
+            };
             const handleSubmit = () => {
                 if (typeof onSubmit === 'function') {
                     onSubmit({
@@ -332,12 +366,15 @@
 
             submitButton.addEventListener('click', handleSubmit);
             labelInput.addEventListener('keydown', handleEditorKeydown);
+            labelInput.addEventListener('input', () => setError(''));
             colorControl.hexInput.addEventListener('keydown', handleEditorKeydown);
 
             return {
                 root,
                 labelInput,
-                colorControl
+                colorControl,
+                errorNode,
+                setError
             };
         }
 
@@ -348,36 +385,103 @@
             const sourcesByKey = typeof getSourcesByKey === 'function' ? getSourcesByKey() : new Map();
             const tagsById = typeof getTagsById === 'function' ? getTagsById() : new Map();
             const selectedTagIds = Array.from(tagIds || []).filter((tagId) => tagsById.has(tagId));
-            const keys = normalizeSourceKeyList(sourceKeys).filter((sourceKey) => {
-                const source = sourcesByKey.get(sourceKey);
-                return source && !source.isDisabled && !source.isLoading;
+            const requestedKeys = normalizeSourceKeyList(sourceKeys);
+            const createResult = ({
+                ok = false,
+                changed = false,
+                succeeded = [],
+                failed = [],
+                skipped = [],
+                unattempted = [],
+                reason = ''
+            } = {}) => ({
+                ok: Boolean(ok),
+                changed: Boolean(changed),
+                succeeded,
+                failed,
+                skipped,
+                unattempted,
+                reason
             });
 
-            if (keys.length === 0 || selectedTagIds.length === 0) {
+            if (requestedKeys.length === 0 || selectedTagIds.length === 0) {
                 closeBatchTagModal();
-                return false;
+                const reason = requestedKeys.length === 0
+                    ? 'empty_selection'
+                    : 'tag_not_found';
+                return createResult({
+                    unattempted: requestedKeys.map((key) => ({ key, reason })),
+                    reason
+                });
             }
 
             const selectedTagIdSet = new Set(selectedTagIds);
-            keys.forEach((sourceKey) => {
+            const succeeded = [];
+            const failed = [];
+            const skipped = [];
+            requestedKeys.forEach((sourceKey) => {
+                const source = sourcesByKey.get(sourceKey);
+                if (!source) {
+                    failed.push({ key: sourceKey, reason: 'source_missing' });
+                    return;
+                }
+                if (source.isDisabled || source.isLoading) {
+                    skipped.push({ key: sourceKey, reason: 'source_unavailable' });
+                    return;
+                }
                 const currentTagIds = getSourceTagIds(sourceKey);
                 const nextTagIds = normalizedMode === 'remove'
                     ? currentTagIds.filter((tagId) => !selectedTagIdSet.has(tagId))
                     : Array.from(new Set([...currentTagIds, ...selectedTagIds]));
-                setSourceTagIds(sourceKey, nextTagIds);
+                if (
+                    currentTagIds.length === nextTagIds.length
+                    && currentTagIds.every((tagId, index) => tagId === nextTagIds[index])
+                ) {
+                    skipped.push({ key: sourceKey, reason: 'no_change' });
+                    return;
+                }
+                try {
+                    setSourceTagIds(sourceKey, nextTagIds);
+                    succeeded.push(sourceKey);
+                } catch (error) {
+                    failed.push({ key: sourceKey, reason: 'tag_update_failed' });
+                }
             });
 
-            state.isBatchMode = false;
-            pendingBatchKeys.clear();
+            const retryableSkipped = skipped.filter((entry) => entry.reason !== 'no_change');
+            const result = createResult({
+                ok: failed.length === 0 && retryableSkipped.length === 0,
+                changed: succeeded.length > 0,
+                succeeded,
+                failed,
+                skipped,
+                unattempted: [],
+                reason: failed.length > 0 || retryableSkipped.length > 0
+                    ? 'partial'
+                    : (succeeded.length > 0 ? 'completed' : 'no_change')
+            });
+            if (!result.changed) {
+                closeBatchTagModal();
+                return result;
+            }
+
+            const completedKeys = new Set([
+                ...succeeded,
+                ...skipped
+                    .filter((entry) => entry.reason === 'no_change')
+                    .map((entry) => entry.key)
+            ]);
+            completedKeys.forEach((key) => pendingBatchKeys.delete(key));
+            state.isBatchMode = pendingBatchKeys.size > 0;
             closeSourceActionMenu();
             saveState({ immediate: true, critical: true });
             render();
             closeBatchTagModal();
             showUndoableToast(getMessage(
                 normalizedMode === 'remove' ? 'ui_batch_tags_removed_toast' : 'ui_batch_tags_added_toast',
-                [String(keys.length)]
+                [String(succeeded.length)]
             ), { variant: 'success' });
-            return true;
+            return result;
         }
 
         function renderBatchTagModal(mode, sourceKeys, modalState = null) {
@@ -418,8 +522,12 @@
                     inputId: 'sp-batch-tag-name-input',
                     initialColor: getDefaultTagColor(),
                     onSubmit: ({ label, color }) => {
-                        const newTagId = createTag(label, { color });
-                        if (!newTagId) return;
+                        const result = createTag(label, { color });
+                        if (!result?.ok || !result.tagId) {
+                            createEditor.setError(getTagMutationErrorMessage(result));
+                            return;
+                        }
+                        const newTagId = result.tagId;
 
                         selectedTagIds.add(newTagId);
                         saveState({ immediate: true, critical: true });
@@ -551,8 +659,12 @@
                 inputId: 'sp-tag-name-input',
                 initialColor: getDefaultTagColor(),
                 onSubmit: ({ label, color }) => {
-                    const newTagId = createTag(label, { color });
-                    if (!newTagId) return;
+                    const result = createTag(label, { color });
+                    if (!result?.ok || !result.tagId) {
+                        createEditor.setError(getTagMutationErrorMessage(result));
+                        return;
+                    }
+                    const newTagId = result.tagId;
 
                     createEditor.labelInput.value = '';
                     if (source) {
@@ -658,7 +770,10 @@
                             onCancel: () => renderTagModal(),
                             onSubmit: ({ label, color }) => {
                                 const result = updateTag(tagId, { label, color });
-                                if (!result || result !== tagId) return;
+                                if (!result?.ok || result.tagId !== tagId) {
+                                    editEditor.setError(getTagMutationErrorMessage(result));
+                                    return;
+                                }
 
                                 saveState({ immediate: true, critical: true });
                                 render();
@@ -730,7 +845,8 @@
             createTagEditor,
             createTagColorControl,
             getEditTagInputId,
-            getCssEscapedId
+            getCssEscapedId,
+            getTagMutationErrorMessage
         };
     }
 

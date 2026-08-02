@@ -85,6 +85,27 @@ describe('popup motion styles', () => {
         expect(popupButtonHover).toContain('transform: scale(1.02);');
         expect(css).not.toContain('translateY(-1px)');
     });
+
+    it('preserves visible popup controls and focus in forced-colors mode', () => {
+        const css = fs.readFileSync(path.join(__dirname, '../src/popup/styles.css'), 'utf8');
+
+        expect(css).toContain('@media (forced-colors: active)');
+        expect(css).toContain('--popup-text-primary: CanvasText;');
+        expect(css).toContain('background: Highlight;');
+        expect(css).toContain('color: HighlightText;');
+        expect(css).toContain('outline: 2px solid Highlight;');
+    });
+
+    it('uses a contrast-safe accent token for text without weakening the fill color', () => {
+        const css = fs.readFileSync(path.join(__dirname, '../src/popup/styles.css'), 'utf8');
+
+        expect(css).toContain('--popup-accent: #007aff;');
+        expect(css).toContain('--popup-accent-text: #0066cc;');
+        expect(css).toContain('--popup-accent: #0a84ff;');
+        expect(css).toContain('--popup-accent-text: #64a8ff;');
+        expect(css).toContain('color: var(--popup-accent-text);');
+        expect(css).toContain('background: var(--popup-accent);');
+    });
 });
 
 describe('popup launcher', () => {
@@ -230,7 +251,7 @@ describe('popup launcher', () => {
             managerStatus: null,
             launchContext: 'current-home-only'
         })).toMatchObject({
-            buttonKey: 'popup_cta_open_notebooklm_new_tab',
+            buttonKey: 'popup_cta_continue_current_tab',
             action: 'open-notebooklm'
         });
 
@@ -666,7 +687,7 @@ describe('popup launcher', () => {
         );
     });
 
-    it('opens NotebookLM in a new tab when the current tab is the only home tab', async () => {
+    it('reuses the current tab when it is already the Gemini Notebook home', async () => {
         activeTab = { id: 14, url: 'https://notebooklm.google.com/' };
         notebookLmTabs = [{ id: 14, url: 'https://notebooklm.google.com/' }];
 
@@ -674,7 +695,7 @@ describe('popup launcher', () => {
 
         expect(result.context).toBe('notebook-home');
         expect(result.launchContext).toBe('current-home-only');
-        expect(popupDocument.elements['popup-primary-btn'].textContent).toBe('popup_cta_open_notebooklm_new_tab');
+        expect(popupDocument.elements['popup-primary-btn'].textContent).toBe('popup_cta_continue_current_tab');
 
         await popupDocument.elements['popup-primary-btn'].onclick();
         expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(

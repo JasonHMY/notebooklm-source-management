@@ -26,14 +26,32 @@ function createElement(tag, attrs = {}, children = []) {
         },
         classList: { add: jest.fn(), remove: jest.fn(), toggle: jest.fn() },
         focus: jest.fn(),
-        setAttribute: jest.fn(),
-        getAttribute: jest.fn(() => null),
-        removeAttribute: jest.fn(),
+        setAttribute: jest.fn(function (name, value) {
+            this.attrs[name] = value;
+        }),
+        getAttribute: jest.fn(function (name) {
+            return this.attrs[name] ?? null;
+        }),
+        removeAttribute: jest.fn(function (name) {
+            delete this.attrs[name];
+        }),
+        contains(candidate) {
+            return candidate === this || collectDescendants(this).includes(candidate);
+        },
         querySelector(selector) {
             return collectDescendants(this).find((node) => matchesSelector(node, selector)) || null;
         },
         querySelectorAll(selector) {
             return collectDescendants(this).filter((node) => matchesSelector(node, selector));
+        },
+        get textContent() {
+            return this.childNodes.map((child) => (
+                typeof child === 'string' ? child : (child?.textContent || '')
+            )).join('');
+        },
+        set textContent(value) {
+            this.children = [];
+            this.childNodes = [String(value)];
         }
     };
     (children || []).forEach((child) => {
@@ -42,6 +60,8 @@ function createElement(tag, attrs = {}, children = []) {
             child.parentNode = node;
             node.children.push(child);
             node.childNodes.push(child);
+        } else {
+            node.childNodes.push(String(child));
         }
     });
     return node;
@@ -61,6 +81,9 @@ function collectDescendants(root) {
 
 function matchesSelector(node, selector) {
     if (!node || typeof node !== 'object') return false;
+    if (selector === '[data-settings-focus-key]') {
+        return Boolean(node.dataset?.settingsFocusKey);
+    }
     if (selector.startsWith('.')) {
         return String(node.className || '').split(/\s+/).includes(selector.slice(1));
     }
@@ -93,9 +116,14 @@ function createDeps(overrides = {}) {
         clearDeveloperLogs: jest.fn(() => Promise.resolve(false)),
         getStateHistoryEntries: jest.fn(() => []),
         restoreStateHistoryEntry: jest.fn(() => Promise.resolve(false)),
+        deleteStateHistoryEntry: jest.fn(() => Promise.resolve({ ok: false, reason: 'unavailable' })),
+        clearStateHistory: jest.fn(() => Promise.resolve({ ok: false, reason: 'unavailable' })),
         getExportConfigText: jest.fn(() => '{"format":"x"}'),
         previewImportConfig: jest.fn(() => null),
         applyImportConfig: jest.fn(() => Promise.resolve({ ok: false })),
+        getImportBackupInfo: jest.fn(() => null),
+        restoreImportBackup: jest.fn(() => Promise.resolve({ ok: false })),
+        discardImportBackup: jest.fn(() => Promise.resolve({ ok: false })),
         openWebStoreFeedback: jest.fn(() => Promise.resolve(false)),
         renderCommandPaletteModal: jest.fn(() => false),
         renderWelcomeModal: jest.fn(() => false),
@@ -213,6 +241,203 @@ describe('content modal settings', () => {
             expect(deps.getShadowRoot().querySelector('#sp-settings-modal')).toBeTruthy();
         });
 
+        it('requires explicit confirmation before clearing all history', async () => {
+            const win = { confirm: jest.fn(() => false) };
+            const clearStateHistory = jest.fn(() => Promise.resolve({
+                success: true,
+                deletedCount: 2
+            }));
+            const deps = createDeps({
+                getWindow: () => win,
+                clearStateHistory,
+                createHistoryPreferenceNodes: () => [
+                    createElement('button', {
+                        className: 'sp-history-clear-all-btn'
+                    })
+                ]
+            });
+            const helper = createContentModalSettings(deps);
+            helper.renderSettingsModal();
+
+            let clearButton = deps.getShadowRoot().querySelector('.sp-history-clear-all-btn');
+            clearButton.listeners.click[0]();
+            expect(win.confirm).toHaveBeenCalledWith('ui_history_clear_all_confirm');
+            expect(clearStateHistory).not.toHaveBeenCalled();
+
+            win.confirm.mockReturnValue(true);
+            clearButton.listeners.click[0]();
+            await Promise.resolve();
+            await Promise.resolve();
+            await Promise.resolve();
+            await Promise.resolve();
+
+            expect(clearStateHistory).toHaveBeenCalledWith('all');
+            clearButton = deps.getShadowRoot().querySelector('.sp-history-clear-all-btn');
+            expect(clearButton).toBeTruthy();
+        });
+
+        it('opens the settings modal directly at storage management', () => {
+            const deps = createDeps({
+                createHistoryPreferenceNodes: () => [
+                    createElement('p', {
+                        className: 'sp-history-storage-summary'
+                    })
+                ]
+            });
+            const helper = createContentModalSettings(deps);
+
+            expect(helper.renderManageStorage()).toBe(true);
+            expect(deps.getShadowRoot().querySelector('.sp-settings-backup-section')).toBeTruthy();
+            expect(deps.bindModalKeyboardNavigation).toHaveBeenCalledWith(
+                expect.anything(),
+                expect.objectContaining({
+                    initialFocusTarget: expect.any(Function)
+                })
+            );
+        });
+
+        it('shows Help onboarding replay, shortcut guidance and import guidance', () => {
+            const deps = createDeps();
+            const helper = createContentModalSettings(deps);
+
+            helper.renderSettingsModal();
+
+            const shadowRoot = deps.getShadowRoot();
+            const replayButton = shadowRoot.querySelector('.sp-settings-replay-onboarding-btn');
+            expect(replayButton).toBeTruthy();
+            expect(shadowRoot.querySelector('.sp-settings-shortcuts-guide')).toBeTruthy();
+            expect(shadowRoot.querySelector('.sp-settings-import-guide')).toBeTruthy();
+
+            replayButton.listeners.click[0]();
+            expect(deps.closeManagedModal).toHaveBeenCalledWith(
+                'sp-settings-modal',
+                'sp-settings-backdrop',
+                { immediate: true, restoreFocus: false }
+            );
+            expect(deps.renderWelcomeModal).toHaveBeenCalledWith({ markSeenOnClose: false });
+        });
+
+        it('keeps an Import Backup recovery card with counts and inline failure status', async () => {
+            const restoreImportBackup = jest.fn(() => Promise.resolve({ ok: false }));
+            const deps = createDeps({
+                getImportBackupInfo: () => ({
+                    createdAt: '2026-07-31T01:02:03.000Z',
+                    sourceCount: 12,
+                    groupCount: 3
+                }),
+                restoreImportBackup
+            });
+            const helper = createContentModalSettings(deps);
+            helper.renderSettingsModal();
+
+            const shadowRoot = deps.getShadowRoot();
+            const restoreButton = shadowRoot.querySelector('.sp-import-backup-restore-btn');
+            expect(restoreButton).toBeTruthy();
+            expect(shadowRoot.querySelector('.sp-import-backup-discard-btn')).toBeTruthy();
+            expect(deps.getMessage).toHaveBeenCalledWith(
+                'ui_import_backup_counts',
+                ['12', '3']
+            );
+
+            restoreButton.listeners.click[0]();
+            await new Promise((resolve) => setImmediate(resolve));
+
+            expect(restoreImportBackup).toHaveBeenCalledTimes(1);
+            const status = shadowRoot.querySelector('.sp-import-backup-status');
+            expect(status.hidden).toBe(false);
+            expect(status.textContent).toBe('ui_import_backup_restore_failed');
+            expect(deps.showToast).not.toHaveBeenCalled();
+        });
+
+        it('requires confirmation before discarding Import Backup', async () => {
+            const win = { confirm: jest.fn(() => false) };
+            const discardImportBackup = jest.fn(() => Promise.resolve({ ok: true }));
+            const deps = createDeps({
+                getWindow: () => win,
+                getImportBackupInfo: () => ({
+                    createdAt: '2026-07-31T01:02:03.000Z',
+                    sourceCount: 1,
+                    groupCount: 1
+                }),
+                discardImportBackup
+            });
+            const helper = createContentModalSettings(deps);
+            helper.renderSettingsModal();
+
+            const discardButton = deps.getShadowRoot().querySelector('.sp-import-backup-discard-btn');
+            discardButton.listeners.click[0]();
+            expect(win.confirm).toHaveBeenCalledWith('ui_import_backup_discard_confirm');
+            expect(discardImportBackup).not.toHaveBeenCalled();
+
+            win.confirm.mockReturnValue(true);
+            discardButton.listeners.click[0]();
+            await Promise.resolve();
+            await Promise.resolve();
+            expect(discardImportBackup).toHaveBeenCalledTimes(1);
+        });
+
+        it('removes the Import Backup recovery actions only after restore succeeds', async () => {
+            let importBackupInfo = {
+                createdAt: '2026-07-31T01:02:03.000Z',
+                sourceCount: 2,
+                groupCount: 1
+            };
+            const restoreImportBackup = jest.fn(() => {
+                importBackupInfo = null;
+                return Promise.resolve({ ok: true });
+            });
+            const deps = createDeps({
+                getImportBackupInfo: () => importBackupInfo,
+                restoreImportBackup
+            });
+            const helper = createContentModalSettings(deps);
+            helper.renderSettingsModal();
+
+            deps.getShadowRoot().querySelector('.sp-import-backup-restore-btn').listeners.click[0]();
+            await new Promise((resolve) => setImmediate(resolve));
+
+            const settingsModals = deps.getShadowRoot().children.filter(
+                (node) => String(node.className || '').split(/\s+/).includes('sp-settings-modal')
+            );
+            const rebuiltModal = settingsModals[settingsModals.length - 1];
+            expect(rebuiltModal.querySelector('.sp-import-backup-restore-btn')).toBeNull();
+            expect(rebuiltModal.querySelector('.sp-import-backup-discard-btn')).toBeNull();
+            expect(deps.getMessage).toHaveBeenCalledWith('ui_import_backup_restore_success');
+            expect(rebuiltModal.querySelector('.sp-import-backup-status').textContent)
+                .toBe('ui_import_backup_restore_success');
+        });
+
+        it('restores content scroll, collapsible state and focused control after rebuilding', () => {
+            const documentObj = {};
+            const deps = createDeps({ getDocument: () => documentObj });
+            const helper = createContentModalSettings(deps);
+            helper.renderSettingsModal();
+
+            const shadowRoot = deps.getShadowRoot();
+            const oldModal = shadowRoot.querySelector('#sp-settings-modal');
+            const oldContent = oldModal.querySelector('.sp-settings-modal-content');
+            const oldReplayButton = oldModal.querySelector('.sp-settings-replay-onboarding-btn');
+            const oldBackupToggle = oldModal.querySelector('.sp-settings-backup-section')
+                .querySelector('.sp-settings-collapsible-toggle');
+            oldContent.scrollTop = 173;
+            oldBackupToggle.attrs['aria-expanded'] = 'true';
+            documentObj.activeElement = oldReplayButton;
+
+            helper.renderSettingsModal();
+
+            const settingsModals = shadowRoot.children.filter(
+                (node) => String(node.className || '').split(/\s+/).includes('sp-settings-modal')
+            );
+            const rebuiltModal = settingsModals[settingsModals.length - 1];
+            const rebuiltContent = rebuiltModal.querySelector('.sp-settings-modal-content');
+            const rebuiltReplayButton = rebuiltModal.querySelector('.sp-settings-replay-onboarding-btn');
+            const rebuiltBackupToggle = rebuiltModal.querySelector('.sp-settings-backup-section')
+                .querySelector('.sp-settings-collapsible-toggle');
+            expect(rebuiltContent.scrollTop).toBe(173);
+            expect(rebuiltBackupToggle.attrs['aria-expanded']).toBe('true');
+            expect(rebuiltReplayButton.focus).toHaveBeenCalledTimes(1);
+        });
+
         it('exposes developer settings inline when developer mode is already enabled', () => {
             const deps = createDeps({ getDeveloperModeEnabled: () => true });
             const helper = createContentModalSettings(deps);
@@ -321,7 +546,7 @@ describe('content modal settings', () => {
             expect(setHoverSpotlightEnabled).toHaveBeenCalledWith(false);
         });
 
-        it('rolls back checkbox and shows error toast when setter rejects', async () => {
+        it('rolls back checkbox and shows an inline error when setter rejects', async () => {
             const setHoverSpotlightEnabled = jest.fn(() => Promise.reject(new Error('boom')));
             const showToast = jest.fn();
             const deps = createDeps({ setHoverSpotlightEnabled, showToast });
@@ -335,7 +560,11 @@ describe('content modal settings', () => {
             await Promise.resolve();
             await Promise.resolve();
             expect(toggle.attrs.checked).toBe(originalChecked);
-            expect(showToast).toHaveBeenCalledWith('ui_settings_appearance_hover_spotlight_failed', expect.objectContaining({ variant: 'error' }));
+            const status = shadowRoot.querySelector('.sp-settings-action-status');
+            expect(status.textContent).toBe('ui_settings_appearance_hover_spotlight_failed');
+            expect(status.hidden).toBe(false);
+            expect(status.attrs['aria-live']).toBe('assertive');
+            expect(showToast).not.toHaveBeenCalled();
         });
 
         it('renders a drag-mode (reflow Beta) toggle in the appearance section', () => {
@@ -379,7 +608,7 @@ describe('content modal settings', () => {
             expect(setDragMode).toHaveBeenCalledWith('classic');
         });
 
-        it('rolls back the drag-mode toggle and shows error toast when setDragMode rejects', async () => {
+        it('rolls back the drag-mode toggle and shows an inline error when setDragMode rejects', async () => {
             const setDragMode = jest.fn(() => Promise.reject(new Error('boom')));
             const showToast = jest.fn();
             const deps = createDeps({ setDragMode, showToast, getDragMode: () => 'classic' });
@@ -392,7 +621,11 @@ describe('content modal settings', () => {
             await Promise.resolve();
             await Promise.resolve();
             expect(toggle.checked).toBe(false);
-            expect(showToast).toHaveBeenCalledWith('ui_settings_drag_mode_failed', expect.objectContaining({ variant: 'error' }));
+            const status = shadowRoot.querySelector('.sp-settings-action-status');
+            expect(status.textContent).toBe('ui_settings_drag_mode_failed');
+            expect(status.hidden).toBe(false);
+            expect(status.attrs['aria-live']).toBe('assertive');
+            expect(showToast).not.toHaveBeenCalled();
         });
 
         it('reflects the actual mode when a failed Classic migration cannot restore reflow', async () => {
@@ -414,8 +647,8 @@ describe('content modal settings', () => {
         });
     });
 
-    describe('settings toast visibility (frosted modal)', () => {
-        it('suppresses the success toast while the settings modal is open', async () => {
+    describe('settings inline status visibility (frosted modal)', () => {
+        it('shows success inline while the settings modal is open', async () => {
             const setHoverSpotlightEnabled = jest.fn(() => Promise.resolve(true));
             const showToast = jest.fn();
             const deps = createDeps({ setHoverSpotlightEnabled, showToast });
@@ -428,9 +661,13 @@ describe('content modal settings', () => {
             await Promise.resolve();
             expect(setHoverSpotlightEnabled).toHaveBeenCalled();
             expect(showToast).not.toHaveBeenCalled();
+            const status = shadowRoot.querySelector('.sp-settings-action-status');
+            expect(status.textContent).toBe('ui_settings_appearance_hover_spotlight_disabled');
+            expect(status.hidden).toBe(false);
+            expect(status.attrs['aria-live']).toBe('polite');
         });
 
-        it('shows the failure toast elevated above the modal while settings is open', async () => {
+        it('shows failures inline while settings is open', async () => {
             const setHoverSpotlightEnabled = jest.fn(() => Promise.reject(new Error('boom')));
             const showToast = jest.fn();
             const deps = createDeps({ setHoverSpotlightEnabled, showToast });
@@ -441,7 +678,11 @@ describe('content modal settings', () => {
             toggle.listeners.change.forEach((handler) => handler({ target: toggle }));
             await Promise.resolve();
             await Promise.resolve();
-            expect(showToast).toHaveBeenCalledWith('ui_settings_appearance_hover_spotlight_failed', expect.objectContaining({ variant: 'error', elevated: true }));
+            const status = shadowRoot.querySelector('.sp-settings-action-status');
+            expect(status.textContent).toBe('ui_settings_appearance_hover_spotlight_failed');
+            expect(status.hidden).toBe(false);
+            expect(status.attrs['aria-live']).toBe('assertive');
+            expect(showToast).not.toHaveBeenCalled();
         });
     });
 
