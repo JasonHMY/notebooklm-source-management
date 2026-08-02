@@ -3344,6 +3344,97 @@ describe('batch count and source menu motion rendering', () => {
         expect(frameCallbacks).toHaveLength(2);
     });
 
+    it('flushes an immediate render without waiting for an animation frame', () => {
+        const listContainer = createRenderTestElement('div', { id: 'sources-list' });
+        const frameCallbacks = [];
+        const cancelAnimationFrame = jest.fn();
+        const onAfterRender = jest.fn();
+        const renderModule = createContentRender({
+            el: createRenderTestElement,
+            getWindow: () => ({
+                requestAnimationFrame: (callback) => {
+                    frameCallbacks.push(callback);
+                    return frameCallbacks.length;
+                },
+                cancelAnimationFrame
+            }),
+            getDocument: () => ({
+                createDocumentFragment: createRenderTestFragment,
+                createElement: (tag) => createRenderTestElement(tag)
+            }),
+            getShadowRoot: () => ({
+                querySelector: jest.fn((selector) => (
+                    selector === '#sources-list' ? listContainer : null
+                )),
+                getElementById: jest.fn((id) => (
+                    id === 'sources-list' ? listContainer : null
+                )),
+                appendChild: jest.fn()
+            }),
+            getState: () => ({
+                root: [],
+                ungrouped: [],
+                filterQuery: '',
+                isBatchMode: false
+            }),
+            onAfterRender,
+            getMessage: (key) => key
+        });
+
+        expect(renderModule.scheduleRender({ flushImmediately: true })).toBe(true);
+        expect(frameCallbacks).toHaveLength(0);
+        expect(renderModule.isRenderScheduled()).toBe(false);
+        expect(onAfterRender).toHaveBeenCalledTimes(1);
+        expect(cancelAnimationFrame).not.toHaveBeenCalled();
+    });
+
+    it('flushes an existing scheduled render without creating a second render', () => {
+        const listContainer = createRenderTestElement('div', { id: 'sources-list' });
+        const frameCallbacks = [];
+        const cancelAnimationFrame = jest.fn();
+        const onAfterRender = jest.fn();
+        const renderModule = createContentRender({
+            el: createRenderTestElement,
+            getWindow: () => ({
+                requestAnimationFrame: (callback) => {
+                    frameCallbacks.push(callback);
+                    return frameCallbacks.length;
+                },
+                cancelAnimationFrame
+            }),
+            getDocument: () => ({
+                createDocumentFragment: createRenderTestFragment,
+                createElement: (tag) => createRenderTestElement(tag)
+            }),
+            getShadowRoot: () => ({
+                querySelector: jest.fn((selector) => (
+                    selector === '#sources-list' ? listContainer : null
+                )),
+                getElementById: jest.fn((id) => (
+                    id === 'sources-list' ? listContainer : null
+                )),
+                appendChild: jest.fn()
+            }),
+            getState: () => ({
+                root: [],
+                ungrouped: [],
+                filterQuery: '',
+                isBatchMode: false
+            }),
+            onAfterRender,
+            getMessage: (key) => key
+        });
+
+        expect(renderModule.scheduleRender()).toBe(true);
+        expect(renderModule.scheduleRender({ flushImmediately: true })).toBe(true);
+        expect(frameCallbacks).toHaveLength(1);
+        expect(onAfterRender).toHaveBeenCalledTimes(1);
+        frameCallbacks[0]();
+
+        expect(onAfterRender).toHaveBeenCalledTimes(1);
+        expect(cancelAnimationFrame).toHaveBeenCalledWith(1);
+    });
+
     it('keeps a replacement text node when reconciliation removes an inline editor', () => {
         const target = {
             childNodes: [],

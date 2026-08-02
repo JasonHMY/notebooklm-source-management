@@ -364,9 +364,14 @@ test.describe.serial('drag performance baseline', () => {
                     };
                     const wait = (milliseconds) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
                     const nextFrame = () => new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
-                    let sourceKeysByNumber = null;
+                    let sourceKeyPrefix = null;
+                    let sourceWindowRowHeight = 44;
+                    let sourceWindowOrdinalByKey = new Map();
                     const sourceKey = (number) => {
-                        const key = sourceKeysByNumber?.get(number);
+                        const normalizedNumber = String(number).padStart(4, '0');
+                        const key = sourceKeyPrefix
+                            ? `${sourceKeyPrefix}${normalizedNumber}`
+                            : null;
                         if (!key) throw new Error(`Synthetic source key ${number} was not resolved.`);
                         return key;
                     };
@@ -409,7 +414,89 @@ test.describe.serial('drag performance baseline', () => {
                         const diagnostics = benchmarkBridge('snapshot');
                         throw new Error(`${message}; scheduled ${diagnostics.scheduledCallbackIds.join(',')}; completed ${diagnostics.completedCallbackIds.join(',')}.`);
                     };
+                    const getSourcesList = () => getRoot()?.querySelector('#sources-list') || null;
                     const rowFor = (key) => getRoot()?.querySelector(`.source-item[data-source-key="${key}"]`) || null;
+                    const getSourceWindowOrdinal = (row) => {
+                        const ordinal = Number(row?.dataset?.sourceWindowOrdinal);
+                        return Number.isSafeInteger(ordinal) && ordinal >= 0 ? ordinal : null;
+                    };
+                    const updateSourceWindowRowHeight = (list) => {
+                        const spacer = Array.from(list?.querySelectorAll('.sp-source-window-spacer') || [])
+                            .find((candidate) => Number(candidate.dataset?.sourceWindowRows) > 0);
+                        const spacerRows = Number(spacer?.dataset?.sourceWindowRows);
+                        const spacerHeight = Number.parseFloat(spacer?.style?.height || '');
+                        if (Number.isFinite(spacerHeight) && spacerHeight > 0 && spacerRows > 0) {
+                            sourceWindowRowHeight = spacerHeight / spacerRows;
+                            return sourceWindowRowHeight;
+                        }
+                        const windowStart = Number(list?.dataset?.sourceWindowStart);
+                        const scrollTop = Number(list?.scrollTop);
+                        if (Number.isFinite(windowStart) && windowStart > 0 && Number.isFinite(scrollTop) && scrollTop > 0) {
+                            sourceWindowRowHeight = scrollTop / windowStart;
+                        }
+                        return sourceWindowRowHeight;
+                    };
+                    const scrollSourceWindowTo = async (scrollTop) => {
+                        const list = getSourcesList();
+                        if (!list) throw new Error('Benchmark sources list missing.');
+                        list.scrollTop = Math.max(0, Number(scrollTop) || 0);
+                        list.dispatchEvent(new Event('scroll', { bubbles: true }));
+                        await nextFrame();
+                        await nextFrame();
+                        updateSourceWindowRowHeight(list);
+                        return list;
+                    };
+                    const materializeSource = async (key) => {
+                        const existing = rowFor(key);
+                        if (existing) return existing;
+                        const ordinal = sourceWindowOrdinalByKey.get(key);
+                        if (!Number.isSafeInteger(ordinal) || ordinal < 0) {
+                            throw new Error(`No logical source-window ordinal is available for ${key}.`);
+                        }
+                        await scrollSourceWindowTo(ordinal * sourceWindowRowHeight);
+                        return waitFor(() => rowFor(key), `Benchmark source ${key} did not materialize.`);
+                    };
+                    const prepareWindowedSourceOrdinals = async () => {
+                        const list = getSourcesList();
+                        if (!list || list.dataset?.sourceWindowingActive !== 'true') return;
+
+                        await scrollSourceWindowTo(0);
+                        const rootAnchor = await waitFor(
+                            () => rowFor(sourceKey(21)),
+                            'Root source anchor did not materialize in the initial source window.'
+                        );
+                        const rootStart = getSourceWindowOrdinal(rootAnchor);
+                        if (rootStart === null) {
+                            throw new Error('Root source anchor is missing its logical source-window ordinal.');
+                        }
+
+                        let groupedStart = getSourceWindowOrdinal(rowFor(sourceKey(1)));
+                        if (groupedStart === null) {
+                            await scrollSourceWindowTo(list.scrollHeight);
+                            const groupedAnchor = await waitFor(
+                                () => rowFor(sourceKey(1)),
+                                'Grouped source anchor did not materialize at the end of the source window.'
+                            );
+                            groupedStart = getSourceWindowOrdinal(groupedAnchor);
+                        }
+                        if (groupedStart === null) {
+                            throw new Error('Grouped source anchor is missing its logical source-window ordinal.');
+                        }
+
+                        const nextOrdinals = new Map();
+                        for (let number = 1; number <= nextRowCount; number += 1) {
+                            const ordinal = number <= 20
+                                ? groupedStart + number - 1
+                                : rootStart + number - 21;
+                            nextOrdinals.set(sourceKey(number), ordinal);
+                        }
+                        const uniqueOrdinals = new Set(nextOrdinals.values());
+                        if (nextOrdinals.size !== nextRowCount || uniqueOrdinals.size !== nextRowCount
+                            || Math.min(...uniqueOrdinals) !== 0 || Math.max(...uniqueOrdinals) !== nextRowCount - 1) {
+                            throw new Error('Synthetic source placement did not retain a complete logical window projection.');
+                        }
+                        sourceWindowOrdinalByKey = nextOrdinals;
+                    };
                     const dispatchDrag = (row, type, extra = {}) => {
                         const event = new DragEvent(type, {
                             bubbles: true,
@@ -462,17 +549,21 @@ test.describe.serial('drag performance baseline', () => {
                         await waitFor(() => getRoot()?.querySelectorAll('.sp-batch-checkbox').length === 0, 'Batch mode did not disable.');
                     };
                     const selectKeys = async (keys) => {
-                        for (const key of keys) {
-                            const checkbox = rowFor(key)?.querySelector('.sp-batch-checkbox');
+                        for (let index = 0; index < keys.length; index += 1) {
+                            const key = keys[index];
+                            const row = await materializeSource(key);
+                            const checkbox = row?.querySelector('.sp-batch-checkbox');
                             if (!checkbox) throw new Error(`Batch checkbox missing for ${key}.`);
                             checkbox.click();
+                            await waitFor(() => Number(getSourcesList()?.dataset?.pendingSelected) === index + 1,
+                                `Batch selection did not retain ${index + 1} logical source(s).`);
                         }
                         await nextFrame();
-                        const selected = Array.from(getRoot()?.querySelectorAll('.source-item.selected-for-batch') || [])
-                            .map((row) => row.dataset.sourceKey)
-                            .filter(Boolean);
-                        if (selected.length !== keys.length || keys.some((key) => !selected.includes(key))) {
-                            throw new Error(`Expected selected keys ${keys.join(',')}; saw ${selected.join(',')}.`);
+                        const list = getSourcesList();
+                        const visibleSelected = Number(list?.dataset?.visibleSelected) || 0;
+                        const hiddenSelected = Number(list?.dataset?.hiddenSelected) || 0;
+                        if (visibleSelected + hiddenSelected !== keys.length) {
+                            throw new Error(`Expected ${keys.length} logical selected keys, saw ${visibleSelected} visible + ${hiddenSelected} hidden.`);
                         }
                     };
                     const createGroups = async () => {
@@ -513,7 +604,7 @@ test.describe.serial('drag performance baseline', () => {
                     const moveSelectionIntoGroup = async (keys, groupId) => {
                         await enableBatch();
                         await selectKeys(keys);
-                        const origin = rowFor(keys[0]);
+                        const origin = await materializeSource(keys[0]);
                         const target = getRoot()?.querySelector(`.group-container[data-group-id="${groupId}"]`);
                         if (!origin || !target) throw new Error('Benchmark distribution target missing.');
                         const dataTransfer = dispatchDrag(origin, 'dragstart');
@@ -530,11 +621,27 @@ test.describe.serial('drag performance baseline', () => {
                         await disableBatch();
                     };
                     const runPrepare = async (originKey, selectionCount, record) => {
-                        const origin = rowFor(originKey);
+                        const origin = await materializeSource(originKey);
                         if (!origin) throw new Error(`Benchmark origin ${originKey} missing.`);
+                        const materializedSelectionCount = selectionCount > 1
+                            ? getRoot()?.querySelectorAll('.source-item.selected-for-batch').length || 0
+                            : 1;
+                        if (materializedSelectionCount < 1 || materializedSelectionCount > selectionCount) {
+                            throw new Error(`Invalid materialized selection count ${materializedSelectionCount}/${selectionCount}.`);
+                        }
+                        if (selectionCount > 1
+                            && Number(getSourcesList()?.dataset?.pendingSelected) !== selectionCount) {
+                            throw new Error(`Drag prepare lost part of the ${selectionCount}-source logical selection.`);
+                        }
                         const before = normalizePrepareState();
                         const start = performance.now();
                         const dataTransfer = dispatchDrag(origin, 'dragstart');
+                        if (selectionCount > 1) {
+                            const selectedKeys = JSON.parse(dataTransfer.getData('application/source-keys') || '[]');
+                            if (!Array.isArray(selectedKeys) || selectedKeys.length !== selectionCount) {
+                                throw new Error(`Dragstart did not carry ${selectionCount} logical selected sources.`);
+                            }
+                        }
                         const cpuMs = performance.now() - start;
                         const syncSnapshot = benchmarkBridge('snapshot');
                         const callsDelta = subtractCalls(syncSnapshot.calls, before.calls);
@@ -551,8 +658,8 @@ test.describe.serial('drag performance baseline', () => {
                         if (syncSnapshot.forcedLayoutReadPhases < 1) {
                             throw new Error('Synchronous dragstart did not record a write-before-geometry-read phase.');
                         }
-                        if (geometryReadsDelta.offsetHeight < selectionCount) {
-                            throw new Error(`Synchronous dragstart recorded ${geometryReadsDelta.offsetHeight} offsetHeight reads for ${selectionCount} selected item(s).`);
+                        if (geometryReadsDelta.offsetHeight < materializedSelectionCount) {
+                            throw new Error(`Synchronous dragstart recorded ${geometryReadsDelta.offsetHeight} offsetHeight reads for ${materializedSelectionCount}/${selectionCount} materialized/logical selected item(s).`);
                         }
                         if (foldCallbackIds.length === 0) {
                             throw new Error('Synchronous dragstart did not schedule its deferred fold callback.');
@@ -560,6 +667,7 @@ test.describe.serial('drag performance baseline', () => {
                         if (record) {
                             record.cpu.push(cpuMs);
                             record.forced.push(syncSnapshot.forcedLayoutReadPhases);
+                            record.materializedSelectionCounts.push(materializedSelectionCount);
                             addCalls(record.calls, callsDelta);
                         }
                         await waitForCallbackIds(foldCallbackIds, 'Deferred dragstart fold did not complete');
@@ -572,8 +680,26 @@ test.describe.serial('drag performance baseline', () => {
                         );
                         await wait(5);
                     };
-                    const runCallbackFrames = async (originKey, frameCount) => {
-                        const origin = rowFor(originKey);
+                    const prepareCallbackTargets = async (originKey, selectionCount) => {
+                        const targetNumbers = getSourcesList()?.dataset?.sourceWindowingActive === 'true'
+                            ? (
+                                selectionCount > 1
+                                    ? [56, 57]
+                                    : [nextRowCount - 20, nextRowCount - 19]
+                            )
+                            : [];
+                        const targetKeys = targetNumbers.map((number) => sourceKey(number));
+                        for (const targetKey of targetKeys) {
+                            await materializeSource(targetKey);
+                        }
+                        const origin = await materializeSource(originKey);
+                        return {
+                            origin,
+                            targetKeys
+                        };
+                    };
+                    const runCallbackFrames = async (originKey, selectionCount, frameCount) => {
+                        const { origin, targetKeys } = await prepareCallbackTargets(originKey, selectionCount);
                         if (!origin) throw new Error(`Frame benchmark origin ${originKey} missing.`);
                         const beforeDragStart = benchmarkBridge('snapshot');
                         const dataTransfer = dispatchDrag(origin, 'dragstart');
@@ -588,13 +714,20 @@ test.describe.serial('drag performance baseline', () => {
                         await waitForCallbackIds(foldCallbackIds, 'Frame benchmark fold callback did not complete');
                         benchmarkBridge('reset-frames');
                         const listRect = getRoot()?.querySelector('#sources-list')?.getBoundingClientRect();
-                        const candidates = Array.from(getRoot()?.querySelectorAll('.source-item:not(.selected-for-batch)') || [])
+                        const visibleCandidates = Array.from(getRoot()?.querySelectorAll('.source-item:not(.selected-for-batch)') || [])
                             .filter((candidate) => {
                                 const rect = candidate.getBoundingClientRect();
                                 return listRect && rect.bottom > listRect.top && rect.top < listRect.bottom;
-                            })
-                            .slice(0, 12);
-                        if (candidates.length < 2) throw new Error('Not enough non-selected benchmark drag targets.');
+                            });
+                        const materializedTargets = targetKeys.map((targetKey) => rowFor(targetKey));
+                        const missingMaterializedTargetKeys = materializedTargets.filter((target) => !target).length;
+                        const candidates = Array.from(new Set([
+                            ...materializedTargets.filter(Boolean),
+                            ...visibleCandidates
+                        ])).slice(0, 12);
+                        if (candidates.length < 2 || missingMaterializedTargetKeys > 0) {
+                            throw new Error(`Not enough materialized non-selected benchmark drag targets; candidates ${candidates.length}, targets missing ${missingMaterializedTargetKeys}.`);
+                        }
                         benchmarkBridge('capture-frames', true);
                         const targetCallbackIds = [];
                         for (let index = 0; index < frameCount; index += 1) {
@@ -661,6 +794,7 @@ test.describe.serial('drag performance baseline', () => {
                         const prepare = {
                             cpu: [],
                             forced: [],
+                            materializedSelectionCounts: [],
                             calls: { getBoundingClientRect: 0, querySelector: 0, querySelectorAll: 0 }
                         };
                         for (let index = 0; index < warmupSessions; index += 1) {
@@ -675,14 +809,14 @@ test.describe.serial('drag performance baseline', () => {
                         // continuous active-drag sequence, otherwise an old cleanup can remove
                         // the current list's manager-active marker mid-sample.
                         await wait(1600);
-                        const warmup = await runCallbackFrames(originKey, warmupFrames);
+                        const warmup = await runCallbackFrames(originKey, selectionCount, warmupFrames);
                         if (warmup.frames.length !== warmupFrames
                             || warmup.targetCallbackIds.length !== warmupFrames) {
                             throw new Error('Exact manager-active drag callback warmup was not captured.');
                         }
                         await wait(1600);
                         benchmarkBridge('reset');
-                        const measured = await runCallbackFrames(originKey, measuredFrames);
+                        const measured = await runCallbackFrames(originKey, selectionCount, measuredFrames);
                         const callbackCalls = { getBoundingClientRect: 0, querySelector: 0, querySelectorAll: 0 };
                         measured.frames.forEach((sample) => addCalls(callbackCalls, sample.callsDelta));
                         const callbackDurations = measured.frames.map((sample) => sample.duration);
@@ -693,6 +827,11 @@ test.describe.serial('drag performance baseline', () => {
                             measuredSessions,
                             warmupFrames,
                             measuredFrames,
+                            logicalSelectionCount: selectionCount,
+                            materializedSelectionCount: {
+                                p50: percentile(prepare.materializedSelectionCounts, 0.5),
+                                p95: percentile(prepare.materializedSelectionCounts, 0.95)
+                            },
                             prepareCpuMs: {
                                 p50: percentile(prepare.cpu, 0.5),
                                 p95: percentile(prepare.cpu, 0.95)
@@ -714,20 +853,25 @@ test.describe.serial('drag performance baseline', () => {
                         notebookId: `drag-benchmark-${nextRowCount}`,
                         sources
                     });
-                    await waitFor(
-                        () => getRoot()?.querySelectorAll('#sources-list .source-item').length === nextRowCount,
-                        `Manager did not render ${nextRowCount} synthetic sources.`
-                    );
-                    sourceKeysByNumber = new Map(Array.from(getRoot()?.querySelectorAll('#sources-list .source-item') || [])
-                        .map((row) => {
-                            const title = row.querySelector('.source-title-text')?.textContent || '';
-                            const match = title.match(/^Synthetic source (\d{4})$/);
-                            return match && row.dataset.sourceKey ? [Number(match[1]), row.dataset.sourceKey] : null;
-                        })
-                        .filter(Boolean));
-                    if (sourceKeysByNumber.size !== nextRowCount) {
-                        throw new Error(`Expected ${nextRowCount} deterministic source keys, saw ${sourceKeysByNumber.size}.`);
+                    await waitFor(() => {
+                        const list = getRoot()?.querySelector('#sources-list');
+                        const materializedCount = list?.querySelectorAll('.source-item').length || 0;
+                        const logicalCount = Number(list?.dataset?.logicalSourceCount);
+                        const windowingActive = list?.dataset?.sourceWindowingActive === 'true';
+                        if (logicalCount !== nextRowCount || materializedCount === 0) return false;
+                        return nextRowCount < 240
+                            ? materializedCount === nextRowCount
+                            : windowingActive && materializedCount < nextRowCount;
+                    }, `Manager did not expose ${nextRowCount} synthetic sources through its logical window.`);
+                    const firstRow = getRoot()?.querySelector(
+                        '.source-item[data-source-window-ordinal="0"]'
+                    ) || getRoot()?.querySelector('.source-item');
+                    const firstTitle = firstRow?.querySelector('.source-title-text')?.textContent || '';
+                    const firstKey = firstRow?.dataset?.sourceKey || '';
+                    if (firstTitle !== 'Synthetic source 0001' || !firstKey.endsWith('0001')) {
+                        throw new Error('Could not derive the deterministic synthetic source-key prefix.');
                     }
+                    sourceKeyPrefix = firstKey.slice(0, -4);
                     const groupIds = await createGroups();
                     for (let index = 0; index < 2; index += 1) {
                         const first = index * 10 + 1;
@@ -737,6 +881,17 @@ test.describe.serial('drag performance baseline', () => {
                         getRoot()?.querySelectorAll(`.group-container[data-group-id="${groupId}"] .source-item`) || []
                     ).map((row) => row.dataset.sourceKey).filter(Boolean));
                     if (distributed.length !== 20) throw new Error(`Expected 20 grouped benchmark sources, saw ${distributed.length}.`);
+                    await prepareWindowedSourceOrdinals();
+                    const postDistributionList = getSourcesList();
+                    if (Number(postDistributionList?.dataset?.logicalSourceCount) !== nextRowCount) {
+                        throw new Error('Benchmark grouping changed the complete logical source projection.');
+                    }
+                    if (nextRowCount >= 240 && (
+                        postDistributionList?.dataset?.sourceWindowingActive !== 'true'
+                        || Number(postDistributionList?.dataset?.materializedSourceCount) >= nextRowCount
+                    )) {
+                        throw new Error('Benchmark grouping disabled or bypassed source windowing.');
+                    }
 
                     const rootOrigin = sourceKey(nextRowCount === 100 ? 91 : 491);
                     const multiOrigin = sourceKey(41);

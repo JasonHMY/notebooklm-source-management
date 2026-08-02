@@ -91,14 +91,14 @@ describe('content modal whats-new', () => {
         expect(deps.prepareModalOpen).not.toHaveBeenCalled();
     });
 
-    it('renders the modal scaffolding with two feature rows from the fallback featureRow', () => {
+    it('renders the modal scaffolding with four release feature rows', () => {
         const deps = createDeps();
         const helper = createContentModalWhatsNew(deps);
 
         expect(helper.renderWhatsNewModal()).toBe(true);
         const shadow = deps.getShadowRoot();
         expect(shadow.querySelector('.sp-whats-new-modal')).toBeTruthy();
-        expect(shadow.querySelectorAll('.sp-welcome-feature-row')).toHaveLength(2);
+        expect(shadow.querySelectorAll('.sp-welcome-feature-row')).toHaveLength(4);
     });
 
     it('uses the injected createWelcomeFeatureRow when provided', () => {
@@ -108,8 +108,31 @@ describe('content modal whats-new', () => {
 
         helper.renderWhatsNewModal();
 
-        expect(customRow).toHaveBeenCalledTimes(2);
-        expect(customRow).toHaveBeenNthCalledWith(1, 'drag_pan', 'ui_whats_new_drag_title', 'ui_whats_new_drag_body');
+        expect(customRow).toHaveBeenCalledTimes(4);
+        expect(customRow).toHaveBeenNthCalledWith(
+            1,
+            'restore',
+            'ui_whats_new_transaction_title',
+            'ui_whats_new_transaction_body'
+        );
+        expect(customRow).toHaveBeenNthCalledWith(
+            2,
+            'verified_user',
+            'ui_whats_new_native_safety_title',
+            'ui_whats_new_native_safety_body'
+        );
+        expect(customRow).toHaveBeenNthCalledWith(
+            3,
+            'inventory_2',
+            'ui_whats_new_batch_storage_title',
+            'ui_whats_new_batch_storage_body'
+        );
+        expect(customRow).toHaveBeenNthCalledWith(
+            4,
+            'accessibility_new',
+            'ui_whats_new_accessibility_scale_title',
+            'ui_whats_new_accessibility_scale_body'
+        );
     });
 
     it('clicking the close button marks whats-new seen and closes the modal', async () => {
@@ -177,38 +200,4 @@ describe('content modal whats-new', () => {
         expect(modal.classList.add).toHaveBeenCalledWith('visible');
     });
 
-    it('renders an enable-Beta button when dragMode is classic', () => {
-        const deps = createDeps({ getDragMode: () => 'classic' });
-        const helper = createContentModalWhatsNew(deps);
-        helper.renderWhatsNewModal();
-        const btn = deps.getShadowRoot().querySelector('.sp-whats-new-enable-beta-btn');
-        expect(btn).toBeTruthy();
-    });
-
-    it('clicking the enable-Beta button switches to reflow, marks seen, and closes', async () => {
-        const setDragMode = jest.fn(() => Promise.resolve('reflow'));
-        const showToast = jest.fn();
-        const deps = createDeps({ getDragMode: () => 'classic', setDragMode, showToast });
-        const helper = createContentModalWhatsNew(deps);
-        helper.renderWhatsNewModal();
-        const btn = deps.getShadowRoot().querySelector('.sp-whats-new-enable-beta-btn');
-        btn.listeners.click[0]();
-        await Promise.resolve();
-        await Promise.resolve();
-        expect(setDragMode).toHaveBeenCalledWith('reflow');
-        expect(deps.markWhatsNewSeen).toHaveBeenCalledTimes(1);
-        expect(deps.closeManagedModal).toHaveBeenCalled();
-    });
-
-    it('renders the enable-Beta button as already-enabled (disabled, no-op) when dragMode is reflow', () => {
-        const setDragMode = jest.fn(() => Promise.resolve('reflow'));
-        const deps = createDeps({ getDragMode: () => 'reflow', setDragMode });
-        const helper = createContentModalWhatsNew(deps);
-        helper.renderWhatsNewModal();
-        const btn = deps.getShadowRoot().querySelector('.sp-whats-new-enable-beta-btn');
-        expect(btn).toBeTruthy();
-        expect(String(btn.className)).toContain('is-disabled');
-        if (Array.isArray(btn.listeners.click)) btn.listeners.click.forEach((h) => h());
-        expect(setDragMode).not.toHaveBeenCalled();
-    });
 });

@@ -202,6 +202,8 @@
         let focusedSourceActionMenuKey = null;
         let pendingSourceActionMenuFocus = null;
         let isRenderScheduled = false;
+        let scheduledRenderFrameId = null;
+        let scheduledRenderRunner = null;
         let sourceRenderGeneration = 0;
         let estimatedSourceWindowRowHeight = DEFAULT_SOURCE_WINDOW_ROW_HEIGHT;
         let hasMeasuredSourceWindowRowHeight = false;
@@ -2940,24 +2942,45 @@
             }
         }
 
-        function scheduleRender() {
-            if (isRenderScheduled) return false;
+        function scheduleRender(options = {}) {
             const win = typeof deps.getWindow === 'function'
                 ? deps.getWindow()
                 : (typeof window !== 'undefined' ? window : null);
             const requestFrame = win && typeof win.requestAnimationFrame === 'function'
                 ? win.requestAnimationFrame.bind(win)
                 : null;
-            if (!requestFrame) {
+            const cancelFrame = win && typeof win.cancelAnimationFrame === 'function'
+                ? win.cancelAnimationFrame.bind(win)
+                : null;
+            const flushImmediately = options?.flushImmediately === true;
+            const runScheduledRender = () => {
+                if (!isRenderScheduled) return false;
+                isRenderScheduled = false;
+                if (scheduledRenderFrameId !== null) {
+                    if (cancelFrame) cancelFrame(scheduledRenderFrameId);
+                    scheduledRenderFrameId = null;
+                }
+                scheduledRenderRunner = null;
+                render();
+                return true;
+            };
+            if (isRenderScheduled) {
+                // A scroll or another interaction may already own the next frame.
+                // An immediate search executes that same runner now rather
+                // than adding another render or inheriting a delayed rAF callback.
+                if (flushImmediately && typeof scheduledRenderRunner === 'function') {
+                    return scheduledRenderRunner();
+                }
+                return false;
+            }
+            if (!requestFrame || flushImmediately) {
                 render();
                 return true;
             }
 
             isRenderScheduled = true;
-            requestFrame(() => {
-                isRenderScheduled = false;
-                render();
-            });
+            scheduledRenderRunner = runScheduledRender;
+            scheduledRenderFrameId = requestFrame(runScheduledRender);
             return true;
         }
 

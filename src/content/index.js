@@ -5753,7 +5753,7 @@
 
         const searchInput = shadowRoot.getElementById('sp-search');
         const handleSearchInput = debounce(() => {
-            scheduleRender();
+            scheduleRender({ flushImmediately: true });
         }, SEARCH_RENDER_TIMER_MS);
 
         // Immediate search trigger

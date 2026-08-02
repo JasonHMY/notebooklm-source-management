@@ -19,6 +19,18 @@ environment:
 
 Each row-count/selection case uses 5 warm-up and 20 measured drag-start prepare sessions, followed by 10 warm-up and 50 measured manager-active dragover callbacks. CPU measurements use `performance.now()` around synchronous handler/callback work, never adjacent rAF timestamps. Immediately before every prepare, the fixture reproduces the state after the trusted pointerdown that precedes a real next drag: it removes the prior dragend pseudo-hover bridge, reads the source list's `offsetHeight` to settle that restyle outside the timed interval, resets all instrumentation, and asserts that call/write/pending/forced-layout counters are zero. It then snapshots the synchronous dragstart result before fold or dragend work can run. Both `getBoundingClientRect` and `offsetHeight` are geometry reads; only real structural, class, style, or attribute mutations arm a forced-layout-read phase.
 
+At the 500-row scale, source windowing is part of the contract: the benchmark requires
+the complete logical projection (`logicalSourceCount === 500`), active windowing, and
+fewer materialized rows than logical rows. It derives the deterministic synthetic
+source-key prefix from the initial mounted row, then uses the source-window ordinal to
+temporarily mount only the drag origin and nearby non-selected callback targets. The
+50-source path selects through those temporary windows, verifies the full logical
+selection through `pendingSelected`, and verifies that dragstart carries all 50 keys in
+`application/source-keys`. Geometry-read expectations use the recorded materialized
+selection subset rather than incorrectly requiring all logical selected sources to be
+in the DOM at once. The benchmark output records both logical and materialized selection
+counts; the established timing and geometry/query acceptance limits are unchanged.
+
 The isolated-world rAF wrapper assigns a monotonic logical ID to every callback. After the dragstart fold IDs are drained, each dragover must synchronously schedule exactly one new ID; that exact ID is registered before yielding and must complete with exactly one `{ callbackId, duration, callsDelta }` sample. The 10/50 sample ID sets must exactly match their target ID sets. DOM call totals include only measured synchronous prepare deltas plus the exact 50 measured target-callback deltas, excluding fixture setup, fold, dragend, bridge, and unrelated rAF work.
 
 ## Before Optimization

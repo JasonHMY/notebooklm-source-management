@@ -27,6 +27,8 @@
 
 ## [Unreleased] (未发布)
 
+## [2026-08-02] [26.8.2]
+
 ### Added
 - **事务式撤销与重做 (Add Transactional Undo and Redo)**: **影响**: 用户现在可从工具栏、命令面板或常用快捷键连续撤销和重做分组整理；只有 critical save 明确成功后历史栈才前进，失败会恢复操作前界面并保留可重试的历史项。
 - **常用整理任务就地完成 (Complete Common Organization Tasks In Place)**: **影响**: 新建文件夹或子文件夹后会立即命名；即使当前有搜索、标签、快速视图、隔离或折叠祖先，临时命名路径仍保持可见，确认后会退出这些视图约束并展开必要祖先。命名中的重绘会恢复已输入草稿，确认前的临时文件夹不会进入任何持久化快照；“移动到文件夹”可在弹窗内新建目标并一次完成移动；批量栏提供真实选中数、“选择当前可见”和“清空选择”，并严格排除折叠、隐藏、加载失败或缺少原生复选框的来源，不再要求逐项勾选或退出当前流程。
@@ -35,6 +37,7 @@
 - **可恢复的批量与存储管理 (Add Recoverable Batch and Storage Management)**: **影响**: 批量删除会保留失败与未尝试来源并提供 Retry remaining，筛选后明确区分可见/隐藏选择并可单独清除隐藏项；移动目标可搜索、显示完整路径并记住最近目标。设置页可删除单个历史点、清理自动历史或确认后清空全部历史，并从保存失败状态直接查看配额、占用与可释放历史大小。
 
 ### Changed
+- **发布 26.8.2 并更新「更新介绍」 (Release 26.8.2 and Refresh What's New)**: **影响**: 升级到 26.8.2 后，「更新介绍」会展示事务恢复、原生删除安全、可恢复批量与存储管理、无障碍命令面板及大列表工作流；扩展清单、npm 包、锁文件、README 版本徽章和 Chrome Web Store ZIP 同步使用 `26.8.2`。
 - **空状态提供准确诊断与恢复入口 (Make Empty States Contextual and Actionable)**: **影响**: 真正没有来源、搜索无匹配、筛选无匹配和隔离文件夹无内容现在显示不同说明，并分别提供 Clear search、Clear filters 或 Show all；退出隔离的组合清除操作会同步恢复 Gemini Notebook 原生来源启用状态，不再把所有情况误报为筛选无结果或留下界面与原生状态不一致。
 - **核心树与窄面板无障碍改进 (Improve Core Tree Accessibility and Narrow-Panel Layout)**: **影响**: 来源与嵌套文件夹使用 list/listitem 关系，重复控件名称带来源或文件夹上下文，折叠内容从 Tab 和辅助技术路径中移除，标签状态与 switch focus 更清晰；工具栏和批量栏在窄宽度及长译文下可换行，浅色次要文字和自定义标签文字保持可读。
 - **设置、Popup 与首次引导保持操作上下文 (Preserve Context in Settings, Popup, and Onboarding)**: **影响**: 设置操作在弹窗内持续反馈并在必要重建后恢复焦点、展开区与滚动位置；导入备份会持续显示来源数量、文件夹数量与恢复/丢弃入口。Popup 优先复用当前首页或聚焦已有笔记本管理器，首次引导改为可跳过的三步检查表，Help 可重播引导并查看快捷键与导入说明。
@@ -43,6 +46,8 @@
 - **Manager 基准记录隔离世界 DOM 调用 (Record Isolated-World Manager DOM Calls)**: **影响**: 对扩展使用无可感知变化。 `benchmark:manager` 现在在临时 content-script 隔离世界中按样本记录 DOM mutation、querySelector/querySelectorAll 与 layout-read 调用，并在成功、异常或清理路径都还原被测原型；恢复失败会让基准明确失败，避免样本之间相互污染。
 
 ### Fixed
+- **搜索合并不再受迟到动画帧阻塞 (Keep Coalesced Search Independent of Delayed Animation Frames)**: **影响**: 来源列表较大或浏览器延迟下一帧时，输入筛选仍会在短暂合并后立即更新结果，不再偶发等待多个动画帧而越过交互门槛。搜索继续合并快速连续输入；若已有列表刷新待执行，则复用并立即完成同一个刷新、取消旧 rAF，避免重复渲染。
+- **窗口化拖拽基准按完整逻辑状态验证 (Verify Windowed Drag Benchmarks Against Complete Logical State)**: **影响**: 对扩展使用无可感知变化。 `benchmark:drag` 在 500 个合成来源时不再把当前 `.source-item` 挂载数误当成来源总数；它会验证完整逻辑投影、windowing 仍启用且物理行少于逻辑行，临时挂载 origin 和测量目标。50 项选择同时校验 `pendingSelected` 与 drag DataTransfer 的完整键集合，几何读取按实际 materialized subset 审计；既有 timing、强制布局和 geometry/query 门槛未降低。
 - **窄面板文件夹标题保持可读 (Keep Folder Titles Readable in Narrow Panels)**: **影响**: 在 240px、320px 侧栏及高倍缩放下，文件夹标题不再被计数和悬浮操作挤成单字或完全消失；标题与文件夹操作会自动换行，同时保留计数、精准排序、新建子文件夹、隔离、编辑和删除入口。
 - **视图与树位置变更保持原生状态一致 (Keep Native State Consistent Across View and Tree Transitions)**: **影响**: 用户切换 Quick View、Tag、Isolation 或命令面板视图，以及移动来源、拖拽或调整文件夹位置后，Gemini Notebook 原生复选框会按操作前后有效状态差异同步；无变化和放置失败不会保存或显示成功，原生同步失败会保留可重试状态。
 - **恢复与来源盘点改为事务式 (Make Restore and Inventory Reconciliation Transactional)**: **影响**: Recovery、History、Import Backup 和 Source Repair 现在按笔记本实例串行应用，只有明确保存成功且 `sessionStorage` recovery 清理已确认才清除恢复入口；即使主状态已落盘，清理失败也会结构化失败并回滚。Recovery Restore 全程保留原始恢复目标，拒绝、空响应、过期修订、页面切换、清理失败或回滚无法确认时均保留该目标的 Restore/Refresh 入口。来源扫描会区分 complete、partial、virtualized 和 loading，单次缺失或虚拟化换窗不再丢失来源的文件夹、Tag 与启用状态。

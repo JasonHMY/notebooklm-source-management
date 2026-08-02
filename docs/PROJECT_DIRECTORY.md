@@ -468,7 +468,7 @@ manifest.json
 │   ├── 负责
 │   │   ├── 保留 50 层导入兼容，同时使用迭代遍历避免递归深度风险
 │   │   ├── 视觉缩进按每层 12px、最多 8 层显示；完整 breadcrumb 继续用于路径和 ARIA 名称
-│   │   ├── 缓存搜索条件和派生计数；搜索输入在 80ms input-to-DOM 总预算内合并，所有 schedule 每帧最多一次 render
+│   │   ├── 缓存搜索条件和派生计数；搜索输入在 80ms input-to-DOM 总预算内先合并，再立即完成共享 render；普通 schedule 仍每帧最多一次，避免迟到 rAF 超预算
 │   │   ├── 240 个及以上逻辑可见来源启用 windowing，上下各 20 行 overscan；聚焦、来源操作和拖拽相关行可越窗固定
 │   │   ├── 搜索计数、可见/隐藏批量选择、键盘与拖拽语义始终使用完整 logical projection；DOM 只包含 materialized rows，并按 stable source key 线性 reconciliation
 │   │   └── 对 100/500/1000/5000 来源测量初始渲染，并对搜索、Quick View、Tag filter、批量选择和同步输入执行 opt-in 性能门槛
@@ -811,7 +811,7 @@ content runtime memory
 ├── 拖拽性能基准（opt-in）
 │   ├── 命令: npm run benchmark:drag
 │   ├── 文件: tests/smoke/drag-performance.smoke.spec.js, docs/DRAG_PERFORMANCE_BASELINE.md
-│   └── 默认: 仅 DRAG_BENCHMARK=1 时执行；100/500 行 × 单项/50 项选择，prepare 计时前在真实 pointerdown 后状态完成 settle/全量计数归零，以 isolated-world logical rAF callback ID 精确绑定目标帧；After 四组合及重复 500 行稳定性样本已记录，仍非默认 smoke/CI timing gate
+│   └── 默认: 仅 DRAG_BENCHMARK=1 时执行；100/500 行 × 单项/50 项选择，500 行读取完整 logicalSourceCount/sourceWindowingActive 而非把未挂载行当丢失，按 source-window ordinal 临时挂载 origin 与 callback target；50 项选择同时校验 pendingSelected 和 DataTransfer 完整 50 keys，并单独记录 materialized selection subset。prepare 计时前在真实 pointerdown 后状态完成 settle/全量计数归零，以 isolated-world logical rAF callback ID 精确绑定目标帧；After 四组合及重复 500 行稳定性样本已记录，仍非默认 smoke/CI timing gate
 ├── Manager 大列表性能基准（opt-in）
 │   ├── 命令: npm run benchmark:manager
 │   ├── 文件: tests/smoke/manager-performance.smoke.spec.js
