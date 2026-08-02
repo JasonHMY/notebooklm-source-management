@@ -16,6 +16,7 @@
      */
     function createContentSourcePartialSyncGuard(deps = {}) {
         const URLCtor = deps.URL || globalThis.URL;
+        let lastStableCompleteMissingObservation = null;
         const resolveStoredSourceKeyWithReason = typeof deps.resolveStoredSourceKeyWithReason === 'function'
             ? deps.resolveStoredSourceKeyWithReason
             : () => ({ key: null, reason: 'unresolved' });
@@ -42,8 +43,14 @@
             if (!previousSourceRecordsByKey || typeof previousSourceRecordsByKey.forEach !== 'function') return false;
             const previousCount = previousSourceRecordsByKey.size;
             const currentCount = Array.isArray(currentSources) ? currentSources.length : 0;
-            if (previousCount === 0 || currentCount >= previousCount) return false;
-            if (currentCount === 0) return true;
+            if (previousCount === 0) {
+                lastStableCompleteMissingObservation = null;
+                return false;
+            }
+            if (currentCount === 0) {
+                lastStableCompleteMissingObservation = null;
+                return true;
+            }
 
             const currentKeys = new Set((currentSources || []).map((source) => source.key).filter(Boolean));
             if (currentKeys.size === 0) return true;
@@ -56,7 +63,10 @@
                 }
             });
 
-            if (missingPreviousKeys.length === 0) return false;
+            if (missingPreviousKeys.length === 0) {
+                lastStableCompleteMissingObservation = null;
+                return false;
+            }
 
             const recentNativeDeletedSourceKeys = options.recentNativeDeletedSourceKeys instanceof Set
                 ? options.recentNativeDeletedSourceKeys
@@ -66,10 +76,53 @@
                 missingPreviousKeys.every((key) => recentNativeDeletedSourceKeys.has(key))
             ) {
                 missingPreviousKeys.forEach((key) => recentNativeDeletedSourceKeys.delete(key));
+                lastStableCompleteMissingObservation = null;
                 return false;
             }
 
+            const completeness = ['complete', 'partial', 'virtualized', 'loading'].includes(options.completeness)
+                ? options.completeness
+                : 'partial';
+            if (completeness !== 'complete') {
+                lastStableCompleteMissingObservation = null;
+                return true;
+            }
+
+            const observedIdentityKeys = Array.isArray(options.identityKeys)
+                ? options.identityKeys
+                    .map((key) => String(key || '').trim())
+                    .filter(Boolean)
+                : [];
+            const identitySignature = Array.from(
+                new Set(observedIdentityKeys.length > 0
+                    ? observedIdentityKeys
+                    : currentKeys)
+            ).sort().join('|');
+            const missingSignature = missingPreviousKeys.slice().sort().join('|');
+            const currentObservation = {
+                contextToken: String(options.contextToken || ''),
+                identitySignature,
+                missingSignature,
+                totalHint: Number.isFinite(Number(options.totalHint))
+                    ? Number(options.totalHint)
+                    : null
+            };
+            if (
+                lastStableCompleteMissingObservation
+                && lastStableCompleteMissingObservation.contextToken === currentObservation.contextToken
+                && lastStableCompleteMissingObservation.identitySignature === currentObservation.identitySignature
+                && lastStableCompleteMissingObservation.missingSignature === currentObservation.missingSignature
+                && lastStableCompleteMissingObservation.totalHint === currentObservation.totalHint
+            ) {
+                lastStableCompleteMissingObservation = null;
+                return false;
+            }
+            lastStableCompleteMissingObservation = currentObservation;
             return true;
+        }
+
+        function resetCompleteScanObservation() {
+            lastStableCompleteMissingObservation = null;
         }
 
         function isLikelyRawImportUrlTitle(value) {
@@ -122,6 +175,7 @@
         return {
             hasPreviousRecordForCurrentSource,
             shouldPreserveExistingSourcesDuringPartialSync,
+            resetCompleteScanObservation,
             isLikelyRawImportUrlTitle,
             markTransientRawUrlImportSources
         };

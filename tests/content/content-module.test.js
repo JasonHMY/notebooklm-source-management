@@ -265,6 +265,16 @@ describe('content stylesheet native source list visibility', () => {
         expect(css).not.toContain('transition: all');
         expect(css).toContain('@media (prefers-reduced-motion: reduce)');
     });
+
+    it('scopes native menu restyling to a manager-owned native action', () => {
+        const css = fs.readFileSync(path.join(__dirname, '../../src/content/styles.css'), 'utf8');
+        const marker = 'body.sources-plus-native-action-active[data-nsm-native-action-active="true"]';
+
+        expect(css).toContain(`${marker} .cdk-overlay-pane .mat-mdc-menu-panel`);
+        expect(css).toContain(`${marker} .cdk-overlay-pane [role="menu"]`);
+        expect(css).not.toContain('body[data-nsm-native-action-active="true"] .cdk-overlay-pane');
+        expect(css).not.toMatch(/(?:^|\n)\s*\.cdk-overlay-pane\s+/);
+    });
 });
 
 describe('manifest web accessible resources', () => {

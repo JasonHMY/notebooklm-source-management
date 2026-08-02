@@ -40,10 +40,12 @@
 ### Fixed
 - **视图与树位置变更保持原生状态一致 (Keep Native State Consistent Across View and Tree Transitions)**: **影响**: 用户切换 Quick View、Tag、Isolation 或命令面板视图，以及移动来源、拖拽或调整文件夹位置后，Gemini Notebook 原生复选框会按操作前后有效状态差异同步；无变化和放置失败不会保存或显示成功，原生同步失败会保留可重试状态。
 - **恢复与来源盘点改为事务式 (Make Restore and Inventory Reconciliation Transactional)**: **影响**: Recovery、History、Import Backup 和 Source Repair 现在按笔记本实例串行应用，只有明确保存成功且 `sessionStorage` recovery 清理已确认才清除恢复入口；即使主状态已落盘，清理失败也会结构化失败并回滚。Recovery Restore 全程保留原始恢复目标，拒绝、空响应、过期修订、页面切换、清理失败或回滚无法确认时均保留该目标的 Restore/Refresh 入口。来源扫描会区分 complete、partial、virtualized 和 loading，单次缺失或虚拟化换窗不再丢失来源的文件夹、Tag 与启用状态。
+- **原生删除证明与复选框同步加固 (Harden Native Delete Proof and Checkbox Synchronization)**: **影响**: 删除在点击不可逆原生确认前会先验证完整 identity 清单、显式原生 totalHint 与唯一绑定目标；对话框关闭后仍需同类证据证明目标消失、总数 N→N−1 才成功。当前 DOM 行数、虚拟化卸载、等数量补位、不完整盘点或缺失/重复目标都不会误判。真实删除会清空 Undo/Redo 并明确提示不可恢复；原生复选框以每来源 last-write-wins 队列同步，快速反向操作、超时或页面切换会返回可重试的结构化失败。
 - **支持当前 Gemini Notebook 域名 (Support the Current Gemini Notebook Origin)**: **影响**: 扩展会在当前 `notebook.google.com` 页面正常注入、识别、聚焦和启动，同时保留 `notebooklm.google.com` 兼容入口；Popup 只有收到明确的 `success: true` 才报告动作完成。
 
 ### Security
-- **原生批量删除双重确认与缺失证明 (Require Dual Confirmation and Absence Proof for Native Batch Delete)**: **影响**: 批量删除会先显示扩展确认、数量和有限标题预览，再进入 Gemini Notebook 原生确认；取消不会触发原生操作，确认后也只有两次完整 ready-panel 扫描共同证明唯一来源身份消失且行数准确减少，才提交本地删除。 对话框关闭、扫描不完整、来源仍存在、身份歧义或超时都会安全失败。
+- **原生批量删除双重确认与缺失证明 (Require Dual Confirmation and Absence Proof for Native Batch Delete)**: **影响**: 批量删除会先显示扩展确认、数量和有限标题预览，再进入 Gemini Notebook 原生确认；取消不会触发原生操作。每个不可逆确认前都必须由完整 identity inventory、显式 native totalHint 和唯一绑定目标放行；确认后只有稳定的同类证据证明目标消失、总数 N→N−1 且原有 survivors 保留，才提交本地删除。真实删除后的同数量 backfill 只有 totalHint 明确证明该变化时可以完成；扫描不完整、缺少 totalHint、仅虚拟化卸载、来源仍存在、缺失/重复身份或超时都会安全失败。
+- **原生来源操作绑定唯一上下文并失败关闭 (Bind Native Source Actions to a Unique Context and Fail Closed)**: **影响**: Rename、Delete、Details 与完整批量删除会绑定 operation、笔记本、manager 实例和来源身份并互斥执行；菜单并列、重复或子串标题、多个确认弹窗、旧 overlay、路由切换、取消与超时都会停止点击并释放临时宿主样式，不再执行过期意图。
 
 ## [2026-07-27] [26.7.27]
 

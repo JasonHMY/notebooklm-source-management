@@ -24,6 +24,153 @@ describe('content source partial sync guard', () => {
         expect(recentNativeDeletedSourceKeys.has('two')).toBe(false);
     });
 
+    it('preserves an equal-sized sliding window when a previous identity disappears', () => {
+        const guard = createGuard();
+        const previous = new Map([
+            ['one', {}],
+            ['two', {}],
+            ['three', {}]
+        ]);
+
+        expect(guard.shouldPreserveExistingSourcesDuringPartialSync([
+            { key: 'two' },
+            { key: 'three' },
+            { key: 'four' }
+        ], {}, previous)).toBe(true);
+    });
+
+    it('allows an equal-sized replacement only when every missing identity is an authorized delete', () => {
+        const guard = createGuard();
+        const previous = new Map([
+            ['one', {}],
+            ['two', {}],
+            ['three', {}]
+        ]);
+        const recentNativeDeletedSourceKeys = new Set(['one']);
+
+        expect(guard.shouldPreserveExistingSourcesDuringPartialSync([
+            { key: 'two' },
+            { key: 'three' },
+            { key: 'four' }
+        ], {}, previous, {
+            recentNativeDeletedSourceKeys
+        })).toBe(false);
+        expect(recentNativeDeletedSourceKeys.has('one')).toBe(false);
+    });
+
+    it('accepts a missing identity only after two stable complete inventory observations', () => {
+        const guard = createGuard();
+        const previous = new Map([
+            ['one', {}],
+            ['two', {}],
+            ['three', {}]
+        ]);
+        const nextSources = [
+            { key: 'two' },
+            { key: 'three' },
+            { key: 'four' }
+        ];
+        const evidence = {
+            completeness: 'complete',
+            totalHint: 3
+        };
+
+        expect(guard.shouldPreserveExistingSourcesDuringPartialSync(
+            nextSources,
+            {},
+            previous,
+            evidence
+        )).toBe(true);
+        expect(guard.shouldPreserveExistingSourcesDuringPartialSync(
+            nextSources,
+            {},
+            previous,
+            evidence
+        )).toBe(false);
+    });
+
+    it('does not reuse complete-scan evidence across notebook manager contexts', () => {
+        const guard = createGuard();
+        const previous = new Map([
+            ['one', {}],
+            ['two', {}]
+        ]);
+        const nextSources = [{ key: 'two' }];
+        const evidence = {
+            completeness: 'complete',
+            identityKeys: ['stable:two'],
+            totalHint: 1
+        };
+
+        expect(guard.shouldPreserveExistingSourcesDuringPartialSync(
+            nextSources,
+            {},
+            previous,
+            { ...evidence, contextToken: 'notebook-a:manager-1' }
+        )).toBe(true);
+        expect(guard.shouldPreserveExistingSourcesDuringPartialSync(
+            nextSources,
+            {},
+            previous,
+            { ...evidence, contextToken: 'notebook-b:manager-1' }
+        )).toBe(true);
+        expect(guard.shouldPreserveExistingSourcesDuringPartialSync(
+            nextSources,
+            {},
+            previous,
+            { ...evidence, contextToken: 'notebook-b:manager-1' }
+        )).toBe(false);
+    });
+
+    it('uses the observed identity contract when proving two stable complete scans', () => {
+        const guard = createGuard();
+        const previous = new Map([
+            ['one', {}],
+            ['two', {}]
+        ]);
+        const evidence = {
+            completeness: 'complete',
+            identityKeys: ['stable:two'],
+            contextToken: 'notebook-a:manager-1',
+            totalHint: 1
+        };
+
+        expect(guard.shouldPreserveExistingSourcesDuringPartialSync(
+            [{ key: 'transient-row-key-a' }],
+            {},
+            previous,
+            evidence
+        )).toBe(true);
+        expect(guard.shouldPreserveExistingSourcesDuringPartialSync(
+            [{ key: 'transient-row-key-b' }],
+            {},
+            previous,
+            evidence
+        )).toBe(false);
+    });
+
+    it('does not count a virtualized observation toward complete inventory stability', () => {
+        const guard = createGuard();
+        const previous = new Map([
+            ['one', {}],
+            ['two', {}]
+        ]);
+        const nextSources = [{ key: 'two' }];
+
+        expect(guard.shouldPreserveExistingSourcesDuringPartialSync(nextSources, {}, previous, {
+            completeness: 'complete',
+            totalHint: 1
+        })).toBe(true);
+        expect(guard.shouldPreserveExistingSourcesDuringPartialSync(nextSources, {}, previous, {
+            completeness: 'virtualized',
+            totalHint: 2
+        })).toBe(true);
+        expect(guard.shouldPreserveExistingSourcesDuringPartialSync(nextSources, {}, previous, {
+            completeness: 'complete',
+            totalHint: 1
+        })).toBe(true);
+    });
+
     it('detects previous records by remapped source key', () => {
         const guard = createGuard();
         const previous = new Map([
