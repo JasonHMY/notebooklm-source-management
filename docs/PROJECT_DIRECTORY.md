@@ -42,9 +42,11 @@ GeminiNotebook-Source-Management
 │   │   ├── content-native-label-detector.js
 │   │   │   └── 原生标签标题清理、可比较归一、label/view-switch 控件识别 helper
 │   │   ├── content-source-actions.js
-│   │   │   └── 来源三点菜单、精准排序 submenu 分发、详情、重命名、删除、原生 menu/dialog 自动化；删除只在两次完整 ready-panel 扫描确认唯一身份消失且行数准确减少后成功
+│   │   │   └── 来源三点菜单、精准排序 submenu 分发、详情、重命名、删除、原生 menu/dialog 自动化；点击不可逆原生确认前必须以完整 identity inventory + 显式 totalHint 验证唯一绑定目标，删除只在对话框关闭且新的同类证据共同证明身份消失后成功
 │   │   ├── content-source-action-menu.js
 │   │   │   └── 来源三点菜单和 submenu item 生成 helper；精准排序 disabled state 委托 Tree Placement resolver，失败来源菜单收口
+│   │   ├── content-native-action-coordinator.js
+│   │   │   └── Gemini Notebook 原生详情/重命名/删除及 batch-delete 会话的独占操作协调器；将异步步骤绑定到 operation、notebook、manager instance 和稳定来源身份，并只在操作期间挂载宿主 overlay scope
 │   │   ├── content-native-checkbox-sync.js
 │   │   │   └── 原生 checkbox 状态读取、切换判定、detached 行解析 helper
 │   │   ├── content-tree-placement.js
@@ -85,6 +87,8 @@ GeminiNotebook-Source-Management
 │   │   │   └── 有界事务 Undo/Redo 双栈；critical save 明确成功后才移动栈，失败恢复操作前 runtime 并保留历史项
 │   │   ├── content-state-apply.js
 │   │   │   └── undo/redo、配置导入/回滚、手动历史/恢复快照与来源修复共用的快照应用 Adapter；先归一化并原子提交树，再更新标签/来源状态、parent map 与原生 checkbox
+│   │   ├── content-snapshot-transaction.js
+│   │   │   └── Recovery、History、Import Backup 和 Source Repair 共用的串行快照事务；绑定 notebook/manager context，要求明确 critical-save ack，失败恢复运行时并确认回滚落盘
 │   │   ├── content-toast.js
 │   │   │   └── toast 容器与提示渲染 helper
 │   │   ├── content-source-list-scan.js
@@ -157,6 +161,8 @@ GeminiNotebook-Source-Management
 │   ├── smoke/
 │   │   ├── drag-reflow-layout.smoke.spec.js
 │   │   │   └── 真实 Chromium 中的混合/fixed box model 占位、跨 host 多选、preview、滚动恢复、reduced-motion 与原生 Esc/dragend
+│   │   ├── manager-performance.smoke.spec.js
+│   │   │   └── opt-in 100/500/1000/5000 来源 manager 基准；5 次 warm-up + 20 次测量，临时 content-script 隔离世界按样本记录初始渲染、搜索、Quick View、Tag filter、批量选择、同步输入、DOM mutation、query 与 layout read 的 p50/p95，并在每个样本结束还原原型
 │   │   └── 其他 Playwright 真实扩展上下文 smoke，默认 headless
 │   ├── background.test.js
 │   ├── popup.test.js
@@ -258,6 +264,7 @@ manifest.json
     ├── src/content/content-template.js
     ├── src/content/content-panel-dom.js
     ├── src/content/content-source-action-menu.js
+    ├── src/content/content-native-action-coordinator.js
     ├── src/content/content-source-actions.js
     ├── src/content/content-tags.js
     ├── src/content/content-tree-placement.js
@@ -269,6 +276,7 @@ manifest.json
     ├── src/content/content-toast-status.js
     ├── src/content/content-toast.js
     ├── src/content/content-state-apply.js
+    ├── src/content/content-snapshot-transaction.js
     ├── src/content/content-undo-history.js
     ├── src/content/content-import-export.js
     ├── src/content/content-diagnostics.js
@@ -308,6 +316,7 @@ manifest.json
 - content script 没有 bundler，加载顺序就是依赖顺序。
 - 每个 content helper 先挂到 `globalThis.NSM_*`，最后由 `src/content/index.js` 组装。
 - 改加载顺序前，先确认 `index.js` 依赖的 `NSM_*` helper 已经在前面加载。
+- 新增、移动或重命名 content helper 时，同步更新 `manifest.json`、`tests/helpers/load-content-module.js`、`tests/helpers/content-test-harness.js` 和本文件的目录树、Runtime 加载树及对应功能域“先看”列表。
 
 ## 3. 功能域树
 
@@ -387,11 +396,11 @@ manifest.json
 │   │   ├── 避让 dragover 每帧只读一次 geometry snapshot 后纯计算并集中写入；纯滚动按 root/嵌套 children 精确 delta 修补，auto-scroll 无新 dragover 时仍按静止指针合并刷新，drop 前同步消费 dirty geometry，尺寸/render/混合失效时 fail closed 重建
 │   │   ├── native dropEffect 只在原始 dragover 事件内由 clean snapshot 同步解析；dirty/missing snapshot 保守 move，未知 payload 为 none，异步 drag frame 不保留 DataTransfer
 │   │   ├── reflow transform 使用 source/group 类型化 map；仅可视区 + 一个真实行高 overscan 动画，离屏位移静态应用并在结束/下次 preflight 清理
-│   │   ├── 批量选择、Select visible（只选当前渲染、未处于折叠/hidden/inert 祖先且 native-operable 的来源）、Clear selection、真实选中数、加入文件夹、添加/移除标签；删除进行中冻结选择变更
+│   │   ├── 批量选择、Select visible（基于完整逻辑投影选择所有明确可见且 native-operable 的来源，不受 windowing 当前挂载行限制）、Clear selection、Clear hidden selection、可见/隐藏/真实选中数、加入文件夹、添加/移除标签；删除进行中冻结选择变更
 │   │   ├── 纯 Tree Placement Interface 集中 entry shape、source XOR、循环拒绝、索引修正、no-op、批量/事务原子提交与 import normalization；single/batch drag、移动到分组、批量/单项移出分组、分组新增/删除、原生来源删除、Classic sweep、来源同步、restore/reconcile、state apply、配置/原生标签导入均已迁移，业务路径不再直接修改放置数组
 │   │   ├── 来源三点菜单与文件夹标题栏共用 up/down/in/out 精准排序 resolver；渲染期以单次快照索引计算全部 disabled state，执行时再按实时树重新解析；边界禁用，成功后恢复可见稳定控件焦点并只播报 canonical N/M（过滤视图不改用可见索引，批量模式隐藏文件夹控件）
 │   │   ├── 移动 modal 内新建目标文件夹并一次完成移动；也可移到未分组
-│   │   └── 批量删除先经过扩展 alertdialog；原生确认后只有两次完整 ready-panel 扫描证明唯一身份消失且行数准确减少才提交本地删除
+│   │   └── 批量删除先经过扩展 alertdialog；每个原生确认按钮点击前必须由完整 identity inventory + 显式 native totalHint 验证唯一绑定目标；确认后必须等待 dialog 关闭，并由稳定的同类 inventory 证明目标身份消失、总数减少一且原有 survivors 仍存在才提交本地删除；虚拟窗口卸载、partial scan、缺少/歧义目标 identity、缺少 totalHint 或 DOM 行数变化本身均不构成成功证据，真实删除后的同数量 backfill 仅可由完整 identity/totalHint inventory 正向证明
 │   ├── 先看
 │   │   ├── src/content/content-tree-placement.js
 │   │   ├── src/content/content-tree-interactions.js
@@ -405,6 +414,7 @@ manifest.json
 │   │   ├── src/content/content-modals.js
 │   │   ├── src/content/content-source-actions.js
 │   │   ├── src/content/content-source-action-menu.js
+│   │   ├── src/content/content-native-action-coordinator.js
 │   │   ├── src/content/content-template.js
 │   │   └── src/content/content-style-text.js
 │   └── 测试
@@ -454,6 +464,23 @@ manifest.json
 │       ├── tests/content/content-render.test.js
 │       ├── tests/content/content-module.test.js
 │       └── tests/manifest-loader-sync.test.js
+├── 深树 / 大列表性能
+│   ├── 负责
+│   │   ├── 保留 50 层导入兼容，同时使用迭代遍历避免递归深度风险
+│   │   ├── 视觉缩进按每层 12px、最多 8 层显示；完整 breadcrumb 继续用于路径和 ARIA 名称
+│   │   ├── 缓存搜索条件和派生计数；搜索输入在 80ms input-to-DOM 总预算内合并，所有 schedule 每帧最多一次 render
+│   │   ├── 240 个及以上逻辑可见来源启用 windowing，上下各 20 行 overscan；聚焦、来源操作和拖拽相关行可越窗固定
+│   │   ├── 搜索计数、可见/隐藏批量选择、键盘与拖拽语义始终使用完整 logical projection；DOM 只包含 materialized rows，并按 stable source key 线性 reconciliation
+│   │   └── 对 100/500/1000/5000 来源测量初始渲染，并对搜索、Quick View、Tag filter、批量选择和同步输入执行 opt-in 性能门槛
+│   ├── 先看
+│   │   ├── src/content/content-render.js
+│   │   ├── src/content/content-view-state.js
+│   │   ├── src/content/content-tree-placement.js
+│   │   ├── tests/smoke/manager-performance.smoke.spec.js
+│   │   └── package.json 的 `benchmark:manager`
+│   └── 测试
+│       ├── tests/content/content-render.test.js
+│       └── npm run benchmark:manager（opt-in；5 次 warm-up + 20 次测量）
 ├── 原生来源操作
 │   ├── 负责
 │   │   ├── 插件三点菜单定位和 submenu
@@ -462,11 +489,15 @@ manifest.json
 │   │   ├── 触发 Gemini Notebook 原生命名修改
 │   │   ├── 触发 Gemini Notebook 原生删除确认
 │   │   ├── 失败来源删除入口
-│   │   └── 删除确认弹窗歧义防护与原生删除后的双次完整扫描 absence proof
+│   │   ├── rename/delete/details 和完整 batch-delete 会话互斥；route、manager instance 或来源身份变化即 fail closed
+│   │   ├── 原生 overlay 样式只在宿主同时带有 operation-scoped `sources-plus-native-action-active` class 与 `data-nsm-native-action-active="true"` 时生效，并在成功、失败、取消、超时或 teardown 后清理
+│   │   └── 删除确认弹窗歧义防护与原生删除后的完整 inventory identity absence proof
 │   ├── 先看
+│   │   ├── src/content/content-native-action-coordinator.js
 │   │   ├── src/content/content-source-actions.js
 │   │   └── src/content/content-source-action-menu.js
 │   └── 测试
+│       ├── tests/content/content-native-action-coordinator.test.js
 │       ├── tests/content/content-source-actions.test.js
 │       └── tests/content/content-source-action-menu.test.js
 ├── 欢迎弹窗 / 设置弹窗 / 导入导出 / 原生标签导入
@@ -535,18 +566,20 @@ manifest.json
 │   │   ├── schemaVersion 5 和 sourceStateById[sourceKey].addedAt
 │   │   ├── background FIFO、revision guard、equal-revision conflict
 │   │   ├── runtime-first LOAD_STATE 与 metadata-first raw primary/backup 兼容性选择
-│   │   ├── backup/history；工具栏、命令面板与 Cmd/Ctrl+Z、Cmd/Ctrl+Shift+Z、Ctrl+Y 暴露 Undo/Redo
+│   │   ├── previous-primary backup rotation 与 history；首次验证保存可镜像当前 primary，后续保存先将旧 verified primary 旋转到 backup，再写新 primary；工具栏、命令面板与 Cmd/Ctrl+Z、Cmd/Ctrl+Shift+Z、Ctrl+Y 暴露 Undo/Redo
+│   │   ├── Recovery、History、Import Backup、Source Repair 共用串行 snapshot transaction；只有明确 save `{ ok: true }` 且 recovery 清理确认后完成，已落盘但清理失败也结构化失败并回滚；Recovery Restore 在 target/rollback save 期间保留原 recovery payload，清理失败保留该 payload 的 Restore/Refresh
 │   │   ├── Undo/Redo 双栈均有界；应用目标 snapshot 后等待 critical save `{ ok: true }` 才移动栈，失败恢复操作前 runtime 并保持栈不变
 │   │   ├── lifecycle critical save、import-owned session recovery 与 A→B import completion 隔离
 │   │   ├── deferred initial load
 │   │   ├── 旧状态 source-key remap 后统一 normalize；first/later sync 保留完整候选到 Tree Placement，再按 reachable group → root → bin 修剪重复与循环边
-│   │   ├── scan 返回 `{ ok, shouldUpgradeStorage, reason }`；首次虚拟化/加载中 partial 会安全 staging 完整持久化树，再将当前 ready DOM 与未显示持久化占位合并，成功提交后清 pending；普通 partial/reconcile/placement 失败保持现状，partial 初始扫描仍传递旧 schema upgrade 标记
+│   │   ├── scan 返回 `{ ok, shouldUpgradeStorage, reason, completeness, observedIdentityKeys, totalHint }`；native inventory 另以 `hasAuthoritativeTotal` 标出完整 identity 数量与显式 totalHint 是否一致，删除证明不得以 DOM rowCount 补充缺失的 totalHint。`completeness` 区分 complete/partial/virtualized/loading，单次缺失与等数量滑窗替换不得移除旧来源；首次非完整扫描会安全 staging 完整持久化树，再将当前 ready DOM 与未显示持久化占位合并，成功提交后清 pending；普通 partial/reconcile/placement 失败保持现状，partial 初始扫描仍传递旧 schema upgrade 标记
 │   │   └── undo/redo、配置导入/回滚、手动历史/恢复快照与来源修复共用 state-apply Adapter；初始 LOAD_STATE 的无 DOM restore 使用独立 staging，汇总 snapshot sourceStateById、sourceTagsById、legacy enabled map、root、group children 与 ungrouped 的持久化来源引用，兼容只有旧树或 tag assignment 引用的快照，再经 Tree Placement 原子提交；外部 snapshot 的可选字段、group children 与 tree entry type/key/id 只按 own-property 读取，输出以 safe own write 避开原型 setter/只读字段
 │   ├── 先看
 │   │   ├── src/content/content-persistence.js
 │   │   ├── src/content/content-snapshot-signature.js
 │   │   ├── src/content/content-state-repair.js
 │   │   ├── src/content/content-state-apply.js
+│   │   ├── src/content/content-snapshot-transaction.js
 │   │   ├── src/content/content-undo-history.js
 │   │   ├── src/content/content-import-export.js
 │   │   ├── src/background/index.js
@@ -557,6 +590,7 @@ manifest.json
 │       ├── tests/content/content-snapshot-signature.test.js
 │       ├── tests/content/content-state-repair.test.js
 │       ├── tests/content/content-state-apply.test.js
+│       ├── tests/content/content-snapshot-transaction.test.js
 │       ├── tests/content/content-undo-history.test.js
 │       ├── tests/content/content-tree-placement.test.js
 │       ├── tests/content/content-state-reconcile.test.js
@@ -642,12 +676,12 @@ chrome.storage.local
 │   ├── 写入: content -> background SAVE_STATE（normal/lifecycle 共用 per-key FIFO）
 │   └── 排障: src/content/content-persistence.js, src/background/index.js
 ├── sourcesPlusState_<projectId>__backup
-│   ├── 用途: 主状态备份，load 时择优恢复
-│   ├── 写入: background save state
+│   ├── 用途: 上一代已验证 primary；首次验证保存没有旧 primary 时可镜像当前状态，load 时与 primary 按 metadata/质量择优恢复
+│   ├── 写入: background SAVE_STATE 在同 notebook FIFO 内先旋转旧 verified primary，再写新 primary；非法旧 primary 不覆盖已有 verified backup
 │   └── 排障: src/background/index.js
 ├── sourcesPlusHistory_<projectId>
 │   ├── 用途: 最近历史快照和手动命名恢复点，支持版本历史和恢复
-│   ├── 写入: background SAVE_STATE / APPEND_STATE_HISTORY
+│   ├── 写入: background SAVE_STATE / APPEND_STATE_HISTORY / DELETE_STATE_HISTORY_ENTRY / CLEAR_STATE_HISTORY；四类 mutation 与 primary/backup 共用同 notebook FIFO，后两者分别携带 exact entryId 或 scope=automatic|all
 │   └── 排障: src/background/index.js, src/content/content-persistence.js
 ├── sourcesPlusPreferences
 │   ├── 用途: 全局偏好，包含 developerModeEnabled、welcomeOnboardingSeenVersion、whatsNewSeenVersion、historyRetentionLimit、languageOverride、dragMode、commandShortcuts、visibleQuickViewKinds、appearance
@@ -729,14 +763,14 @@ content runtime memory
 │   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-source-sync.test.js
 │   └── 文件: tests/content/content-source-sync.test.js, tests/content/content-source-partial-sync-guard.test.js
 ├── 持久化 / history / import-export / background storage
-│   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-persistence.test.js tests/content/content-import-export.test.js tests/background.test.js
-│   └── 文件: tests/content/content-persistence.test.js, tests/background.test.js, tests/content/content-import-export.test.js, tests/content/content-state-apply.test.js, tests/content/content-undo-history.test.js
+│   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-persistence.test.js tests/content/content-snapshot-transaction.test.js tests/content/content-import-export.test.js tests/background.test.js
+│   └── 文件: tests/content/content-persistence.test.js, tests/content/content-snapshot-transaction.test.js, tests/background.test.js, tests/content/content-import-export.test.js, tests/content/content-state-apply.test.js, tests/content/content-undo-history.test.js
 ├── Tree Placement consumers / sync / restore / import normalization
 │   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-tree-placement.test.js tests/content/content-state-reconcile.test.js tests/content/content-state-apply.test.js tests/content/content-source-sync.test.js tests/content/content-import-export.test.js tests/content/content-persistence.test.js
 │   └── 文件: 上述 6 个测试；覆盖 first/later sync、source remap、cycle/duplicate/orphan、second normalize 幂等、preview/apply 一致、legacy/sourceTags-only 无 DOM persisted-ref source universe、own-property children/entry 读取、non-writable prototype 安全写回、跨 realm group 与原子 commit
 ├── 原生删除 / 重命名 / 详情
-│   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-source-actions.test.js tests/content/content-source-action-menu.test.js
-│   └── 文件: tests/content/content-source-actions.test.js, tests/content/content-source-action-menu.test.js, tests/content/content-source-sync.test.js；删除 marker 覆盖 stale raw DOM、ready-panel disappearance、placement failure/retry 与同身份重新添加
+│   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-native-action-coordinator.test.js tests/content/content-source-actions.test.js tests/content/content-source-action-menu.test.js
+│   └── 文件: tests/content/content-native-action-coordinator.test.js, tests/content/content-source-actions.test.js, tests/content/content-source-action-menu.test.js, tests/content/content-source-sync.test.js；覆盖独占 operation/context/identity/宿主 scope 与删除 inventory proof
 ├── 分组树 / checkbox
 │   ├── 命令: npm run test:unit -- --runTestsByPath tests/content/content-tree-placement.test.js tests/content/content-source-action-menu.test.js tests/content/content-source-actions.test.js tests/content/content-tree.test.js tests/content/content-render.test.js tests/locales.test.js
 │   └── 文件: 上述 6 个测试；覆盖四方向 target、source/group 共用 Interface、边界禁用、submenu、单次 placement/save/render、焦点恢复、匿名位置 live region、三语 key/placeholder 对齐
@@ -778,8 +812,15 @@ content runtime memory
 │   ├── 命令: npm run benchmark:drag
 │   ├── 文件: tests/smoke/drag-performance.smoke.spec.js, docs/DRAG_PERFORMANCE_BASELINE.md
 │   └── 默认: 仅 DRAG_BENCHMARK=1 时执行；100/500 行 × 单项/50 项选择，prepare 计时前在真实 pointerdown 后状态完成 settle/全量计数归零，以 isolated-world logical rAF callback ID 精确绑定目标帧；After 四组合及重复 500 行稳定性样本已记录，仍非默认 smoke/CI timing gate
+├── Manager 大列表性能基准（opt-in）
+│   ├── 命令: npm run benchmark:manager
+│   ├── 文件: tests/smoke/manager-performance.smoke.spec.js
+│   ├── 样本: 100/500/1000/5000 来源；每档 5 次 warm-up + 20 次测量
+│   ├── 聚焦复测: `MANAGER_BENCHMARK_ROWS=500,1000 MANAGER_BENCHMARK_WARMUP_RUNS=1 MANAGER_BENCHMARK_MEASURED_RUNS=3 npm run benchmark:manager` 可限制允许档位与有界样本数；正式发布仍必须不带变量跑 5 + 20 的全四档
+│   ├── 门槛: 同步输入 p95 ≤ 16ms；1000 行及以下搜索/Quick View/Tag filter/批量选择 p95 ≤ 100ms；5000 行对应交互 p95 ≤ 250ms
+│   └── 输出: commit、CPU/平台、Chromium、p50/p95/max、logical/materialized row 数，以及每样本的 DOM mutation、querySelector/querySelectorAll 和 layout-read count；临时隔离世界 instrumentation 在每个样本结束恢复原型，恢复失败会使基准失败。完成判定读取 render generation 与 logical datasets，不把未挂载 window rows 误判为隐藏；不属于默认 smoke/CI timing gate
 └── 完整发布前验证
-    └── 命令: npm run test:unit && npm run test:smoke && npm run package && git diff --check
+    └── 顺序: npm run lint → npm run test:unit → npm run test:smoke → npm run benchmark:drag → npm run benchmark:manager → git diff --check → npm run package
 ```
 
 需要可见浏览器调试 smoke 时才用：
@@ -792,10 +833,13 @@ PLAYWRIGHT_HEADLESS=false npm run test:smoke
 
 ```text
 发布前本地检查
+├── npm run lint
 ├── npm run test:unit
 ├── npm run test:smoke
-├── npm run package
-└── git diff --check
+├── npm run benchmark:drag
+├── npm run benchmark:manager
+├── git diff --check
+└── npm run package
 
 release zip
 ├── 生成脚本: scripts/package.js
@@ -979,7 +1023,7 @@ CI: .github/workflows/ci.yml
 │   ├── 批量删除必须先经过扩展 alertdialog，取消不得触发 native click 或本地 marker
 │   ├── dialog ambiguous 时 fail closed
 │   ├── title 明显冲突时 fail closed
-│   └── 删除成功必须由两次完整 ready-panel 扫描共同证明：目标身份缺失且行数准确减少；dialog 关闭、partial/busy、row 仍存在或 timeout 都不够
+│   └── 点击不可逆确认前必须由完整 identity inventory 与显式 native totalHint 验证唯一绑定目标；删除成功必须在 dialog 关闭后由稳定的同类证据证明：目标身份缺失、总数减少一且原有 survivors 保留；DOM rowCount 不能补充缺失 totalHint，也不是必需条件；同数量 backfill 仅在 totalHint 明确证明 N→N−1 时可成功，partial/virtualized/loading、仅 unmount、目标缺失或重复、row 仍存在、身份歧义或 timeout 都不够
 ├── storage 边界
 │   ├── content script 有 chrome.storage.local 权限
 │   ├── 正常状态写入仍应走 background

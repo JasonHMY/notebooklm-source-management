@@ -99,6 +99,24 @@
         const syncSourceToPage = typeof ctx.syncSourceToPage === 'function'
             ? ctx.syncSourceToPage
             : () => {};
+        const syncSourceToPageWithResult = typeof ctx.syncSourceToPageWithResult === 'function'
+            ? ctx.syncSourceToPageWithResult
+            : (source, desiredState) => {
+                const started = syncSourceToPage(source, desiredState);
+                return Promise.resolve(started === false
+                    ? {
+                        ok: false,
+                        sourceKey: source?.key || '',
+                        desiredState: Boolean(desiredState),
+                        reason: 'native_selection_sync_not_started'
+                    }
+                    : {
+                        ok: true,
+                        sourceKey: source?.key || '',
+                        desiredState: Boolean(desiredState),
+                        reason: 'native_selection_sync_started'
+                    });
+            };
         const getSourceTagIds = typeof ctx.getSourceTagIds === 'function'
             ? ctx.getSourceTagIds
             : () => [];
@@ -157,35 +175,54 @@
             const sourcesByKey = getSourcesByKey();
             const effectivelyEnabled = new Map();
 
-            const visit = (group, ancestorsEnabled, ancestorGroupIds = new Set()) => {
-                if (!group || ancestorGroupIds.has(group.id)) return;
-                const nextAncestorGroupIds = new Set(ancestorGroupIds);
-                nextAncestorGroupIds.add(group.id);
-                const currentEffectivelyEnabled = ancestorsEnabled && Boolean(group.enabled);
-                for (const child of group.children || []) {
-                    if (child.type === 'source') {
-                        const source = sourcesByKey.get(child.key);
-                        if (source && source.enabled && currentEffectivelyEnabled) {
-                            effectivelyEnabled.set(child.key, true);
-                        }
-                    } else if (child.type === 'group') {
-                        const subGroup = groupsById.get(child.id);
-                        if (subGroup) visit(subGroup, currentEffectivelyEnabled, nextAncestorGroupIds);
-                    }
-                }
-            };
-
             const rootEntries = Array.isArray(state.root)
                 ? state.root
                 : (Array.isArray(state.groups) ? state.groups.map((id) => ({ type: 'group', id })) : []);
-            for (const entry of rootEntries) {
-                if (entry && entry.type === 'group') {
-                    const group = groupsById.get(entry.id);
-                    if (group) visit(group, true);
-                } else if (entry && entry.type === 'source') {
-                    const source = sourcesByKey.get(entry.key);
-                    if (source && source.enabled) {
-                        effectivelyEnabled.set(entry.key, true);
+            const stack = [];
+            for (let index = rootEntries.length - 1; index >= 0; index -= 1) {
+                const entry = rootEntries[index];
+                if (entry?.type === 'group') {
+                    stack.push({
+                        kind: 'group',
+                        group: groupsById.get(entry.id),
+                        ancestorsEnabled: true,
+                        ancestorGroupIds: new Set()
+                    });
+                } else if (entry?.type === 'source') {
+                    stack.push({ kind: 'source', sourceKey: entry.key, effectivelyEnabled: true });
+                }
+            }
+
+            while (stack.length > 0) {
+                const task = stack.pop();
+                if (task.kind === 'source') {
+                    const source = sourcesByKey.get(task.sourceKey);
+                    if (source && source.enabled && task.effectivelyEnabled) {
+                        effectivelyEnabled.set(task.sourceKey, true);
+                    }
+                    continue;
+                }
+                const group = task.group;
+                if (!group || task.ancestorGroupIds.has(group.id)) continue;
+                const nextAncestorGroupIds = new Set(task.ancestorGroupIds);
+                nextAncestorGroupIds.add(group.id);
+                const currentEffectivelyEnabled = task.ancestorsEnabled && Boolean(group.enabled);
+                const children = Array.isArray(group.children) ? group.children : [];
+                for (let index = children.length - 1; index >= 0; index -= 1) {
+                    const child = children[index];
+                    if (child?.type === 'source') {
+                        stack.push({
+                            kind: 'source',
+                            sourceKey: child.key,
+                            effectivelyEnabled: currentEffectivelyEnabled
+                        });
+                    } else if (child?.type === 'group') {
+                        stack.push({
+                            kind: 'group',
+                            group: groupsById.get(child.id),
+                            ancestorsEnabled: currentEffectivelyEnabled,
+                            ancestorGroupIds: nextAncestorGroupIds
+                        });
                     }
                 }
             }
@@ -341,28 +378,34 @@
 
         function groupHasRenderableDescendant(group, ancestorGroupIds = new Set()) {
             if (!group || ancestorGroupIds.has(group.id)) return false;
-            const nextAncestorGroupIds = new Set(ancestorGroupIds);
-            nextAncestorGroupIds.add(group.id);
             const state = getState() || {};
             const searchCriteria = parseSearchQuery(state.filterQuery || '');
-            if (groupMatchesSearchCriteria(group, searchCriteria)) {
-                return true;
-            }
-
             const groupsById = getGroupsById();
             const sourcesByKey = getSourcesByKey();
-            for (const child of group.children || []) {
-                if (child.type === 'source') {
-                    const source = sourcesByKey.get(child.key);
-                    if (source && sourceMatchesCurrentFilters(source)) {
-                        return true;
-                    }
-                    continue;
+            const visitedGroupIds = new Set(ancestorGroupIds);
+            const stack = [group];
+
+            while (stack.length > 0) {
+                const currentGroup = stack.pop();
+                if (!currentGroup || visitedGroupIds.has(currentGroup.id)) continue;
+                visitedGroupIds.add(currentGroup.id);
+                if (groupMatchesSearchCriteria(currentGroup, searchCriteria)) {
+                    return true;
                 }
 
-                const childGroup = groupsById.get(child.id);
-                if (childGroup && groupHasRenderableDescendant(childGroup, nextAncestorGroupIds)) {
-                    return true;
+                const children = Array.isArray(currentGroup.children)
+                    ? currentGroup.children
+                    : [];
+                for (let index = children.length - 1; index >= 0; index -= 1) {
+                    const child = children[index];
+                    if (child?.type === 'source') {
+                        const source = sourcesByKey.get(child.key);
+                        if (source && sourceMatchesCurrentFilters(source)) {
+                            return true;
+                        }
+                    } else if (child?.type === 'group' && !visitedGroupIds.has(child.id)) {
+                        stack.push(groupsById.get(child.id));
+                    }
                 }
             }
 
@@ -588,21 +631,131 @@
         function syncSourcesToEffectiveState(previousStates = null) {
             const sourcesByKey = getSourcesByKey();
             const nextStates = collectEffectiveSourceStates();
-
-            if (!previousStates) {
-                nextStates.forEach((desiredState, sourceKey) => {
-                    syncSourceToPage(sourcesByKey.get(sourceKey), desiredState);
-                });
-                return nextStates;
-            }
-
+            const changedSourceKeys = [];
+            const confirmations = [];
             nextStates.forEach((desiredState, sourceKey) => {
-                if (previousStates.get(sourceKey) !== desiredState) {
-                    syncSourceToPage(sourcesByKey.get(sourceKey), desiredState);
+                if (previousStates && previousStates.get(sourceKey) === desiredState) return;
+                changedSourceKeys.push(sourceKey);
+                let confirmation;
+                try {
+                    confirmation = syncSourceToPageWithResult(
+                        sourcesByKey.get(sourceKey),
+                        desiredState
+                    );
+                } catch (error) {
+                    confirmation = {
+                        ok: false,
+                        sourceKey,
+                        desiredState,
+                        reason: error?.reason || error?.message || 'native_selection_sync_error'
+                    };
                 }
+                confirmations.push(Promise.resolve(confirmation)
+                    .then((result) => (
+                        result?.ok === true
+                            ? result
+                            : {
+                                ok: false,
+                                sourceKey,
+                                desiredState,
+                                reason: result?.reason || 'native_selection_sync_failed'
+                            }
+                    ))
+                    .catch((error) => ({
+                        ok: false,
+                        sourceKey,
+                        desiredState,
+                        reason: error?.reason || error?.message || 'native_selection_sync_error'
+                    })));
             });
 
+            const confirmation = Promise.all(confirmations).then((results) => {
+                const failed = results.filter((result) => result?.ok !== true);
+                return {
+                    ok: failed.length === 0,
+                    changedSourceKeys: changedSourceKeys.slice(),
+                    succeeded: results.filter((result) => result?.ok === true),
+                    failed,
+                    reason: failed.length > 0 ? 'native_selection_sync_failed' : 'confirmed'
+                };
+            });
+            Object.defineProperties(nextStates, {
+                changedSourceKeys: {
+                    configurable: true,
+                    value: changedSourceKeys.slice()
+                },
+                confirmation: {
+                    configurable: true,
+                    value: confirmation
+                }
+            });
+            confirmation.then((result) => {
+                if (!result.ok) render();
+            });
             return nextStates;
+        }
+
+        function awaitEffectiveStateSync(syncHandle) {
+            const confirmation = syncHandle?.confirmation;
+            if (!confirmation || typeof confirmation.then !== 'function') {
+                return Promise.resolve({
+                    ok: true,
+                    changedSourceKeys: [],
+                    succeeded: [],
+                    failed: [],
+                    reason: 'no_native_changes'
+                });
+            }
+            return Promise.resolve(confirmation).catch((error) => ({
+                ok: false,
+                changedSourceKeys: Array.isArray(syncHandle?.changedSourceKeys)
+                    ? syncHandle.changedSourceKeys.slice()
+                    : [],
+                succeeded: [],
+                failed: [{
+                    sourceKey: '',
+                    reason: error?.reason || error?.message || 'native_selection_sync_error'
+                }],
+                reason: 'native_selection_sync_failed'
+            }));
+        }
+
+        function runEffectiveStateTransition(mutate, afterMutate = null) {
+            if (typeof mutate !== 'function') {
+                return {
+                    ok: false,
+                    reason: 'invalid_transition',
+                    changedSourceKeys: []
+                };
+            }
+            const previousStates = collectEffectiveSourceStates();
+            const result = mutate();
+            if (result === false) {
+                return {
+                    ok: false,
+                    reason: 'transition_rejected',
+                    result,
+                    changedSourceKeys: []
+                };
+            }
+            if (typeof afterMutate === 'function') {
+                afterMutate(result);
+            }
+            const nextStates = syncSourcesToEffectiveState(previousStates);
+            const changedSourceKeys = [];
+            nextStates.forEach((desiredState, sourceKey) => {
+                if (previousStates.get(sourceKey) !== desiredState) {
+                    changedSourceKeys.push(sourceKey);
+                }
+            });
+            return {
+                ok: true,
+                result,
+                previousStates,
+                nextStates,
+                changedSourceKeys,
+                confirmation: awaitEffectiveStateSync(nextStates)
+            };
         }
 
         return {
@@ -633,6 +786,8 @@
             handleSourceActionMenuViewportChange,
             collectEffectiveSourceStates,
             syncSourcesToEffectiveState,
+            awaitEffectiveStateSync,
+            runEffectiveStateTransition,
             isDescendant
         };
     }

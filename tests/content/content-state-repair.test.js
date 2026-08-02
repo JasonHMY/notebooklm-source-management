@@ -42,6 +42,25 @@ describe('content state repair', () => {
             expect([...repair.collectSnapshotGroupedSourceKeys(snapshot)]).toEqual(['deep']);
         });
 
+        it('collects a grouped source through a fifty-level snapshot iteratively', () => {
+            const groupsById = {};
+            const depth = 50;
+            for (let level = 0; level < depth; level += 1) {
+                groupsById[`g-${level}`] = {
+                    children: level < depth - 1
+                        ? [{ type: 'group', id: `g-${level + 1}` }]
+                        : [{ type: 'source', key: 'deep-source' }]
+                };
+            }
+            const snapshot = {
+                root: [{ type: 'group', id: 'g-0' }],
+                groupsById
+            };
+
+            expect([...repair.collectSnapshotGroupedSourceKeys(snapshot)])
+                .toEqual(['deep-source']);
+        });
+
         it('does not loop on cyclic group references', () => {
             const snapshot = {
                 groups: ['a'],

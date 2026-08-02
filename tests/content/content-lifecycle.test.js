@@ -1597,6 +1597,7 @@ describe('manager launcher messaging', () => {
         const source = mod.sourcesByKey.get(sourceKey);
         source.enabled = false;
         expect(mod.syncSourceToPage(source, false)).toBe(true);
+        mod.processClickQueue();
 
         expect(nativeSource.checkbox.click).toHaveBeenCalledTimes(1);
         expect(mod.getDiagnosticsInfo().lastNativeSelectionSyncFailure).toBe(null);
@@ -2239,6 +2240,35 @@ describe('manager launcher messaging', () => {
         expect(mod._resolveKeyboardResizeHeightForTest(160, 'ArrowUp', 150)).toBe(150);
         expect(mod._resolveKeyboardResizeHeightForTest(NaN, 'ArrowDown', 150)).toBe(166);
         expect(mod._resolveKeyboardResizeHeightForTest(300, 'Enter', 150)).toBeNull();
+    });
+
+    it('coalesces search renders within the 80ms interaction budget', () => {
+        expect(mod._getSearchRenderDebounceMsForTest()).toBe(80);
+        expect(mod._getSearchRenderTimerMsForTest()).toBe(16);
+    });
+
+    it('does not surface a stale notebook snapshot rollback warning in the current notebook', () => {
+        mod._setProjectId('notebook-b');
+        mod.setSaveStatus({
+            state: 'idle',
+            recoveryAvailable: false,
+            lastError: ''
+        });
+
+        expect(mod._handleSnapshotRollbackUnconfirmedForTest({
+            transaction: {
+                contextToken: {
+                    projectId: 'notebook-a',
+                    managerInstanceToken: mod._getActiveManagerInstanceTokenForTest(),
+                    state: mod.state
+                }
+            }
+        })).toBe(false);
+        expect(mod.getSaveStatus()).toMatchObject({
+            state: 'idle',
+            recoveryAvailable: false,
+            lastError: ''
+        });
     });
 
     it('flushes a pending save before DISABLE_MANAGER removes the host and responds immediately', () => {

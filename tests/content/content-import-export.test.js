@@ -422,6 +422,27 @@ describe('content import/export helper', () => {
             expect(refs.size).toBe(0);
         });
 
+        it('collects a source reference through a fifty-level imported tree iteratively', () => {
+            const groupsById = {};
+            const depth = 50;
+            for (let level = 0; level < depth; level += 1) {
+                groupsById[`g-${level}`] = {
+                    id: `g-${level}`,
+                    children: level < depth - 1
+                        ? [{ type: 'group', id: `g-${level + 1}` }]
+                        : [{ type: 'source', key: 'deep-source' }]
+                };
+            }
+            const { collectImportSourceRefs } = createContentImportExport(createDeps());
+
+            expect([...collectImportSourceRefs({
+                groupsById,
+                root: [{ type: 'group', id: 'g-0' }],
+                ungrouped: [],
+                sourceStateById: {}
+            })]).toEqual(['deep-source']);
+        });
+
         it('ignores group children inherited through Object.prototype', () => {
             const priorChildrenDescriptor = Object.getOwnPropertyDescriptor(
                 Object.prototype,

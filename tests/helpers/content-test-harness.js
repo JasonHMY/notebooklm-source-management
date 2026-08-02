@@ -13,6 +13,7 @@ const CONTENT_HELPER_GLOBALS = [
     'NSM_CREATE_MANAGER_SHELL',
     'NSM_CREATE_CONTENT_PANEL_DOM',
     'NSM_CREATE_CONTENT_SOURCE_ACTION_MENU',
+    'NSM_CREATE_CONTENT_NATIVE_ACTION_COORDINATOR',
     'NSM_CREATE_CONTENT_SOURCE_ACTIONS',
     'NSM_CREATE_CONTENT_TAGS',
     'NSM_CREATE_CONTENT_TREE_PLACEMENT',
@@ -24,6 +25,7 @@ const CONTENT_HELPER_GLOBALS = [
     'NSM_CREATE_CONTENT_TOAST_STATUS',
     'NSM_CREATE_CONTENT_TOAST',
     'NSM_CREATE_CONTENT_STATE_APPLY',
+    'NSM_CREATE_CONTENT_SNAPSHOT_TRANSACTION',
     'NSM_CREATE_CONTENT_UNDO_HISTORY',
     'NSM_CREATE_CONTENT_IMPORT_EXPORT',
     'NSM_CREATE_CONTENT_DIAGNOSTICS',
@@ -369,7 +371,11 @@ const createMockSourceRow = ({
     const checkbox = {
         checked,
         disabled,
-        click: jest.fn(),
+        click: jest.fn(() => {
+            if (!checkbox.disabled && typeof checkbox.checked === 'boolean') {
+                checkbox.checked = !checkbox.checked;
+            }
+        }),
         getAttribute: jest.fn((attr) => (attr === 'aria-label' ? ariaLabel : null))
     };
     const titleEl = { textContent: title };

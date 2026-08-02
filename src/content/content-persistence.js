@@ -405,10 +405,26 @@
             }
         }
 
+        function retainRecoverySnapshotAfterCleanupFailure(key) {
+            if (!key || key !== recoveryKeyForProject()) return false;
+            const currentStatus = getSaveStatus();
+            const recovery = readRecoverySnapshot(key);
+            setSaveStatus({
+                state: 'recovery_available',
+                recoveryAvailable: true,
+                recoveryCreatedAt: recovery?.createdAt || currentStatus.recoveryCreatedAt || '',
+                lastError: 'recovery_cleanup_failed'
+            });
+            return true;
+        }
+
         function clearRecoverySnapshot(projectIdOrRecoveryKey = ctx.projectId, options = {}) {
             const storage = getSessionStorage();
             const key = resolveRecoveryKey(projectIdOrRecoveryKey);
-            if (!storage || !key) return false;
+            if (!storage || !key) {
+                retainRecoverySnapshotAfterCleanupFailure(key);
+                return false;
+            }
 
             try {
                 if (options.expectedClientSaveId) {
@@ -417,6 +433,7 @@
                         currentRecovery?.clientSaveId
                         && currentRecovery.clientSaveId !== options.expectedClientSaveId
                     ) {
+                        retainRecoverySnapshotAfterCleanupFailure(key);
                         return false;
                     }
                 }
@@ -430,6 +447,10 @@
                 return true;
             } catch (error) {
                 console.warn('GeminiNotebook-Source-Management: Recovery snapshot clear failed:', error);
+                retainRecoverySnapshotAfterCleanupFailure(key);
+                developerLog('warn', 'persistence', 'recovery_snapshot_clear_failed', {
+                    reason: 'recovery_cleanup_failed'
+                });
                 return false;
             }
         }
@@ -455,8 +476,7 @@
             }
 
             if (loadedState && arePersistableSnapshotsEquivalent(recovery.snapshot, loadedState)) {
-                clearRecoverySnapshot();
-                return false;
+                return !clearRecoverySnapshot();
             }
 
             const loadedRevision = getSnapshotSaveRevision(loadedState);
@@ -472,8 +492,7 @@
                 return true;
             }
 
-            clearRecoverySnapshot();
-            return false;
+            return !clearRecoverySnapshot();
         }
 
         function getSnapshotSavedAtTimestamp(snapshot) {
@@ -1023,10 +1042,11 @@
             });
             const operationOptions = Object.freeze({ ...options });
             const requestedScopeGeneration = schemaWriteScopeGeneration;
-            const preserveExistingImportRecovery = (
-                operationOptions.reason === 'page_lifecycle'
-                && isImportOwnedRecovery(readRecoverySnapshot(operation.recoveryKey))
-            );
+            const preserveExistingRecovery = Boolean(operationOptions.preserveRecoverySnapshot)
+                || (
+                    operationOptions.reason === 'page_lifecycle'
+                    && isImportOwnedRecovery(readRecoverySnapshot(operation.recoveryKey))
+                );
             const counts = getPersistableStateCounts(operation.saveSnapshot);
             developerLog('debug', 'persistence', 'state_save_requested', {
                 clientSaveId,
@@ -1037,7 +1057,7 @@
                 groupCount: counts.groupCount,
                 tagCount: counts.tagCount
             });
-            if (operationOptions.critical && !preserveExistingImportRecovery) {
+            if (operationOptions.critical && !preserveExistingRecovery) {
                 writeRecoverySnapshot(operation.recoverySnapshot, {
                     recoveryKey: operation.recoveryKey,
                     baseRevision: getSaveRevisionForStateKey(operation.stateKey),
@@ -1109,6 +1129,7 @@
                         const storageMetadata = getStorageMetadataFromResult(result);
                         const hasStorageMetadata = storageMetadata.storageQuotaBytes > 0 || storageMetadata.storageUsageBytes > 0;
                         const currentStatus = getSaveStatus();
+                        let resolvedResult = result;
                         if (result.ok) {
                             const saveRevision = result.runtimeResult?.saveRevision
                                 || getSnapshotSaveRevision(result.localData)
@@ -1119,36 +1140,49 @@
                                 || dispatchedSnapshot._savedAt
                                 || new Date().toISOString();
                             setSaveRevisionForStateKey(operation.stateKey, saveRevision);
-                            if (isCurrentOperationContext()) {
-                                setSaveStatus({
-                                    state: 'saved',
-                                    lastSavedAt: savedAt,
-                                    lastSaveRevision: saveRevision,
-                                    currentRevision: saveRevision,
-                                    lastError: '',
-                                    clientSaveId: operation.clientSaveId,
-                                    storageUsageBytes: hasStorageMetadata ? storageMetadata.storageUsageBytes : currentStatus.storageUsageBytes,
-                                    storageQuotaBytes: hasStorageMetadata ? storageMetadata.storageQuotaBytes : currentStatus.storageQuotaBytes,
-                                    storageUsageRatio: hasStorageMetadata ? storageMetadata.storageUsageRatio : currentStatus.storageUsageRatio,
-                                    storageWarning: hasStorageMetadata ? storageMetadata.storageWarning : currentStatus.storageWarning,
-                                    lastStorageError: '',
-                                    historyEntryCount: hasStorageMetadata ? storageMetadata.historyEntryCount : currentStatus.historyEntryCount,
-                                    lastStaleLocalRevision: 0,
-                                    lastStaleRemoteRevision: 0,
-                                    lastStaleDetectedAt: ''
-                                });
-                            }
-                            if (
+                            const shouldClearRecoverySnapshot = (
                                 operationOptions.critical
-                                && !preserveExistingImportRecovery
+                                && !preserveExistingRecovery
                                 && result.runtimeResult?.ok === true
                                 && (
                                     !operationOptions.recoveryFallbackSnapshot
                                     || isCurrentOperationContext()
                                 )
-                            ) {
-                                clearRecoverySnapshot(operation.recoveryKey, {
+                            );
+                            const recoverySnapshotCleared = !shouldClearRecoverySnapshot
+                                || clearRecoverySnapshot(operation.recoveryKey, {
                                     expectedClientSaveId: operation.clientSaveId
+                                });
+                            if (isCurrentOperationContext()) {
+                                if (recoverySnapshotCleared) {
+                                    setSaveStatus({
+                                        state: 'saved',
+                                        lastSavedAt: savedAt,
+                                        lastSaveRevision: saveRevision,
+                                        currentRevision: saveRevision,
+                                        lastError: '',
+                                        clientSaveId: operation.clientSaveId,
+                                        storageUsageBytes: hasStorageMetadata ? storageMetadata.storageUsageBytes : currentStatus.storageUsageBytes,
+                                        storageQuotaBytes: hasStorageMetadata ? storageMetadata.storageQuotaBytes : currentStatus.storageQuotaBytes,
+                                        storageUsageRatio: hasStorageMetadata ? storageMetadata.storageUsageRatio : currentStatus.storageUsageRatio,
+                                        storageWarning: hasStorageMetadata ? storageMetadata.storageWarning : currentStatus.storageWarning,
+                                        lastStorageError: '',
+                                        historyEntryCount: hasStorageMetadata ? storageMetadata.historyEntryCount : currentStatus.historyEntryCount,
+                                        lastStaleLocalRevision: 0,
+                                        lastStaleRemoteRevision: 0,
+                                        lastStaleDetectedAt: ''
+                                    });
+                                }
+                            }
+                            if (!recoverySnapshotCleared) {
+                                developerLog('warn', 'persistence', 'state_save_recovery_cleanup_retained', {
+                                    clientSaveId: operation.clientSaveId,
+                                    saveRevision
+                                });
+                                resolvedResult = Object.assign({}, result, {
+                                    ok: false,
+                                    reason: 'recovery_cleanup_failed',
+                                    persistenceCommitted: true
                                 });
                             }
                             developerLog('info', 'persistence', 'state_save_succeeded', {
@@ -1198,7 +1232,7 @@
                             }
                             if (
                                 operationOptions.critical
-                                && !preserveExistingImportRecovery
+                                && !preserveExistingRecovery
                             ) {
                                 const isAmbiguousAck = [
                                     'runtime_message_error',
@@ -1229,9 +1263,9 @@
                             });
                         }
                         if (operationOptions.critical && isCurrentOperationContext()) {
-                            notifyCriticalSaveFailure(result);
+                            notifyCriticalSaveFailure(resolvedResult);
                         }
-                        return result;
+                        return resolvedResult;
                     });
             };
 

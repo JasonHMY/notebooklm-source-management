@@ -64,23 +64,32 @@
                 ? snapshot.root
                 : (Array.isArray(snapshot?.groups) ? snapshot.groups.map((id) => ({ type: 'group', id })) : []);
             const visitedGroups = new Set();
-
-            const walkGroup = (groupId) => {
-                if (!groupId || visitedGroups.has(groupId)) return;
-                visitedGroups.add(groupId);
-                const group = groupsById[groupId];
-                (Array.isArray(group?.children) ? group.children : []).forEach((child) => {
+            const stack = [];
+            for (let index = rootEntries.length - 1; index >= 0; index -= 1) {
+                const entry = rootEntries[index];
+                if (entry?.type === 'group' && entry.id) {
+                    stack.push({ kind: 'group', id: entry.id });
+                }
+            }
+            while (stack.length > 0) {
+                const task = stack.pop();
+                if (task.kind === 'source') {
+                    result.add(task.key);
+                    continue;
+                }
+                if (!task.id || visitedGroups.has(task.id)) continue;
+                visitedGroups.add(task.id);
+                const group = groupsById[task.id];
+                const children = Array.isArray(group?.children) ? group.children : [];
+                for (let index = children.length - 1; index >= 0; index -= 1) {
+                    const child = children[index];
                     if (child?.type === 'source' && child.key) {
-                        result.add(child.key);
+                        stack.push({ kind: 'source', key: child.key });
                     } else if (child?.type === 'group' && child.id) {
-                        walkGroup(child.id);
+                        stack.push({ kind: 'group', id: child.id });
                     }
-                });
-            };
-
-            rootEntries.forEach((entry) => {
-                if (entry && entry.type === 'group' && entry.id) walkGroup(entry.id);
-            });
+                }
+            }
             return result;
         }
 

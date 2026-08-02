@@ -99,6 +99,28 @@ describe('accepted native source deletion reconciliation', () => {
         expect(mod.state.ungrouped).toEqual([]);
     });
 
+    it('clears undo and redo history after an accepted irreversible native deletion', () => {
+        mod._setProjectId('delete-undo-history');
+        mod.sourcesByKey.set('A', { key: 'A', title: 'Deleted source', enabled: true });
+        mod.sourcesByKey.set('B', { key: 'B', title: 'Remaining source', enabled: true });
+        mod.state.root = [{ type: 'source', key: 'A' }, { type: 'source', key: 'B' }];
+        mod._resetUndoHistoryBaselineForTest();
+        mod.sourcesByKey.get('A').enabled = false;
+        mod.saveState();
+
+        expect(mod._getUndoStackLengthForTest()).toBeGreaterThan(0);
+        expect(mod._handleNativeSourceDeleteAcceptedForTest('A')).toBe(true);
+        expect(mod._getUndoStackLengthForTest()).toBe(0);
+        expect(mod._getRedoStackLengthForTest()).toBe(0);
+        expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(
+            expect.objectContaining({
+                type: 'SAVE_STATE',
+                critical: true
+            }),
+            expect.any(Function)
+        );
+    });
+
     it('does not persist dangling refs when accepted-delete tree repair fails closed', () => {
         mod.state.root = [{ type: 'group', id: 'B' }];
         mod.state.ungrouped = [];
@@ -239,11 +261,11 @@ describe('scanAndSyncSources', () => {
             mod.DEPS.row.includes(selector) ? [source.row] : []
         ));
 
-        expect(mod.scanAndSyncSources({}, true)).toEqual({
+        expect(mod.scanAndSyncSources({}, true)).toEqual(expect.objectContaining({
             ok: true,
             shouldUpgradeStorage: false,
             reason: 'completed'
-        });
+        }));
 
         const depth = 12_000;
         mod.state.root = [{ type: 'group', id: 'deep-0' }];
@@ -2863,6 +2885,9 @@ describe('scanAndSyncSources', () => {
         panel.querySelectorAll = jest.fn((selector) => (
             mod.DEPS.row.includes(selector) ? [firstRow.row, secondRow.row, thirdRow.row] : []
         ));
+        panel.getAttribute = jest.fn((attributeName) => (
+            attributeName === 'data-total-count' ? '3' : null
+        ));
         global.document.querySelectorAll = jest.fn((selector) => (
             mod.DEPS.row.includes(selector) ? [firstRow.row, secondRow.row, thirdRow.row] : []
         ));
@@ -2937,11 +2962,11 @@ describe('scanAndSyncSources', () => {
         const changed = mod.scanAndSyncSources(null, false);
         mod.flushPendingStateSave();
 
-        expect(changed).toEqual({
+        expect(changed).toEqual(expect.objectContaining({
             ok: false,
             shouldUpgradeStorage: false,
             reason: 'unsafe_remap'
-        });
+        }));
         expect(mod.groupsById.get('folder').children).toEqual(originalChildren);
         expect(mod.state.ungrouped).toEqual([]);
         expect(mod.getDiagnosticsInfo().lastSkippedStructuralSourceSync).toEqual(expect.objectContaining({
@@ -3003,11 +3028,11 @@ describe('scanAndSyncSources', () => {
             deletedDescriptor
         );
 
-        expect(mod.scanAndSyncSources({}, false)).toEqual({
+        expect(mod.scanAndSyncSources({}, false)).toEqual(expect.objectContaining({
             ok: false,
             shouldUpgradeStorage: false,
             reason: 'placement_failed'
-        });
+        }));
         expect(mod._getRecentNativeDeleteMarkersForTest()).toEqual({
             sourceKeys: new Set([deletedDescriptor.key]),
             identityKeys: new Set([
@@ -3024,11 +3049,11 @@ describe('scanAndSyncSources', () => {
             replacementDescriptor.key
         ];
 
-        expect(mod.scanAndSyncSources({}, false)).toEqual({
+        expect(mod.scanAndSyncSources({}, false)).toEqual(expect.objectContaining({
             ok: true,
             shouldUpgradeStorage: false,
             reason: 'completed'
-        });
+        }));
         expect(mod.sourcesByKey.has(deletedDescriptor.key)).toBe(false);
         expect(mod.sourcesByKey.has(replacementDescriptor.key)).toBe(true);
         expect(mod._getRecentNativeDeleteMarkersForTest()).toEqual({
@@ -3073,11 +3098,11 @@ describe('scanAndSyncSources', () => {
         expect(mod._handleNativeSourceDeleteAcceptedForTest(deletedDescriptor.key)).toBe(true);
         expect(mod.sourcesByKey.has(deletedDescriptor.key)).toBe(false);
 
-        expect(mod.scanAndSyncSources({}, false)).toEqual({
+        expect(mod.scanAndSyncSources({}, false)).toEqual(expect.objectContaining({
             ok: true,
             shouldUpgradeStorage: false,
             reason: 'completed'
-        });
+        }));
         expect(mod.sourcesByKey.has(deletedDescriptor.key)).toBe(false);
         expect(mod._getRecentNativeDeleteMarkersForTest()).toEqual({
             sourceKeys: new Set([deletedDescriptor.key]),
@@ -3088,22 +3113,22 @@ describe('scanAndSyncSources', () => {
         });
 
         visibleRows = [];
-        expect(mod.scanAndSyncSources({}, false)).toEqual({
+        expect(mod.scanAndSyncSources({}, false)).toEqual(expect.objectContaining({
             ok: true,
             shouldUpgradeStorage: false,
             reason: 'completed'
-        });
+        }));
         expect(mod._getRecentNativeDeleteMarkersForTest()).toEqual({
             sourceKeys: new Set(),
             identityKeys: new Set()
         });
 
         visibleRows = [deletedRow.row];
-        expect(mod.scanAndSyncSources({}, false)).toEqual({
+        expect(mod.scanAndSyncSources({}, false)).toEqual(expect.objectContaining({
             ok: true,
             shouldUpgradeStorage: false,
             reason: 'completed'
-        });
+        }));
         expect(mod.sourcesByKey.has(deletedDescriptor.key)).toBe(true);
         expect(mod.state.ungrouped).toContain(deletedDescriptor.key);
     });
@@ -3159,11 +3184,11 @@ describe('scanAndSyncSources', () => {
 
         expect(mod._handleNativeSourceDeleteAcceptedForTest(deletedDescriptor.key)).toBe(false);
         for (let attempt = 0; attempt < 2; attempt += 1) {
-            expect(mod.scanAndSyncSources({}, false)).toEqual({
+            expect(mod.scanAndSyncSources({}, false)).toEqual(expect.objectContaining({
                 ok: false,
                 shouldUpgradeStorage: false,
                 reason: 'placement_failed'
-            });
+            }));
             expect(mod.sourcesByKey.has(deletedDescriptor.key)).toBe(true);
             expect(mod._getRecentNativeDeleteMarkersForTest()).toEqual({
                 sourceKeys: new Set([deletedDescriptor.key]),
@@ -3182,11 +3207,11 @@ describe('scanAndSyncSources', () => {
             replacementDescriptor.key
         ];
 
-        expect(mod.scanAndSyncSources({}, false)).toEqual({
+        expect(mod.scanAndSyncSources({}, false)).toEqual(expect.objectContaining({
             ok: true,
             shouldUpgradeStorage: false,
             reason: 'completed'
-        });
+        }));
         expect(mod.sourcesByKey.has(deletedDescriptor.key)).toBe(false);
         expect(mod.sourcesByKey.has(replacementDescriptor.key)).toBe(true);
         expect(mod._getRecentNativeDeleteMarkersForTest()).toEqual({
@@ -3252,11 +3277,11 @@ describe('scanAndSyncSources', () => {
             deletedDescriptor
         );
 
-        expect(mod.scanAndSyncSources({}, false)).toEqual({
+        expect(mod.scanAndSyncSources({}, false)).toEqual(expect.objectContaining({
             ok: true,
             shouldUpgradeStorage: false,
             reason: 'completed'
-        });
+        }));
         expect(mod.sourcesByKey.has(deletedDescriptor.key)).toBe(false);
         expect(mod.sourcesByKey.has(retainedDescriptor.key)).toBe(true);
         expect(mod.sourcesByKey.has(addedDescriptor.key)).toBe(true);
@@ -3294,11 +3319,11 @@ describe('scanAndSyncSources', () => {
         }, true);
 
         const secondKey = mod.state.ungrouped[0];
-        expect(shouldUpgrade).toEqual({
+        expect(shouldUpgrade).toEqual(expect.objectContaining({
             ok: true,
             shouldUpgradeStorage: false,
             reason: 'completed'
-        });
+        }));
         expect(mod.sourcesByKey.get(descriptorA.key).enabled).toBe(false);
         expect(mod.groupsById.get('group1').children[0].key).toBe(descriptorA.key);
         expect(secondKey).toBeDefined();
@@ -3358,11 +3383,11 @@ describe('scanAndSyncSources', () => {
             }
         }), true);
 
-        expect(shouldUpgrade).toEqual({
+        expect(shouldUpgrade).toEqual(expect.objectContaining({
             ok: true,
             shouldUpgradeStorage: true,
             reason: 'completed'
-        });
+        }));
         expect(mod.groupsById.get('group1').children[0].key).toBe(descriptor.key);
         expect(mod.sourcesByKey.get(descriptor.key).enabled).toBe(false);
     });
@@ -3505,11 +3530,11 @@ describe('scanAndSyncSources', () => {
                     identityType: 'stable-token'
                 }
             }
-        }, true)).toEqual({
+        }, true)).toEqual(expect.objectContaining({
             ok: false,
             shouldUpgradeStorage: false,
             reason: 'partial_initial_source_sync'
-        });
+        }));
 
         expect(mod.groupsById.has('group1')).toBe(false);
         expect(mod.sourcesByKey.has(currentDescriptor.key)).toBe(false);
@@ -3711,11 +3736,11 @@ describe('scanAndSyncSources', () => {
             isLoading: true,
             isDisabled: true
         });
-        expect(shouldUpgrade).toEqual({
+        expect(shouldUpgrade).toEqual(expect.objectContaining({
             ok: true,
             shouldUpgradeStorage: false,
             reason: 'completed'
-        });
+        }));
         expect(mod.hasRenderableSourceRows()).toBe(true);
         expect(mod.getSourcePanelState(panel)).toEqual(expect.objectContaining({
             state: 'ready',
@@ -3967,13 +3992,14 @@ describe('scanAndSyncSources', () => {
             children: [{ type: 'source', key: firstDescriptor.key }]
         });
         mod.sourcesByKey.get(firstDescriptor.key).enabled = false;
-        const tagId = mod.createTag('Pinned');
+        const tagId = mod.createTag('Pinned').tagId;
         mod.setSourceTagIds(firstDescriptor.key, [tagId]);
 
         global.document.querySelectorAll = jest.fn((selector) => (
             mod.DEPS.row.includes(selector) ? [secondPass.row] : []
         ));
-        mod.scanAndSyncSources(null, false);
+        mod.scanAndSyncSources(null, false, { scanCompleteness: 'complete' });
+        mod.scanAndSyncSources(null, false, { scanCompleteness: 'complete' });
 
         expect(firstDescriptor.key).not.toBe(secondDescriptor.key);
         expect(mod.groupsById.get('group1').children).toEqual([]);
@@ -3993,6 +4019,9 @@ describe('scanAndSyncSources', () => {
 
         mod._setProjectId('test-project');
         global.document.querySelector = jest.fn(() => panel);
+        panel.getAttribute = jest.fn((attributeName) => (
+            attributeName === 'data-total-count' ? '3' : null
+        ));
         global.document.querySelectorAll = jest.fn((selector) => (
             mod.DEPS.row.includes(selector) ? [firstRow.row, secondRow.row] : []
         ));
@@ -4246,12 +4275,13 @@ describe('scanAndSyncSources', () => {
         ));
         mod.scanAndSyncSources(null, true);
         mod.sourcesByKey.get(firstDescriptor.key).enabled = false;
-        const tagId = mod.createTag('Pinned');
+        const tagId = mod.createTag('Pinned').tagId;
         mod.setSourceTagIds(firstDescriptor.key, [tagId]);
 
         renamedRow.titleEl.textContent = 'Renamed Source';
         const renamedDescriptor = mod.createSourceDescriptor(renamedRow.row, new Map(), new Map());
-        mod.scanAndSyncSources(null, false);
+        mod.scanAndSyncSources(null, false, { scanCompleteness: 'complete' });
+        mod.scanAndSyncSources(null, false, { scanCompleteness: 'complete' });
 
         expect(firstDescriptor.key).not.toBe(renamedDescriptor.key);
         expect(mod.state.ungrouped).toEqual([renamedDescriptor.key, otherDescriptor.key]);
@@ -4288,7 +4318,8 @@ describe('scanAndSyncSources', () => {
             mod.DEPS.row.includes(selector) ? [newRenamedRow.row, newAnchorRow.row] : []
         ));
 
-        mod.scanAndSyncSources(null, false);
+        mod.scanAndSyncSources(null, false, { scanCompleteness: 'complete' });
+        mod.scanAndSyncSources(null, false, { scanCompleteness: 'complete' });
 
         expect(firstDescriptor.key).not.toBe(renamedDescriptor.key);
         expect(mod.groupsById.get('group1').children).toEqual([{ type: 'source', key: renamedDescriptor.key }]);
@@ -4315,7 +4346,7 @@ describe('scanAndSyncSources', () => {
             children: [{ type: 'source', key: firstDescriptor.key }]
         });
         mod.sourcesByKey.get(firstDescriptor.key).enabled = false;
-        const tagId = mod.createTag('Pinned');
+        const tagId = mod.createTag('Pinned').tagId;
         mod.setSourceTagIds(firstDescriptor.key, [tagId]);
 
         const newRenamedRow = createMockSourceRow({ title: 'Renamed Source', stableToken: 'new-doc', checked: true });
@@ -4325,7 +4356,8 @@ describe('scanAndSyncSources', () => {
             mod.DEPS.row.includes(selector) ? [newRenamedRow.row, newAnchorRow.row] : []
         ));
 
-        mod.scanAndSyncSources(null, false);
+        mod.scanAndSyncSources(null, false, { scanCompleteness: 'complete' });
+        mod.scanAndSyncSources(null, false, { scanCompleteness: 'complete' });
 
         expect(mod.groupsById.get('group1').children).toEqual([]);
         expect(mod.sourcesByKey.get(renamedDescriptor.key).enabled).toBe(true);
@@ -4359,7 +4391,8 @@ describe('scanAndSyncSources', () => {
         global.document.querySelectorAll = jest.fn((selector) => (
             mod.DEPS.row.includes(selector) ? newRows.map(({ row }) => row) : []
         ));
-        mod.scanAndSyncSources(null, false);
+        mod.scanAndSyncSources(null, false, { scanCompleteness: 'complete' });
+        mod.scanAndSyncSources(null, false, { scanCompleteness: 'complete' });
 
         expect(mod.groupsById.get('group1').children).toEqual([]);
         expect(mod.state.ungrouped).toHaveLength(2);
@@ -4638,6 +4671,9 @@ describe('scanAndSyncSources', () => {
             sourceTagsById: {}
         };
         let visibleRows = [rows[0].row];
+        panel.getAttribute = jest.fn((attributeName) => (
+            attributeName === 'data-total-count' ? '3' : null
+        ));
         panel.querySelectorAll = jest.fn((selector) => (
             mod.DEPS.row.includes(selector) ? visibleRows : []
         ));
@@ -4680,11 +4716,24 @@ describe('scanAndSyncSources', () => {
             ])))
         );
 
-        expect(mod.scanAndSyncSources({}, false)).toEqual({
+        expect(mod.scanAndSyncSources({}, false)).toEqual(expect.objectContaining({
             ok: false,
             shouldUpgradeStorage: false,
-            reason: 'partial_source_sync'
-        });
+            reason: 'partial_source_sync',
+            completeness: 'virtualized',
+            totalHint: 3,
+            observedIdentityKeys: [descriptors[0].key]
+        }));
+        expect(mod._getNativeSourceInventorySnapshotForTest()).toEqual(
+            expect.objectContaining({
+                complete: false,
+                completeness: 'virtualized',
+                totalHint: 3,
+                hasAuthoritativeTotal: false,
+                rowCount: 1,
+                observedIdentityKeys: [`stable:${descriptors[0].stableToken}`]
+            })
+        );
         expect(mod.groupsById.get('folder').children).toEqual([
             { type: 'source', key: descriptors[0].key }
         ]);
@@ -4694,11 +4743,23 @@ describe('scanAndSyncSources', () => {
         ]);
 
         visibleRows = rows.map(({ row }) => row);
-        expect(mod.scanAndSyncSources({}, false)).toEqual({
+        expect(mod.scanAndSyncSources({}, false)).toEqual(expect.objectContaining({
             ok: true,
             shouldUpgradeStorage: false,
             reason: 'completed'
-        });
+        }));
+        expect(mod._getNativeSourceInventorySnapshotForTest()).toEqual(
+            expect.objectContaining({
+                complete: true,
+                completeness: 'complete',
+                totalHint: 3,
+                hasAuthoritativeTotal: true,
+                rowCount: 3,
+                observedIdentityKeys: descriptors
+                    .map(({ stableToken }) => `stable:${stableToken}`)
+                    .sort()
+            })
+        );
         expect(mod._getPendingInitialLoadedState()).toBe(null);
         expect(mod.groupsById.get('folder').children).toEqual([
             { type: 'source', key: descriptors[0].key }
@@ -4713,6 +4774,36 @@ describe('scanAndSyncSources', () => {
             });
             expect(mod.sourcesByKey.get(key).isPendingNativeHydration).not.toBe(true);
         });
+    });
+
+    it('does not synthesize an authoritative total from complete DOM rows', () => {
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const sourceRow = createMockSourceRow({
+            title: 'No Total Hint',
+            stableToken: 'no-total-hint',
+            checked: true
+        });
+        const descriptor = mod.createSourceDescriptor(sourceRow.row, new Map(), new Map());
+        panel.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [sourceRow.row] : []
+        ));
+        global.document.querySelector = jest.fn((selector) => (
+            mod.DEPS.panel.includes(selector) ? panel : null
+        ));
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [sourceRow.row] : []
+        ));
+
+        expect(mod._getNativeSourceInventorySnapshotForTest()).toEqual(
+            expect.objectContaining({
+                complete: true,
+                completeness: 'complete',
+                totalHint: null,
+                hasAuthoritativeTotal: false,
+                rowCount: 1,
+                observedIdentityKeys: [`stable:${descriptor.stableToken}`]
+            })
+        );
     });
 
     it('merges newly visible rows with persisted rows during a partial initial restore', () => {
@@ -5019,6 +5110,9 @@ describe('syncSourceToPage', () => {
         global.document.querySelectorAll = jest.fn((selector) => (
             mod.DEPS.row.includes(selector) ? [freshRow.row] : []
         ));
+        freshRow.checkbox.click.mockImplementation(() => {
+            freshRow.checkbox.checked = true;
+        });
 
         mod.syncSourceToPage(source, true);
 
@@ -5049,6 +5143,9 @@ describe('syncSourceToPage', () => {
         global.document.querySelectorAll = jest.fn((selector) => (
             mod.DEPS.row.includes(selector) ? [freshRow.row] : []
         ));
+        freshRow.checkbox.click.mockImplementation(() => {
+            freshRow.checkbox.checked = false;
+        });
 
         mod.syncSourceToPage(source, false);
 
@@ -5158,6 +5255,168 @@ describe('syncSourceToPage', () => {
 
         expect(ariaCheckbox.click).toHaveBeenCalledTimes(1);
         expect(mod.getDiagnosticsInfo().lastNativeSelectionSyncFailure).toBe(null);
+    });
+
+    it('supersedes an in-flight target with the latest state for the same source', async () => {
+        const scheduled = [];
+        global.setTimeout = jest.fn((callback) => {
+            scheduled.push(callback);
+            return scheduled.length;
+        });
+        const row = createMockSourceRow({
+            title: 'Rapid Toggle Source',
+            stableToken: 'rapid-toggle',
+            checked: true
+        });
+        const descriptor = mod.createSourceDescriptor(row.row, new Map(), new Map());
+        const source = { ...descriptor, element: row.row, checkbox: row.checkbox };
+        mod.sourcesByKey.set(descriptor.key, source);
+        global.document.body.contains = jest.fn(() => true);
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [row.row] : []
+        ));
+
+        const firstResultPromise = mod.syncSourceToPageWithResult(source, false);
+        const latestResultPromise = mod.syncSourceToPageWithResult(source, true);
+        while (scheduled.length > 0) {
+            scheduled.shift()();
+        }
+
+        await expect(firstResultPromise).resolves.toEqual(expect.objectContaining({
+            ok: false,
+            reason: 'superseded'
+        }));
+        await expect(latestResultPromise).resolves.toEqual(expect.objectContaining({
+            ok: true,
+            reason: 'confirmed',
+            desiredState: true
+        }));
+        expect(row.checkbox.click).toHaveBeenCalledTimes(2);
+        expect(mod._getClickQueueLength()).toBe(0);
+    });
+
+    it('reports a structured timeout after two native checkbox click no-ops', async () => {
+        const row = createMockSourceRow({
+            title: 'No-op Toggle Source',
+            stableToken: 'no-op-toggle',
+            checked: false
+        });
+        const descriptor = mod.createSourceDescriptor(row.row, new Map(), new Map());
+        const source = { ...descriptor, element: row.row, checkbox: row.checkbox };
+        mod.sourcesByKey.set(descriptor.key, source);
+        row.checkbox.click = jest.fn();
+        global.document.body.contains = jest.fn(() => true);
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [row.row] : []
+        ));
+
+        await expect(mod.syncSourceToPageWithResult(source, true)).resolves.toEqual(expect.objectContaining({
+            ok: false,
+            reason: 'native_checkbox_timeout',
+            clickAttempts: 2
+        }));
+        expect(row.checkbox.click).toHaveBeenCalledTimes(2);
+        expect(mod.getDiagnosticsInfo().lastNativeSelectionSyncFailure).toEqual(expect.objectContaining({
+            sourceKey: descriptor.key,
+            reason: 'native_checkbox_timeout'
+        }));
+    });
+
+    it('keeps one source retryable when a different source later confirms successfully', async () => {
+        const failedRow = createMockSourceRow({
+            title: 'Failed Toggle Source',
+            stableToken: 'failed-toggle',
+            checked: false
+        });
+        const failedDescriptor = mod.createSourceDescriptor(
+            failedRow.row,
+            new Map(),
+            new Map()
+        );
+        const failedSource = {
+            ...failedDescriptor,
+            element: failedRow.row,
+            checkbox: failedRow.checkbox
+        };
+        failedRow.checkbox.click = jest.fn();
+
+        const successfulRow = createMockSourceRow({
+            title: 'Already Confirmed Source',
+            stableToken: 'confirmed-toggle',
+            checked: true
+        });
+        const successfulDescriptor = mod.createSourceDescriptor(
+            successfulRow.row,
+            new Map(),
+            new Map()
+        );
+        const successfulSource = {
+            ...successfulDescriptor,
+            element: successfulRow.row,
+            checkbox: successfulRow.checkbox
+        };
+        mod.sourcesByKey.set(failedDescriptor.key, failedSource);
+        mod.sourcesByKey.set(successfulDescriptor.key, successfulSource);
+        global.document.body.contains = jest.fn(() => true);
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector)
+                ? [failedRow.row, successfulRow.row]
+                : []
+        ));
+
+        await expect(mod.syncSourceToPageWithResult(failedSource, true))
+            .resolves.toEqual(expect.objectContaining({
+                ok: false,
+                reason: 'native_checkbox_timeout'
+            }));
+        await expect(mod.syncSourceToPageWithResult(successfulSource, true))
+            .resolves.toEqual(expect.objectContaining({
+                ok: true,
+                reason: 'already_confirmed'
+            }));
+
+        expect(mod.getDiagnosticsInfo().lastNativeSelectionSyncFailure)
+            .toEqual(expect.objectContaining({
+                sourceKey: failedDescriptor.key,
+                reason: 'native_checkbox_timeout'
+            }));
+    });
+
+    it('cancels an in-flight native checkbox sync when notebook context changes', async () => {
+        const scheduled = [];
+        global.setTimeout = jest.fn((callback) => {
+            scheduled.push(callback);
+            return scheduled.length;
+        });
+        const row = createMockSourceRow({
+            title: 'Route Change Source',
+            stableToken: 'route-change',
+            checked: false
+        });
+        const descriptor = mod.createSourceDescriptor(row.row, new Map(), new Map());
+        const source = { ...descriptor, element: row.row, checkbox: row.checkbox };
+        mod.sourcesByKey.set(descriptor.key, source);
+        global.document.body.contains = jest.fn(() => true);
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [row.row] : []
+        ));
+
+        const resultPromise = mod.syncSourceToPageWithResult(source, true);
+        mod._setProjectId('next-notebook');
+        while (scheduled.length > 0) {
+            scheduled.shift()();
+        }
+
+        await expect(resultPromise).resolves.toEqual(expect.objectContaining({
+            ok: false,
+            reason: 'context_changed',
+            clickAttempts: 1
+        }));
+        expect(mod.getDiagnosticsInfo().lastNativeSelectionSyncFailure).toEqual(expect.objectContaining({
+            sourceKey: descriptor.key,
+            reason: 'context_changed'
+        }));
+        expect(mod._getClickQueueLength()).toBe(0);
     });
 });
 

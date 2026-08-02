@@ -417,7 +417,10 @@ describe('drag and drop ordering guards', () => {
 
         expect(indexSource).toContain('treePlacement: _treePlacementModule,');
         expect(indexSource).toContain(
-            'return _treePlacementModule.rebuildParentMap(parentMap);'
+            'const result = _treePlacementModule.rebuildParentMap(parentMap);'
+        );
+        expect(indexSource).toContain(
+            'invalidateDerivedGroupEffectiveStateCache: () => ('
         );
         expect(indexSource).toContain(
             'const normalized = _treePlacementModule.normalizePlacementState({'
@@ -431,6 +434,36 @@ describe('drag and drop ordering guards', () => {
         expect(indexSource).not.toContain('_getSourceTreePositionForTest');
         expect(indexSource).not.toContain('_getGroupTreePositionForTest');
         expect(indexSource).not.toContain('_isNoopTreeMoveForTest');
+    });
+
+    it('collects source order through a fifty-level tree without recursive traversal', () => {
+        const depth = 50;
+        const groupsById = new Map();
+        for (let level = 0; level < depth; level += 1) {
+            groupsById.set(`g-${level}`, {
+                id: `g-${level}`,
+                children: level < depth - 1
+                    ? [{ type: 'group', id: `g-${level + 1}` }]
+                    : [{ type: 'source', key: 'deep-source' }]
+            });
+        }
+        const state = {
+            root: [
+                { type: 'group', id: 'g-0' },
+                { type: 'source', key: 'root-source' }
+            ],
+            ungrouped: ['loose-source']
+        };
+        const interactions = createContentTreeInteractions({
+            getState: () => state,
+            getGroupsById: () => groupsById
+        });
+
+        expect(interactions.collectSourceKeysInTreeOrder()).toEqual([
+            'deep-source',
+            'root-source',
+            'loose-source'
+        ]);
     });
 
     it('rolls back a new group when inline naming cannot mount', () => {
@@ -602,6 +635,7 @@ describe('drag and drop ordering guards', () => {
         const groupsById = new Map();
         const parentMap = new Map();
         const saveState = jest.fn();
+        const emitOnboardingSuccess = jest.fn();
         const input = global.document.createElement('input');
         input.focus = jest.fn();
         input.select = jest.fn();
@@ -639,6 +673,7 @@ describe('drag and drop ordering guards', () => {
             getShadowRoot: () => shadowRoot,
             getSetTimeout: () => (callback) => callback(),
             saveState,
+            emitOnboardingSuccess,
             render: jest.fn(),
             getMessage: (key) => key
         });
@@ -658,6 +693,7 @@ describe('drag and drop ordering guards', () => {
         expect(groupsById.get(groupId).isNewlyCreated).toBe(false);
         expect(saveState).toHaveBeenCalledTimes(1);
         expect(saveState).toHaveBeenCalledWith({ immediate: true, critical: true });
+        expect(emitOnboardingSuccess).toHaveBeenCalledWith('create-folder');
         expect(editButton.focus).toHaveBeenCalledTimes(1);
     });
 
@@ -689,6 +725,7 @@ describe('drag and drop ordering guards', () => {
         };
         const editButton = { focus: jest.fn() };
         const saveState = jest.fn();
+        const invalidateSourceContextIndex = jest.fn();
         const interactions = createContentTreeInteractions({
             getState: () => state,
             getGroupsById: () => groupsById,
@@ -699,6 +736,7 @@ describe('drag and drop ordering guards', () => {
             }),
             getSetTimeout: () => (callback) => callback(),
             saveState,
+            invalidateSourceContextIndex,
             render: jest.fn(),
             getMessage: (key) => key
         });
@@ -711,6 +749,7 @@ describe('drag and drop ordering guards', () => {
         expect(group.isNewlyCreated).toBe(false);
         expect(saveState).toHaveBeenCalledTimes(1);
         expect(saveState).toHaveBeenCalledWith({ immediate: true, critical: true });
+        expect(invalidateSourceContextIndex).toHaveBeenCalledTimes(1);
         expect(editButton.focus).toHaveBeenCalledTimes(1);
     });
 
@@ -1285,6 +1324,7 @@ describe('drag and drop ordering guards', () => {
         };
         const saveState = jest.fn();
         const render = jest.fn();
+        const syncSourcesToEffectiveState = jest.fn();
         const runtime = {
             dragReflowSession: {
                 draggedKeys: new Set(['A']),
@@ -1311,6 +1351,7 @@ describe('drag and drop ordering guards', () => {
             getGroupsById: () => new Map(),
             getParentMap: () => new Map(),
             getShadowRoot: () => ({ querySelectorAll: jest.fn(() => []) }),
+            syncSourcesToEffectiveState,
             saveState,
             render
         });
@@ -1323,6 +1364,7 @@ describe('drag and drop ordering guards', () => {
         });
         expect(treePlacement.rebuildParentMap).not.toHaveBeenCalled();
         expect(state).toEqual({ root: [], ungrouped: ['A'] });
+        expect(syncSourcesToEffectiveState).not.toHaveBeenCalled();
         expect(render).not.toHaveBeenCalled();
         expect(saveState).not.toHaveBeenCalled();
     });
@@ -2010,6 +2052,7 @@ describe('drag and drop ordering guards', () => {
         const isDescendant = jest.fn(() => true);
         const saveState = jest.fn();
         const render = jest.fn();
+        const syncSourcesToEffectiveState = jest.fn();
         const runtime = {
             dragReflowSession: {
                 draggedKeys: new Set(['root']),
@@ -2037,6 +2080,7 @@ describe('drag and drop ordering guards', () => {
             getParentMap: () => new Map([['child', 'root']]),
             getShadowRoot: () => ({ querySelectorAll: jest.fn(() => []) }),
             isDescendant,
+            syncSourcesToEffectiveState,
             saveState,
             render
         });
@@ -2057,6 +2101,7 @@ describe('drag and drop ordering guards', () => {
         expect(state).toEqual(beforeState);
         expect(Array.from(groupsById.entries())).toEqual(beforeGroups);
         expect(treePlacement.rebuildParentMap).not.toHaveBeenCalled();
+        expect(syncSourcesToEffectiveState).not.toHaveBeenCalled();
         expect(render).not.toHaveBeenCalled();
         expect(saveState).not.toHaveBeenCalled();
     });
@@ -2280,6 +2325,7 @@ describe('drag and drop ordering guards', () => {
     it('handleDrop splices a dragged group into state.root as a {type:group} entry', () => {
         const state = {
             root: [
+                { type: 'group', id: 'disabled-parent' },
                 { type: 'source', key: 'A' },
                 { type: 'group', id: 'g1' }
             ],
@@ -2287,11 +2333,30 @@ describe('drag and drop ordering guards', () => {
         };
         const groupsById = new Map([
             ['g1', { id: 'g1', children: [] }],
-            ['mover', { id: 'mover', children: [] }]
+            ['disabled-parent', {
+                id: 'disabled-parent',
+                enabled: false,
+                children: [{ type: 'group', id: 'mover' }]
+            }],
+            ['mover', {
+                id: 'mover',
+                enabled: true,
+                children: [{ type: 'source', key: 'mover-child' }]
+            }]
         ]);
         const saveState = jest.fn();
         const render = jest.fn();
         const buildParentMap = jest.fn();
+        const previousEffectiveStates = new Map([['mover-child', false]]);
+        const collectEffectiveSourceStates = jest.fn(() => previousEffectiveStates);
+        const parentMap = new Map([
+            ['mover', 'disabled-parent'],
+            ['mover-child', 'mover']
+        ]);
+        const syncSourcesToEffectiveState = jest.fn(() => {
+            expect(parentMap.has('mover')).toBe(false);
+            expect(parentMap.get('mover-child')).toBe('mover');
+        });
         const dropTarget = { dataset: { sourceKey: 'A' }, classList: createClassList(['source-item']) };
         const runtime = {
             dragReflowSession: {
@@ -2300,27 +2365,29 @@ describe('drag and drop ordering guards', () => {
                     kind: 'before-source',
                     targetGroup: null,
                     targetList: state.root,
-                    insertIndex: 0, // before A in state.root
+                    insertIndex: 1, // before A in state.root, after disabled-parent
                     targetGroupId: null,
                     slotKey: 'A',
                     isRootList: true,
                     target: {
                         container: 'root',
-                        index: 0
+                        index: 1
                     }
                 },
                 shiftedItems: new Map()
             }
         };
-        // 'mover' starts as a root group at index 1; moving it before A.
-        state.root.push({ type: 'group', id: 'mover' });
+        // The enabled folder starts below a disabled ancestor; moving it before A
+        // removes that ancestor from its effective-state path.
         const interactions = createContentTreeInteractions({
             runtime,
             getState: () => state,
             getGroupsById: () => groupsById,
-            getParentMap: () => new Map(),
+            getParentMap: () => parentMap,
             getShadowRoot: () => ({ querySelectorAll: jest.fn(() => []) }),
             isDescendant: global.isDescendant,
+            collectEffectiveSourceStates,
+            syncSourcesToEffectiveState,
             saveState,
             render,
             buildParentMap
@@ -2329,10 +2396,13 @@ describe('drag and drop ordering guards', () => {
         interactions.handleDrop(createDropEvent({ dropTarget, groupId: 'mover' }));
 
         expect(state.root).toEqual([
+            { type: 'group', id: 'disabled-parent' },
             { type: 'group', id: 'mover' },
             { type: 'source', key: 'A' },
             { type: 'group', id: 'g1' }
         ]);
+        expect(collectEffectiveSourceStates).toHaveBeenCalledTimes(1);
+        expect(syncSourcesToEffectiveState).toHaveBeenCalledWith(previousEffectiveStates);
         expect(saveState).toHaveBeenCalledWith({ immediate: true, critical: true });
     });
 
@@ -2549,9 +2619,18 @@ describe('drag and drop ordering guards', () => {
             ['child-b', { id: 'child-b', children: [] }]
         ]);
         const confirm = jest.fn(() => true);
+        const getMessage = jest.fn((key) => key);
         const saveState = jest.fn();
         const render = jest.fn();
         const buildParentMap = jest.fn();
+        const previousEffectiveStates = new Map([
+            ['parent-source', false],
+            ['S1', true],
+            ['S2', true]
+        ]);
+        const collectEffectiveSourceStates = jest.fn(() => previousEffectiveStates);
+        const syncSourcesToEffectiveState = jest.fn();
+        let activeIsolationGroupId = 'doomed';
         const parentMap = new Map([
             ['doomed', 'parent'],
             ['parent-sibling', 'parent'],
@@ -2585,7 +2664,13 @@ describe('drag and drop ordering guards', () => {
             getParentMap: () => parentMap,
             getPendingBatchKeys: () => new Set(),
             getWindow: () => ({ confirm }),
-            getMessage: (key) => key,
+            getMessage,
+            getActiveIsolationGroupId: () => activeIsolationGroupId,
+            setActiveIsolationGroupId: (value) => {
+                activeIsolationGroupId = value;
+            },
+            collectEffectiveSourceStates,
+            syncSourcesToEffectiveState,
             saveState,
             render,
             buildParentMap
@@ -2594,6 +2679,10 @@ describe('drag and drop ordering guards', () => {
         interactions.handleInteraction({ target });
 
         expect(confirm).toHaveBeenCalledTimes(1);
+        expect(getMessage).toHaveBeenCalledWith(
+            'ui_delete_group_confirm_non_empty',
+            ['Doomed', 'ui_ungrouped', '2', '2']
+        );
         expect(state.ungrouped).toEqual(['existing-bin', 'S1', 'S2']);
         expect(state.root).toEqual([
             { type: 'group', id: 'existing-root' },
@@ -2608,6 +2697,9 @@ describe('drag and drop ordering guards', () => {
         expect(groupsById.has('doomed')).toBe(false);
         expect(groupsById.has('child-a')).toBe(true);
         expect(groupsById.has('child-b')).toBe(true);
+        expect(activeIsolationGroupId).toBeNull();
+        expect(collectEffectiveSourceStates).toHaveBeenCalledTimes(1);
+        expect(syncSourcesToEffectiveState).toHaveBeenCalledWith(previousEffectiveStates);
         expect(treePlacement.removeGroup).toHaveBeenCalledWith({
             item: { kind: 'group', id: 'doomed' }
         });
@@ -2771,10 +2863,68 @@ describe('drag and drop ordering guards', () => {
             'visible-ready'
         ]);
 
+        interactions.handleInteraction(createEvent('.sp-batch-clear-hidden-selection-btn'));
+        expect(Array.from(pendingBatchKeys)).toEqual(['hidden-ready']);
+
         interactions.handleInteraction(createEvent('.sp-batch-clear-selection-btn'));
 
         expect(pendingBatchKeys.size).toBe(0);
-        expect(render).toHaveBeenCalledTimes(4);
+        expect(render).toHaveBeenCalledTimes(5);
+    });
+
+    it('selects and clears hidden batch sources from the full logical projection under windowing', () => {
+        const state = { isBatchMode: true };
+        const pendingBatchKeys = new Set(['filtered-out']);
+        const sourcesByKey = new Map([
+            ['visible-mounted', { key: 'visible-mounted' }],
+            ['visible-windowed', { key: 'visible-windowed' }],
+            ['visible-loading', { key: 'visible-loading', isLoading: true }],
+            ['filtered-out', { key: 'filtered-out' }]
+        ]);
+        const render = jest.fn();
+        const interactions = createContentTreeInteractions({
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getSourcesByKey: () => sourcesByKey,
+            getPendingBatchKeys: () => pendingBatchKeys,
+            getVisibleLogicalSourceKeys: () => [
+                'visible-mounted',
+                'visible-windowed',
+                'visible-loading'
+            ],
+            getShadowRoot: () => ({
+                querySelectorAll: jest.fn(() => [{
+                    dataset: { sourceKey: 'visible-mounted' }
+                }])
+            }),
+            render
+        });
+        const createEvent = (buttonClass) => ({
+            target: {
+                classList: { contains: jest.fn(() => false) },
+                closest: jest.fn((selector) => (
+                    selector === '.group-container' || selector === '.source-item'
+                        ? null
+                        : (selector === buttonClass ? {} : null)
+                ))
+            }
+        });
+
+        interactions.handleInteraction(createEvent('.sp-batch-select-visible-btn'));
+
+        expect(Array.from(pendingBatchKeys).sort()).toEqual([
+            'filtered-out',
+            'visible-mounted',
+            'visible-windowed'
+        ]);
+
+        interactions.handleInteraction(createEvent('.sp-batch-clear-hidden-selection-btn'));
+
+        expect(Array.from(pendingBatchKeys).sort()).toEqual([
+            'visible-mounted',
+            'visible-windowed'
+        ]);
+        expect(render).toHaveBeenCalledTimes(2);
     });
 
     it('ignores direct batch row clicks for every inoperable source kind', () => {
@@ -2854,6 +3004,54 @@ describe('drag and drop ordering guards', () => {
 
         expect(Array.from(pendingBatchKeys)).toEqual(['selected']);
         expect(render).not.toHaveBeenCalled();
+    });
+
+    it('invalidates derived effective-state caches after group and source toggles', () => {
+        const group = { id: 'group-1', enabled: true };
+        const source = { key: 'source-1', enabled: true };
+        const invalidateDerivedGroupEffectiveStateCache = jest.fn();
+        const syncSourcesToEffectiveState = jest.fn();
+        const interactions = createContentTreeInteractions({
+            getState: () => ({ isBatchMode: false }),
+            getGroupsById: () => new Map([[group.id, group]]),
+            getSourcesByKey: () => new Map([[source.key, source]]),
+            collectEffectiveSourceStates: () => new Map([[source.key, true]]),
+            syncSourcesToEffectiveState,
+            isSourceEffectivelyEnabled: (candidate) => candidate.enabled,
+            invalidateDerivedGroupEffectiveStateCache,
+            render: jest.fn(),
+            saveState: jest.fn()
+        });
+        const groupToggle = {
+            checked: false,
+            dataset: { groupId: group.id },
+            classList: {
+                contains: (className) => className === 'sp-group-toggle-checkbox'
+            },
+            closest: jest.fn(() => null)
+        };
+        const sourceRow = {
+            dataset: { sourceKey: source.key },
+            querySelector: jest.fn()
+        };
+        const sourceToggle = {
+            checked: false,
+            dataset: { sourceKey: source.key },
+            classList: {
+                contains: (className) => className === 'sp-checkbox'
+            },
+            closest: jest.fn((selector) => (
+                selector === '.source-item' ? sourceRow : null
+            ))
+        };
+
+        interactions.handleInteraction({ target: groupToggle });
+        interactions.handleInteraction({ target: sourceToggle });
+
+        expect(group.enabled).toBe(false);
+        expect(source.enabled).toBe(false);
+        expect(invalidateDerivedGroupEffectiveStateCache).toHaveBeenCalledTimes(2);
+        expect(syncSourcesToEffectiveState).toHaveBeenCalledTimes(1);
     });
 
     it('clears contextual empty-state filters without mutating source data', () => {
@@ -2965,6 +3163,15 @@ describe('drag and drop ordering guards', () => {
         const render = jest.fn();
         const showToast = jest.fn();
         const buildParentMap = jest.fn();
+        const invalidateSourceContextIndex = jest.fn();
+        const invalidateDerivedGroupEffectiveStateCache = jest.fn();
+        const previousEffectiveStates = new Map([
+            ['source-1', false],
+            ['source-2', false],
+            ['root-source', false]
+        ]);
+        const collectEffectiveSourceStates = jest.fn(() => previousEffectiveStates);
+        const syncSourcesToEffectiveState = jest.fn();
         const createContentTreePlacement = require('../../src/content/content-tree-placement.js');
         const treePlacement = createContentTreePlacement({
             getState: () => state,
@@ -2983,11 +3190,30 @@ describe('drag and drop ordering guards', () => {
             render,
             showToast,
             buildParentMap,
+            invalidateSourceContextIndex,
+            invalidateDerivedGroupEffectiveStateCache,
+            collectEffectiveSourceStates,
+            syncSourcesToEffectiveState,
             closeSourceActionMenu: jest.fn(),
             getMessage: (key, args = []) => `${key}:${args.join(',')}`
         });
 
-        expect(interactions.executeBatchMoveToUngrouped()).toBe(true);
+        expect(interactions.executeBatchMoveToUngrouped()).toEqual({
+            ok: true,
+            changed: true,
+            succeeded: [
+                { kind: 'source', key: 'source-1' },
+                { kind: 'source', key: 'source-2' },
+                { kind: 'source', key: 'root-source' }
+            ],
+            failed: [],
+            skipped: [{
+                item: { kind: 'source', key: 'source-3' },
+                reason: 'already_ungrouped'
+            }],
+            unattempted: [],
+            reason: 'partial'
+        });
 
         expect(root.children).toEqual([{ type: 'group', id: 'child' }]);
         expect(child.children).toEqual([]);
@@ -3011,10 +3237,14 @@ describe('drag and drop ordering guards', () => {
         });
         expect(treePlacement.rebuildParentMap).toHaveBeenCalledWith(parentMap);
         expect(buildParentMap).not.toHaveBeenCalled();
+        expect(invalidateSourceContextIndex).toHaveBeenCalledTimes(1);
+        expect(invalidateDerivedGroupEffectiveStateCache).toHaveBeenCalledTimes(1);
+        expect(collectEffectiveSourceStates).toHaveBeenCalledTimes(1);
+        expect(syncSourcesToEffectiveState).toHaveBeenCalledWith(previousEffectiveStates);
         expect(saveState).toHaveBeenCalledWith({ immediate: true, critical: true });
         expect(render).toHaveBeenCalled();
-        expect(pendingBatchKeys.size).toBe(0);
-        expect(state.isBatchMode).toBe(false);
+        expect(Array.from(pendingBatchKeys)).toEqual(['source-3']);
+        expect(state.isBatchMode).toBe(true);
         expect(showToast).toHaveBeenCalledWith('ui_batch_ungrouped_toast:3', { variant: 'success' });
     });
 
@@ -3036,6 +3266,7 @@ describe('drag and drop ordering guards', () => {
         const saveState = jest.fn();
         const render = jest.fn();
         const showToast = jest.fn();
+        const syncSourcesToEffectiveState = jest.fn();
         const interactions = createContentTreeInteractions({
             treePlacement,
             getState: () => state,
@@ -3049,14 +3280,33 @@ describe('drag and drop ordering guards', () => {
             saveState,
             render,
             showToast,
+            syncSourcesToEffectiveState,
             getMessage: (key) => key
         });
 
-        expect(interactions.executeBatchMoveToUngrouped()).toBe(false);
+        expect(interactions.executeBatchMoveToUngrouped()).toEqual({
+            ok: true,
+            changed: false,
+            succeeded: [],
+            failed: [],
+            skipped: [
+                {
+                    item: { kind: 'source', key: 'source-1' },
+                    reason: 'already_ungrouped'
+                },
+                {
+                    item: { kind: 'source', key: 'source-2' },
+                    reason: 'already_ungrouped'
+                }
+            ],
+            unattempted: [],
+            reason: 'no_change'
+        });
         expect(treePlacement.applyBatchPlacement).not.toHaveBeenCalled();
         expect(treePlacement.rebuildParentMap).not.toHaveBeenCalled();
         expect(state.isBatchMode).toBe(true);
         expect(Array.from(pendingBatchKeys)).toEqual(['source-1', 'source-2']);
+        expect(syncSourcesToEffectiveState).not.toHaveBeenCalled();
         expect(saveState).not.toHaveBeenCalled();
         expect(render).not.toHaveBeenCalled();
         expect(showToast).toHaveBeenCalledWith('ui_batch_no_sources_changed', {
@@ -3082,6 +3332,12 @@ describe('drag and drop ordering guards', () => {
         const saveState = jest.fn();
         const render = jest.fn();
         const showUndoableToast = jest.fn();
+        const emitOnboardingSuccess = jest.fn();
+        const invalidateSourceContextIndex = jest.fn();
+        const invalidateDerivedGroupEffectiveStateCache = jest.fn();
+        const previousEffectiveStates = new Map([['source-1', false]]);
+        const collectEffectiveSourceStates = jest.fn(() => previousEffectiveStates);
+        const syncSourcesToEffectiveState = jest.fn();
         const createContentTreePlacement = require('../../src/content/content-tree-placement.js');
         const treePlacement = createContentTreePlacement({
             getState: () => state,
@@ -3098,6 +3354,11 @@ describe('drag and drop ordering guards', () => {
             saveState,
             render,
             showUndoableToast,
+            emitOnboardingSuccess,
+            invalidateSourceContextIndex,
+            invalidateDerivedGroupEffectiveStateCache,
+            collectEffectiveSourceStates,
+            syncSourcesToEffectiveState,
             buildParentMap: jest.fn(),
             closeSourceActionMenu: jest.fn(),
             getMessage: (key) => key
@@ -3113,9 +3374,14 @@ describe('drag and drop ordering guards', () => {
             target: { container: 'ungrouped', index: 1 }
         });
         expect(treePlacement.rebuildParentMap).toHaveBeenCalledWith(parentMap);
+        expect(invalidateSourceContextIndex).toHaveBeenCalledTimes(1);
+        expect(invalidateDerivedGroupEffectiveStateCache).toHaveBeenCalledTimes(1);
+        expect(collectEffectiveSourceStates).toHaveBeenCalledTimes(1);
+        expect(syncSourcesToEffectiveState).toHaveBeenCalledWith(previousEffectiveStates);
         expect(saveState).toHaveBeenCalledWith({ immediate: true, critical: true });
         expect(render).toHaveBeenCalled();
         expect(showUndoableToast).toHaveBeenCalledWith('ui_keyboard_moved_ungrouped_toast', { variant: 'success' });
+        expect(emitOnboardingSuccess).toHaveBeenCalledWith('move-source');
     });
 
     it('handles the click produced by Enter once and restores focus after a source order move', () => {
@@ -3143,6 +3409,9 @@ describe('drag and drop ordering guards', () => {
         const saveState = jest.fn();
         const render = jest.fn();
         const closeSourceActionMenu = jest.fn();
+        const previousEffectiveStates = new Map([['source-a', false], ['source-b', false]]);
+        const collectEffectiveSourceStates = jest.fn(() => previousEffectiveStates);
+        const syncSourcesToEffectiveState = jest.fn();
         const status = { textContent: '' };
         const restoredControl = {
             dataset: { sourceKey: 'source-b' },
@@ -3166,6 +3435,8 @@ describe('drag and drop ordering guards', () => {
             saveState,
             render,
             closeSourceActionMenu,
+            collectEffectiveSourceStates,
+            syncSourcesToEffectiveState,
             getMessage: (key, args = []) => `${key}:${args.join('/')}`
         });
         const orderButton = {
@@ -3189,6 +3460,8 @@ describe('drag and drop ordering guards', () => {
         expect(treePlacement.applyPlacement).toHaveBeenCalledTimes(1);
         expect(treePlacement.rebuildParentMap).toHaveBeenCalledTimes(1);
         expect(closeSourceActionMenu).toHaveBeenCalledTimes(1);
+        expect(collectEffectiveSourceStates).toHaveBeenCalledTimes(1);
+        expect(syncSourcesToEffectiveState).toHaveBeenCalledWith(previousEffectiveStates);
         expect(render).toHaveBeenCalledTimes(1);
         expect(saveState).toHaveBeenCalledTimes(1);
         expect(saveState).toHaveBeenCalledWith({ immediate: true, critical: true });
@@ -3214,6 +3487,7 @@ describe('drag and drop ordering guards', () => {
         const status = { textContent: '' };
         const saveState = jest.fn();
         const render = jest.fn();
+        const syncSourcesToEffectiveState = jest.fn();
         const interactions = createContentTreeInteractions({
             treePlacement,
             getState: () => state,
@@ -3228,7 +3502,8 @@ describe('drag and drop ordering guards', () => {
                 querySelectorAll: () => []
             }),
             saveState,
-            render
+            render,
+            syncSourcesToEffectiveState
         });
         const orderButton = {
             dataset: {
@@ -3246,6 +3521,7 @@ describe('drag and drop ordering guards', () => {
         expect(treePlacement.resolveDirectionalTarget).toHaveBeenCalledTimes(1);
         expect(treePlacement.applyPlacement).not.toHaveBeenCalled();
         expect(treePlacement.rebuildParentMap).not.toHaveBeenCalled();
+        expect(syncSourcesToEffectiveState).not.toHaveBeenCalled();
         expect(saveState).not.toHaveBeenCalled();
         expect(render).not.toHaveBeenCalled();
         expect(status.textContent).toBe('');
@@ -3768,6 +4044,13 @@ describe('drop routes multi vs single source', () => {
         const showToast = jest.fn();
         const buildParentMap = jest.fn();
         const developerLog = jest.fn();
+        const previousEffectiveStates = new Map([
+            ['A', false],
+            ['B', false],
+            ['C', false]
+        ]);
+        const collectEffectiveSourceStates = jest.fn(() => previousEffectiveStates);
+        const syncSourcesToEffectiveState = jest.fn();
         const dropTarget = {
             dataset: { groupId: 'g1' },
             classList: createClassList(['group-container', 'drag-into'])
@@ -3808,6 +4091,8 @@ describe('drop routes multi vs single source', () => {
             showToast,
             buildParentMap,
             developerLog,
+            collectEffectiveSourceStates,
+            syncSourcesToEffectiveState,
             dragMulti: createContentDragMulti({}),
             getMessage: (key, args = []) => `${key}:${args.join(',')}`
         });
@@ -3823,6 +4108,8 @@ describe('drop routes multi vs single source', () => {
         expect(render).toHaveBeenCalledTimes(1);
         expect(showToast).toHaveBeenCalledTimes(1);
         expect(showToast.mock.calls[0][0]).toEqual(expect.stringContaining('3'));
+        expect(collectEffectiveSourceStates).toHaveBeenCalledTimes(1);
+        expect(syncSourcesToEffectiveState).toHaveBeenCalledWith(previousEffectiveStates);
         expect(state.isBatchMode).toBe(false);
         expect(pendingBatchKeys.size).toBe(0);
         expect(group.children).toEqual([
@@ -3921,6 +4208,7 @@ describe('drop routes multi vs single source', () => {
         const showToast = jest.fn();
         const buildParentMap = jest.fn();
         const developerLog = jest.fn();
+        const syncSourcesToEffectiveState = jest.fn();
         const dropTarget = {
             dataset: { sourceKey: 'A' },
             classList: createClassList(['source-item'])
@@ -3961,6 +4249,7 @@ describe('drop routes multi vs single source', () => {
             showToast,
             buildParentMap,
             developerLog,
+            syncSourcesToEffectiveState,
             dragMulti: createContentDragMulti({}),
             getMessage: (key, args = []) => `${key}:${args.join(',')}`
         });
@@ -3975,6 +4264,7 @@ describe('drop routes multi vs single source', () => {
         expect(state.isBatchMode).toBe(true);
         expect(pendingBatchKeys.size).toBe(2);
         expect(developerLog).not.toHaveBeenCalled();
+        expect(syncSourcesToEffectiveState).not.toHaveBeenCalled();
         expect(saveState).not.toHaveBeenCalled();
         expect(render).not.toHaveBeenCalled();
         expect(buildParentMap).not.toHaveBeenCalled();
@@ -3999,6 +4289,9 @@ describe('drop routes multi vs single source', () => {
         ]);
         const parentMap = new Map([['A1', 'gA'], ['A2', 'gA'], ['B1', 'gB']]);
         const buildParentMap = jest.fn();
+        const previousEffectiveStates = new Map([['A1', false]]);
+        const collectEffectiveSourceStates = jest.fn(() => previousEffectiveStates);
+        const syncSourcesToEffectiveState = jest.fn();
         const dropTarget = {
             dataset: { sourceKey: 'B1' },
             classList: createClassList(['source-item'])
@@ -4035,6 +4328,8 @@ describe('drop routes multi vs single source', () => {
             showToast: jest.fn(),
             buildParentMap,
             developerLog: jest.fn(),
+            collectEffectiveSourceStates,
+            syncSourcesToEffectiveState,
             dragMulti: createContentDragMulti({}),
             getMessage: (key, args = []) => `${key}:${args.join(',')}`
         });
@@ -4054,6 +4349,8 @@ describe('drop routes multi vs single source', () => {
         // (findParentGroupOfSource) consistent with the new tree shape.
         expect(parentMap.get('A1')).toBe('gB');
         expect(buildParentMap).not.toHaveBeenCalled();
+        expect(collectEffectiveSourceStates).toHaveBeenCalledTimes(1);
+        expect(syncSourcesToEffectiveState).toHaveBeenCalledWith(previousEffectiveStates);
     });
 
     it('preserves batch selection when dragging an unselected source while batch mode is on', () => {

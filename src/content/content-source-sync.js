@@ -119,6 +119,9 @@
         const syncSourceToPage = typeof deps.syncSourceToPage === 'function'
             ? deps.syncSourceToPage
             : () => {};
+        const getCurrentSourceViewKind = typeof deps.getCurrentSourceViewKind === 'function'
+            ? deps.getCurrentSourceViewKind
+            : () => runtime.sourceViewKind || SOURCE_VIEW_KIND_UNKNOWN;
         const buildParentMap = typeof deps.buildParentMap === 'function'
             ? deps.buildParentMap
             : () => {};
@@ -188,6 +191,9 @@
         const partialSyncMarkTransientRawUrlImportSources = typeof sourcePartialSyncGuard.markTransientRawUrlImportSources === 'function'
             ? sourcePartialSyncGuard.markTransientRawUrlImportSources
             : () => 0;
+        const partialSyncResetCompleteScanObservation = typeof sourcePartialSyncGuard.resetCompleteScanObservation === 'function'
+            ? sourcePartialSyncGuard.resetCompleteScanObservation
+            : () => {};
 
         const ensureMap = (name) => {
             const current = runtime[name];
@@ -2055,11 +2061,166 @@
             return getSourcePanelState(panel).state === 'detail';
         }
 
+        function readPositiveIntegerAttribute(element, attributeNames) {
+            for (const attributeName of attributeNames) {
+                const rawValue = element?.getAttribute?.(attributeName);
+                const numericValue = Number.parseInt(String(rawValue || ''), 10);
+                if (Number.isFinite(numericValue) && numericValue >= 0) {
+                    return numericValue;
+                }
+            }
+            return null;
+        }
+
+        function getSourceScanCompleteness(panel, sourceEntries, currentSources, override = null) {
+            const entries = Array.isArray(sourceEntries) ? sourceEntries : [];
+            const sources = Array.isArray(currentSources) ? currentSources : [];
+            const observedIdentityKeys = Array.from(new Set(
+                sources.map((source) => String(source?.key || '')).filter(Boolean)
+            )).sort();
+            const rowTotalHints = entries
+                .map((entry) => readPositiveIntegerAttribute(entry?.row, [
+                    'aria-setsize',
+                    'data-total-count',
+                    'data-source-count'
+                ]))
+                .filter((value) => value != null);
+            const panelTotalHint = readPositiveIntegerAttribute(panel, [
+                'data-total-count',
+                'data-source-count',
+                'aria-setsize'
+            ]);
+            const totalHint = panelTotalHint != null
+                ? panelTotalHint
+                : (rowTotalHints.length > 0 ? Math.max(...rowTotalHints) : null);
+
+            const overrideCompleteness = typeof override === 'string'
+                ? override
+                : override?.completeness;
+            if (['complete', 'partial', 'virtualized', 'loading'].includes(overrideCompleteness)) {
+                return {
+                    completeness: overrideCompleteness,
+                    observedIdentityKeys,
+                    totalHint: override?.totalHint ?? totalHint,
+                    reason: override?.reason || ''
+                };
+            }
+
+            if (sources.some((source) => source?.isLoading)) {
+                return {
+                    completeness: 'loading',
+                    observedIdentityKeys,
+                    totalHint,
+                    reason: 'source_panel_loading'
+                };
+            }
+            if (!panel) {
+                return {
+                    completeness: 'partial',
+                    observedIdentityKeys,
+                    totalHint,
+                    reason: 'source_panel_unavailable'
+                };
+            }
+
+            const isAriaBusy = String(panel.getAttribute?.('aria-busy') || '').toLowerCase() === 'true';
+            const hasLoadingIndicator = Boolean(
+                panel.querySelector?.('[aria-busy="true"], [role="progressbar"], mat-spinner, mat-progress-spinner')
+            );
+            if (isAriaBusy || hasLoadingIndicator || sources.some((source) => source?.isLoading)) {
+                return {
+                    completeness: 'loading',
+                    observedIdentityKeys,
+                    totalHint,
+                    reason: 'source_panel_loading'
+                };
+            }
+
+            const hasVirtualizationMarker = Boolean(
+                panel.querySelector?.(
+                    '[data-virtualized="true"], [data-virtual-scroll="true"], cdk-virtual-scroll-viewport'
+                )
+            );
+            if (hasVirtualizationMarker || (totalHint != null && totalHint > observedIdentityKeys.length)) {
+                return {
+                    completeness: 'virtualized',
+                    observedIdentityKeys,
+                    totalHint,
+                    reason: 'source_panel_virtualized'
+                };
+            }
+
+            if (entries.length !== sources.length) {
+                return {
+                    completeness: 'partial',
+                    observedIdentityKeys,
+                    totalHint,
+                    reason: 'source_identity_incomplete'
+                };
+            }
+
+            return {
+                completeness: 'complete',
+                observedIdentityKeys,
+                totalHint,
+                reason: ''
+            };
+        }
+
+        function getNativeSourceInventorySnapshot(options = {}) {
+            const panel = findSourcePanel();
+            const root = panel || getDocument();
+            const sourceEntries = getSourceEntries(root, options);
+            const seenSourceIds = new Map();
+            const seenLegacyKeys = new Map();
+            const descriptors = sourceEntries
+                .map((entry) => createSourceDescriptor(
+                    entry?.row,
+                    seenSourceIds,
+                    seenLegacyKeys
+                ))
+                .filter(Boolean);
+            const scanCompleteness = getSourceScanCompleteness(
+                panel,
+                sourceEntries,
+                descriptors,
+                options.scanCompleteness || null
+            );
+            const observedIdentityKeys = descriptors
+                .map((source) => {
+                    if (source?.stableToken) return `stable:${source.stableToken}`;
+                    if (source?.fingerprint) return `fingerprint:${source.fingerprint}`;
+                    const normalizedTitle = normalizeSourceText(
+                        source?.normalizedTitle || source?.title || source?.ariaLabel
+                    );
+                    return normalizedTitle ? `title:${normalizedTitle}` : '';
+                })
+                .filter(Boolean)
+                .sort();
+            return {
+                complete: scanCompleteness.completeness === 'complete',
+                completeness: scanCompleteness.completeness,
+                reason: scanCompleteness.reason || '',
+                completenessReason: scanCompleteness.reason || '',
+                observedIdentityKeys,
+                identityKeys: observedIdentityKeys,
+                identitySignature: observedIdentityKeys.join('|'),
+                rowCount: sourceEntries.length,
+                totalHint: scanCompleteness.totalHint,
+                hasAuthoritativeTotal: scanCompleteness.completeness === 'complete'
+                    && scanCompleteness.totalHint != null
+                    && observedIdentityKeys.length === scanCompleteness.totalHint,
+                panel,
+                rows: sourceEntries.map((entry) => entry.row).filter(Boolean)
+            };
+        }
+
         function shouldPreserveExistingSourcesDuringPartialSync(
             currentSources,
             sourceLookup,
             previousSourceRecordsByKey,
-            authorizedNativeDeleteKeys
+            authorizedNativeDeleteKeys,
+            scanCompleteness
         ) {
             const recentNativeDeletedSourceKeys = runtime.recentNativeDeletedSourceKeys instanceof Set
                 ? runtime.recentNativeDeletedSourceKeys
@@ -2072,7 +2233,15 @@
                 sourceLookup,
                 previousSourceRecordsByKey,
                 {
-                    recentNativeDeletedSourceKeys: probeDeletedSourceKeys
+                    recentNativeDeletedSourceKeys: probeDeletedSourceKeys,
+                    completeness: scanCompleteness?.completeness || 'partial',
+                    identityKeys: scanCompleteness?.observedIdentityKeys || [],
+                    totalHint: scanCompleteness?.totalHint ?? null,
+                    reason: scanCompleteness?.reason || '',
+                    contextToken: [
+                        String(runtime.projectId || ''),
+                        String(runtime.activeManagerInstanceToken || '')
+                    ].join(':')
                 }
             );
             if (!shouldPreserve && recentNativeDeletedSourceKeys && probeDeletedSourceKeys) {
@@ -2132,12 +2301,15 @@
             });
             runtime.keyByElement = keyByElement;
             buildParentMap();
-            hydratedSources.forEach(({ record }) => {
-                syncSourceToPage(record, isSourceEffectivelyEnabled(record), {
-                    currentSourceViewKind: runtime.sourceViewKind || SOURCE_VIEW_KIND_UNKNOWN,
-                    preferStoredCheckbox: true
+            const currentSourceViewKind = getCurrentSourceViewKind();
+            if (currentSourceViewKind !== SOURCE_VIEW_KIND_LABEL) {
+                hydratedSources.forEach(({ record }) => {
+                    syncSourceToPage(record, isSourceEffectivelyEnabled(record), {
+                        currentSourceViewKind,
+                        preferStoredCheckbox: true
+                    });
                 });
-            });
+            }
 
             return hydratedSources.length;
         }
@@ -2385,6 +2557,12 @@
         }
 
         function scanAndSyncSources(loadedState, isFirstLoad = false, options = {}) {
+            let scanCompleteness = {
+                completeness: 'loading',
+                observedIdentityKeys: [],
+                totalHint: null,
+                reason: 'scan_not_started'
+            };
             const createScanResult = (
                 ok,
                 shouldUpgradeStorage = false,
@@ -2392,7 +2570,11 @@
             ) => ({
                 ok: Boolean(ok),
                 shouldUpgradeStorage: Boolean(shouldUpgradeStorage),
-                reason
+                reason,
+                completeness: scanCompleteness.completeness,
+                observedIdentityKeys: [...scanCompleteness.observedIdentityKeys],
+                totalHint: scanCompleteness.totalHint,
+                completenessReason: scanCompleteness.reason
             });
             const sourcesByKey = getSourcesByKey();
             const sourceTagsById = getSourceTagsById();
@@ -2462,6 +2644,12 @@
             let currentSources = rawCurrentSources
                 .filter((source) => !isRecentlyNativeDeletedSource(source));
             let sourceLookup = buildSourceLookup(currentSources);
+            scanCompleteness = getSourceScanCompleteness(
+                sourcePanel,
+                sourceEntries,
+                rawCurrentSources,
+                options.scanCompleteness || null
+            );
             if (isFirstLoad && loadedState && typeof loadedState === 'object') {
                 const unresolvedStoredKeys = [];
                 collectPersistedSourceRefs(loadedState).forEach((storedKey) => {
@@ -2525,7 +2713,8 @@
                 currentSources,
                 sourceLookup,
                 previousSourceRecordsByKey,
-                authorizedNativeDeleteKeys
+                authorizedNativeDeleteKeys,
+                scanCompleteness
             )) {
                 const transientLoadingSourceCount = mergeVisibleLoadingSourcesDuringPartialSync(
                     currentSources,
@@ -2537,12 +2726,16 @@
                     previousCount: previousSourceRecordsByKey.size,
                     currentCount: currentSources.length,
                     transientLoadingSourceCount,
+                    completeness: scanCompleteness.completeness,
+                    totalHint: scanCompleteness.totalHint,
                     skippedAt: new Date().toISOString()
                 };
                 developerLog('warn', 'source_sync', 'scan_skipped_partial_sync', {
                     previousCount: previousSourceRecordsByKey.size,
                     currentCount: currentSources.length,
                     transientLoadingSourceCount,
+                    completeness: scanCompleteness.completeness,
+                    completenessReason: scanCompleteness.reason,
                     reason: 'partial_source_sync'
                 });
                 return createScanResult(false, false, 'partial_source_sync');
@@ -2700,13 +2893,16 @@
             }
 
             buildParentMap();
-            sourcesByKey.forEach((source) => {
-                if (source.isPreservedPartialSource) return;
-                syncSourceToPage(source, isSourceEffectivelyEnabled(source), {
-                    currentSourceViewKind: runtime.sourceViewKind || SOURCE_VIEW_KIND_UNKNOWN,
-                    preferStoredCheckbox: true
+            const currentSourceViewKind = getCurrentSourceViewKind();
+            if (currentSourceViewKind !== SOURCE_VIEW_KIND_LABEL) {
+                sourcesByKey.forEach((source) => {
+                    if (source.isPreservedPartialSource) return;
+                    syncSourceToPage(source, isSourceEffectivelyEnabled(source), {
+                        currentSourceViewKind,
+                        preferStoredCheckbox: true
+                    });
                 });
-            });
+            }
 
             const pendingStorageUpgrade = isFirstLoad && getPendingStorageUpgrade();
             consumeNativeDeleteMarkersAfterSuccessfulSync(
@@ -3002,6 +3198,7 @@
             getSourcePanelState,
             isSourcePanelManageable,
             isSourceDetailViewPanel,
+            getNativeSourceInventorySnapshot,
             scanAndSyncSources,
             handleDomChanges,
             debouncedScanAndSync,
@@ -3010,7 +3207,8 @@
             getMutationRelevance,
             getFreshRowCache,
             setFreshRowCache,
-            clearFreshRowCache: () => setFreshRowCache(null)
+            clearFreshRowCache: () => setFreshRowCache(null),
+            resetCompleteScanObservation: () => partialSyncResetCompleteScanObservation()
         };
     }
 

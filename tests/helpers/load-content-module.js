@@ -8,6 +8,7 @@ function clearContentGlobals() {
     delete globalThis.NSM_CREATE_MANAGER_SHELL;
     delete globalThis.NSM_CREATE_CONTENT_PANEL_DOM;
     delete globalThis.NSM_CREATE_CONTENT_SOURCE_ACTION_MENU;
+    delete globalThis.NSM_CREATE_CONTENT_NATIVE_ACTION_COORDINATOR;
     delete globalThis.NSM_CREATE_CONTENT_SOURCE_ACTIONS;
     delete globalThis.NSM_CREATE_CONTENT_TAGS;
     delete globalThis.NSM_CREATE_CONTENT_TREE_PLACEMENT;
@@ -19,6 +20,7 @@ function clearContentGlobals() {
     delete globalThis.NSM_CREATE_CONTENT_TOAST_STATUS;
     delete globalThis.NSM_CREATE_CONTENT_TOAST;
     delete globalThis.NSM_CREATE_CONTENT_STATE_APPLY;
+    delete globalThis.NSM_CREATE_CONTENT_SNAPSHOT_TRANSACTION;
     delete globalThis.NSM_CREATE_CONTENT_UNDO_HISTORY;
     delete globalThis.NSM_CREATE_CONTENT_IMPORT_EXPORT;
     delete globalThis.NSM_CREATE_CONTENT_DIAGNOSTICS;
@@ -63,6 +65,7 @@ function loadContentModule() {
     require('../../src/content/content-template.js');
     require('../../src/content/content-panel-dom.js');
     require('../../src/content/content-source-action-menu.js');
+    require('../../src/content/content-native-action-coordinator.js');
     require('../../src/content/content-source-actions.js');
     require('../../src/content/content-tags.js');
     require('../../src/content/content-tree-placement.js');
@@ -74,6 +77,7 @@ function loadContentModule() {
     require('../../src/content/content-toast-status.js');
     require('../../src/content/content-toast.js');
     require('../../src/content/content-state-apply.js');
+    require('../../src/content/content-snapshot-transaction.js');
     require('../../src/content/content-undo-history.js');
     require('../../src/content/content-import-export.js');
     require('../../src/content/content-diagnostics.js');

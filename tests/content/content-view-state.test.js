@@ -135,6 +135,36 @@ describe('content effective-enabled with state.root', () => {
         expect(mod.getEffectivelyEnabledSources().has('off')).toBe(false);
     });
 
+    it('evaluates enabled state and renderability through a fifty-level tree iteratively', () => {
+        const depth = 50;
+        const groupsById = new Map();
+        for (let level = 0; level < depth; level += 1) {
+            groupsById.set(`g-${level}`, {
+                id: `g-${level}`,
+                title: `Group ${level}`,
+                enabled: true,
+                children: level < depth - 1
+                    ? [{ type: 'group', id: `g-${level + 1}` }]
+                    : [{ type: 'source', key: 'deep-source' }]
+            });
+        }
+        const state = {
+            root: [{ type: 'group', id: 'g-0' }],
+            ungrouped: [],
+            filterQuery: '',
+            activeQuickViewKind: null,
+            activeTagId: null
+        };
+        const sourcesByKey = new Map([[
+            'deep-source',
+            { key: 'deep-source', title: 'Deep source', enabled: true }
+        ]]);
+        const mod = make({ state, sourcesByKey, groupsById });
+
+        expect([...mod.getEffectivelyEnabledSources().keys()]).toEqual(['deep-source']);
+        expect(mod.groupHasRenderableDescendant(groupsById.get('g-0'))).toBe(true);
+    });
+
     it('keeps the ungrouped quick-view filter scoped to the bin (not state.root)', () => {
         const state = {
             filterQuery: '',
@@ -151,5 +181,182 @@ describe('content effective-enabled with state.root', () => {
         // 'ungrouped' filter = bin membership ONLY; positioned root source must NOT match.
         expect(mod.sourceMatchesCurrentFilters(sourcesByKey.get('bin'))).toBe(true);
         expect(mod.sourceMatchesCurrentFilters(sourcesByKey.get('positioned'))).toBe(false);
+    });
+
+    it('captures and synchronizes native state around an isolation transition', () => {
+        const state = {
+            root: [{ type: 'group', id: 'g1' }],
+            ungrouped: ['outside']
+        };
+        const groupsById = new Map([
+            ['g1', {
+                id: 'g1',
+                enabled: true,
+                children: [{ type: 'source', key: 'inside' }]
+            }]
+        ]);
+        const sourcesByKey = new Map([
+            ['inside', { key: 'inside', enabled: true }],
+            ['outside', { key: 'outside', enabled: true }]
+        ]);
+        const parentMap = new Map([['inside', 'g1']]);
+        let isolationGroupId = 'g1';
+        const syncSourceToPage = jest.fn();
+        const mod = createContentViewState({
+            getState: () => state,
+            getSourcesByKey: () => sourcesByKey,
+            getGroupsById: () => groupsById,
+            getParentMap: () => parentMap,
+            getTagsById: () => new Map(),
+            getSourceTagIds: () => [],
+            getActiveIsolationGroupId: () => isolationGroupId,
+            isDescendant: (candidate, ancestor) => candidate.id === ancestor.id,
+            syncSourceToPage
+        });
+
+        const result = mod.runEffectiveStateTransition(() => {
+            isolationGroupId = null;
+            return true;
+        });
+
+        expect(result).toMatchObject({
+            ok: true,
+            changedSourceKeys: ['outside']
+        });
+        expect(syncSourceToPage).toHaveBeenCalledTimes(1);
+        expect(syncSourceToPage).toHaveBeenCalledWith(
+            sourcesByKey.get('outside'),
+            true
+        );
+    });
+
+    it('captures ancestor and isolation state before a placement transition, then syncs only changed sources', async () => {
+        const state = {
+            root: [
+                { type: 'group', id: 'isolated' },
+                { type: 'group', id: 'outside-group' }
+            ],
+            ungrouped: []
+        };
+        const disabledAncestor = {
+            id: 'disabled-ancestor',
+            enabled: false,
+            children: [{ type: 'source', key: 'inside' }]
+        };
+        const isolated = {
+            id: 'isolated',
+            enabled: true,
+            children: [
+                { type: 'group', id: 'disabled-ancestor' },
+                { type: 'source', key: 'stable' }
+            ]
+        };
+        const outsideGroup = {
+            id: 'outside-group',
+            enabled: true,
+            children: [{ type: 'source', key: 'outside' }]
+        };
+        const groupsById = new Map([
+            ['isolated', isolated],
+            ['disabled-ancestor', disabledAncestor],
+            ['outside-group', outsideGroup]
+        ]);
+        const sourcesByKey = new Map([
+            ['inside', { key: 'inside', enabled: true }],
+            ['stable', { key: 'stable', enabled: true }],
+            ['outside', { key: 'outside', enabled: true }]
+        ]);
+        const parentMap = new Map([
+            ['disabled-ancestor', 'isolated'],
+            ['inside', 'disabled-ancestor'],
+            ['stable', 'isolated'],
+            ['outside', 'outside-group']
+        ]);
+        const syncSourceToPage = jest.fn();
+        const mod = createContentViewState({
+            getState: () => state,
+            getSourcesByKey: () => sourcesByKey,
+            getGroupsById: () => groupsById,
+            getParentMap: () => parentMap,
+            getTagsById: () => new Map(),
+            getSourceTagIds: () => [],
+            getActiveIsolationGroupId: () => 'isolated',
+            syncSourceToPage
+        });
+
+        const transition = mod.runEffectiveStateTransition(() => {
+            disabledAncestor.enabled = true;
+            outsideGroup.children = [];
+            isolated.children.push({ type: 'source', key: 'outside' });
+            parentMap.set('outside', 'isolated');
+            return true;
+        });
+
+        expect(transition.previousStates).toEqual(new Map([
+            ['inside', false],
+            ['stable', true],
+            ['outside', false]
+        ]));
+        expect(transition.changedSourceKeys).toEqual(['inside', 'outside']);
+        expect(syncSourceToPage).toHaveBeenNthCalledWith(
+            1,
+            sourcesByKey.get('inside'),
+            true
+        );
+        expect(syncSourceToPage).toHaveBeenNthCalledWith(
+            2,
+            sourcesByKey.get('outside'),
+            true
+        );
+        expect(syncSourceToPage).toHaveBeenCalledTimes(2);
+        await expect(transition.confirmation).resolves.toEqual(expect.objectContaining({
+            ok: true,
+            changedSourceKeys: ['inside', 'outside']
+        }));
+    });
+
+    it('exposes aggregate native confirmation failures without reverting the view transition', async () => {
+        const state = {
+            root: [],
+            ungrouped: ['source-1'],
+            activeQuickViewKind: null
+        };
+        const source = { key: 'source-1', enabled: true };
+        const syncSourceToPageWithResult = jest.fn(() => Promise.resolve({
+            ok: false,
+            sourceKey: 'source-1',
+            reason: 'native_checkbox_timeout'
+        }));
+        const mod = createContentViewState({
+            getState: () => state,
+            getSourcesByKey: () => new Map([['source-1', source]]),
+            getGroupsById: () => new Map(),
+            getParentMap: () => new Map(),
+            getTagsById: () => new Map(),
+            getSourceTagIds: () => [],
+            getActiveIsolationGroupId: () => (
+                state.activeQuickViewKind === 'issues' ? 'hidden-context' : null
+            ),
+            isDescendant: () => false,
+            syncSourceToPageWithResult,
+            render: jest.fn()
+        });
+
+        const transition = mod.runEffectiveStateTransition(() => {
+            state.activeQuickViewKind = 'issues';
+            return true;
+        });
+
+        await expect(transition.confirmation).resolves.toEqual(
+            expect.objectContaining({
+                ok: false,
+                changedSourceKeys: ['source-1'],
+                failed: [expect.objectContaining({
+                    sourceKey: 'source-1',
+                    reason: 'native_checkbox_timeout'
+                })]
+            })
+        );
+        expect(state.activeQuickViewKind).toBe('issues');
     });
 });

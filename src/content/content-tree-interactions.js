@@ -32,7 +32,9 @@
      */
     function createContentTreeInteractions(deps = {}) {
         const runtime = deps.runtime || deps;
-        const NATIVE_SELECTION_SYNC_RETRY_LIMIT = 6;
+        const NATIVE_SELECTION_SYNC_CHECK_INTERVAL_MS = 75;
+        const NATIVE_SELECTION_SYNC_CHECK_LIMIT = 10;
+        const NATIVE_SELECTION_SYNC_CLICK_LIMIT = 2;
         const TREE_ORDER_STATUS_KEYS = {
             up: 'ui_tree_order_moved_up_status',
             down: 'ui_tree_order_moved_down_status',
@@ -40,6 +42,9 @@
             out: 'ui_tree_order_moved_out_status'
         };
         const activeInitialRenameInputsByGroupId = new Map();
+        const nativeSelectionGenerationBySourceKey = new Map();
+        const nativeSelectionWaitersBySourceKey = new Map();
+        let activeNativeSelectionItem = null;
 
         const getState = typeof deps.getState === 'function'
             ? deps.getState
@@ -81,6 +86,9 @@
         const getShadowRoot = typeof deps.getShadowRoot === 'function'
             ? deps.getShadowRoot
             : () => (deps.shadowRoot || runtime.shadowRoot || null);
+        const getVisibleLogicalSourceKeys = typeof deps.getVisibleLogicalSourceKeys === 'function'
+            ? deps.getVisibleLogicalSourceKeys
+            : null;
         // Drag mode preference ('classic' blue-line / 'reflow' avoidance Beta). Default
         // 'reflow' here keeps the new engine active when no getter is injected (unit tests
         // that predate the toggle); production index.js injects the real getDragMode, whose
@@ -130,9 +138,52 @@
         const syncSourcesToEffectiveState = typeof deps.syncSourcesToEffectiveState === 'function'
             ? deps.syncSourcesToEffectiveState
             : (typeof runtime.syncSourcesToEffectiveState === 'function' ? runtime.syncSourcesToEffectiveState : () => {});
+        const awaitEffectiveStateSync = typeof deps.awaitEffectiveStateSync === 'function'
+            ? deps.awaitEffectiveStateSync
+            : (typeof runtime.awaitEffectiveStateSync === 'function'
+                ? runtime.awaitEffectiveStateSync
+                : () => Promise.resolve({ ok: true, reason: 'no_native_changes' }));
+        const runEffectiveStateTransition = typeof deps.runEffectiveStateTransition === 'function'
+            ? deps.runEffectiveStateTransition
+            : (mutate) => {
+                const previousStates = collectEffectiveSourceStates();
+                const result = typeof mutate === 'function' ? mutate() : false;
+                if (result === false) {
+                    return { ok: false, reason: 'transition_rejected', changedSourceKeys: [] };
+                }
+                syncSourcesToEffectiveState(previousStates);
+                return { ok: true, result };
+            };
+
+        function onEffectiveStateSyncConfirmed(syncHandle, onConfirmed = null) {
+            if (!syncHandle?.confirmation || typeof syncHandle.confirmation.then !== 'function') {
+                const result = { ok: true, reason: 'no_native_changes' };
+                if (typeof onConfirmed === 'function') onConfirmed(result);
+                return Promise.resolve(result);
+            }
+            return Promise.resolve(awaitEffectiveStateSync(syncHandle))
+                .then((result) => {
+                    if (result?.ok === true) {
+                        if (typeof onConfirmed === 'function') onConfirmed(result);
+                    } else {
+                        render();
+                    }
+                    return result;
+                })
+                .catch((error) => {
+                    render();
+                    return {
+                        ok: false,
+                        reason: error?.reason || error?.message || 'native_selection_sync_failed'
+                    };
+                });
+        }
         const executeBatchDelete = typeof deps.executeBatchDelete === 'function'
             ? deps.executeBatchDelete
             : (typeof runtime.executeBatchDelete === 'function' ? runtime.executeBatchDelete : () => {});
+        const clearLastBatchDeleteResult = typeof deps.clearLastBatchDeleteResult === 'function'
+            ? deps.clearLastBatchDeleteResult
+            : () => {};
         const renderMoveToFolderModal = typeof deps.renderMoveToFolderModal === 'function'
             ? deps.renderMoveToFolderModal
             : (typeof runtime.renderMoveToFolderModal === 'function' ? runtime.renderMoveToFolderModal : () => {});
@@ -205,12 +256,46 @@
         const getCurrentSourceViewKind = typeof deps.getCurrentSourceViewKind === 'function'
             ? deps.getCurrentSourceViewKind
             : () => (deps.sourceViewKind || runtime.sourceViewKind || null);
+        const getNativeSelectionContextToken = typeof deps.getNativeSelectionContextToken === 'function'
+            ? deps.getNativeSelectionContextToken
+            : () => {
+                const locationObj = getDocument()?.location || globalThis.location || {};
+                return [
+                    runtime.projectId || '',
+                    runtime.activeManagerInstanceToken ?? '',
+                    locationObj.pathname || '',
+                    locationObj.search || ''
+                ].join(':');
+            };
         const recordNativeSelectionSyncFailure = typeof deps.recordNativeSelectionSyncFailure === 'function'
             ? deps.recordNativeSelectionSyncFailure
             : () => {};
         const developerLog = typeof deps.developerLog === 'function'
             ? deps.developerLog
             : (typeof runtime.developerLog === 'function' ? runtime.developerLog : () => false);
+        const invalidateSourceContextIndex = typeof deps.invalidateSourceContextIndex === 'function'
+            ? deps.invalidateSourceContextIndex
+            : () => {};
+        const invalidateDerivedGroupEffectiveStateCache = (
+            typeof deps.invalidateDerivedGroupEffectiveStateCache === 'function'
+                ? deps.invalidateDerivedGroupEffectiveStateCache
+                : () => {}
+        );
+        const emitOnboardingSuccess = typeof deps.emitOnboardingSuccess === 'function'
+            ? deps.emitOnboardingSuccess
+            : (step) => {
+                const EventCtor = deps.CustomEvent || globalThis.CustomEvent;
+                if (
+                    typeof globalThis.dispatchEvent !== 'function'
+                    || typeof EventCtor !== 'function'
+                ) {
+                    return false;
+                }
+                globalThis.dispatchEvent(new EventCtor('nsm:onboarding-success', {
+                    detail: { step }
+                }));
+                return true;
+            };
 
         const dragMulti = (typeof deps.dragMulti === 'object' && deps.dragMulti)
             ? deps.dragMulti
@@ -503,6 +588,8 @@
                 return false;
             }
             treePlacement.rebuildParentMap(getParentMap());
+            invalidateSourceContextIndex();
+            invalidateDerivedGroupEffectiveStateCache();
             return true;
         }
 
@@ -1977,8 +2064,125 @@
             return true;
         }
 
+        function settleNativeSelectionWaiter(sourceKey, generation, result) {
+            const waiter = nativeSelectionWaitersBySourceKey.get(sourceKey);
+            if (!waiter || waiter.generation !== generation) return;
+            nativeSelectionWaitersBySourceKey.delete(sourceKey);
+            waiter.resolve(Object.assign({
+                ok: false,
+                sourceKey,
+                generation
+            }, result || {}));
+        }
+
+        function supersedeNativeSelectionWaiter(sourceKey, nextGeneration) {
+            const waiter = nativeSelectionWaitersBySourceKey.get(sourceKey);
+            if (!waiter || waiter.generation === nextGeneration) return;
+            nativeSelectionWaitersBySourceKey.delete(sourceKey);
+            waiter.resolve({
+                ok: false,
+                sourceKey,
+                generation: waiter.generation,
+                reason: 'superseded',
+                supersededByGeneration: nextGeneration
+            });
+        }
+
+        function removeQueuedNativeSelectionTarget(sourceKey) {
+            const clickQueue = getClickQueue();
+            for (let index = clickQueue.length - 1; index >= 0; index -= 1) {
+                if (clickQueue[index]?.sourceKey === sourceKey) {
+                    clickQueue.splice(index, 1);
+                }
+            }
+        }
+
+        function hasPendingNativeSelectionTarget(sourceKey) {
+            return activeNativeSelectionItem?.sourceKey === sourceKey
+                || getClickQueue().some((item) => item?.sourceKey === sourceKey);
+        }
+
+        function enqueueNativeSelectionTarget(source, checkbox, desiredState, options = {}) {
+            const sourceKey = String(source?.key || '');
+            if (!sourceKey) return null;
+
+            const supersedesClickedTarget = Boolean(
+                activeNativeSelectionItem?.sourceKey === sourceKey
+                && activeNativeSelectionItem.clickAttempts > 0
+            );
+            const generation = Number(nativeSelectionGenerationBySourceKey.get(sourceKey) || 0) + 1;
+            nativeSelectionGenerationBySourceKey.set(sourceKey, generation);
+            supersedeNativeSelectionWaiter(sourceKey, generation);
+            removeQueuedNativeSelectionTarget(sourceKey);
+
+            const item = {
+                checkbox: checkbox || null,
+                desiredState: Boolean(desiredState),
+                sourceKey,
+                generation,
+                contextToken: getNativeSelectionContextToken(),
+                retryOnMissing: options.retryOnMissingCheckbox === true,
+                checksAfterClick: 0,
+                clickAttempts: 0,
+                confirmationChecks: 0,
+                minimumConfirmationChecks: supersedesClickedTarget ? 2 : 0
+            };
+            getClickQueue().push(item);
+
+            if (typeof options.resultResolver === 'function') {
+                nativeSelectionWaitersBySourceKey.set(sourceKey, {
+                    generation,
+                    resolve: options.resultResolver
+                });
+            }
+            if (!getIsProcessingQueue()) processClickQueue();
+            return item;
+        }
+
+        function failNativeSelectionItem(item, reason, extra = {}) {
+            const result = Object.assign({
+                reason,
+                desiredState: item.desiredState,
+                clickAttempts: item.clickAttempts,
+                checksAfterClick: item.checksAfterClick
+            }, extra);
+            recordNativeSelectionSyncFailure(Object.assign({
+                sourceKey: item.sourceKey || '',
+                detectedSourceViewKind: getCurrentSourceViewKind() || 'unknown'
+            }, result));
+            settleNativeSelectionWaiter(item.sourceKey, item.generation, result);
+        }
+
+        function completeNativeSelectionItem(item) {
+            recordNativeSelectionSyncFailure({
+                sourceKey: item.sourceKey,
+                resolved: true
+            });
+            settleNativeSelectionWaiter(item.sourceKey, item.generation, {
+                ok: true,
+                reason: 'confirmed',
+                desiredState: item.desiredState,
+                clickAttempts: item.clickAttempts,
+                checksAfterClick: item.checksAfterClick
+            });
+        }
+
+        function scheduleNextNativeSelectionStep() {
+            const setTimeoutFn = getSetTimeout();
+            if (typeof setTimeoutFn === 'function') {
+                setTimeoutFn(processClickQueue, NATIVE_SELECTION_SYNC_CHECK_INTERVAL_MS);
+                return;
+            }
+            processClickQueue();
+        }
+
         function syncSourceToPage(source, desiredState, options = {}) {
-            if (!source) return false;
+            if (!source) {
+                if (typeof options.resultResolver === 'function') {
+                    options.resultResolver({ ok: false, reason: 'source_missing' });
+                }
+                return false;
+            }
 
             const documentObj = getDocument();
             const currentSourceViewKind = options.currentSourceViewKind || getCurrentSourceViewKind();
@@ -1988,6 +2192,13 @@
                     reason: 'not_list_view',
                     detectedSourceViewKind: currentSourceViewKind
                 });
+                if (typeof options.resultResolver === 'function') {
+                    options.resultResolver({
+                        ok: false,
+                        sourceKey: source.key || '',
+                        reason: 'not_list_view'
+                    });
+                }
                 return false;
             }
 
@@ -2009,14 +2220,7 @@
 
             if (!checkbox || !documentObj?.body?.contains?.(checkbox)) {
                 if (options.retryOnMissingCheckbox === true && currentSourceViewKind !== 'label') {
-                    getClickQueue().push({
-                        checkbox: null,
-                        desiredState,
-                        sourceKey: source.key,
-                        retryOnMissing: true,
-                        attempts: 0
-                    });
-                    if (!getIsProcessingQueue()) processClickQueue();
+                    enqueueNativeSelectionTarget(source, null, desiredState, options);
                     return true;
                 }
 
@@ -2025,24 +2229,54 @@
                     reason: 'native_checkbox_missing',
                     detectedSourceViewKind: currentSourceViewKind || 'unknown'
                 });
+                if (typeof options.resultResolver === 'function') {
+                    options.resultResolver({
+                        ok: false,
+                        sourceKey: source.key || '',
+                        reason: 'native_checkbox_missing'
+                    });
+                }
                 return false;
             }
 
-            if (shouldToggleNativeCheckbox(checkbox, desiredState)) {
-                getClickQueue().push({ checkbox, desiredState, sourceKey: source.key });
+            if (
+                shouldToggleNativeCheckbox(checkbox, desiredState)
+                || hasPendingNativeSelectionTarget(String(source.key || ''))
+            ) {
+                enqueueNativeSelectionTarget(source, checkbox, desiredState, options);
+                return true;
             }
 
-            recordNativeSelectionSyncFailure(null);
-            if (!getIsProcessingQueue()) processClickQueue();
+            recordNativeSelectionSyncFailure({
+                sourceKey: source.key || '',
+                resolved: true
+            });
+            if (typeof options.resultResolver === 'function') {
+                options.resultResolver({
+                    ok: true,
+                    sourceKey: source.key || '',
+                    reason: 'already_confirmed',
+                    desiredState: Boolean(desiredState),
+                    clickAttempts: 0,
+                    checksAfterClick: 0
+                });
+            }
             return true;
+        }
+
+        function syncSourceToPageWithResult(source, desiredState, options = {}) {
+            return new Promise((resolve) => {
+                syncSourceToPage(source, desiredState, Object.assign({}, options, {
+                    resultResolver: resolve
+                }));
+            });
         }
 
         function processClickQueue() {
             const clickQueue = getClickQueue();
             const documentObj = getDocument();
-            const setTimeoutFn = getSetTimeout();
 
-            if (clickQueue.length === 0) {
+            if (!activeNativeSelectionItem && clickQueue.length === 0) {
                 setIsProcessingQueue(false);
                 setIsSyncingState(false);
                 return;
@@ -2051,39 +2285,86 @@
             setIsProcessingQueue(true);
             setIsSyncingState(true);
 
-            const batchSize = 5;
-            for (let i = 0; i < batchSize && clickQueue.length > 0; i++) {
-                const item = clickQueue.shift();
-                let checkbox = item.checkbox;
-
-                if (!checkbox || !documentObj?.body?.contains?.(checkbox)) {
-                    const freshCheckbox = findFreshCheckbox(item.sourceKey);
-                    if (freshCheckbox) {
-                        checkbox = freshCheckbox;
-                    } else if (item.retryOnMissing && Number(item.attempts) < NATIVE_SELECTION_SYNC_RETRY_LIMIT) {
-                        clickQueue.push(Object.assign({}, item, {
-                            attempts: Number(item.attempts) + 1
-                        }));
-                        continue;
-                    } else {
-                        recordNativeSelectionSyncFailure({
-                            sourceKey: item.sourceKey || '',
-                            reason: 'native_checkbox_missing_during_queue',
-                            detectedSourceViewKind: getCurrentSourceViewKind() || 'unknown'
-                        });
-                        continue;
-                    }
-                }
-
-                if (shouldToggleNativeCheckbox(checkbox, item.desiredState)) {
-                    recordNativeSelectionSyncFailure(null);
-                    checkbox.click();
-                }
+            if (!activeNativeSelectionItem) {
+                activeNativeSelectionItem = clickQueue.shift() || null;
+            }
+            const item = activeNativeSelectionItem;
+            if (!item) {
+                scheduleNextNativeSelectionStep();
+                return;
             }
 
-            if (typeof setTimeoutFn === 'function') {
-                setTimeoutFn(processClickQueue, 20);
+            if (nativeSelectionGenerationBySourceKey.get(item.sourceKey) !== item.generation) {
+                settleNativeSelectionWaiter(item.sourceKey, item.generation, {
+                    reason: 'superseded'
+                });
+                activeNativeSelectionItem = null;
+                scheduleNextNativeSelectionStep();
+                return;
             }
+
+            if (item.contextToken !== getNativeSelectionContextToken()) {
+                failNativeSelectionItem(item, 'context_changed');
+                activeNativeSelectionItem = null;
+                scheduleNextNativeSelectionStep();
+                return;
+            }
+
+            let checkbox = item.checkbox;
+            if (!checkbox || !documentObj?.body?.contains?.(checkbox)) {
+                checkbox = findFreshCheckbox(item.sourceKey);
+                item.checkbox = checkbox || null;
+            }
+
+            if (!checkbox) {
+                item.checksAfterClick += 1;
+                if (item.retryOnMissing && item.checksAfterClick < NATIVE_SELECTION_SYNC_CHECK_LIMIT) {
+                    scheduleNextNativeSelectionStep();
+                    return;
+                }
+                failNativeSelectionItem(item, 'native_checkbox_missing_during_queue');
+                activeNativeSelectionItem = null;
+                scheduleNextNativeSelectionStep();
+                return;
+            }
+
+            if (!shouldToggleNativeCheckbox(checkbox, item.desiredState)) {
+                if (item.confirmationChecks < item.minimumConfirmationChecks) {
+                    item.confirmationChecks += 1;
+                    scheduleNextNativeSelectionStep();
+                    return;
+                }
+                completeNativeSelectionItem(item);
+                activeNativeSelectionItem = null;
+                scheduleNextNativeSelectionStep();
+                return;
+            }
+
+            if (item.clickAttempts >= NATIVE_SELECTION_SYNC_CLICK_LIMIT) {
+                failNativeSelectionItem(item, 'native_checkbox_timeout', {
+                    currentState: getNativeCheckboxState(checkbox)
+                });
+                activeNativeSelectionItem = null;
+                scheduleNextNativeSelectionStep();
+                return;
+            }
+
+            if (item.checksAfterClick === 0) {
+                if (typeof checkbox.click !== 'function') {
+                    failNativeSelectionItem(item, 'native_checkbox_click_unavailable');
+                    activeNativeSelectionItem = null;
+                    scheduleNextNativeSelectionStep();
+                    return;
+                }
+                item.clickAttempts += 1;
+                checkbox.click();
+            }
+            item.checksAfterClick += 1;
+
+            if (item.checksAfterClick >= NATIVE_SELECTION_SYNC_CHECK_LIMIT) {
+                item.checksAfterClick = 0;
+            }
+            scheduleNextNativeSelectionStep();
         }
 
         function findParentGroupOfSource(key) {
@@ -2126,47 +2407,70 @@
             return true;
         }
 
+        function getVisibleBatchOperableSourceKeys() {
+            const sourcesByKey = getSourcesByKey();
+            if (getVisibleLogicalSourceKeys) {
+                const logicalSourceKeys = getVisibleLogicalSourceKeys();
+                if (Array.isArray(logicalSourceKeys)) {
+                    return logicalSourceKeys.filter((sourceKey) => (
+                        isBatchOperableSource(sourcesByKey.get(sourceKey))
+                    ));
+                }
+            }
+
+            const shadowRoot = getShadowRoot();
+            return Array.from(
+                shadowRoot?.querySelectorAll?.('.source-item .sp-batch-checkbox:not(:disabled)') || []
+            )
+                .filter((checkbox) => isBatchSelectionElementVisible(checkbox))
+                .map((checkbox) => checkbox?.dataset?.sourceKey)
+                .filter((sourceKey) => (
+                    sourceKey
+                    && isBatchOperableSource(sourcesByKey.get(sourceKey))
+                ));
+        }
+
         function collectSourceKeysInTreeOrder() {
             const state = getState();
             const groupsById = getGroupsById();
             const orderedKeys = [];
-            const visitGroup = (groupId) => {
-                const group = groupsById.get(groupId);
-                if (!group || !Array.isArray(group.children)) return;
-                group.children.forEach((child) => {
-                    if (child.type === 'source' && child.key) {
-                        orderedKeys.push(child.key);
-                    } else if (child.type === 'group' && child.id) {
-                        visitGroup(child.id);
-                    }
-                });
-            };
+            const visitedGroupIds = new Set();
+            const stack = [];
 
             // v5: walk the unified root array (root folders + positioned root sources
             // interleaved), mirroring render()'s root walk, then the bottom bin.
-            (Array.isArray(state.root) ? state.root : []).forEach((entry) => {
-                if (!entry) return;
-                if (entry.type === 'group' && entry.id) {
-                    visitGroup(entry.id);
-                } else if (entry.type === 'source' && entry.key) {
-                    orderedKeys.push(entry.key);
+            const rootEntries = Array.isArray(state.root) ? state.root : [];
+            for (let index = rootEntries.length - 1; index >= 0; index -= 1) {
+                const entry = rootEntries[index];
+                if (entry?.type === 'group' && entry.id) {
+                    stack.push({ kind: 'group', id: entry.id });
+                } else if (entry?.type === 'source' && entry.key) {
+                    stack.push({ kind: 'source', key: entry.key });
                 }
-            });
+            }
+            while (stack.length > 0) {
+                const task = stack.pop();
+                if (task.kind === 'source') {
+                    orderedKeys.push(task.key);
+                    continue;
+                }
+                if (visitedGroupIds.has(task.id)) continue;
+                visitedGroupIds.add(task.id);
+                const group = groupsById.get(task.id);
+                const children = Array.isArray(group?.children) ? group.children : [];
+                for (let index = children.length - 1; index >= 0; index -= 1) {
+                    const child = children[index];
+                    if (child?.type === 'source' && child.key) {
+                        stack.push({ kind: 'source', key: child.key });
+                    } else if (child?.type === 'group' && child.id) {
+                        stack.push({ kind: 'group', id: child.id });
+                    }
+                }
+            }
             (Array.isArray(state.ungrouped) ? state.ungrouped : []).forEach((sourceKey) => {
                 if (sourceKey) orderedKeys.push(sourceKey);
             });
             return orderedKeys;
-        }
-
-        function finishSuccessfulBatchOperation(messageKey, count) {
-            const state = getState();
-            const pendingBatchKeys = getPendingBatchKeys();
-            pendingBatchKeys.clear();
-            state.isBatchMode = false;
-            closeSourceActionMenu();
-            saveState({ immediate: true, critical: true });
-            render();
-            showUndoableToast(getMessage(messageKey, [String(count)]), { variant: 'success' });
         }
 
         function executeBatchMoveToUngrouped() {
@@ -2175,6 +2479,23 @@
             const pendingBatchKeys = getPendingBatchKeys();
             const selectedKeys = new Set(pendingBatchKeys);
             const parentMap = getParentMap();
+            const createResult = ({
+                ok = false,
+                changed = false,
+                succeeded = [],
+                failed = [],
+                skipped = [],
+                unattempted = [],
+                reason = ''
+            } = {}) => ({
+                ok,
+                changed,
+                succeeded,
+                failed,
+                skipped,
+                unattempted,
+                reason
+            });
             if (
                 !(parentMap instanceof Map)
                 || !treePlacement
@@ -2183,10 +2504,17 @@
                 || typeof treePlacement.rebuildParentMap !== 'function'
             ) {
                 showToast(getMessage('ui_batch_no_sources_changed'), { variant: 'info' });
-                return false;
+                return createResult({
+                    unattempted: Array.from(selectedKeys).map((key) => ({
+                        item: { kind: 'source', key },
+                        reason: 'placement_unavailable'
+                    })),
+                    reason: 'placement_unavailable'
+                });
             }
 
             const items = [];
+            const preflightSkipped = [];
             try {
                 collectSourceKeysInTreeOrder().forEach((sourceKey) => {
                     const source = sourcesByKey.get(sourceKey);
@@ -2197,19 +2525,35 @@
                     });
                     if (location && location.container !== 'ungrouped') {
                         items.push({ kind: 'source', key: sourceKey });
+                    } else if (location?.container === 'ungrouped') {
+                        preflightSkipped.push({
+                            item: { kind: 'source', key: sourceKey },
+                            reason: 'already_ungrouped'
+                        });
                     }
                 });
             } catch (error) {
                 showToast(getMessage('ui_batch_no_sources_changed'), { variant: 'info' });
-                return false;
+                return createResult({
+                    failed: Array.from(selectedKeys).map((key) => ({
+                        item: { kind: 'source', key },
+                        reason: 'placement_failed'
+                    })),
+                    reason: 'placement_failed'
+                });
             }
 
             if (items.length === 0) {
                 showToast(getMessage('ui_batch_no_sources_changed'), { variant: 'info' });
-                return false;
+                return createResult({
+                    ok: true,
+                    skipped: preflightSkipped,
+                    reason: 'no_change'
+                });
             }
 
             let result;
+            const previousEffectiveStates = collectEffectiveSourceStates();
             try {
                 result = treePlacement.applyBatchPlacement({
                     items,
@@ -2228,20 +2572,56 @@
                 : [];
             if (!result?.ok || !result.changed || movedKeys.length === 0) {
                 showToast(getMessage('ui_batch_no_sources_changed'), { variant: 'info' });
-                return false;
+                return createResult({
+                    failed: items.map((item) => ({
+                        item,
+                        reason: result?.reason || 'placement_failed'
+                    })),
+                    skipped: preflightSkipped,
+                    reason: result?.reason || 'placement_failed'
+                });
             }
 
-            treePlacement.rebuildParentMap(parentMap);
-            finishSuccessfulBatchOperation('ui_batch_ungrouped_toast', movedKeys.length);
-            return true;
-        }
-
-        function finishKeyboardTreeMove(messageKey) {
-            closeSourceActionMenu();
             rebuildPlacementParentMap();
+            const effectiveStateSync = syncSourcesToEffectiveState(previousEffectiveStates);
+            const skipped = [
+                ...preflightSkipped,
+                ...(Array.isArray(result.skipped) ? result.skipped : [])
+            ];
+            pendingBatchKeys.clear();
+            skipped
+                .map((entry) => entry?.item?.key)
+                .filter(Boolean)
+                .forEach((key) => pendingBatchKeys.add(key));
+            state.isBatchMode = pendingBatchKeys.size > 0;
+            closeSourceActionMenu();
             render();
             saveState({ immediate: true, critical: true });
-            showUndoableToast(getMessage(messageKey), { variant: 'success' });
+            onEffectiveStateSyncConfirmed(effectiveStateSync, () => {
+                showUndoableToast(getMessage('ui_batch_ungrouped_toast', [String(movedKeys.length)]), {
+                    variant: 'success'
+                });
+                emitOnboardingSuccess('move-source');
+            });
+            return createResult({
+                ok: true,
+                changed: true,
+                succeeded: result.moved,
+                skipped,
+                reason: skipped.length > 0 ? 'partial' : (result.reason || 'moved')
+            });
+        }
+
+        function finishKeyboardTreeMove(messageKey, previousEffectiveStates = null) {
+            closeSourceActionMenu();
+            rebuildPlacementParentMap();
+            const effectiveStateSync = syncSourcesToEffectiveState(previousEffectiveStates);
+            render();
+            saveState({ immediate: true, critical: true });
+            return onEffectiveStateSyncConfirmed(effectiveStateSync, () => {
+                showUndoableToast(getMessage(messageKey), { variant: 'success' });
+                emitOnboardingSuccess('move-source');
+            });
         }
 
         function getDirectionalContainerLength(location) {
@@ -2358,6 +2738,7 @@
             const resolution = treePlacement.resolveDirectionalTarget(item, direction);
             if (!resolution?.ok || !resolution.target) return false;
 
+            const previousEffectiveStates = collectEffectiveSourceStates();
             const result = treePlacement.applyPlacement({
                 item,
                 target: resolution.target
@@ -2366,10 +2747,16 @@
 
             closeSourceActionMenu();
             rebuildPlacementParentMap();
+            const effectiveStateSync = syncSourcesToEffectiveState(previousEffectiveStates);
             render();
             saveState({ immediate: true, critical: true });
             restoreDirectionalTreeOrderFocus(item, direction, result);
-            announceDirectionalTreeOrder(direction, result.to);
+            onEffectiveStateSyncConfirmed(effectiveStateSync, () => {
+                announceDirectionalTreeOrder(direction, result.to);
+                if (item?.kind === 'source') {
+                    emitOnboardingSuccess('move-source');
+                }
+            });
             return true;
         }
 
@@ -2390,6 +2777,7 @@
                 return false;
             }
 
+            const previousEffectiveStates = collectEffectiveSourceStates();
             const result = treePlacement.applyPlacement({
                 item: { kind: 'source', key: sourceKey },
                 target: {
@@ -2399,7 +2787,7 @@
             });
             if (!result?.ok || !result.changed) return false;
 
-            finishKeyboardTreeMove('ui_keyboard_moved_ungrouped_toast');
+            finishKeyboardTreeMove('ui_keyboard_moved_ungrouped_toast', previousEffectiveStates);
             return true;
         }
 
@@ -2508,23 +2896,32 @@
 
             if (target.closest('.sp-tag-pill')) {
                 const tagId = target.closest('.sp-tag-pill').dataset.tagId;
-                state.activeTagId = state.activeTagId === tagId ? null : tagId;
-                state.activeQuickViewKind = null;
+                runEffectiveStateTransition(() => {
+                    state.activeTagId = state.activeTagId === tagId ? null : tagId;
+                    state.activeQuickViewKind = null;
+                    return true;
+                });
                 render();
                 return;
             }
 
             if (target.closest('#sp-clear-isolate-btn')) {
-                const oldStates = collectEffectiveSourceStates();
-                setActiveIsolationGroupId(null);
-                syncSourcesToEffectiveState(oldStates);
+                const transition = runEffectiveStateTransition(() => {
+                    setActiveIsolationGroupId(null);
+                    return true;
+                });
                 render();
-                showToast(getMessage('ui_isolation_cleared_toast'));
+                onEffectiveStateSyncConfirmed(transition?.nextStates, () => {
+                    showToast(getMessage('ui_isolation_cleared_toast'));
+                });
                 return;
             }
 
             if (target.closest('#sp-clear-tag-filter-btn')) {
-                state.activeTagId = null;
+                runEffectiveStateTransition(() => {
+                    state.activeTagId = null;
+                    return true;
+                });
                 render();
                 return;
             }
@@ -2537,23 +2934,23 @@
             }
 
             if (target.closest('.sp-empty-clear-filters-btn')) {
-                const oldStates = isolationGroupId ? collectEffectiveSourceStates() : null;
-                state.filterQuery = '';
-                state.activeTagId = null;
-                state.activeQuickViewKind = null;
-                setActiveIsolationGroupId(null);
-                if (oldStates) {
-                    syncSourcesToEffectiveState(oldStates);
-                }
+                runEffectiveStateTransition(() => {
+                    state.filterQuery = '';
+                    state.activeTagId = null;
+                    state.activeQuickViewKind = null;
+                    setActiveIsolationGroupId(null);
+                    return true;
+                });
                 render();
                 getShadowRoot()?.getElementById?.('sp-search')?.focus?.();
                 return;
             }
 
             if (target.closest('.sp-empty-clear-isolation-btn')) {
-                const oldStates = collectEffectiveSourceStates();
-                setActiveIsolationGroupId(null);
-                syncSourcesToEffectiveState(oldStates);
+                runEffectiveStateTransition(() => {
+                    setActiveIsolationGroupId(null);
+                    return true;
+                });
                 render();
                 getShadowRoot()?.getElementById?.('sp-search')?.focus?.();
                 return;
@@ -2575,15 +2972,18 @@
                 return;
             }
             if (target.closest('.sp-isolate-button')) {
-                const oldStates = collectEffectiveSourceStates();
-                setActiveIsolationGroupId(isolationGroupId === groupId ? null : groupId);
-                syncSourcesToEffectiveState(oldStates);
+                const transition = runEffectiveStateTransition(() => {
+                    setActiveIsolationGroupId(isolationGroupId === groupId ? null : groupId);
+                    return true;
+                });
                 render();
-                showToast(
-                    getActiveIsolationGroupId()
-                        ? getMessage('ui_isolated_toast', [groupsById.get(groupId)?.title])
-                        : getMessage('ui_isolation_cleared_toast')
-                );
+                onEffectiveStateSyncConfirmed(transition?.nextStates, () => {
+                    showToast(
+                        getActiveIsolationGroupId()
+                            ? getMessage('ui_isolated_toast', [groupsById.get(groupId)?.title])
+                            : getMessage('ui_isolation_cleared_toast')
+                    );
+                });
                 return;
             }
 
@@ -2593,15 +2993,17 @@
                 if (group) {
                     const oldEffectiveStates = collectEffectiveSourceStates();
                     group.enabled = target.checked;
+                    invalidateDerivedGroupEffectiveStateCache();
                     syncSourcesToEffectiveState(oldEffectiveStates);
-                    saveState({ immediate: true, critical: true });
                     render();
+                    saveState({ immediate: true, critical: true });
                 }
                 return;
             }
 
             const batchCheckbox = target.closest('.sp-batch-checkbox');
             if (batchCheckbox) {
+                clearLastBatchDeleteResult();
                 const batchSourceKey = batchCheckbox.dataset.sourceKey;
                 const source = batchSourceKey ? sourcesByKey.get(batchSourceKey) : null;
 
@@ -2631,6 +3033,7 @@
                     const source = sourcesByKey.get(checkboxSourceKey);
                     if (source && !source.isDisabled) {
                         source.enabled = target.checked;
+                        invalidateDerivedGroupEffectiveStateCache();
                         syncSourceToPage(source, isSourceEffectivelyEnabled(source), {
                             retryOnMissingCheckbox: true
                         });
@@ -2658,6 +3061,7 @@
                         return;
                     }
 
+                    clearLastBatchDeleteResult();
                     if (pendingBatchKeys.has(sourceKey)) {
                         pendingBatchKeys.delete(sourceKey);
                     } else {
@@ -2683,6 +3087,7 @@
 
                     if (source) {
                         source.enabled = checkbox.checked;
+                        invalidateDerivedGroupEffectiveStateCache();
                         syncSourceToPage(source, isSourceEffectivelyEnabled(source), {
                             retryOnMissingCheckbox: true
                         });
@@ -2694,6 +3099,7 @@
             }
 
             if (target.closest('.sp-cancel-batch-btn')) {
+                clearLastBatchDeleteResult();
                 state.isBatchMode = false;
                 pendingBatchKeys.clear();
                 render();
@@ -2701,27 +3107,33 @@
             }
 
             if (target.closest('.sp-batch-select-visible-btn') && !getIsDeletingSources()) {
-                const shadowRoot = getShadowRoot();
-                const visibleCheckboxes = Array.from(
-                    shadowRoot?.querySelectorAll?.('.source-item .sp-batch-checkbox:not(:disabled)') || []
-                );
-                visibleCheckboxes.forEach((checkbox) => {
-                    const sourceKey = checkbox?.dataset?.sourceKey;
-                    if (
-                        sourceKey
-                        && isBatchOperableSource(sourcesByKey.get(sourceKey))
-                        && isBatchSelectionElementVisible(checkbox)
-                    ) {
-                        pendingBatchKeys.add(sourceKey);
-                    }
+                clearLastBatchDeleteResult();
+                getVisibleBatchOperableSourceKeys().forEach((sourceKey) => {
+                    pendingBatchKeys.add(sourceKey);
                 });
                 render();
                 return;
             }
 
             if (target.closest('.sp-batch-clear-selection-btn') && !getIsDeletingSources()) {
+                clearLastBatchDeleteResult();
                 pendingBatchKeys.clear();
                 render();
+                return;
+            }
+
+            if (target.closest('.sp-batch-clear-hidden-selection-btn') && !getIsDeletingSources()) {
+                clearLastBatchDeleteResult();
+                const visibleSelectedKeys = new Set(getVisibleBatchOperableSourceKeys());
+                Array.from(pendingBatchKeys).forEach((key) => {
+                    if (!visibleSelectedKeys.has(key)) pendingBatchKeys.delete(key);
+                });
+                render();
+                return;
+            }
+
+            if (target.closest('.sp-batch-retry-remaining-btn') && !getIsDeletingSources() && pendingBatchKeys.size > 0) {
+                executeBatchDelete();
                 return;
             }
 
@@ -2770,13 +3182,25 @@
                 const groupChildren = Array.isArray(group.children) ? group.children : [];
 
                 if (groupChildren.length > 0) {
+                    const directSourceCount = groupChildren.filter(
+                        (child) => child?.type === 'source' && child.key
+                    ).length;
+                    const directChildGroupCount = groupChildren.filter(
+                        (child) => child?.type === 'group' && child.id
+                    ).length;
                     const windowObj = getWindow();
                     const deleteContents = windowObj?.confirm?.(
-                        getMessage('ui_delete_group_confirm_non_empty', [group.title, getMessage('ui_ungrouped')])
+                        getMessage('ui_delete_group_confirm_non_empty', [
+                            group.title,
+                            getMessage('ui_ungrouped'),
+                            String(directSourceCount),
+                            String(directChildGroupCount)
+                        ])
                     );
                     if (!deleteContents) return;
                 }
 
+                const previousEffectiveStates = collectEffectiveSourceStates();
                 const result = treePlacement.removeGroup({
                     item: { kind: 'group', id: groupId }
                 });
@@ -2786,8 +3210,9 @@
                     setActiveIsolationGroupId(null);
                 }
                 rebuildPlacementParentMap();
-                saveState({ immediate: true, critical: true });
+                syncSourcesToEffectiveState(previousEffectiveStates);
                 render();
+                saveState({ immediate: true, critical: true });
             }
         }
 
@@ -2824,6 +3249,7 @@
                 if (checkboxState === null) return;
                 if (source && source.enabled !== checkboxState) {
                     source.enabled = checkboxState;
+                    invalidateDerivedGroupEffectiveStateCache();
                     const desiredState = isSourceEffectivelyEnabled(source);
 
                     const virtualCheckbox = shadowRoot?.querySelector?.(`.sp-checkbox[data-source-key="${key}"]`);
@@ -2937,18 +3363,14 @@
                     group.title = newTitle;
                 }
                 if (isNewlyCreated) {
-                    const isolatedGroupId = getActiveIsolationGroupId();
-                    const oldStates = isolatedGroupId
-                        ? collectEffectiveSourceStates()
-                        : null;
-                    const state = getState();
-                    state.filterQuery = '';
-                    state.activeTagId = null;
-                    state.activeQuickViewKind = null;
-                    setActiveIsolationGroupId(null);
-                    if (oldStates) {
-                        syncSourcesToEffectiveState(oldStates);
-                    }
+                    runEffectiveStateTransition(() => {
+                        const state = getState();
+                        state.filterQuery = '';
+                        state.activeTagId = null;
+                        state.activeQuickViewKind = null;
+                        setActiveIsolationGroupId(null);
+                        return true;
+                    });
                     const collapsedAncestorIds = Array.isArray(
                         group.pendingInitialRenameCollapsedAncestorIds
                     )
@@ -2968,11 +3390,17 @@
                 delete group.pendingInitialRenameCollapsedAncestorIds;
                 delete group.isPendingInitialRenameRender;
                 const changed = group.title !== originalTitle || isNewlyCreated;
+                if (group.title !== originalTitle) {
+                    invalidateSourceContextIndex();
+                }
                 cleanup(
                     `.group-container[data-group-id="${cssEscape(groupId)}"] .sp-edit-button`
                 );
                 if (!changed) return;
                 saveState({ immediate: true, critical: true });
+                if (isNewlyCreated) {
+                    emitOnboardingSuccess('create-folder');
+                }
             };
             const handleKey = (e) => {
                 if (e.key === 'Enter') {
@@ -5121,6 +5549,7 @@
                         };
                         clearReflowBeforeMutation();
                         let result = null;
+                        const previousEffectiveStates = collectEffectiveSourceStates();
                         try {
                             result = treePlacement.applyBatchPlacement({
                                 items: keys.map((key) => ({ kind: 'source', key })),
@@ -5142,9 +5571,9 @@
                             state.isBatchMode = false;
                             pendingBatchKeys.clear();
                             rebuildPlacementParentMap();
-                            saveState({ immediate: true, critical: true });
+                            const effectiveStateSync = syncSourcesToEffectiveState(previousEffectiveStates);
                             render();
-                            showToast(getMessage('ui_batch_moved_sources_toast', [String(movedKeys.length)]));
+                            saveState({ immediate: true, critical: true });
                             disposeHoverOpenedGroupsAfterDrop(intent, augmentedIntent);
                             applyDropLandingAndFlash(
                                 movedKeys,
@@ -5153,6 +5582,10 @@
                                 _preDropRects,
                                 'source'
                             );
+                            onEffectiveStateSyncConfirmed(effectiveStateSync, () => {
+                                showToast(getMessage('ui_batch_moved_sources_toast', [String(movedKeys.length)]));
+                                emitOnboardingSuccess('move-source');
+                            });
                         }
                         clearDragFeedback();
                         return;
@@ -5185,6 +5618,7 @@
                 }
                 clearReflowBeforeMutation();
                 let result;
+                const previousEffectiveStates = collectEffectiveSourceStates();
                 try {
                     result = treePlacement.applyPlacement({
                         item,
@@ -5200,6 +5634,7 @@
                 }
 
                 rebuildPlacementParentMap();
+                const effectiveStateSync = syncSourcesToEffectiveState(previousEffectiveStates);
                 render();
                 saveState({ immediate: true, critical: true });
                 disposeHoverOpenedGroupsAfterDrop(intent, augmentedIntent);
@@ -5210,6 +5645,11 @@
                     _preDropRects,
                     sourceKey ? 'source' : (draggedGroupId ? 'group' : null)
                 );
+                if (sourceKey) {
+                    onEffectiveStateSyncConfirmed(effectiveStateSync, () => {
+                        emitOnboardingSuccess('move-source');
+                    });
+                }
                 // Discoverability hint: when a source drop lands in the bottom ungrouped
                 // bin via the trailing drop zone (targetGroup null, slotKey null, and NOT a
                 // positioned root drop), render() places it at the BOTTOM of the list, below
@@ -5222,7 +5662,9 @@
                     && result.to?.container === 'ungrouped'
                     && intent.slotKey == null
                 ) {
-                    try { showToast(getMessage('ui_keyboard_moved_ungrouped_toast')); } catch (_) {}
+                    onEffectiveStateSyncConfirmed(effectiveStateSync, () => {
+                        try { showToast(getMessage('ui_keyboard_moved_ungrouped_toast')); } catch (_) {}
+                    });
                     const _listAfter = getSourceListContainer();
                     if (_listAfter && typeof _listAfter.querySelector === 'function') {
                         const _ungroupedHeader = _listAfter.querySelector('.ungrouped-header');
@@ -5741,9 +6183,12 @@
         return {
             handleAddNewGroup,
             syncSourceToPage,
+            syncSourceToPageWithResult,
             processClickQueue,
             findParentGroupOfSource,
             isBatchOperableSource,
+            isBatchSelectionElementVisible,
+            getVisibleBatchOperableSourceKeys,
             collectSourceKeysInTreeOrder,
             executeBatchMoveToUngrouped,
             canMoveSourceToUngrouped,

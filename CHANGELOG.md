@@ -38,6 +38,8 @@
 - **核心树与窄面板无障碍改进 (Improve Core Tree Accessibility and Narrow-Panel Layout)**: **影响**: 来源与嵌套文件夹使用 list/listitem 关系，重复控件名称带来源或文件夹上下文，折叠内容从 Tab 和辅助技术路径中移除，标签状态与 switch focus 更清晰；工具栏和批量栏在窄宽度及长译文下可换行，浅色次要文字和自定义标签文字保持可读。
 
 ### Fixed
+- **视图与树位置变更保持原生状态一致 (Keep Native State Consistent Across View and Tree Transitions)**: **影响**: 用户切换 Quick View、Tag、Isolation 或命令面板视图，以及移动来源、拖拽或调整文件夹位置后，Gemini Notebook 原生复选框会按操作前后有效状态差异同步；无变化和放置失败不会保存或显示成功，原生同步失败会保留可重试状态。
+- **恢复与来源盘点改为事务式 (Make Restore and Inventory Reconciliation Transactional)**: **影响**: Recovery、History、Import Backup 和 Source Repair 现在按笔记本实例串行应用，只有明确保存成功且 `sessionStorage` recovery 清理已确认才清除恢复入口；即使主状态已落盘，清理失败也会结构化失败并回滚。Recovery Restore 全程保留原始恢复目标，拒绝、空响应、过期修订、页面切换、清理失败或回滚无法确认时均保留该目标的 Restore/Refresh 入口。来源扫描会区分 complete、partial、virtualized 和 loading，单次缺失或虚拟化换窗不再丢失来源的文件夹、Tag 与启用状态。
 - **支持当前 Gemini Notebook 域名 (Support the Current Gemini Notebook Origin)**: **影响**: 扩展会在当前 `notebook.google.com` 页面正常注入、识别、聚焦和启动，同时保留 `notebooklm.google.com` 兼容入口；Popup 只有收到明确的 `success: true` 才报告动作完成。
 
 ### Security

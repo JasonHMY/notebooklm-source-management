@@ -189,6 +189,13 @@
             }
         }
 
+        function getLiveReadOnlyModel() {
+            const state = getLiveState();
+            const groupsById = getLiveGroups();
+            if (!state || !groupsById) return null;
+            return { state, groupsById };
+        }
+
         function normalizeItem(item) {
             if (item?.kind === 'source' && typeof item.key === 'string' && item.key) {
                 return { kind: 'source', key: item.key };
@@ -546,7 +553,10 @@
         }
 
         function createDirectionalTargetResolver() {
-            const model = getLiveModel();
+            // Directional affordances only inspect placement. Avoid cloning the complete
+            // notebook tree on every render; the resolver is consumed synchronously by
+            // that render, so the current live references form a safe read-only snapshot.
+            const model = getLiveReadOnlyModel();
             const locationIndex = model ? createDirectionalLocationIndex(model) : null;
             const validation = model ? validateWorkingModel(model) : null;
             return (itemInput, directionInput) => {

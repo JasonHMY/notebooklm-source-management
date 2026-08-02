@@ -352,28 +352,32 @@
                 ? rawGroupsById
                 : {};
             const visitedGroups = new Set();
-            const visitGroup = (groupId) => {
-                if (!groupId || visitedGroups.has(groupId)) return;
-                visitedGroups.add(groupId);
-                const group = importGroupsById[groupId];
+            const stack = Object.keys(importGroupsById)
+                .reverse()
+                .map((groupId) => ({ kind: 'group', id: groupId }));
+            while (stack.length > 0) {
+                const task = stack.pop();
+                if (task.kind === 'source') {
+                    refs.add(task.key);
+                    continue;
+                }
+                if (!task.id || visitedGroups.has(task.id)) continue;
+                visitedGroups.add(task.id);
+                const group = importGroupsById[task.id];
                 const rawChildren = getOwnField(group, 'children', []);
-                (Array.isArray(rawChildren) ? rawChildren : []).forEach((child) => {
+                const children = Array.isArray(rawChildren) ? rawChildren : [];
+                for (let index = children.length - 1; index >= 0; index -= 1) {
+                    const child = children[index];
                     const childType = getOwnField(child, 'type');
                     const childKey = getOwnField(child, 'key');
                     const childGroupId = getOwnField(child, 'id');
                     if (childType === 'source' && childKey) {
-                        refs.add(childKey);
-                        return;
+                        stack.push({ kind: 'source', key: childKey });
+                    } else if (childType === 'group' && childGroupId) {
+                        stack.push({ kind: 'group', id: childGroupId });
                     }
-                    if (childType === 'group' && childGroupId) {
-                        visitGroup(childGroupId);
-                    }
-                });
-            };
-
-            Object.keys(importGroupsById).forEach((groupId) => {
-                visitGroup(groupId);
-            });
+                }
+            }
             const rawUngrouped = getOwnField(importState, 'ungrouped', []);
             (Array.isArray(rawUngrouped) ? rawUngrouped : []).forEach((sourceKey) => {
                 if (sourceKey) refs.add(sourceKey);

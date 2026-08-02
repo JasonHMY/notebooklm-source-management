@@ -584,6 +584,72 @@ describe('saveState', () => {
         await expect(mod.createManualRestorePoint('Before import')).resolves.toBe(false);
     });
 
+    it('deletes one notebook-owned history entry and refreshes storage diagnostics', async () => {
+        const projectId = seedPersistedState();
+        global.chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+            expect(message).toEqual({
+                type: 'DELETE_STATE_HISTORY_ENTRY',
+                key: `sourcesPlusHistory_${projectId}`,
+                entryId: 'history-1'
+            });
+            callback({
+                success: true,
+                changed: true,
+                deletedCount: 1,
+                history: [{
+                    id: 'history-2',
+                    createdAt: '2026-07-31T00:00:00.000Z',
+                    reason: 'manual',
+                    manual: true,
+                    snapshot: expectedPersistableState
+                }],
+                storageUsageBytes: 2048,
+                storageQuotaBytes: 4096,
+                storageUsageRatio: 0.5,
+                storageWarning: false
+            });
+        });
+
+        await expect(mod.deleteStateHistoryEntry('history-1')).resolves.toEqual(
+            expect.objectContaining({ ok: true, deletedCount: 1 })
+        );
+        expect(mod.getStateHistoryEntries()).toEqual([
+            expect.objectContaining({ id: 'history-2' })
+        ]);
+        expect(mod.getSaveStatus()).toEqual(expect.objectContaining({
+            storageUsageBytes: 2048,
+            storageQuotaBytes: 4096,
+            storageUsageRatio: 0.5,
+            historyEntryCount: 1
+        }));
+    });
+
+    it('clears automatic history with the exact notebook history key', async () => {
+        const projectId = seedPersistedState();
+        global.chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+            expect(message).toEqual({
+                type: 'CLEAR_STATE_HISTORY',
+                key: `sourcesPlusHistory_${projectId}`,
+                scope: 'automatic'
+            });
+            callback({
+                success: true,
+                changed: true,
+                deletedCount: 2,
+                history: [],
+                storageUsageBytes: 1024,
+                storageQuotaBytes: 4096,
+                storageUsageRatio: 0.25,
+                storageWarning: false
+            });
+        });
+
+        await expect(mod.clearStateHistory('automatic')).resolves.toEqual(
+            expect.objectContaining({ ok: true, deletedCount: 2 })
+        );
+        expect(mod.getStateHistoryEntries()).toEqual([]);
+    });
+
     it('serializes immediate saves and assigns increasing revisions', async () => {
         const projectId = seedPersistedState();
         const pendingRuntimeCallbacks = [];
@@ -999,6 +1065,32 @@ describe('saveState', () => {
             lastSaveRevision: 1,
             recoveryAvailable: false
         });
+    });
+
+    it('retains recovery status when cleanup throws after a confirmed critical save', async () => {
+        const projectId = seedPersistedState();
+        const consoleWarn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+        global.sessionStorage.removeItem.mockImplementation(() => {
+            throw new Error('session_cleanup_failed');
+        });
+
+        try {
+            const result = await mod.saveState({ immediate: true, critical: true });
+
+            expect(result).toMatchObject({
+                ok: false,
+                reason: 'recovery_cleanup_failed',
+                persistenceCommitted: true
+            });
+            expect(global.sessionStorage.getItem(`sourcesPlusRecovery_${projectId}`)).not.toBeNull();
+            expect(mod.getSaveStatus()).toMatchObject({
+                state: 'recovery_available',
+                recoveryAvailable: true,
+                lastError: 'recovery_cleanup_failed'
+            });
+        } finally {
+            consoleWarn.mockRestore();
+        }
     });
 
     it('preserves a failed Classic sweep recovery with the storage-plan failure reason', async () => {
@@ -1659,7 +1751,8 @@ describe('saveState', () => {
         expect(managerStatusContainer.className).toBe('sp-save-status sp-save-status-failed');
         expect(managerStatusContainer.childNodes.map((node) => node.textContent)).toEqual([
             'ui_save_status_failed',
-            'ui_save_status_retry'
+            'ui_save_status_retry',
+            'ui_save_status_manage_storage'
         ]);
 
         managerStatusContainer.childNodes[1].dispatchEvent({
@@ -1701,10 +1794,11 @@ describe('saveState', () => {
         expect(statusContainer.childNodes.map((node) => node.textContent)).toEqual([
             'ui_save_status_stale',
             'ui_save_status_retry',
+            'ui_save_status_manage_storage',
             'ui_save_status_refresh'
         ]);
 
-        statusContainer.childNodes[2].dispatchEvent({
+        statusContainer.childNodes[3].dispatchEvent({
             type: 'click',
             preventDefault: jest.fn(),
             stopPropagation: jest.fn()
@@ -1742,10 +1836,11 @@ describe('saveState', () => {
         expect(statusContainer.childNodes.map((node) => node.textContent)).toEqual([
             'ui_save_status_recovery',
             'ui_recovery_restore',
+            'ui_save_status_refresh',
             'ui_recovery_dismiss'
         ]);
 
-        statusContainer.childNodes[2].dispatchEvent({
+        statusContainer.childNodes[3].dispatchEvent({
             type: 'click',
             preventDefault: jest.fn(),
             stopPropagation: jest.fn()
@@ -1758,7 +1853,57 @@ describe('saveState', () => {
         });
     });
 
-    it('restores a recovery snapshot from the save status UI and saves it critically', () => {
+    it('keeps recovery actions visible when dismiss cannot clear session storage', () => {
+        const projectId = seedPersistedState();
+        const consoleWarn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+        global.sessionStorage.setItem(`sourcesPlusRecovery_${projectId}`, JSON.stringify({
+            snapshot: expectedPersistableState,
+            baseRevision: 1,
+            createdAt: '2026-04-22T00:02:00.000Z',
+            reason: 'critical_save',
+            clientSaveId: 'test-save'
+        }));
+        global.sessionStorage.removeItem.mockImplementation(() => {
+            throw new Error('session_cleanup_failed');
+        });
+        const statusContainer = global.document.createElement('div');
+        const statusSection = global.document.createElement('section');
+        mod._setShadowRootForTest({
+            host: { isConnected: true },
+            getElementById: jest.fn((id) => {
+                if (id === 'sp-settings-save-status') return statusContainer;
+                if (id === 'sp-settings-save-status-section') return statusSection;
+                return null;
+            }),
+            querySelector: jest.fn(() => null)
+        });
+
+        try {
+            mod.setSaveStatus({
+                state: 'recovery_available',
+                recoveryAvailable: true,
+                recoveryCreatedAt: '2026-04-22T00:02:00.000Z'
+            });
+            expect(mod.dismissRecoverySnapshotFromUi()).toBe(false);
+
+            expect(global.sessionStorage.getItem(`sourcesPlusRecovery_${projectId}`)).not.toBeNull();
+            expect(mod.getSaveStatus()).toMatchObject({
+                state: 'recovery_available',
+                recoveryAvailable: true,
+                lastError: 'recovery_cleanup_failed'
+            });
+            expect(statusContainer.childNodes.map((node) => node.textContent)).toEqual([
+                'ui_save_status_recovery',
+                'ui_recovery_restore',
+                'ui_save_status_refresh',
+                'ui_recovery_dismiss'
+            ]);
+        } finally {
+            consoleWarn.mockRestore();
+        }
+    });
+
+    it('restores a recovery snapshot from the save status UI and saves it critically', async () => {
         const projectId = seedPersistedState();
         const recoveredSnapshot = {
             ...expectedPersistableState,
@@ -1768,21 +1913,29 @@ describe('saveState', () => {
             },
             ungrouped: []
         };
-        global.sessionStorage.setItem(`sourcesPlusRecovery_${projectId}`, JSON.stringify({
+        const restoredRecovery = {
             snapshot: recoveredSnapshot,
             baseRevision: 1,
             createdAt: '2026-04-22T00:03:00.000Z',
             reason: 'critical_save',
             clientSaveId: 'test-save'
-        }));
+        };
+        global.sessionStorage.setItem(`sourcesPlusRecovery_${projectId}`, JSON.stringify(restoredRecovery));
         mod._setShadowRootForTest({
             host: { isConnected: true },
             getElementById: jest.fn(() => null),
             querySelector: jest.fn(() => null),
             appendChild: jest.fn()
         });
+        global.chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+            callback({
+                success: true,
+                saveRevision: 2,
+                savedAt: '2026-04-22T00:04:00.000Z'
+            });
+        });
 
-        expect(mod.restoreRecoverySnapshotFromUi()).toBe(true);
+        await expect(mod.restoreRecoverySnapshotFromUi()).resolves.toBe(true);
 
         expect(mod.state.root).toEqual([{ type: 'group', id: 'recovered' }]);
         expect(mod.groupsById.get('recovered')).toMatchObject({
@@ -1801,6 +1954,145 @@ describe('saveState', () => {
             variant: 'success'
         });
         mod._hideActiveToastForTest(false);
+    });
+
+    it('rolls a recovery restore back when session cleanup cannot be confirmed', async () => {
+        const projectId = seedPersistedState();
+        const recoveredSnapshot = {
+            ...expectedPersistableState,
+            root: [{ type: 'group', id: 'recovered' }],
+            groupsById: {
+                recovered: { id: 'recovered', title: 'Recovered', children: [] }
+            },
+            ungrouped: []
+        };
+        const consoleWarn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+        const originalRecovery = {
+            snapshot: recoveredSnapshot,
+            baseRevision: 1,
+            createdAt: '2026-04-22T00:03:00.000Z',
+            reason: 'critical_save',
+            clientSaveId: 'test-save'
+        };
+        global.sessionStorage.setItem(`sourcesPlusRecovery_${projectId}`, JSON.stringify(originalRecovery));
+        global.sessionStorage.setItem.mockClear();
+        global.sessionStorage.removeItem.mockImplementation(() => {
+            throw new Error('session_cleanup_failed');
+        });
+        const statusContainer = global.document.createElement('div');
+        const statusSection = global.document.createElement('section');
+        mod._setShadowRootForTest({
+            host: { isConnected: true },
+            getElementById: jest.fn((id) => {
+                if (id === 'sp-settings-save-status') return statusContainer;
+                if (id === 'sp-settings-save-status-section') return statusSection;
+                return null;
+            }),
+            querySelector: jest.fn(() => null),
+            appendChild: jest.fn()
+        });
+        global.chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+            callback({
+                success: true,
+                saveRevision: 2,
+                savedAt: '2026-04-22T00:04:00.000Z'
+            });
+        });
+
+        try {
+            await expect(mod.restoreRecoverySnapshotFromUi()).resolves.toBe(false);
+
+            expect(mod.state.root).toEqual(expectedPersistableState.root);
+            const saveMessages = global.chrome.runtime.sendMessage.mock.calls
+                .map(([message]) => message)
+                .filter((message) => message?.type === 'SAVE_STATE');
+            expect(saveMessages).toHaveLength(2);
+            expect(global.sessionStorage.setItem).not.toHaveBeenCalled();
+            expect(JSON.parse(global.sessionStorage.getItem(`sourcesPlusRecovery_${projectId}`))).toEqual(
+                originalRecovery
+            );
+            expect(mod.readRecoverySnapshot()?.snapshot).toEqual(recoveredSnapshot);
+            expect(mod.getSaveStatus()).toMatchObject({
+                state: 'recovery_available',
+                recoveryAvailable: true,
+                lastError: 'recovery_cleanup_failed'
+            });
+            expect(statusContainer.childNodes.map((node) => node.textContent)).toEqual([
+                'ui_save_status_recovery',
+                'ui_recovery_restore',
+                'ui_save_status_refresh',
+                'ui_recovery_dismiss'
+            ]);
+            expect(mod._getActiveToastItemForTest()).toMatchObject({
+                message: 'ui_recovery_restore_failed',
+                variant: 'error'
+            });
+            mod._hideActiveToastForTest(false);
+        } finally {
+            consoleWarn.mockRestore();
+        }
+    });
+
+    it('keeps the original recovery target when cleanup fails and the rollback save is rejected', async () => {
+        const projectId = seedPersistedState();
+        const recoveredSnapshot = {
+            ...expectedPersistableState,
+            root: [{ type: 'group', id: 'recovered' }],
+            groupsById: {
+                recovered: { id: 'recovered', title: 'Recovered', children: [] }
+            },
+            ungrouped: []
+        };
+        const originalRecovery = {
+            snapshot: recoveredSnapshot,
+            baseRevision: 1,
+            createdAt: '2026-04-22T00:03:00.000Z',
+            reason: 'critical_save',
+            clientSaveId: 'test-save'
+        };
+        const consoleWarn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+        global.sessionStorage.setItem(`sourcesPlusRecovery_${projectId}`, JSON.stringify(originalRecovery));
+        global.sessionStorage.setItem.mockClear();
+        global.sessionStorage.removeItem.mockImplementation(() => {
+            throw new Error('session_cleanup_failed');
+        });
+        mod._setShadowRootForTest({
+            host: { isConnected: true },
+            getElementById: jest.fn(() => null),
+            querySelector: jest.fn(() => null),
+            appendChild: jest.fn()
+        });
+        let saveCount = 0;
+        global.chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+            if (message?.type !== 'SAVE_STATE') return;
+            saveCount += 1;
+            callback(saveCount === 1
+                ? {
+                    success: true,
+                    saveRevision: 2,
+                    savedAt: '2026-08-02T00:04:00.000Z'
+                }
+                : { success: false, errorCode: 'runtime_failure' });
+        });
+
+        try {
+            await expect(mod.restoreRecoverySnapshotFromUi()).resolves.toBe(false);
+
+            expect(saveCount).toBe(2);
+            expect(mod.state.root).toEqual(expectedPersistableState.root);
+            expect(global.sessionStorage.setItem).not.toHaveBeenCalled();
+            expect(JSON.parse(global.sessionStorage.getItem(`sourcesPlusRecovery_${projectId}`))).toEqual(
+                originalRecovery
+            );
+            expect(mod.readRecoverySnapshot()?.snapshot).toEqual(recoveredSnapshot);
+            expect(mod.getSaveStatus()).toMatchObject({
+                state: 'recovery_available',
+                recoveryAvailable: true,
+                lastError: 'recovery_cleanup_failed'
+            });
+        } finally {
+            consoleWarn.mockRestore();
+        }
     });
 
     it('builds diagnostics without exposing source titles or content', () => {
@@ -2952,6 +3244,470 @@ describe('settings import/export configuration', () => {
         expect(mod._getActiveToastItemForTest()).toMatchObject({
             message: 'ui_settings_import_backup_restored',
             variant: 'success'
+        });
+    });
+
+    it('rolls Import Backup restore back and retains the backup when recovery cleanup throws', async () => {
+        mod._setProjectId('project-import-cleanup-failed');
+        mod._setShadowRootForTest({
+            host: { isConnected: true },
+            querySelector: jest.fn(() => null),
+            appendChild: jest.fn()
+        });
+        mod.state.root = [{ type: 'group', id: 'before' }];
+        mod.groupsById.set('before', { id: 'before', title: 'Before', children: [] });
+        expect(mod.writeImportBackupSnapshot()).toBeTruthy();
+
+        mod.state.root = [{ type: 'group', id: 'after' }];
+        mod.groupsById.clear();
+        mod.groupsById.set('after', { id: 'after', title: 'After', children: [] });
+        const rollbackSnapshot = mod.buildPersistableState();
+        const consoleWarn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+        global.sessionStorage.removeItem.mockImplementationOnce(() => {
+            throw new Error('session_cleanup_failed');
+        });
+        let saveCount = 0;
+        global.chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+            if (message?.type === 'SAVE_STATE') {
+                saveCount += 1;
+                callback({
+                    success: true,
+                    saveRevision: saveCount,
+                    savedAt: '2026-08-02T00:00:00.000Z'
+                });
+            }
+        });
+
+        try {
+            await expect(mod.restoreImportBackupSnapshotFromUi()).resolves.toBe(false);
+
+            expect(saveCount).toBe(2);
+            expect(mod.state.root).toEqual([{ type: 'group', id: 'after' }]);
+            expect(mod.groupsById.has('after')).toBe(true);
+            expect(mod.readImportBackupSnapshot()).toBeTruthy();
+            expect(global.sessionStorage.removeItem).toHaveBeenCalledTimes(1);
+            expect(mod.readRecoverySnapshot()).toMatchObject({ snapshot: rollbackSnapshot });
+            expect(mod.getSaveStatus()).toMatchObject({
+                state: 'recovery_available',
+                recoveryAvailable: true,
+                lastError: 'recovery_cleanup_failed'
+            });
+        } finally {
+            consoleWarn.mockRestore();
+        }
+    });
+
+    it('locks all snapshot restore controls and blocks Import Backup discard while restore is pending', async () => {
+        mod._setProjectId('project-import-restore-busy');
+        mod.state.root = [{ type: 'group', id: 'before' }];
+        mod.groupsById.set('before', { id: 'before', title: 'Before', children: [] });
+        expect(mod.writeImportBackupSnapshot()).toBeTruthy();
+
+        mod.state.root = [{ type: 'group', id: 'after' }];
+        mod.groupsById.clear();
+        mod.groupsById.set('after', { id: 'after', title: 'After', children: [] });
+
+        const createBusyControl = () => ({
+            disabled: false,
+            setAttribute: jest.fn(),
+            removeAttribute: jest.fn()
+        });
+        const busyControls = Array.from({ length: 5 }, createBusyControl);
+        const snapshotControlSelector = [
+            '.sp-history-restore-btn',
+            '.sp-source-repair-apply-btn',
+            '.sp-save-status-action',
+            '.sp-import-backup-restore-btn',
+            '.sp-import-backup-discard-btn'
+        ].join(',');
+        mod._setShadowRootForTest({
+            host: { isConnected: true },
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn((selector) => (
+                selector === snapshotControlSelector ? busyControls : []
+            )),
+            appendChild: jest.fn()
+        });
+
+        let acknowledgeSave;
+        global.chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+            if (message?.type === 'SAVE_STATE') {
+                acknowledgeSave = callback;
+                return;
+            }
+            callback?.({ success: true, history: [] });
+        });
+
+        const restorePromise = mod.restoreImportBackupSnapshotFromUi();
+        await new Promise((resolve) => setImmediate(resolve));
+
+        expect(typeof acknowledgeSave).toBe('function');
+        busyControls.forEach((button) => {
+            expect(button.disabled).toBe(true);
+            expect(button.setAttribute).toHaveBeenCalledWith('aria-busy', 'true');
+        });
+        expect(mod.discardImportBackupSnapshotFromUi()).toBe(false);
+        expect(mod.readImportBackupSnapshot()).toBeTruthy();
+
+        acknowledgeSave({
+            success: true,
+            saveRevision: 1,
+            savedAt: '2026-07-31T00:00:00.000Z'
+        });
+        await expect(restorePromise).resolves.toBe(true);
+
+        busyControls.forEach((button) => {
+            expect(button.disabled).toBe(false);
+            expect(button.removeAttribute).toHaveBeenCalledWith('aria-busy');
+        });
+        expect(mod.readImportBackupSnapshot()).toBeNull();
+    });
+});
+
+describe('snapshot restore consumer wiring', () => {
+    let mod;
+
+    beforeEach(() => {
+        jest.useFakeTimers();
+        jest.resetModules();
+        setupGlobalMocks();
+        mod = loadContentModule();
+        mod._resetState();
+        mod._setProjectId('project-snapshot-consumers');
+        mod._setShadowRootForTest({
+            host: { isConnected: true },
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => []),
+            getElementById: jest.fn(() => null),
+            appendChild: jest.fn()
+        });
+    });
+
+    afterEach(() => {
+        mod?._hideActiveToastForTest(false);
+        jest.clearAllTimers();
+        jest.useRealTimers();
+        teardownGlobalMocks();
+    });
+
+    const setRuntimeState = (groupId, sourceKey = '') => {
+        mod.state.root = [{ type: 'group', id: groupId }];
+        mod.state.ungrouped = sourceKey ? [sourceKey] : [];
+        mod.groupsById.clear();
+        mod.groupsById.set(groupId, {
+            id: groupId,
+            title: groupId,
+            children: []
+        });
+        mod.sourcesByKey.clear();
+        if (sourceKey) {
+            mod.sourcesByKey.set(sourceKey, {
+                key: sourceKey,
+                enabled: true,
+                title: sourceKey,
+                normalizedTitle: sourceKey,
+                stableToken: `token-${sourceKey}`,
+                fingerprint: `${sourceKey}||article`,
+                identityType: 'stable-token'
+            });
+        }
+    };
+
+    const createSnapshot = (groupId, sourceKey = '') => ({
+        schemaVersion: 5,
+        root: [{ type: 'group', id: groupId }],
+        groupsById: {
+            [groupId]: {
+                id: groupId,
+                title: groupId,
+                children: []
+            }
+        },
+        ungrouped: sourceKey ? [sourceKey] : [],
+        sourceStateById: sourceKey
+            ? {
+                [sourceKey]: {
+                    enabled: true,
+                    title: sourceKey,
+                    normalizedTitle: sourceKey,
+                    stableToken: `token-${sourceKey}`,
+                    fingerprint: `${sourceKey}||article`,
+                    identityType: 'stable-token'
+                }
+            }
+            : {},
+        tagsById: {},
+        tagOrder: [],
+        sourceTagsById: {}
+    });
+
+    const seedHistoryEntry = async (snapshot) => {
+        global.chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+            if (message?.type === 'LOAD_STATE_HISTORY') {
+                callback({
+                    success: true,
+                    history: [{
+                        id: 'history-target',
+                        createdAt: '2026-07-31T00:00:00.000Z',
+                        reason: 'manual',
+                        snapshot
+                    }]
+                });
+            }
+        });
+        await mod.loadStateHistory();
+    };
+
+    it('restores a History snapshot through the shared critical transaction', async () => {
+        setRuntimeState('current');
+        await seedHistoryEntry(createSnapshot('history-restored'));
+        global.chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+            if (message?.type === 'APPEND_STATE_HISTORY') {
+                callback({ success: true, history: [] });
+                return;
+            }
+            if (message?.type === 'SAVE_STATE') {
+                callback({
+                    success: true,
+                    saveRevision: 1,
+                    savedAt: '2026-07-31T00:01:00.000Z'
+                });
+                return;
+            }
+            if (message?.type === 'LOAD_STATE_HISTORY') {
+                callback({ success: true, history: [] });
+            }
+        });
+
+        await expect(mod.restoreStateHistoryEntryFromUi('history-target')).resolves.toBe(true);
+
+        expect(mod.state.root).toEqual([{ type: 'group', id: 'history-restored' }]);
+        expect(mod.groupsById.has('history-restored')).toBe(true);
+        expect(mod._getActiveToastItemForTest()).toMatchObject({
+            message: 'ui_history_restored',
+            variant: 'success'
+        });
+    });
+
+    it('rolls History restore back when the target critical save is rejected', async () => {
+        setRuntimeState('current');
+        await seedHistoryEntry(createSnapshot('history-rejected'));
+        let saveCount = 0;
+        global.chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+            if (message?.type === 'APPEND_STATE_HISTORY') {
+                callback({ success: true, history: [] });
+                return;
+            }
+            if (message?.type === 'SAVE_STATE') {
+                saveCount += 1;
+                callback(saveCount === 1
+                    ? { success: false, errorCode: 'runtime_failure' }
+                    : {
+                        success: true,
+                        saveRevision: 1,
+                        savedAt: '2026-07-31T00:02:00.000Z'
+                    });
+            }
+        });
+
+        await expect(mod.restoreStateHistoryEntryFromUi('history-target')).resolves.toBe(false);
+
+        expect(saveCount).toBe(2);
+        expect(mod.state.root).toEqual([{ type: 'group', id: 'current' }]);
+        expect(mod.groupsById.has('current')).toBe(true);
+        expect(mod.groupsById.has('history-rejected')).toBe(false);
+        mod._hideActiveToastForTest();
+        jest.advanceTimersByTime(120);
+        expect(mod._getActiveToastItemForTest()).toMatchObject({
+            message: 'ui_history_restore_failed',
+            variant: 'error'
+        });
+    });
+
+    it('rolls History restore back when recovery cleanup throws after persistence commits', async () => {
+        setRuntimeState('current');
+        const rollbackSnapshot = mod.buildPersistableState();
+        await seedHistoryEntry(createSnapshot('history-cleanup-failed'));
+        const consoleWarn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+        global.sessionStorage.removeItem.mockImplementationOnce(() => {
+            throw new Error('session_cleanup_failed');
+        });
+        let saveCount = 0;
+        global.chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+            if (message?.type === 'APPEND_STATE_HISTORY') {
+                callback({ success: true, history: [] });
+                return;
+            }
+            if (message?.type === 'SAVE_STATE') {
+                saveCount += 1;
+                callback({
+                    success: true,
+                    saveRevision: saveCount,
+                    savedAt: '2026-08-02T00:01:00.000Z'
+                });
+            }
+        });
+
+        try {
+            await expect(mod.restoreStateHistoryEntryFromUi('history-target')).resolves.toBe(false);
+
+            expect(saveCount).toBe(2);
+            expect(mod.state.root).toEqual([{ type: 'group', id: 'current' }]);
+            expect(mod.groupsById.has('history-cleanup-failed')).toBe(false);
+            expect(global.sessionStorage.removeItem).toHaveBeenCalledTimes(1);
+            expect(mod.readRecoverySnapshot()).toMatchObject({ snapshot: rollbackSnapshot });
+            expect(mod.getSaveStatus()).toMatchObject({
+                state: 'recovery_available',
+                recoveryAvailable: true,
+                lastError: 'recovery_cleanup_failed'
+            });
+        } finally {
+            consoleWarn.mockRestore();
+        }
+    });
+
+    it('applies Source Repair through the shared critical transaction', async () => {
+        setRuntimeState('repair-current', 'legacy-source');
+        mod.sourcesByKey.set('current-source', {
+            key: 'current-source',
+            enabled: true,
+            title: 'current-source',
+            normalizedTitle: 'current-source',
+            stableToken: 'token-current-source',
+            fingerprint: 'current-source||article',
+            identityType: 'stable-token'
+        });
+        mod.state.ungrouped.push('current-source');
+        global.chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+            if (message?.type === 'APPEND_STATE_HISTORY') {
+                callback({ success: true, history: [] });
+                return;
+            }
+            if (message?.type === 'SAVE_STATE') {
+                callback({
+                    success: true,
+                    saveRevision: 1,
+                    savedAt: '2026-07-31T00:03:00.000Z'
+                });
+                return;
+            }
+            if (message?.type === 'LOAD_STATE_HISTORY') {
+                callback({ success: true, history: [] });
+            }
+        });
+
+        await expect(mod.applySourceRepairRemaps({
+            'legacy-source': 'current-source'
+        })).resolves.toBe(true);
+
+        expect(global.chrome.runtime.sendMessage).toHaveBeenCalledWith(
+            expect.objectContaining({
+                type: 'SAVE_STATE',
+                critical: true
+            }),
+            expect.any(Function)
+        );
+        expect(mod._getActiveToastItemForTest()).toMatchObject({
+            message: 'ui_source_repair_applied',
+            variant: 'success'
+        });
+    });
+
+    it('rolls Source Repair back when recovery cleanup throws after persistence commits', async () => {
+        setRuntimeState('repair-current', 'legacy-source');
+        mod.sourcesByKey.set('current-source', {
+            key: 'current-source',
+            enabled: true,
+            title: 'current-source',
+            normalizedTitle: 'current-source',
+            stableToken: 'token-current-source',
+            fingerprint: 'current-source||article',
+            identityType: 'stable-token'
+        });
+        mod.state.ungrouped.push('current-source');
+        const baselineSnapshot = mod.buildPersistableState();
+        const consoleWarn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+        global.sessionStorage.removeItem.mockImplementationOnce(() => {
+            throw new Error('session_cleanup_failed');
+        });
+        let saveCount = 0;
+        global.chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+            if (message?.type === 'APPEND_STATE_HISTORY') {
+                callback({ success: true, history: [] });
+                return;
+            }
+            if (message?.type === 'SAVE_STATE') {
+                saveCount += 1;
+                callback({
+                    success: true,
+                    saveRevision: saveCount,
+                    savedAt: '2026-08-02T00:02:00.000Z'
+                });
+            }
+        });
+
+        try {
+            await expect(mod.applySourceRepairRemaps({
+                'legacy-source': 'current-source'
+            })).resolves.toBe(false);
+
+            expect(saveCount).toBe(2);
+            expect(mod.state.ungrouped).toEqual(baselineSnapshot.ungrouped);
+            expect(global.sessionStorage.removeItem).toHaveBeenCalledTimes(1);
+            expect(mod.readRecoverySnapshot()).toMatchObject({ snapshot: baselineSnapshot });
+            expect(mod.getSaveStatus()).toMatchObject({
+                state: 'recovery_available',
+                recoveryAvailable: true,
+                lastError: 'recovery_cleanup_failed'
+            });
+        } finally {
+            consoleWarn.mockRestore();
+        }
+    });
+
+    it('restores Source Repair runtime state and exposes recovery when rollback cannot persist', async () => {
+        setRuntimeState('repair-current', 'legacy-source');
+        mod.sourcesByKey.set('current-source', {
+            key: 'current-source',
+            enabled: true,
+            title: 'current-source',
+            normalizedTitle: 'current-source',
+            stableToken: 'token-current-source',
+            fingerprint: 'current-source||article',
+            identityType: 'stable-token'
+        });
+        mod.state.ungrouped.push('current-source');
+        const baselineSnapshot = mod.buildPersistableState();
+        let saveCount = 0;
+        global.chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+            if (message?.type === 'APPEND_STATE_HISTORY') {
+                callback({ success: true, history: [] });
+                return;
+            }
+            if (message?.type === 'SAVE_STATE') {
+                saveCount += 1;
+                callback({ success: false, errorCode: 'runtime_failure' });
+            }
+        });
+
+        await expect(mod.applySourceRepairRemaps({
+            'legacy-source': 'current-source'
+        })).resolves.toBe(false);
+
+        expect(saveCount).toBe(2);
+        expect(mod.state.ungrouped).toEqual(baselineSnapshot.ungrouped);
+        expect(mod.getSaveStatus()).toMatchObject({
+            state: 'recovery_available',
+            recoveryAvailable: true,
+            lastError: 'snapshot_rollback_unconfirmed'
+        });
+        mod._hideActiveToastForTest();
+        jest.advanceTimersByTime(120);
+        mod._hideActiveToastForTest();
+        jest.advanceTimersByTime(120);
+        expect(mod._getActiveToastItemForTest()).toMatchObject({
+            message: 'ui_source_repair_failed',
+            variant: 'error'
         });
     });
 });
