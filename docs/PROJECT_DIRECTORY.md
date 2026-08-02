@@ -503,7 +503,7 @@ manifest.json
 ├── 欢迎弹窗 / 设置弹窗 / 导入导出 / 原生标签导入
 │   ├── 负责
 │   │   ├── 首次欢迎 modal、更新介绍 modal 和反馈入口
-│   │   ├── 设置 modal；按“备份与恢复”“偏好设置”“帮助与反馈”组织，保存状态在标题栏显示；主 manager 同步显示 persistent save/stale/recovery 状态和就地操作
+│   │   ├── 设置 modal；按“备份与恢复”“偏好设置”“帮助与反馈”组织；主 manager 与设置标题栏仅在 save failed、stale 或 recovery available 时显示持续状态和就地操作，idle/saving/saved 保持静默
 │   │   ├── Move modal 内新建目标文件夹并一次保存移动；Tag filter modal 搜索标签
 │   │   ├── export/import config JSON 与版本历史恢复入口
 │   │   ├── import diff preview；说明替换语义、来源启用变化、文件夹/tag 差异和设置变化

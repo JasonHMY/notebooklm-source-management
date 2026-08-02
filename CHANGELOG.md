@@ -27,6 +27,9 @@
 
 ## [Unreleased] (未发布)
 
+### Changed
+- **保存状态仅在需要处理时显示 (Show Save Status Only When Action Is Required)**: 主面板与设置不再显示“正在保存”或“刚刚已保存”；只有保存失败、版本过期或存在恢复快照时，才持续显示提示及对应的 Retry、Refresh 或 Restore 操作。
+
 ## [2026-08-02] [26.8.2]
 
 ### Added

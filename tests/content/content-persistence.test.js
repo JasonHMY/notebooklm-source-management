@@ -1719,6 +1719,41 @@ describe('saveState', () => {
         expect(global.sessionStorage.removeItem).toHaveBeenCalledWith(`sourcesPlusRecovery_${projectId}`);
     });
 
+    it.each(['idle', 'saving', 'saved'])(
+        'keeps %s save status hidden after clearing an actionable status',
+        (stateName) => {
+            seedPersistedState();
+            const statusContainer = global.document.createElement('div');
+            const statusSection = global.document.createElement('section');
+            const managerStatusContainer = global.document.createElement('div');
+            const managerStatusSection = global.document.createElement('section');
+            mod._setShadowRootForTest({
+                host: { isConnected: true },
+                getElementById: jest.fn((id) => {
+                    if (id === 'sp-settings-save-status') return statusContainer;
+                    if (id === 'sp-settings-save-status-section') return statusSection;
+                    if (id === 'sp-manager-save-status') return managerStatusContainer;
+                    if (id === 'sp-manager-save-status-section') return managerStatusSection;
+                    return null;
+                }),
+                querySelector: jest.fn(() => null)
+            });
+
+            mod.renderSaveStatus({ state: 'failed' });
+            expect(statusContainer.childNodes).not.toHaveLength(0);
+            expect(managerStatusContainer.childNodes).not.toHaveLength(0);
+
+            mod.renderSaveStatus({ state: stateName });
+
+            expect(statusContainer.hidden).toBe(true);
+            expect(statusSection.hidden).toBe(true);
+            expect(statusContainer.childNodes).toHaveLength(0);
+            expect(managerStatusContainer.hidden).toBe(true);
+            expect(managerStatusSection.hidden).toBe(true);
+            expect(managerStatusContainer.childNodes).toHaveLength(0);
+        }
+    );
+
     it('renders failed save status with a retry action', () => {
         seedPersistedState();
         const statusContainer = global.document.createElement('div');

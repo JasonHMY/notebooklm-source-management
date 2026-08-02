@@ -23,7 +23,7 @@ The extension supports the current `https://notebook.google.com/` site and keeps
 - Delete multiple sources only after an extension confirmation and Gemini Notebook's native confirmation; local state is updated only after a complete source-panel scan proves that the native row is gone.
 - Open source details, rename sources, and delete sources from a single plugin menu.
 - Undo and redo recent plugin-side organization changes from the toolbar, command palette, or keyboard. Undo uses `Command+Z` on macOS or `Ctrl+Z` on Windows/Linux; redo uses `Command+Shift+Z`, `Ctrl+Shift+Z`, or `Ctrl+Y`.
-- See persistent save, stale-state, and recovery status in the main manager, with the relevant retry, refresh, restore, or dismiss action.
+- See save status only when attention is required: failed saves, stale state, or available recovery stay visible with the relevant retry, refresh, restore, or dismiss action.
 - Get distinct guidance for an empty notebook, a search with no matches, a filtered view with no matches, or an isolated folder with nothing to show.
 - Show a one-time welcome panel with a feedback shortcut the first time the in-page manager loads.
 - Show a one-time What's New panel for larger feature updates.

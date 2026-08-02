@@ -991,7 +991,7 @@ Rules:
 - Do not use toast for workflows that require decision-making.
 - A toast shown while a modal with a frosted backdrop is open is obscured by the backdrop blur (toast `z=9999` < backdrop `z=10000`). In that context, suppress low-value success toasts and lift important ones above the modal with `.sp-toast-elevated` (`z=10003`) via the `{ elevated: true }` showToast option. The settings modal applies this: success confirmations are suppressed while it is open, and failures are shown elevated (see §5.8).
 
-Persistent save/recovery feedback uses `.sp-manager-save-status-region` and `.sp-save-status`, not a toast. The manager and Settings render from the same status model: saving is polite, failed/stale is an alert, recovery is persistent, and the available action is rendered next to the message.
+Actionable save/recovery feedback uses `.sp-manager-save-status-region` and `.sp-save-status`, not a toast. The manager and Settings render from the same status model, but idle, saving, and saved remain visually silent. Failed/stale states and recovery availability stay visible until resolved, with the relevant action rendered next to the message.
 
 ### 13.3 Empty states
 
@@ -1151,7 +1151,7 @@ Required rules:
 - Disabled states must change both visuals and pointer behavior.
 - Loading states must block interaction when the action cannot succeed.
 - Empty, loading, error, and disabled states should exist for any non-trivial flow.
-- Saving, failed, stale, and recovery-available states are persistent in the manager surface. Retry, Refresh, Restore, and Dismiss stay adjacent to the state they resolve; short-lived success may collapse automatically.
+- Idle, saving, and saved states stay hidden in the manager and Settings surfaces. Failed, stale, and recovery-available states remain persistent; Retry, Refresh, Restore, and Dismiss stay adjacent to the state they resolve.
 - `forced-colors: active` keeps the command combobox/options, shortcut control,
   resizer, active-option outline, and semantic foregrounds mapped to system
   colors. Do not disable forced-color adjustment for interactive controls unless

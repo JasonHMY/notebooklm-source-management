@@ -2290,7 +2290,10 @@
         const saveStatus = status || getSaveStatus();
         const stateName = saveStatus?.state || 'idle';
         const messageKey = getSaveStatusMessageKey(stateName);
-        const shouldShow = Boolean(messageKey && stateName !== 'idle');
+        const shouldShow = Boolean(
+            messageKey
+            && ['failed', 'stale', 'recovery_available'].includes(stateName)
+        );
         const targetIds = [
             ['sp-manager-save-status', 'sp-manager-save-status-section'],
             ['sp-settings-save-status', 'sp-settings-save-status-section']
