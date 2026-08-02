@@ -202,6 +202,348 @@ test.describe.serial('extension smoke', () => {
         expect(pageErrors).toEqual([]);
     });
 
+    test('keeps accessibility controls operable in forced colors, narrow panels, and high zoom', async () => {
+        const pageErrors = [];
+        const notebookPage = await env.context.newPage();
+        await notebookPage.emulateMedia({
+            forcedColors: 'active',
+            reducedMotion: 'reduce'
+        });
+        notebookPage.on('pageerror', (error) => pageErrors.push(error));
+        notebookPage.on('console', (message) => {
+            if (message.type() === 'error') {
+                pageErrors.push(new Error(message.text()));
+            }
+        });
+
+        await notebookPage.goto('https://notebooklm.google.com/notebook/accessibility');
+        env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
+        const bridgePage = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
+        await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
+        await expect(notebookPage.locator('#sources-list .source-item')).toHaveCount(2);
+        await notebookPage.evaluate(() => new Promise(
+            (resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))
+        ));
+
+        const resizer = notebookPage.locator('.sp-resizer');
+        await notebookPage.locator('#sp-settings-btn').focus();
+        await resizer.focus();
+        const initialResizerState = await notebookPage.evaluate(() => {
+            const root = document.querySelector('#sources-plus-root')?.shadowRoot || null;
+            const separator = root?.querySelector('.sp-resizer') || null;
+            if (!root || !separator) return null;
+            const handleStyle = window.getComputedStyle(separator, '::after');
+            return {
+                forcedColors: window.matchMedia('(forced-colors: active)').matches,
+                reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+                role: separator.getAttribute('role'),
+                orientation: separator.getAttribute('aria-orientation'),
+                valueMin: Number(separator.getAttribute('aria-valuemin')),
+                valueMax: Number(separator.getAttribute('aria-valuemax')),
+                valueNow: Number(separator.getAttribute('aria-valuenow')),
+                valueText: separator.getAttribute('aria-valuetext'),
+                tabIndex: separator.tabIndex,
+                focused: root.activeElement === separator,
+                containerHeight: Math.round(
+                    root.querySelector('.sp-container')?.getBoundingClientRect().height || 0
+                ),
+                forcedColorAdjust: window.getComputedStyle(separator).forcedColorAdjust,
+                handleColor: handleStyle.backgroundColor
+            };
+        });
+
+        expect(initialResizerState).toMatchObject({
+            forcedColors: true,
+            reducedMotion: true,
+            role: 'separator',
+            orientation: 'horizontal',
+            tabIndex: 0,
+            focused: true,
+            forcedColorAdjust: 'auto'
+        });
+        expect(initialResizerState.valueMin).toBe(150);
+        expect(initialResizerState.valueMax).toBeGreaterThan(initialResizerState.valueMin);
+        expect(initialResizerState.valueNow).toBeGreaterThanOrEqual(initialResizerState.valueMin);
+        expect(initialResizerState.valueNow).toBeLessThanOrEqual(initialResizerState.valueMax);
+        expect(initialResizerState.valueText).toBe(`${initialResizerState.valueNow} px`);
+        expect(initialResizerState.handleColor).not.toBe('rgba(0, 0, 0, 0)');
+
+        const expectedKeyboardHeight = Math.min(
+            initialResizerState.valueMax,
+            Math.max(initialResizerState.valueMin, initialResizerState.containerHeight + 16)
+        );
+        await resizer.press('ArrowDown');
+        await expect.poll(async () => Number(await resizer.getAttribute('aria-valuenow')))
+            .toBe(expectedKeyboardHeight);
+        await expect(resizer).toHaveAttribute('aria-valuetext', `${expectedKeyboardHeight} px`);
+        await expect.poll(async () => notebookPage.evaluate(() => Math.round(
+            document.querySelector('#sources-plus-root')?.shadowRoot
+                ?.querySelector('.sp-container')?.getBoundingClientRect().height || 0
+        ))).toBe(expectedKeyboardHeight);
+
+        await notebookPage.locator('#sp-settings-btn').click();
+        await expect(notebookPage.locator('.sp-settings-open-command-palette-btn')).toBeVisible();
+        await notebookPage.locator('.sp-settings-open-command-palette-btn').click();
+        await expect(notebookPage.locator('.sp-command-palette-input')).toBeVisible();
+
+        const forcedColorPaletteState = await notebookPage.evaluate(() => {
+            const root = document.querySelector('#sources-plus-root')?.shadowRoot || null;
+            const input = root?.querySelector('.sp-command-palette-input') || null;
+            const listbox = root?.querySelector('.sp-command-palette-list') || null;
+            const option = root?.querySelector('.sp-command-palette-item.is-active') || null;
+            if (!input || !listbox || !option) return null;
+            const optionStyle = window.getComputedStyle(option);
+            return {
+                inputRole: input.getAttribute('role'),
+                inputExpanded: input.getAttribute('aria-expanded'),
+                inputControls: input.getAttribute('aria-controls'),
+                inputActiveDescendant: input.getAttribute('aria-activedescendant'),
+                inputForcedColorAdjust: window.getComputedStyle(input).forcedColorAdjust,
+                listRole: listbox.getAttribute('role'),
+                optionRole: option.getAttribute('role'),
+                optionForcedColorAdjust: optionStyle.forcedColorAdjust,
+                optionOutlineStyle: optionStyle.outlineStyle,
+                optionOutlineWidth: optionStyle.outlineWidth
+            };
+        });
+
+        expect(forcedColorPaletteState).toMatchObject({
+            inputRole: 'combobox',
+            inputExpanded: 'true',
+            inputForcedColorAdjust: 'auto',
+            listRole: 'listbox',
+            optionRole: 'option',
+            optionForcedColorAdjust: 'auto',
+            optionOutlineStyle: 'solid',
+            optionOutlineWidth: '2px'
+        });
+        expect(forcedColorPaletteState.inputControls).not.toBe('');
+        expect(forcedColorPaletteState.inputActiveDescendant).not.toBe('');
+
+        await notebookPage.locator('.sp-command-palette-input').press('Escape');
+        await expect(notebookPage.locator('.sp-command-palette-input')).toHaveCount(0);
+        await notebookPage.emulateMedia({
+            forcedColors: 'none',
+            reducedMotion: 'no-preference'
+        });
+
+        await notebookPage.locator('#sp-new-group-btn').click();
+        const groupNameInput = notebookPage.locator('.sp-inline-group-name-input');
+        await expect(groupNameInput).toBeVisible();
+        await groupNameInput.fill('Research');
+        await groupNameInput.press('Enter');
+        await expect(notebookPage.locator('.group-title')).toHaveText('Research');
+
+        const setPanelWidth = async (width) => {
+            await notebookPage.evaluate(async (nextWidth) => {
+                const panel = document.querySelector('[data-testid="source-panel"]');
+                if (!panel) throw new Error('Synthetic source panel missing.');
+                if (Number.isFinite(nextWidth)) {
+                    panel.style.width = `${nextWidth}px`;
+                    panel.style.minWidth = `${nextWidth}px`;
+                    panel.style.maxWidth = `${nextWidth}px`;
+                } else {
+                    panel.style.removeProperty('width');
+                    panel.style.removeProperty('min-width');
+                    panel.style.removeProperty('max-width');
+                }
+                await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+            }, width);
+        };
+
+        const readFolderTitleLayout = async () => notebookPage.evaluate(() => {
+            const root = document.querySelector('#sources-plus-root')?.shadowRoot || null;
+            const title = root?.querySelector('.group-title') || null;
+            if (!root || !title) return null;
+
+            const titleRect = title.getBoundingClientRect();
+            const titleStyle = window.getComputedStyle(title);
+            const folderActionSelectors = [
+                '.group-header > .sp-add-subgroup-button',
+                '.group-header > .sp-isolate-button',
+                '.group-header > .sp-edit-button',
+                '.group-header > .sp-delete-button',
+                '.group-header > .sp-tree-order-controls .sp-tree-order-button'
+            ];
+            const folderActions = folderActionSelectors.map((selector) => (
+                root.querySelector(selector)
+            ));
+            const badge = root.querySelector('.group-header > .badge');
+            const visibleInLayout = (element) => Boolean(
+                element && window.getComputedStyle(element).display !== 'none'
+            );
+            return {
+                text: title.textContent?.trim() || '',
+                width: titleRect.width,
+                height: titleRect.height,
+                clientWidth: title.clientWidth,
+                clientHeight: title.clientHeight,
+                scrollWidth: title.scrollWidth,
+                scrollHeight: title.scrollHeight,
+                display: titleStyle.display,
+                visibility: titleStyle.visibility,
+                badgeDisplayed: visibleInLayout(badge),
+                folderActionsDisplayed: folderActions.every(visibleInLayout)
+            };
+        });
+
+        for (const width of [240, 320]) {
+            await setPanelWidth(width);
+            const folderTitleLayout = await readFolderTitleLayout();
+            expect(folderTitleLayout).toMatchObject({
+                text: 'Research',
+                visibility: 'visible',
+                badgeDisplayed: true,
+                folderActionsDisplayed: true
+            });
+            expect(folderTitleLayout.display).not.toBe('none');
+            expect(folderTitleLayout.width).toBeGreaterThanOrEqual(40);
+            expect(folderTitleLayout.height).toBeGreaterThan(0);
+            expect(folderTitleLayout.scrollWidth).toBeLessThanOrEqual(folderTitleLayout.clientWidth + 1);
+            expect(folderTitleLayout.scrollHeight).toBeLessThanOrEqual(folderTitleLayout.clientHeight + 1);
+        }
+
+        await setPanelWidth(null);
+        await notebookPage.locator('#sp-batch-action-btn').click();
+        await expect(notebookPage.locator('.sp-batch-action-bar')).toBeVisible();
+
+        const readHorizontalLayout = async () => notebookPage.evaluate(() => {
+            const root = document.querySelector('#sources-plus-root')?.shadowRoot || null;
+            const host = document.querySelector('#sources-plus-root');
+            const container = root?.querySelector('.sp-container') || null;
+            if (!root || !host || !container) return null;
+
+            const containerRect = container.getBoundingClientRect();
+            const regionSelectors = [
+                '.sp-controls',
+                '.sp-toolbar-actions',
+                '.sp-batch-action-bar',
+                '.sp-batch-toolbar',
+                '.sp-batch-actions'
+            ];
+            const regions = regionSelectors
+                .map((selector) => root.querySelector(selector))
+                .filter(Boolean);
+            const controls = Array.from(root.querySelectorAll(
+                '.sp-controls button, .sp-batch-action-bar button, .sp-batch-selection-count'
+            )).filter((element) => {
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return (
+                    rect.width > 0 &&
+                    rect.height > 0 &&
+                    style.visibility !== 'hidden' &&
+                    Number.parseFloat(style.opacity || '1') > 0.01
+                );
+            });
+            const controlRects = controls.map((element, index) => {
+                const rect = element.getBoundingClientRect();
+                return {
+                    key: element.id || element.className || `control-${index}`,
+                    left: rect.left,
+                    right: rect.right,
+                    top: rect.top,
+                    bottom: rect.bottom
+                };
+            });
+            const overlaps = [];
+            for (let leftIndex = 0; leftIndex < controlRects.length; leftIndex += 1) {
+                for (let rightIndex = leftIndex + 1; rightIndex < controlRects.length; rightIndex += 1) {
+                    const left = controlRects[leftIndex];
+                    const right = controlRects[rightIndex];
+                    const horizontal = Math.min(left.right, right.right) - Math.max(left.left, right.left);
+                    const vertical = Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top);
+                    if (horizontal > 0.5 && vertical > 0.5) {
+                        overlaps.push(`${left.key}|${right.key}`);
+                    }
+                }
+            }
+
+            return {
+                viewportWidth: window.innerWidth,
+                panelWidth: document.querySelector('[data-testid="source-panel"]')?.getBoundingClientRect().width || 0,
+                containerWidth: containerRect.width,
+                hostOverflow: Math.max(0, host.scrollWidth - host.clientWidth),
+                regionOverflow: regions
+                    .filter((element) => element.scrollWidth > element.clientWidth + 1)
+                    .map((element) => element.className),
+                clippedControls: controlRects
+                    .filter((rect) => (
+                        rect.left < containerRect.left - 1 ||
+                        rect.right > containerRect.right + 1
+                    ))
+                    .map((rect) => rect.key),
+                overlaps,
+                controlCount: controlRects.length
+            };
+        });
+
+        for (const width of [240, 320]) {
+            await setPanelWidth(width);
+            const layout = await readHorizontalLayout();
+            expect(layout.containerWidth).toBeCloseTo(width, 0);
+            expect(layout.panelWidth).toBeCloseTo(layout.containerWidth + 2, 0);
+            expect(layout.controlCount).toBeGreaterThan(10);
+            expect(layout.hostOverflow).toBeLessThanOrEqual(1);
+            expect(layout.regionOverflow).toEqual([]);
+            expect(layout.clippedControls).toEqual([]);
+            expect(layout.overlaps).toEqual([]);
+        }
+
+        await setPanelWidth(null);
+        const setNotebookZoom = async (zoomFactor) => bridgePage.evaluate(
+            ({ urlFragment, factor }) => new Promise((resolve, reject) => {
+                chrome.tabs.query({
+                    url: [
+                        'https://notebook.google.com/*',
+                        'https://notebooklm.google.com/*'
+                    ]
+                }, (tabs) => {
+                    const queryError = chrome.runtime.lastError;
+                    if (queryError) {
+                        reject(new Error(queryError.message));
+                        return;
+                    }
+                    const targetTab = tabs.find((tab) => tab.url && tab.url.includes(urlFragment));
+                    if (!targetTab || typeof targetTab.id !== 'number') {
+                        reject(new Error(`Notebook tab was not found for ${urlFragment}.`));
+                        return;
+                    }
+                    chrome.tabs.setZoom(targetTab.id, factor, () => {
+                        const zoomError = chrome.runtime.lastError;
+                        if (zoomError) {
+                            reject(new Error(zoomError.message));
+                            return;
+                        }
+                        chrome.tabs.getZoom(targetTab.id, (actualZoom) => {
+                            const getZoomError = chrome.runtime.lastError;
+                            if (getZoomError) {
+                                reject(new Error(getZoomError.message));
+                                return;
+                            }
+                            resolve(actualZoom);
+                        });
+                    });
+                });
+            }),
+            { urlFragment: '/notebook/accessibility', factor: zoomFactor }
+        );
+
+        for (const zoomFactor of [2, 4]) {
+            expect(await setNotebookZoom(zoomFactor)).toBeCloseTo(zoomFactor, 5);
+            await expect.poll(async () => (await readHorizontalLayout()).viewportWidth)
+                .toBeLessThanOrEqual(Math.ceil(1440 / zoomFactor));
+            const layout = await readHorizontalLayout();
+            expect(layout.controlCount).toBeGreaterThan(10);
+            expect(layout.hostOverflow).toBeLessThanOrEqual(1);
+            expect(layout.regionOverflow).toEqual([]);
+            expect(layout.clippedControls).toEqual([]);
+            expect(layout.overlaps).toEqual([]);
+        }
+
+        expect(pageErrors).toEqual([]);
+    });
+
     test('developer mode records sanitized logs only while enabled', async () => {
         const projectId = 'developer-logs';
         const notebookPage = await env.context.newPage();

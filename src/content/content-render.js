@@ -21,6 +21,8 @@
      */
     function createContentRender(deps = {}) {
         const QUICK_VIEW_BUTTON_KINDS = ['all', 'ungrouped', 'disabled', 'tag', 'recent', 'issues'];
+        const MAX_VISIBLE_TREE_INDENT_LEVEL = 8;
+        const TREE_INDENT_STEP_PX = 12;
         const getDocument = typeof deps.getDocument === 'function'
             ? deps.getDocument
             : () => (typeof document !== 'undefined' ? document : null);
@@ -54,6 +56,9 @@
         const getIsDeletingSources = typeof deps.getIsDeletingSources === 'function'
             ? deps.getIsDeletingSources
             : () => Boolean(deps.isDeletingSources);
+        const getLastBatchDeleteResult = typeof deps.getLastBatchDeleteResult === 'function'
+            ? deps.getLastBatchDeleteResult
+            : () => null;
         const getMessage = typeof deps.getMessage === 'function'
             ? deps.getMessage
             : (key) => key;
@@ -62,6 +67,9 @@
             : (typeof globalThis.el === 'function' ? globalThis.el : null);
         const syncSearchUi = typeof deps.syncSearchUi === 'function'
             ? deps.syncSearchUi
+            : () => {};
+        const updatePanelResizerAria = typeof deps.updatePanelResizerAria === 'function'
+            ? deps.updatePanelResizerAria
             : () => {};
         const hasActiveRenderFilters = typeof deps.hasActiveRenderFilters === 'function'
             ? deps.hasActiveRenderFilters
@@ -81,9 +89,6 @@
         const isSourceEffectivelyEnabled = typeof deps.isSourceEffectivelyEnabled === 'function'
             ? deps.isSourceEffectivelyEnabled
             : () => true;
-        const shouldRenderGroup = typeof deps.shouldRenderGroup === 'function'
-            ? deps.shouldRenderGroup
-            : () => true;
         const getSourceTagIds = typeof deps.getSourceTagIds === 'function'
             ? deps.getSourceTagIds
             : () => [];
@@ -102,6 +107,7 @@
             !searchSemantics
             || typeof searchSemantics.parseQuery !== 'function'
             || typeof searchSemantics.matchesSource !== 'function'
+            || typeof searchSemantics.matchesGroup !== 'function'
             || typeof searchSemantics.getHighlightTerms !== 'function'
             || typeof searchSemantics.segmentText !== 'function'
         ) {
@@ -110,6 +116,7 @@
             );
         }
         const parseSearchQuery = searchSemantics.parseQuery;
+        const groupMatchesSearchQuery = searchSemantics.matchesGroup;
         const getSearchHighlightTerms = searchSemantics.getHighlightTerms;
         const getTagStyleVars = typeof deps.getTagStyleVars === 'function'
             ? deps.getTagStyleVars
@@ -171,10 +178,20 @@
         const getLastNativeLabelImportSummary = typeof deps.getLastNativeLabelImportSummary === 'function'
             ? deps.getLastNativeLabelImportSummary
             : () => null;
+        const getNativeSelectionSyncFailure = typeof deps.getNativeSelectionSyncFailure === 'function'
+            ? deps.getNativeSelectionSyncFailure
+            : () => null;
+        const retryNativeSelectionSync = typeof deps.retryNativeSelectionSync === 'function'
+            ? deps.retryNativeSelectionSync
+            : async () => ({ ok: false, reason: 'retry_unavailable' });
 
         const BATCH_COUNT_MARKER = '__COUNT__';
         const COUNT_UP_DURATION_MS = 320;
         const MOTION_STAGGER_MAX_INDEX = 10;
+        const DEFAULT_SOURCE_WINDOW_THRESHOLD = 240;
+        const DEFAULT_SOURCE_WINDOW_OVERSCAN = 20;
+        const DEFAULT_SOURCE_WINDOW_ROW_HEIGHT = 44;
+        const DEFAULT_SOURCE_WINDOW_VIEWPORT_HEIGHT = 600;
         const SPOTLIGHT_SURFACE_SELECTOR = '.sp-spotlight-surface';
         const TREE_ORDER_DIRECTIONS = [
             { direction: 'up', icon: 'arrow_upward', labelKey: 'ui_tree_order_up' },
@@ -184,6 +201,387 @@
         ];
         let focusedSourceActionMenuKey = null;
         let pendingSourceActionMenuFocus = null;
+        let isRenderScheduled = false;
+        let sourceRenderGeneration = 0;
+        let estimatedSourceWindowRowHeight = DEFAULT_SOURCE_WINDOW_ROW_HEIGHT;
+        let hasMeasuredSourceWindowRowHeight = false;
+        let dragPinnedSourceKeys = new Set();
+        let lastVisibleLogicalSourceKeys = [];
+        let derivedGroupEffectiveStateCache = new Map();
+        let derivedGroupEffectiveStateCohort = null;
+        let lastSourceWindowMetadata = {
+            active: false,
+            logicalTotal: 0,
+            logicalVisible: 0,
+            logicalSourceCount: 0,
+            visibleLogicalSourceCount: 0,
+            materializedSources: 0,
+            materializedSourceCount: 0,
+            renderGeneration: 0,
+            start: 0,
+            end: 0,
+            pinnedCount: 0,
+            overscan: DEFAULT_SOURCE_WINDOW_OVERSCAN
+        };
+
+        function getSourceWindowThreshold() {
+            const configured = Number(deps.sourceWindowThreshold);
+            return Number.isFinite(configured)
+                ? Math.max(1, Math.floor(configured))
+                : DEFAULT_SOURCE_WINDOW_THRESHOLD;
+        }
+
+        function invalidateDerivedGroupEffectiveStateCache() {
+            derivedGroupEffectiveStateCache = new Map();
+            derivedGroupEffectiveStateCohort = null;
+        }
+
+        function getFirstMapValue(map) {
+            if (!map || typeof map.values !== 'function') return null;
+            const iterator = map.values();
+            const first = iterator.next();
+            return first.done ? null : first.value;
+        }
+
+        function ensureDerivedGroupEffectiveStateCohort(
+            state,
+            groupsById,
+            sourcesByKey,
+            activeIsolationGroupId
+        ) {
+            const nextCohort = {
+                state,
+                groupsById,
+                groupsSize: groupsById?.size || 0,
+                firstGroup: getFirstMapValue(groupsById),
+                sourcesByKey,
+                sourcesSize: sourcesByKey?.size || 0,
+                firstSource: getFirstMapValue(sourcesByKey),
+                activeIsolationGroupId: activeIsolationGroupId || null
+            };
+            const previous = derivedGroupEffectiveStateCohort;
+            const invalidated = (
+                !previous
+                || previous.state !== nextCohort.state
+                || previous.groupsById !== nextCohort.groupsById
+                || previous.groupsSize !== nextCohort.groupsSize
+                || previous.firstGroup !== nextCohort.firstGroup
+                || previous.sourcesByKey !== nextCohort.sourcesByKey
+                || previous.sourcesSize !== nextCohort.sourcesSize
+                || previous.firstSource !== nextCohort.firstSource
+                || previous.activeIsolationGroupId !== nextCohort.activeIsolationGroupId
+            );
+            if (invalidated) {
+                derivedGroupEffectiveStateCache = new Map();
+            }
+            derivedGroupEffectiveStateCohort = nextCohort;
+            return invalidated;
+        }
+
+        function getSourceWindowOverscan() {
+            const configured = Number(deps.sourceWindowOverscan);
+            return Number.isFinite(configured)
+                ? Math.max(0, Math.floor(configured))
+                : DEFAULT_SOURCE_WINDOW_OVERSCAN;
+        }
+
+        function getSourceWindowRowHeight() {
+            const configured = Number(deps.sourceWindowRowHeight);
+            if (Number.isFinite(configured) && configured > 0) {
+                return configured;
+            }
+            return estimatedSourceWindowRowHeight;
+        }
+
+        function updateEstimatedSourceWindowRowHeight(listContainer) {
+            if (hasMeasuredSourceWindowRowHeight) {
+                return estimatedSourceWindowRowHeight;
+            }
+            if (!listContainer || typeof listContainer.querySelector !== 'function') {
+                return estimatedSourceWindowRowHeight;
+            }
+
+            const row = listContainer.querySelector('.source-item:not(.dragging)')
+                || listContainer.querySelector('.source-item');
+            if (!row || typeof row.getBoundingClientRect !== 'function') {
+                return estimatedSourceWindowRowHeight;
+            }
+
+            const measuredHeight = Number(row.getBoundingClientRect()?.height);
+            if (!Number.isFinite(measuredHeight) || measuredHeight <= 0) {
+                return estimatedSourceWindowRowHeight;
+            }
+
+            let marginHeight = 0;
+            const win = typeof deps.getWindow === 'function'
+                ? deps.getWindow()
+                : (typeof window !== 'undefined' ? window : null);
+            if (win && typeof win.getComputedStyle === 'function') {
+                const style = win.getComputedStyle(row);
+                marginHeight = (
+                    Number.parseFloat(style?.marginTop || '0')
+                    + Number.parseFloat(style?.marginBottom || '0')
+                );
+                if (!Number.isFinite(marginHeight)) marginHeight = 0;
+            }
+
+            const nextHeight = Math.min(160, Math.max(28, measuredHeight + marginHeight));
+            estimatedSourceWindowRowHeight = (
+                (estimatedSourceWindowRowHeight * 3)
+                + nextHeight
+            ) / 4;
+            hasMeasuredSourceWindowRowHeight = true;
+            return estimatedSourceWindowRowHeight;
+        }
+
+        function resolveSourceWindowRange(listContainer, logicalSourceCount) {
+            const count = Math.max(0, Number(logicalSourceCount) || 0);
+            const overscan = getSourceWindowOverscan();
+            const active = count >= getSourceWindowThreshold();
+            if (!active) {
+                return {
+                    active: false,
+                    start: 0,
+                    end: count,
+                    overscan,
+                    rowHeight: getSourceWindowRowHeight()
+                };
+            }
+
+            const rowHeight = Math.max(1, getSourceWindowRowHeight());
+            const scrollTop = Math.max(0, Number(listContainer?.scrollTop) || 0);
+            const viewportHeight = Math.max(
+                rowHeight,
+                Number(listContainer?.clientHeight) || DEFAULT_SOURCE_WINDOW_VIEWPORT_HEIGHT
+            );
+            const firstViewportIndex = Math.floor(scrollTop / rowHeight);
+            const viewportRowCount = Math.max(1, Math.ceil(viewportHeight / rowHeight));
+            const start = Math.max(0, firstViewportIndex - overscan);
+            const end = Math.min(
+                count,
+                firstViewportIndex + viewportRowCount + overscan
+            );
+
+            return {
+                active: true,
+                start,
+                end,
+                overscan,
+                rowHeight
+            };
+        }
+
+        function resolveSourceKeyFromElement(element) {
+            if (!element) return '';
+            if (element.dataset?.sourceKey) return String(element.dataset.sourceKey);
+            if (typeof element.closest === 'function') {
+                const row = element.closest('.source-item');
+                if (row?.dataset?.sourceKey) return String(row.dataset.sourceKey);
+            }
+
+            let current = element.parentElement || element.parentNode || null;
+            let depth = 0;
+            while (current && depth < 16) {
+                if (current.dataset?.sourceKey && elementHasClass(current, 'source-item')) {
+                    return String(current.dataset.sourceKey);
+                }
+                current = current.parentElement || current.parentNode || null;
+                depth += 1;
+            }
+            return '';
+        }
+
+        function isSourceWindowDragActive(listContainer) {
+            return Boolean(
+                listContainer
+                && (
+                    elementHasClass(listContainer, 'sp-drag-active')
+                    || listContainer.dataset?.dragActive === 'true'
+                )
+            );
+        }
+
+        function collectRenderedDragSourceKeys(listContainer) {
+            const keys = new Set();
+            if (!listContainer || typeof listContainer.querySelectorAll !== 'function') {
+                return keys;
+            }
+
+            [
+                '.source-item.dragging',
+                '.source-item.drag-over-top',
+                '.source-item.drag-over-bottom',
+                '.source-item.sp-pseudo-hover'
+            ].forEach((selector) => {
+                Array.from(listContainer.querySelectorAll(selector) || []).forEach((row) => {
+                    const sourceKey = resolveSourceKeyFromElement(row);
+                    if (sourceKey) keys.add(sourceKey);
+                });
+            });
+            return keys;
+        }
+
+        function collectSourceWindowPinnedKeys(listContainer) {
+            const pinnedKeys = new Set();
+            const activeActionSourceKey = getActiveSourceActionSourceKey();
+            if (activeActionSourceKey) pinnedKeys.add(String(activeActionSourceKey));
+
+            const shadowRoot = getShadowRoot();
+            const activeElement = shadowRoot?.activeElement || getDocument()?.activeElement || null;
+            const focusedSourceKey = resolveSourceKeyFromElement(activeElement);
+            if (focusedSourceKey) pinnedKeys.add(focusedSourceKey);
+
+            if (isSourceWindowDragActive(listContainer)) {
+                collectRenderedDragSourceKeys(listContainer).forEach((key) => {
+                    dragPinnedSourceKeys.add(key);
+                });
+                dragPinnedSourceKeys.forEach((key) => pinnedKeys.add(key));
+            } else {
+                dragPinnedSourceKeys = new Set();
+            }
+
+            if (typeof deps.getSourceWindowPinnedKeys === 'function') {
+                const externalKeys = deps.getSourceWindowPinnedKeys();
+                if (externalKeys && typeof externalKeys[Symbol.iterator] === 'function') {
+                    for (const key of externalKeys) {
+                        if (key) pinnedKeys.add(String(key));
+                    }
+                }
+            }
+
+            return pinnedKeys;
+        }
+
+        function shouldMaterializeWindowedSource(sourceKey, ordinal, windowRange, pinnedKeys) {
+            if (!windowRange?.active) return true;
+            if (pinnedKeys?.has(String(sourceKey || ''))) return true;
+            return ordinal >= windowRange.start && ordinal < windowRange.end;
+        }
+
+        function updateSourceWindowSpacer(spacer, startOrdinal, endOrdinal, rowHeight) {
+            if (!spacer) return spacer;
+            const start = Math.max(0, Number(startOrdinal) || 0);
+            const end = Math.max(start, Number(endOrdinal) || start);
+            const rowCount = Math.max(0, end - start);
+            const height = Math.max(0, rowCount * rowHeight);
+            const spacerKey = `${start}:${end}`;
+            const style = `height:${height}px;min-height:${height}px;pointer-events:none;`;
+
+            if (spacer.dataset) {
+                spacer.dataset.sourceWindowSpacerKey = spacerKey;
+                spacer.dataset.sourceWindowStart = String(start);
+                spacer.dataset.sourceWindowEnd = String(end);
+                spacer.dataset.sourceWindowRows = String(rowCount);
+            }
+            if (typeof spacer.setAttribute === 'function') {
+                spacer.setAttribute('data-source-window-spacer-key', spacerKey);
+                spacer.setAttribute('data-source-window-start', String(start));
+                spacer.setAttribute('data-source-window-end', String(end));
+                spacer.setAttribute('data-source-window-rows', String(rowCount));
+                spacer.setAttribute('style', style);
+            } else if (spacer.attrs) {
+                spacer.attrs.style = style;
+            }
+            return spacer;
+        }
+
+        function createSourceWindowSpacer(startOrdinal, endOrdinal, rowHeight) {
+            const spacer = el('div', {
+                className: 'sp-source-window-spacer',
+                role: 'presentation',
+                'aria-hidden': 'true'
+            });
+            return updateSourceWindowSpacer(spacer, startOrdinal, endOrdinal, rowHeight);
+        }
+
+        function appendSourceRenderResult(target, result, rowHeight) {
+            if (!target || !result) return false;
+            const append = Array.isArray(target)
+                ? (node) => target.push(node)
+                : (node) => target.appendChild(node);
+            const children = Array.isArray(target)
+                ? target
+                : Array.from(target.childNodes || []);
+
+            if (!result.__spSourceWindowOmission) {
+                append(result);
+                return true;
+            }
+
+            const prior = children[children.length - 1] || null;
+            if (
+                prior
+                && elementHasClass(prior, 'sp-source-window-spacer')
+                && Number(prior.dataset?.sourceWindowEnd) === result.ordinal
+            ) {
+                updateSourceWindowSpacer(
+                    prior,
+                    Number(prior.dataset?.sourceWindowStart) || 0,
+                    result.ordinal + 1,
+                    rowHeight
+                );
+                return true;
+            }
+
+            append(createSourceWindowSpacer(
+                result.ordinal,
+                result.ordinal + 1,
+                rowHeight
+            ));
+            return true;
+        }
+
+        function setSourceWindowMetadata(listContainer, metadata) {
+            lastSourceWindowMetadata = Object.assign({}, metadata);
+            if (!listContainer) return lastSourceWindowMetadata;
+
+            const values = {
+                sourceWindowingActive: metadata.active ? 'true' : 'false',
+                logicalTotal: String(metadata.logicalTotal),
+                logicalVisible: String(metadata.logicalVisible),
+                logicalSourceCount: String(metadata.logicalSourceCount),
+                visibleLogicalSourceCount: String(metadata.visibleLogicalSourceCount),
+                materializedSources: String(metadata.materializedSources),
+                materializedSourceCount: String(metadata.materializedSourceCount),
+                renderGeneration: String(metadata.renderGeneration),
+                windowStart: String(metadata.start),
+                windowEnd: String(metadata.end),
+                sourceWindowStart: String(metadata.start),
+                sourceWindowEnd: String(metadata.end),
+                pinnedCount: String(metadata.pinnedCount),
+                sourceWindowOverscan: String(metadata.overscan),
+                pendingSelected: String(metadata.pendingSelected ?? 0),
+                visibleSelected: String(metadata.visibleSelected ?? 0),
+                hiddenSelected: String(metadata.hiddenSelected ?? 0),
+                visibleBatchOperable: String(metadata.visibleBatchOperable ?? 0)
+            };
+            Object.entries(values).forEach(([key, value]) => {
+                if (listContainer.dataset) {
+                    listContainer.dataset[key] = value;
+                    return;
+                }
+                const attributeName = `data-${key.replace(/[A-Z]/g, (char) => `-${char.toLowerCase()}`)}`;
+                listContainer.setAttribute?.(attributeName, value);
+            });
+            return lastSourceWindowMetadata;
+        }
+
+        function bindSourceWindowingScroll(listContainer) {
+            if (
+                !listContainer
+                || listContainer.__spSourceWindowScrollBound
+                || typeof listContainer.addEventListener !== 'function'
+            ) {
+                return false;
+            }
+
+            listContainer.addEventListener('scroll', () => {
+                if (listContainer.dataset?.sourceWindowingActive !== 'true') return;
+                scheduleRender();
+            }, { passive: true });
+            listContainer.__spSourceWindowScrollBound = true;
+            return true;
+        }
 
         function normalizeVisibleQuickViewKinds(value) {
             if (!Array.isArray(value)) return [...QUICK_VIEW_BUTTON_KINDS];
@@ -315,7 +713,7 @@
             ));
         }
 
-        function updateSearchResultCount(query, count) {
+        function updateSearchResultCount(query, sourceCount, folderCount = 0) {
             const shadowRoot = getShadowRoot();
             const countEl = shadowRoot?.getElementById?.('sp-search-count');
             if (!countEl) return;
@@ -326,7 +724,10 @@
                 return;
             }
             countEl.hidden = false;
-            countEl.textContent = getMessage('ui_search_results_count', [String(count)]);
+            countEl.textContent = getMessage('ui_search_results_summary', [
+                String(sourceCount),
+                String(folderCount)
+            ]);
         }
 
         function collectSearchExpandedGroupIds(groupIds, query = null) {
@@ -339,39 +740,70 @@
 
             const groupsById = getGroupsById();
             const sourcesByKey = getSourcesByKey();
-            const visitedGroupIds = new Set();
-            const visitGroup = (groupId) => {
-                if (!groupId || visitedGroupIds.has(groupId)) return false;
-                const group = groupsById.get(groupId);
-                if (!group) return false;
-                visitedGroupIds.add(groupId);
+            const sourceMatchCache = new Map();
+            const descendantMatchByGroupId = new Map();
+            const visitStateByGroupId = new Map();
+            const roots = Array.isArray(groupIds) ? groupIds : [];
 
-                let hasMatchingDescendant = false;
-                (Array.isArray(group.children) ? group.children : []).forEach((child) => {
-                    if (child?.type === 'source') {
-                        const source = sourcesByKey.get(child.key);
+            for (let rootIndex = roots.length - 1; rootIndex >= 0; rootIndex -= 1) {
+                const rootGroupId = roots[rootIndex];
+                if (!rootGroupId || visitStateByGroupId.get(rootGroupId) === 'done') continue;
+
+                const stack = [{ groupId: rootGroupId, exiting: false }];
+                while (stack.length > 0) {
+                    const frame = stack.pop();
+                    const group = groupsById.get(frame.groupId);
+                    if (!group) continue;
+
+                    if (!frame.exiting) {
+                        const visitState = visitStateByGroupId.get(group.id);
+                        if (visitState === 'done' || visitState === 'visiting') continue;
+                        visitStateByGroupId.set(group.id, 'visiting');
+                        stack.push({ groupId: group.id, exiting: true });
+
+                        const children = Array.isArray(group.children) ? group.children : [];
+                        for (let index = children.length - 1; index >= 0; index -= 1) {
+                            const child = children[index];
+                            if (child?.type !== 'group') continue;
+                            if (visitStateByGroupId.get(child.id) === 'visiting') continue;
+                            stack.push({ groupId: child.id, exiting: false });
+                        }
+                        continue;
+                    }
+
+                    let hasMatchingDescendant = false;
+                    const children = Array.isArray(group.children) ? group.children : [];
+                    for (const child of children) {
+                        if (child?.type === 'source') {
+                            if (!sourceMatchCache.has(child.key)) {
+                                const source = sourcesByKey.get(child.key);
+                                sourceMatchCache.set(child.key, Boolean(
+                                    source
+                                    && sourceMatchesSearchQuery(source, searchCriteria)
+                                    && sourceMatchesCurrentFilters(source)
+                                ));
+                            }
+                            if (sourceMatchCache.get(child.key)) {
+                                hasMatchingDescendant = true;
+                                break;
+                            }
+                            continue;
+                        }
+
                         if (
-                            source &&
-                            sourceMatchesSearchQuery(source, searchCriteria) &&
-                            sourceMatchesCurrentFilters(source)
+                            child?.type === 'group'
+                            && descendantMatchByGroupId.get(child.id)
                         ) {
                             hasMatchingDescendant = true;
+                            break;
                         }
-                        return;
                     }
 
-                    if (child?.type === 'group' && visitGroup(child.id)) {
-                        hasMatchingDescendant = true;
-                    }
-                });
-
-                if (hasMatchingDescendant) {
-                    expandedGroupIds.add(group.id);
+                    descendantMatchByGroupId.set(group.id, hasMatchingDescendant);
+                    visitStateByGroupId.set(group.id, 'done');
+                    if (hasMatchingDescendant) expandedGroupIds.add(group.id);
                 }
-                return hasMatchingDescendant;
-            };
-
-            (Array.isArray(groupIds) ? groupIds : []).forEach(visitGroup);
+            }
             return expandedGroupIds;
         }
 
@@ -503,38 +935,152 @@
 
         function getGroupEffectiveState(group) {
             const groupsById = getGroupsById();
-            const descendantKeys = [];
-            const getKeys = (g) => {
-                if (!g) return;
-                (Array.isArray(g.children) ? g.children : []).forEach((child) => {
-                    if (child.type === 'source') descendantKeys.push(child.key);
-                    else getKeys(groupsById.get(child.id));
-                });
-            };
-            getKeys(group);
+            const sourcesByKey = getSourcesByKey();
+            const visitedGroupIds = new Set();
+            const descendantKeys = new Set();
+            const stack = group ? [group] : [];
 
-            const total = descendantKeys.length;
-            const on = descendantKeys.filter((key) => {
-                return isSourceEffectivelyEnabled(getSourcesByKey().get(key));
-            }).length;
+            while (stack.length > 0) {
+                const currentGroup = stack.pop();
+                if (!currentGroup || visitedGroupIds.has(currentGroup.id)) continue;
+                visitedGroupIds.add(currentGroup.id);
+
+                const children = Array.isArray(currentGroup.children)
+                    ? currentGroup.children
+                    : [];
+                for (const child of children) {
+                    if (child?.type === 'source') {
+                        if (child.key) descendantKeys.add(child.key);
+                        continue;
+                    }
+                    if (child?.type === 'group') {
+                        const childGroup = groupsById.get(child.id);
+                        if (childGroup) stack.push(childGroup);
+                    }
+                }
+            }
+
+            const total = descendantKeys.size;
+            let on = 0;
+            descendantKeys.forEach((key) => {
+                if (isSourceEffectivelyEnabled(sourcesByKey.get(key))) on += 1;
+            });
 
             return { on, total };
         }
 
+        function getStablePatchKey(node) {
+            if (!node || node.nodeType !== 1) return '';
+            const dataset = node.dataset || {};
+            if (dataset.sourceKey && elementHasClass(node, 'source-item')) {
+                return `source:${dataset.sourceKey}`;
+            }
+            if (dataset.sourceWindowSpacerKey && elementHasClass(node, 'sp-source-window-spacer')) {
+                return `source-window:${dataset.sourceWindowSpacerKey}`;
+            }
+            if (dataset.groupId && elementHasClass(node, 'group-container')) {
+                return `group:${dataset.groupId}`;
+            }
+            if (dataset.quickViewKind) {
+                return `quick-view:${dataset.quickViewKind}`;
+            }
+            const id = node.id || node.getAttribute?.('id');
+            if (id) return `id:${id}`;
+            if (elementHasClass(node, 'ungrouped-section')) return 'region:ungrouped';
+            if (elementHasClass(node, 'sp-batch-action-bar')) return 'region:batch-actions';
+            if (elementHasClass(node, 'sp-contextual-empty-list-item')) return 'region:empty';
+            return '';
+        }
+
+        function patchChildNodeList(target, sourceChildren) {
+            if (!target || typeof target.appendChild !== 'function') return;
+            const initialChildren = Array.from(target.childNodes || []);
+            const usedTargets = new Set();
+            const keyedTargets = new Map();
+            const unkeyedTargets = [];
+
+            initialChildren.forEach((candidate) => {
+                const key = getStablePatchKey(candidate);
+                if (!key) {
+                    unkeyedTargets.push(candidate);
+                    return;
+                }
+                const bucket = keyedTargets.get(key) || { nodes: [], index: 0 };
+                bucket.nodes.push(candidate);
+                keyedTargets.set(key, bucket);
+            });
+            let unkeyedCursor = 0;
+
+            const takeKeyedTarget = (key) => {
+                const bucket = keyedTargets.get(key);
+                if (!bucket) return null;
+                while (bucket.index < bucket.nodes.length) {
+                    const candidate = bucket.nodes[bucket.index];
+                    bucket.index += 1;
+                    if (!usedTargets.has(candidate)) return candidate;
+                }
+                return null;
+            };
+            const takeUnkeyedTarget = () => {
+                while (unkeyedCursor < unkeyedTargets.length) {
+                    const candidate = unkeyedTargets[unkeyedCursor];
+                    unkeyedCursor += 1;
+                    if (!usedTargets.has(candidate)) return candidate;
+                }
+                return null;
+            };
+
+            sourceChildren.forEach((sourceChild, sourceIndex) => {
+                const sourceKey = getStablePatchKey(sourceChild);
+                let targetChild = sourceKey
+                    ? takeKeyedTarget(sourceKey)
+                    : takeUnkeyedTarget();
+                const insertionTarget = target.childNodes?.[sourceIndex] || null;
+
+                if (!targetChild) {
+                    const clonedChild = sourceChild.cloneNode(true);
+                    if (insertionTarget && typeof target.insertBefore === 'function') {
+                        target.insertBefore(clonedChild, insertionTarget);
+                    } else {
+                        target.appendChild(clonedChild);
+                    }
+                    usedTargets.add(clonedChild);
+                    return;
+                }
+
+                if (
+                    targetChild !== insertionTarget
+                    && typeof target.insertBefore === 'function'
+                ) {
+                    target.insertBefore(targetChild, insertionTarget || null);
+                }
+                const patchedTarget = patchNode(targetChild, sourceChild);
+                usedTargets.add(patchedTarget || targetChild);
+            });
+
+            Array.from(target.childNodes || []).forEach((targetChild) => {
+                if (!usedTargets.has(targetChild) && typeof target.removeChild === 'function') {
+                    target.removeChild(targetChild);
+                }
+            });
+        }
+
         function patchNode(target, source) {
             if (target.nodeType !== source.nodeType) {
-                target.parentNode.replaceChild(source.cloneNode(true), target);
-                return;
+                const replacement = source.cloneNode(true);
+                target.parentNode.replaceChild(replacement, target);
+                return replacement;
             }
-            if (target.nodeType === Node.TEXT_NODE) {
+            if (target.nodeType === 3) {
                 if (target.textContent !== source.textContent) {
                     target.textContent = source.textContent;
                 }
-                return;
+                return target;
             }
             if (target.nodeName !== source.nodeName) {
-                target.parentNode.replaceChild(source.cloneNode(true), target);
-                return;
+                const replacement = source.cloneNode(true);
+                target.parentNode.replaceChild(replacement, target);
+                return replacement;
             }
 
             const targetAttrs = target.attributes;
@@ -559,41 +1105,18 @@
                 if (target.disabled !== source.disabled) target.disabled = source.disabled;
             }
 
-            const targetChildren = Array.from(target.childNodes);
             const sourceChildren = Array.from(source.childNodes);
-            const maxLength = Math.max(targetChildren.length, sourceChildren.length);
-
-            for (let i = 0; i < maxLength; i++) {
-                if (i >= targetChildren.length) {
-                    target.appendChild(sourceChildren[i].cloneNode(true));
-                } else if (i >= sourceChildren.length) {
-                    target.removeChild(targetChildren[i]);
-                } else {
-                    patchNode(targetChildren[i], sourceChildren[i]);
-                }
-            }
+            patchChildNodeList(target, sourceChildren);
+            return target;
         }
 
         function patchChildren(target, sourceFragment) {
             if (!target || !sourceFragment || typeof target.appendChild !== 'function') return;
-            const targetChildren = Array.from(target.childNodes || []);
             const sourceChildren = Array.from(sourceFragment.childNodes || []);
-            const maxLength = Math.max(targetChildren.length, sourceChildren.length);
-
-            for (let i = 0; i < maxLength; i++) {
-                if (i >= targetChildren.length) {
-                    target.appendChild(sourceChildren[i].cloneNode(true));
-                } else if (i >= sourceChildren.length) {
-                    if (typeof target.removeChild === 'function') {
-                        target.removeChild(targetChildren[i]);
-                    }
-                } else {
-                    patchNode(targetChildren[i], sourceChildren[i]);
-                }
-            }
+            patchChildNodeList(target, sourceChildren);
         }
 
-        function renderViewStateBar() {
+        function renderViewStateBar(sourceViewInfoOverride = null) {
             const shadowRoot = getShadowRoot();
             if (!shadowRoot) return;
             const container = shadowRoot.getElementById('sp-view-state');
@@ -606,9 +1129,36 @@
             const state = getState() || {};
             const isolatedGroup = getActiveIsolationGroupId() ? groupsById.get(getActiveIsolationGroupId()) : null;
             const activeTag = state.activeTagId ? getTagsById().get(state.activeTagId) : null;
-            const sourceViewInfo = getSourceViewInfo() || {};
-            const nativeLabelPreview = getNativeLabelImportPreview() || {};
+            const sourceViewInfo = sourceViewInfoOverride || getSourceViewInfo() || {};
+            const nativeLabelPreview = sourceViewInfo.kind === 'label'
+                ? (getNativeLabelImportPreview({ viewInfo: sourceViewInfo }) || {})
+                : {};
             const nativeLabelImportSummary = getLastNativeLabelImportSummary() || null;
+            const nativeSelectionSyncFailure = getNativeSelectionSyncFailure() || null;
+
+            if (nativeSelectionSyncFailure) {
+                const reason = String(
+                    nativeSelectionSyncFailure.reason
+                    || nativeSelectionSyncFailure.code
+                    || 'unknown'
+                );
+                fragment.appendChild(el('div', {
+                    className: 'sp-view-banner sp-view-banner-error',
+                    role: 'alert',
+                    dataset: { nativeSelectionSyncFailure: 'true' }
+                }, [
+                    el('div', { className: 'sp-view-banner-copy' }, [
+                        el('span', { className: 'sp-view-banner-label' }, [
+                            getMessage('ui_native_selection_sync_failed', [reason])
+                        ])
+                    ]),
+                    el('button', {
+                        type: 'button',
+                        className: 'sp-button sp-view-banner-btn',
+                        id: 'sp-retry-native-selection-sync-btn'
+                    }, [getMessage('ui_retry')])
+                ]));
+            }
 
             if (sourceViewInfo.kind === 'label') {
                 fragment.appendChild(el('div', { className: 'sp-view-banner sp-native-label-view-banner' }, [
@@ -656,6 +1206,21 @@
                 importNativeLabelsButton.onclick = (event) => {
                     event.preventDefault?.();
                     handleInteraction(event);
+                };
+            }
+            const retryNativeSelectionButton = container.querySelector?.(
+                '#sp-retry-native-selection-sync-btn'
+            );
+            if (retryNativeSelectionButton) {
+                retryNativeSelectionButton.onclick = async (event) => {
+                    event.preventDefault?.();
+                    retryNativeSelectionButton.disabled = true;
+                    retryNativeSelectionButton.setAttribute?.('aria-busy', 'true');
+                    try {
+                        await retryNativeSelectionSync(nativeSelectionSyncFailure);
+                    } finally {
+                        renderViewStateBar();
+                    }
                 };
             }
         }
@@ -1104,11 +1669,21 @@
         }
 
         function render() {
+            const performanceNow = () => {
+                const win = typeof deps.getWindow === 'function'
+                    ? deps.getWindow()
+                    : (typeof window !== 'undefined' ? window : null);
+                return typeof win?.performance?.now === 'function'
+                    ? win.performance.now()
+                    : Date.now();
+            };
+            const renderStartedAt = performanceNow();
             const shadowRoot = getShadowRoot();
             if (!shadowRoot) return;
             const listContainer = shadowRoot.querySelector('#sources-list');
             if (!listContainer) return;
             const container = shadowRoot.querySelector('.sp-container');
+            sourceRenderGeneration += 1;
 
             // Reconcile batch selection against live sources: a selected source can vanish
             // (NotebookLM native delete / SPA rescan) without an explicit user-delete, leaving
@@ -1123,9 +1698,10 @@
                     }
                 }
             }
-
             bindSourceIconFallbackDelegation(listContainer);
             bindSpotlightPointerTracking(listContainer);
+            bindSourceWindowingScroll(listContainer);
+            updateEstimatedSourceWindowRowHeight(listContainer);
             syncActiveSourceActionMenuState();
             syncSearchUi();
             renderQuickViewRail();
@@ -1136,13 +1712,29 @@
             const sourceViewInfo = getSourceViewInfo() || {};
             const isNativeLabelView = sourceViewInfo.kind === 'label';
             setContainerNativeLabelViewMode(container, isNativeLabelView);
-            renderViewStateBar();
+            updatePanelResizerAria(container, shadowRoot.querySelector('.sp-resizer'));
+            renderViewStateBar(sourceViewInfo);
             if (isNativeLabelView) {
                 if (typeof deps.onBeforeRowsPatch === 'function') {
                     try { deps.onBeforeRowsPatch(); } catch (_) { /* ignore hook errors */ }
                 }
                 patchChildren(listContainer, fragment);
                 updateSearchResultCount('', 0);
+                setSourceWindowMetadata(listContainer, {
+                    active: false,
+                    logicalTotal: 0,
+                    logicalVisible: 0,
+                    logicalSourceCount: 0,
+                    visibleLogicalSourceCount: 0,
+                    materializedSources: 0,
+                    materializedSourceCount: 0,
+                    renderGeneration: sourceRenderGeneration,
+                    start: 0,
+                    end: 0,
+                    pinnedCount: 0,
+                    overscan: getSourceWindowOverscan()
+                });
+                lastVisibleLogicalSourceKeys = [];
                 renderSourceActionMenuLayer();
                 return;
             }
@@ -1155,17 +1747,199 @@
             const activeFilters = hasActiveRenderFilters();
             const groupsById = getGroupsById();
             const sourcesByKey = getSourcesByKey();
+            const sourceContextIndexRebuilt = (
+                typeof searchSemantics.ensureSourceContextIndex === 'function'
+                && searchSemantics.ensureSourceContextIndex(sourcesByKey)
+            );
             const parentMap = getParentMap();
             const tagsById = getTagsById();
             const pendingBatchKeys = getPendingBatchKeys();
             const activeIsolationGroupId = getActiveIsolationGroupId();
             const rootEntries = Array.isArray(state.root) ? state.root : [];
+            const derivedGroupCacheInvalidated = ensureDerivedGroupEffectiveStateCohort(
+                state,
+                groupsById,
+                sourcesByKey,
+                activeIsolationGroupId
+            );
+            const sourceFilterMatchCache = new Map();
+            const sourceEffectiveStateCache = new Map();
+            const groupEffectiveStateCache = new Map(derivedGroupEffectiveStateCache);
+            let recomputedGroupEffectiveStateCount = 0;
+            let sourceFilterMatchCount = 0;
+            const matchesCurrentFilters = (source) => {
+                if (!source?.key) return false;
+                if (!sourceFilterMatchCache.has(source.key)) {
+                    const matches = Boolean(sourceMatchesCurrentFilters(source));
+                    sourceFilterMatchCache.set(source.key, matches);
+                    if (matches) sourceFilterMatchCount += 1;
+                }
+                return sourceFilterMatchCache.get(source.key);
+            };
+            const getCachedSourceEffectiveState = (source) => {
+                if (!source?.key) return false;
+                if (!sourceEffectiveStateCache.has(source.key)) {
+                    sourceEffectiveStateCache.set(
+                        source.key,
+                        Boolean(isSourceEffectivelyEnabled(source))
+                    );
+                }
+                return sourceEffectiveStateCache.get(source.key);
+            };
+            const getCachedGroupEffectiveState = (group) => {
+                if (!group?.id) return { on: 0, total: 0 };
+                if (groupEffectiveStateCache.has(group.id)) {
+                    return groupEffectiveStateCache.get(group.id);
+                }
+
+                const visitedGroupIds = new Set();
+                const descendantKeys = new Set();
+                const stack = [group];
+                while (stack.length > 0) {
+                    const currentGroup = stack.pop();
+                    if (!currentGroup || visitedGroupIds.has(currentGroup.id)) continue;
+                    visitedGroupIds.add(currentGroup.id);
+                    const children = Array.isArray(currentGroup.children)
+                        ? currentGroup.children
+                        : [];
+                    for (const child of children) {
+                        if (child?.type === 'source') {
+                            if (child.key) descendantKeys.add(child.key);
+                            continue;
+                        }
+                        if (child?.type === 'group') {
+                            const childGroup = groupsById.get(child.id);
+                            if (childGroup) stack.push(childGroup);
+                        }
+                    }
+                }
+
+                let on = 0;
+                descendantKeys.forEach((sourceKey) => {
+                    if (getCachedSourceEffectiveState(sourcesByKey.get(sourceKey))) on += 1;
+                });
+                const result = { on, total: descendantKeys.size };
+                groupEffectiveStateCache.set(group.id, result);
+                return result;
+            };
+            groupsById.forEach((group, groupId) => {
+                if (!group || groupEffectiveStateCache.has(groupId)) return;
+                const visitStateByGroupId = new Map();
+                const stack = [{ groupId, exiting: false }];
+                while (stack.length > 0) {
+                    const frame = stack.pop();
+                    const currentGroup = groupsById.get(frame.groupId);
+                    if (!currentGroup) continue;
+
+                    if (!frame.exiting) {
+                        const visitState = visitStateByGroupId.get(currentGroup.id);
+                        if (visitState === 'done' || visitState === 'visiting') continue;
+                        visitStateByGroupId.set(currentGroup.id, 'visiting');
+                        stack.push({ groupId: currentGroup.id, exiting: true });
+                        const children = Array.isArray(currentGroup.children)
+                            ? currentGroup.children
+                            : [];
+                        for (let index = children.length - 1; index >= 0; index -= 1) {
+                            const child = children[index];
+                            if (
+                                child?.type === 'group'
+                                && !groupEffectiveStateCache.has(child.id)
+                                && visitStateByGroupId.get(child.id) !== 'visiting'
+                            ) {
+                                stack.push({ groupId: child.id, exiting: false });
+                            }
+                        }
+                        continue;
+                    }
+
+                    let on = 0;
+                    let total = 0;
+                    const directSourceKeys = new Set();
+                    const children = Array.isArray(currentGroup.children)
+                        ? currentGroup.children
+                        : [];
+                    for (const child of children) {
+                        if (child?.type === 'source') {
+                            if (!child.key || directSourceKeys.has(child.key)) continue;
+                            directSourceKeys.add(child.key);
+                            total += 1;
+                            if (getCachedSourceEffectiveState(sourcesByKey.get(child.key))) on += 1;
+                            continue;
+                        }
+                        if (child?.type === 'group') {
+                            const childState = groupEffectiveStateCache.get(child.id);
+                            if (childState) {
+                                on += childState.on;
+                                total += childState.total;
+                            }
+                        }
+                    }
+                    groupEffectiveStateCache.set(currentGroup.id, { on, total });
+                    recomputedGroupEffectiveStateCount += 1;
+                    visitStateByGroupId.set(currentGroup.id, 'done');
+                }
+            });
+            derivedGroupEffectiveStateCache = new Map(groupEffectiveStateCache);
             const rootGroupIds = activeIsolationGroupId && groupsById.has(activeIsolationGroupId)
                 ? [activeIsolationGroupId]
                 : rootEntries
                     .filter((entry) => entry && entry.type === 'group' && entry.id)
                     .map((entry) => entry.id);
             const searchCriteria = parseSearchQuery(state.filterQuery || '');
+            const renderableGroupIds = new Set();
+            const baseSetupCompletedAt = performanceNow();
+            if (activeFilters) {
+                const renderabilityByGroupId = new Map();
+                const visitStateByGroupId = new Map();
+                groupsById.forEach((group, groupId) => {
+                    if (!group || visitStateByGroupId.get(groupId) === 'done') return;
+                    const stack = [{ groupId, exiting: false }];
+                    while (stack.length > 0) {
+                        const frame = stack.pop();
+                        const currentGroup = groupsById.get(frame.groupId);
+                        if (!currentGroup) continue;
+
+                        if (!frame.exiting) {
+                            const visitState = visitStateByGroupId.get(currentGroup.id);
+                            if (visitState === 'done' || visitState === 'visiting') continue;
+                            visitStateByGroupId.set(currentGroup.id, 'visiting');
+                            stack.push({ groupId: currentGroup.id, exiting: true });
+                            const children = Array.isArray(currentGroup.children)
+                                ? currentGroup.children
+                                : [];
+                            for (let index = children.length - 1; index >= 0; index -= 1) {
+                                const child = children[index];
+                                if (
+                                    child?.type === 'group'
+                                    && visitStateByGroupId.get(child.id) !== 'visiting'
+                                ) {
+                                    stack.push({ groupId: child.id, exiting: false });
+                                }
+                            }
+                            continue;
+                        }
+
+                        let renderable = typeof searchSemantics.matchesGroup === 'function'
+                            && searchSemantics.matchesGroup(currentGroup, searchCriteria);
+                        const children = Array.isArray(currentGroup.children)
+                            ? currentGroup.children
+                            : [];
+                        for (const child of children) {
+                            if (renderable) break;
+                            if (child?.type === 'source') {
+                                renderable = matchesCurrentFilters(sourcesByKey.get(child.key));
+                            } else if (child?.type === 'group') {
+                                renderable = Boolean(renderabilityByGroupId.get(child.id));
+                            }
+                        }
+
+                        renderabilityByGroupId.set(currentGroup.id, renderable);
+                        visitStateByGroupId.set(currentGroup.id, 'done');
+                        if (renderable) renderableGroupIds.add(currentGroup.id);
+                    }
+                });
+            }
+            const renderabilityCompletedAt = performanceNow();
             const sourceTitleHighlightTerms = getSearchHighlightTerms(searchCriteria, 'text');
             const tagHighlightTerms = getSearchHighlightTerms(searchCriteria, 'tag');
             const folderHighlightTerms = getSearchHighlightTerms(searchCriteria, 'folder');
@@ -1185,9 +1959,125 @@
                     currentGroupId = parentMap.get(currentGroupId) || null;
                 }
             });
-            let listMotionIndex = 0;
+            const setupCompletedAt = performanceNow();
             const countedSearchResultKeys = new Set();
+            const countedSearchResultGroupIds = new Set();
             const visibleBatchOperableKeys = new Set();
+            const visibleSourceKeysForWindow = [];
+            const visibleSourceKeySetForWindow = new Set();
+            const appendVisibleSourceKeyForWindow = (sourceKey) => {
+                if (!sourceKey || visibleSourceKeySetForWindow.has(sourceKey)) return;
+                const source = sourcesByKey.get(sourceKey);
+                if (!source || !matchesCurrentFilters(source)) return;
+                visibleSourceKeySetForWindow.add(sourceKey);
+                visibleSourceKeysForWindow.push(sourceKey);
+                if (searchCriteria.hasQuery) {
+                    countedSearchResultKeys.add(sourceKey);
+                }
+                if (state.isBatchMode) {
+                    const isFailed = Boolean(
+                        source.isFailed
+                        || (source.isDisabled && !source.isLoading)
+                    );
+                    if (
+                        !source.isDisabled
+                        && !isFailed
+                        && !source.isLoading
+                        && source.hasNativeCheckbox !== false
+                    ) {
+                        visibleBatchOperableKeys.add(sourceKey);
+                    }
+                }
+            };
+            const collectVisibleGroupSourceKeysForWindow = (rootGroup) => {
+                if (!rootGroup) return;
+                const visitedGroupIds = new Set();
+                const stack = [{ kind: 'group', group: rootGroup }];
+                while (stack.length > 0) {
+                    const task = stack.pop();
+                    if (task.kind === 'source') {
+                        appendVisibleSourceKeyForWindow(task.sourceKey);
+                        continue;
+                    }
+
+                    const group = task.group;
+                    if (!group || visitedGroupIds.has(group.id)) continue;
+                    visitedGroupIds.add(group.id);
+                    if (
+                        !pendingInitialRenamePathGroupIds.has(group.id)
+                        && activeFilters
+                        && !renderableGroupIds.has(group.id)
+                    ) {
+                        continue;
+                    }
+
+                    const isCollapsed = (
+                        group.collapsed
+                        && !searchExpandedGroupIds.has(group.id)
+                        && !pendingInitialRenamePathGroupIds.has(group.id)
+                    );
+                    if (isCollapsed) continue;
+
+                    const children = Array.isArray(group.children) ? group.children : [];
+                    for (let index = children.length - 1; index >= 0; index -= 1) {
+                        const child = children[index];
+                        if (child?.type === 'source') {
+                            stack.push({ kind: 'source', sourceKey: child.key });
+                        } else if (child?.type === 'group') {
+                            const childGroup = groupsById.get(child.id);
+                            if (childGroup) stack.push({ kind: 'group', group: childGroup });
+                        }
+                    }
+                }
+            };
+
+            if (activeIsolationGroupId) {
+                collectVisibleGroupSourceKeysForWindow(groupsById.get(activeIsolationGroupId));
+                rootEntries.forEach((entry) => {
+                    if (
+                        entry?.type === 'group'
+                        && entry.id !== activeIsolationGroupId
+                        && pendingInitialRenamePathGroupIds.has(entry.id)
+                    ) {
+                        collectVisibleGroupSourceKeysForWindow(groupsById.get(entry.id));
+                    }
+                });
+            } else {
+                rootEntries.forEach((entry) => {
+                    if (entry?.type === 'source') {
+                        appendVisibleSourceKeyForWindow(entry.key);
+                    } else if (entry?.type === 'group') {
+                        collectVisibleGroupSourceKeysForWindow(groupsById.get(entry.id));
+                    }
+                });
+                (Array.isArray(state.ungrouped) ? state.ungrouped : [])
+                    .forEach(appendVisibleSourceKeyForWindow);
+            }
+            const logicalProjectionCompletedAt = performanceNow();
+
+            if (sourceFilterMatchCache.size < sourcesByKey.size) {
+                sourcesByKey.forEach((source, sourceKey) => {
+                    if (!sourceFilterMatchCache.has(sourceKey)) {
+                        matchesCurrentFilters(source);
+                    }
+                });
+            }
+            const logicalFilteredSourceTotal = sourceFilterMatchCount;
+            const projectionCompletedAt = performanceNow();
+            const sourceWindowRange = resolveSourceWindowRange(
+                listContainer,
+                visibleSourceKeysForWindow.length
+            );
+            const sourceWindowPinnedKeys = new Set(
+                Array.from(collectSourceWindowPinnedKeys(listContainer))
+                    .filter((sourceKey) => sourcesByKey.has(sourceKey))
+            );
+            const sourceWindowOrdinalByKey = new Map(
+                visibleSourceKeysForWindow.map((sourceKey, ordinal) => [sourceKey, ordinal])
+            );
+            lastVisibleLogicalSourceKeys = visibleSourceKeysForWindow.slice();
+            let materializedSourceCount = 0;
+            let listMotionIndex = 0;
 
             const getNextListMotionStyle = () => {
                 const motionIndex = getCappedMotionIndex(listMotionIndex);
@@ -1195,8 +2085,29 @@
                 return `--sp-list-item-index:${motionIndex};`;
             };
 
-            const renderSourceItem = (source, isVisibleInTree = true) => {
-                if (!source || !sourceMatchesCurrentFilters(source)) return null;
+            const joinAccessibleTreePath = (parentPath, ownTitle) => (
+                parentPath ? `${parentPath} / ${ownTitle}` : ownTitle
+            );
+
+            const getGroupAncestorAccessiblePath = (groupId) => {
+                const ancestorTitles = [];
+                const visitedGroupIds = new Set([groupId]);
+                let parentGroupId = parentMap.get(groupId) || null;
+                while (
+                    parentGroupId
+                    && groupsById.has(parentGroupId)
+                    && !visitedGroupIds.has(parentGroupId)
+                ) {
+                    visitedGroupIds.add(parentGroupId);
+                    const parentGroup = groupsById.get(parentGroupId);
+                    ancestorTitles.push(parentGroup?.title || getMessage('ui_group_untitled'));
+                    parentGroupId = parentMap.get(parentGroupId) || null;
+                }
+                return ancestorTitles.reverse().join(' / ');
+            };
+
+            const renderSourceItem = (source, isVisibleInTree = true, parentPath = '') => {
+                if (!source || !matchesCurrentFilters(source)) return null;
                 if (searchCriteria.hasQuery) {
                     countedSearchResultKeys.add(source.key);
                 }
@@ -1213,6 +2124,33 @@
                 ) {
                     visibleBatchOperableKeys.add(source.key);
                 }
+                const sourceWindowOrdinal = sourceWindowOrdinalByKey.has(source.key)
+                    ? sourceWindowOrdinalByKey.get(source.key)
+                    : -1;
+                const isSourceWindowPinned = sourceWindowPinnedKeys.has(source.key);
+                if (
+                    sourceWindowRange.active
+                    && !isVisibleInTree
+                    && !isSourceWindowPinned
+                ) {
+                    return null;
+                }
+                if (
+                    isVisibleInTree
+                    && sourceWindowOrdinal >= 0
+                    && !shouldMaterializeWindowedSource(
+                        source.key,
+                        sourceWindowOrdinal,
+                        sourceWindowRange,
+                        sourceWindowPinnedKeys
+                    )
+                ) {
+                    return {
+                        __spSourceWindowOmission: true,
+                        ordinal: sourceWindowOrdinal
+                    };
+                }
+                materializedSourceCount += 1;
                 const showSourceActionButton = !state.isBatchMode;
                 const canOpenActions = canOpenSourceActionMenu(source);
                 const isSourceActionMenuOpen = canOpenActions && getActiveSourceActionSourceKey() === source.key;
@@ -1230,12 +2168,26 @@
                 if (isFailed) titleAttr = getMessage('ui_source_import_failed');
                 if (isLoading) titleAttr = getMessage('ui_source_parsing');
                 const motionStyle = getNextListMotionStyle();
+                const sourceTitle = source.title || getMessage('ui_source_untitled');
+                const sourcePath = joinAccessibleTreePath(parentPath, sourceTitle);
 
                 return el('div', {
                     className: 'source-item sp-list-item-enter sp-spotlight-surface' + extraClasses,
                     role: 'listitem',
+                    'aria-label': sourcePath,
+                    'aria-posinset': sourceWindowOrdinal >= 0
+                        ? String(sourceWindowOrdinal + 1)
+                        : null,
+                    'aria-setsize': sourceWindowOrdinal >= 0
+                        ? String(visibleSourceKeysForWindow.length)
+                        : null,
                     draggable: !isFailed && !isLoading ? 'true' : 'false',
-                    dataset: { sourceKey: source.key },
+                    dataset: {
+                        sourceKey: source.key,
+                        sourceWindowOrdinal: sourceWindowOrdinal >= 0
+                            ? String(sourceWindowOrdinal)
+                            : ''
+                    },
                     style: motionStyle,
                     title: titleAttr
                 }, [
@@ -1250,7 +2202,7 @@
                             className: 'sp-source-actions-button sp-glare-hover',
                             dataset: { sourceKey: source.key },
                             title: getMessage('ui_source_actions'),
-                            'aria-label': getMessage('ui_source_actions_for', [source.title || getMessage('ui_source_untitled')]),
+                            'aria-label': getMessage('ui_source_actions_for', [sourcePath]),
                             'aria-haspopup': 'menu',
                             'aria-expanded': isSourceActionMenuOpen ? 'true' : 'false',
                             disabled: !canOpenActions
@@ -1286,7 +2238,7 @@
                                 className: 'sp-batch-checkbox sp-checkbox',
                                 dataset: { sourceKey: source.key },
                                 checked: pendingBatchKeys.has(source.key),
-                                'aria-label': getMessage('ui_batch_select_source', [source.title || getMessage('ui_source_untitled')]),
+                                'aria-label': getMessage('ui_batch_select_source', [sourcePath]),
                                 disabled: isFailed || isLoading || source.hasNativeCheckbox === false
                             })
                             : el('input', {
@@ -1294,43 +2246,142 @@
                                 className: 'sp-checkbox',
                                 dataset: { sourceKey: source.key },
                                 checked: source.enabled,
-                                'aria-label': getMessage('ui_source_enabled_checkbox', [source.title || getMessage('ui_source_untitled')]),
+                                'aria-label': getMessage('ui_source_enabled_checkbox', [sourcePath]),
                                 disabled: isFailed || isLoading || source.hasNativeCheckbox === false
                             })
                     ])
                 ]);
             };
 
-            const renderGroup = (
+            const appendWindowedSourceSequence = (
+                target,
+                sourceKeys,
+                parentPath = ''
+            ) => {
+                if (!target || !Array.isArray(sourceKeys) || sourceKeys.length === 0) {
+                    return 0;
+                }
+                const append = Array.isArray(target)
+                    ? (node) => target.push(node)
+                    : (node) => target.appendChild(node);
+                let appendedCount = 0;
+                if (
+                    sourceWindowRange.active
+                    && sourceKeys === visibleSourceKeysForWindow
+                ) {
+                    const materializedOrdinals = new Set();
+                    for (
+                        let ordinal = sourceWindowRange.start;
+                        ordinal < sourceWindowRange.end;
+                        ordinal += 1
+                    ) {
+                        materializedOrdinals.add(ordinal);
+                    }
+                    sourceWindowPinnedKeys.forEach((sourceKey) => {
+                        const ordinal = sourceWindowOrdinalByKey.get(sourceKey);
+                        if (ordinal !== undefined) materializedOrdinals.add(ordinal);
+                    });
+                    const sortedOrdinals = Array.from(materializedOrdinals)
+                        .filter((ordinal) => (
+                            ordinal >= 0 && ordinal < sourceKeys.length
+                        ))
+                        .sort((left, right) => left - right);
+                    let cursor = 0;
+                    sortedOrdinals.forEach((ordinal) => {
+                        if (ordinal > cursor) {
+                            append(createSourceWindowSpacer(
+                                cursor,
+                                ordinal,
+                                sourceWindowRange.rowHeight
+                            ));
+                            appendedCount += 1;
+                        }
+                        const sourceElement = renderSourceItem(
+                            sourcesByKey.get(sourceKeys[ordinal]),
+                            true,
+                            parentPath
+                        );
+                        if (sourceElement && !sourceElement.__spSourceWindowOmission) {
+                            append(sourceElement);
+                            appendedCount += 1;
+                        }
+                        cursor = ordinal + 1;
+                    });
+                    if (cursor < sourceKeys.length) {
+                        append(createSourceWindowSpacer(
+                            cursor,
+                            sourceKeys.length,
+                            sourceWindowRange.rowHeight
+                        ));
+                        appendedCount += 1;
+                    }
+                    return appendedCount;
+                }
+                let omissionStart = null;
+                let omissionEnd = null;
+                const flushOmission = () => {
+                    if (omissionStart === null || omissionEnd === null) return;
+                    append(createSourceWindowSpacer(
+                        omissionStart,
+                        omissionEnd,
+                        sourceWindowRange.rowHeight
+                    ));
+                    appendedCount += 1;
+                    omissionStart = null;
+                    omissionEnd = null;
+                };
+
+                sourceKeys.forEach((sourceKey) => {
+                    const ordinal = sourceWindowOrdinalByKey.get(sourceKey);
+                    const shouldMaterialize = ordinal === undefined
+                        || shouldMaterializeWindowedSource(
+                            sourceKey,
+                            ordinal,
+                            sourceWindowRange,
+                            sourceWindowPinnedKeys
+                        );
+                    if (!shouldMaterialize) {
+                        if (omissionStart === null) omissionStart = ordinal;
+                        omissionEnd = ordinal + 1;
+                        return;
+                    }
+
+                    flushOmission();
+                    const sourceElement = renderSourceItem(
+                        sourcesByKey.get(sourceKey),
+                        true,
+                        parentPath
+                    );
+                    if (sourceElement && !sourceElement.__spSourceWindowOmission) {
+                        append(sourceElement);
+                        appendedCount += 1;
+                    }
+                });
+                flushOmission();
+                return appendedCount;
+            };
+
+            const createRenderedGroupElement = (
                 group,
                 level,
-                ancestorGroupIds = new Set(),
-                ancestorsVisible = true
+                childrenElements,
+                motionStyle,
+                groupPath,
+                hasLogicalChildren = childrenElements.length > 0
             ) => {
-                if (
-                    !group
-                    || ancestorGroupIds.has(group.id)
-                    || (
-                        !pendingInitialRenamePathGroupIds.has(group.id)
-                        && !shouldRenderGroup(group)
-                    )
-                ) {
-                    return null;
-                }
-                const nextAncestorGroupIds = new Set(ancestorGroupIds);
-                nextAncestorGroupIds.add(group.id);
-
                 const isGated = !group.enabled || !areAllAncestorsEnabled(group.id) || !isGroupWithinActiveIsolation(group.id);
-                const { on, total } = getGroupEffectiveState(group);
+                const { on, total } = getCachedGroupEffectiveState(group);
                 const groupTitle = group.title || getMessage('ui_group_untitled');
-                const childrenElements = [];
-                const motionStyle = getNextListMotionStyle();
+                if (
+                    searchCriteria.hasQuery
+                    && groupMatchesSearchQuery(group, searchCriteria)
+                ) {
+                    countedSearchResultGroupIds.add(group.id);
+                }
                 const isSearchExpanded = searchExpandedGroupIds.has(group.id);
                 const isPendingRenameExpanded = pendingInitialRenamePathGroupIds.has(group.id);
                 const isCollapsed = group.collapsed && !isSearchExpanded && !isPendingRenameExpanded;
-                const childrenVisible = ancestorsVisible && !isCollapsed;
                 const groupChildrenId = `sp-group-children-${String(group.id)}`;
-                const groupChildren = Array.isArray(group.children) ? group.children : [];
                 const treeOrderControls = !state.isBatchMode
                     ? el('div', {
                         className: 'sp-tree-order-controls',
@@ -1355,28 +2406,7 @@
                     }))
                     : '';
 
-                groupChildren.forEach((child) => {
-                    if (child.type === 'source') {
-                        const sourceElement = renderSourceItem(
-                            sourcesByKey.get(child.key),
-                            childrenVisible
-                        );
-                        if (sourceElement) childrenElements.push(sourceElement);
-                        return;
-                    }
-
-                    const childGroup = groupsById.get(child.id);
-                    if (!childGroup) return;
-                    const childElement = renderGroup(
-                        childGroup,
-                        level + 1,
-                        nextAncestorGroupIds,
-                        childrenVisible
-                    );
-                    if (childElement) childrenElements.push(childElement);
-                });
-
-                if (childrenElements.length === 0 && !activeFilters) {
+                if (!hasLogicalChildren && childrenElements.length === 0 && !activeFilters) {
                     childrenElements.push(el('div', {
                         className: 'sp-empty-list-item',
                         role: 'listitem'
@@ -1391,8 +2421,12 @@
                 const groupEl = el('div', {
                     className: 'group-container sp-list-item-enter' + (isGated ? ' gated' : '') + (group.isNewlyCreated ? ' sp-folder-enter' : ''),
                     role: 'listitem',
-                    dataset: { groupId: group.id },
-                    style: `padding-left: ${level * 20}px;${motionStyle}`
+                    'aria-label': groupPath,
+                    dataset: {
+                        groupId: group.id,
+                        treeDepth: String(level)
+                    },
+                    style: `--sp-tree-indent:${Math.min(level, MAX_VISIBLE_TREE_INDENT_LEVEL) * TREE_INDENT_STEP_PX}px;${motionStyle}`
                 }, [
                     el('div', { className: 'group-header sp-spotlight-surface', draggable: !state.isBatchMode ? 'true' : 'false', dataset: { dragType: 'group', groupId: group.id } }, [
 	                        el('button', {
@@ -1401,7 +2435,7 @@
 	                            title: isCollapsed ? getMessage('ui_expand') : getMessage('ui_collapse'),
 	                            'aria-label': getMessage(
                                     isCollapsed ? 'ui_expand_group_named' : 'ui_collapse_group_named',
-                                    [groupTitle]
+                                    [groupPath]
                                 ),
                                 'aria-expanded': isCollapsed ? 'false' : 'true',
                                 'aria-controls': groupChildrenId
@@ -1419,7 +2453,7 @@
                                 checked: group.enabled,
                                 'aria-label': getMessage(
                                     group.enabled ? 'ui_disable_group_named' : 'ui_enable_group_named',
-                                    [groupTitle]
+                                    [groupPath]
                                 )
                             }),
                             el('span', { className: 'sp-toggle-slider' })
@@ -1432,26 +2466,26 @@
 	                            type: 'button',
                             className: 'sp-add-subgroup-button sp-glare-hover',
                             title: getMessage('ui_add_subgroup'),
-                            'aria-label': getMessage('ui_add_subgroup_to', [groupTitle])
+                            'aria-label': getMessage('ui_add_subgroup_to', [groupPath])
                         }, [el('span', { className: 'google-symbols', 'aria-hidden': 'true' }, ['create_new_folder'])]),
                         el('button', {
                             type: 'button',
                             className: 'sp-isolate-button sp-glare-hover' + (activeIsolationGroupId === group.id ? ' is-active' : ''),
                             title: getMessage('ui_isolate_group'),
-                            'aria-label': getMessage('ui_isolate_group_named', [groupTitle]),
+                            'aria-label': getMessage('ui_isolate_group_named', [groupPath]),
                             'aria-pressed': activeIsolationGroupId === group.id ? 'true' : 'false'
                         }, [el('span', { className: 'google-symbols', 'aria-hidden': 'true' }, ['filter_center_focus'])]),
                         el('button', {
                             type: 'button',
                             className: 'sp-edit-button sp-glare-hover',
                             title: getMessage('ui_rename'),
-                            'aria-label': getMessage('ui_rename_group_named', [groupTitle])
+                            'aria-label': getMessage('ui_rename_group_named', [groupPath])
                         }, [el('span', { className: 'google-symbols', 'aria-hidden': 'true' }, ['edit'])]),
                         el('button', {
                             type: 'button',
                             className: 'sp-delete-button sp-glare-hover',
                             title: getMessage('ui_delete_group'),
-                            'aria-label': getMessage('ui_delete_group_named', [groupTitle])
+                            'aria-label': getMessage('ui_delete_group_named', [groupPath])
                         }, [el('span', { className: 'google-symbols', 'aria-hidden': 'true' }, ['delete'])])
                     ]),
 	                    el('div', {
@@ -1468,6 +2502,117 @@
                 }
 
                 return groupEl;
+            };
+
+            const renderGroup = (rootGroup, rootLevel, ancestorsVisible = true) => {
+                if (!rootGroup) return null;
+
+                let renderedRoot = null;
+                const stack = [{
+                    kind: 'group-enter',
+                    group: rootGroup,
+                    level: rootLevel,
+                    ancestorGroupIds: new Set(),
+                    ancestorsVisible,
+                    parentPath: getGroupAncestorAccessiblePath(rootGroup.id),
+                    parentFrame: null
+                }];
+
+                while (stack.length > 0) {
+                    const task = stack.pop();
+                    if (task.kind === 'source') {
+                        const source = sourcesByKey.get(task.sourceKey);
+                        const sourceElement = renderSourceItem(
+                            source,
+                            task.isVisibleInTree,
+                            task.parentPath
+                        );
+                        if (source && matchesCurrentFilters(source)) {
+                            task.parentFrame.hasLogicalChildren = true;
+                        }
+                        appendSourceRenderResult(
+                            task.parentFrame.childrenElements,
+                            sourceElement,
+                            sourceWindowRange.rowHeight
+                        );
+                        continue;
+                    }
+
+                    if (task.kind === 'group-exit') {
+                        const groupElement = createRenderedGroupElement(
+                            task.frame.group,
+                            task.frame.level,
+                            task.frame.childrenElements,
+                            task.frame.motionStyle,
+                            task.frame.groupPath,
+                            task.frame.hasLogicalChildren
+                        );
+                        if (task.frame.parentFrame) {
+                            if (groupElement) task.frame.parentFrame.childrenElements.push(groupElement);
+                        } else {
+                            renderedRoot = groupElement;
+                        }
+                        continue;
+                    }
+
+                    const group = task.group;
+                    if (
+                        !group
+                        || task.ancestorGroupIds.has(group.id)
+                        || (
+                            !pendingInitialRenamePathGroupIds.has(group.id)
+                            && activeFilters
+                            && !renderableGroupIds.has(group.id)
+                        )
+                    ) {
+                        continue;
+                    }
+
+                    const isSearchExpanded = searchExpandedGroupIds.has(group.id);
+                    const isPendingRenameExpanded = pendingInitialRenamePathGroupIds.has(group.id);
+                    const isCollapsed = group.collapsed && !isSearchExpanded && !isPendingRenameExpanded;
+                    const childrenVisible = task.ancestorsVisible && !isCollapsed;
+                    const nextAncestorGroupIds = new Set(task.ancestorGroupIds);
+                    nextAncestorGroupIds.add(group.id);
+                    const groupTitle = group.title || getMessage('ui_group_untitled');
+                    const groupPath = joinAccessibleTreePath(task.parentPath, groupTitle);
+                    const frame = {
+                        group,
+                        level: task.level,
+                        childrenElements: [],
+                        motionStyle: getNextListMotionStyle(),
+                        groupPath,
+                        hasLogicalChildren: false,
+                        parentFrame: task.parentFrame
+                    };
+                    stack.push({ kind: 'group-exit', frame });
+
+                    const children = Array.isArray(group.children) ? group.children : [];
+                    for (let index = children.length - 1; index >= 0; index -= 1) {
+                        const child = children[index];
+                        if (child?.type === 'source') {
+                            stack.push({
+                                kind: 'source',
+                                sourceKey: child.key,
+                                isVisibleInTree: childrenVisible,
+                                parentPath: groupPath,
+                                parentFrame: frame
+                            });
+                        } else if (child?.type === 'group') {
+                            stack.push({
+                                kind: 'group-enter',
+                                group: groupsById.get(child.id),
+                                level: task.level + 1,
+                                ancestorGroupIds: nextAncestorGroupIds,
+                                ancestorsVisible: childrenVisible,
+                                parentPath: groupPath,
+                                parentFrame: frame
+                            });
+                        }
+                    }
+                }
+
+                return renderedRoot;
             };
 
             if (activeIsolationGroupId) {
@@ -1491,6 +2636,19 @@
                         renderedRootGroupIds.add(entry.id);
                     }
                 });
+            } else if (!rootEntries.some((entry) => entry?.type === 'group')) {
+                const ungroupedKeys = Array.isArray(state.ungrouped)
+                    ? state.ungrouped
+                    : [];
+                appendWindowedSourceSequence(
+                    fragment,
+                    ungroupedKeys.length === 0
+                        ? visibleSourceKeysForWindow
+                        : rootEntries
+                            .filter((entry) => entry?.type === 'source')
+                            .map((entry) => entry.key)
+                            .filter((sourceKey) => visibleSourceKeySetForWindow.has(sourceKey))
+                );
             } else {
                 rootEntries.forEach((entry) => {
                     if (!entry) return;
@@ -1503,9 +2661,11 @@
                     }
                     if (entry.type === 'source') {
                         const sourceElement = renderSourceItem(sourcesByKey.get(entry.key));
-                        if (sourceElement) {
-                            fragment.appendChild(sourceElement);
-                        }
+                        appendSourceRenderResult(
+                            fragment,
+                            sourceElement,
+                            sourceWindowRange.rowHeight
+                        );
                     }
                 });
             }
@@ -1513,7 +2673,7 @@
             if (!activeIsolationGroupId) {
                 const matchingUngrouped = (Array.isArray(state.ungrouped) ? state.ungrouped : []).filter((key) => {
                     const source = sourcesByKey.get(key);
-                    return source && sourceMatchesCurrentFilters(source);
+                    return source && matchesCurrentFilters(source);
                 });
 
                 if (matchingUngrouped.length > 0) {
@@ -1532,12 +2692,14 @@
                         role: 'list',
                         'aria-label': getMessage('ui_ungrouped')
                     });
-                    matchingUngrouped.forEach((key) => {
-                        const sourceElement = renderSourceItem(sourcesByKey.get(key));
-                        if (sourceElement) {
-                            ungroupedList.appendChild(sourceElement);
-                        }
-                    });
+                    appendWindowedSourceSequence(
+                        ungroupedList,
+                        rootEntries.length === 0
+                            && matchingUngrouped.length === visibleSourceKeysForWindow.length
+                            ? visibleSourceKeysForWindow
+                            : matchingUngrouped,
+                        getMessage('ui_ungrouped')
+                    );
                     ungroupedSection.appendChild(ungroupedList);
 
                     fragment.appendChild(ungroupedSection);
@@ -1593,7 +2755,11 @@
                     }, emptyStatusChildren)
                 ]));
             }
-            updateSearchResultCount(state.filterQuery, countedSearchResultKeys.size);
+            updateSearchResultCount(
+                state.filterQuery,
+                countedSearchResultKeys.size,
+                countedSearchResultGroupIds.size
+            );
 
             // The batch toggle lives in the static toolbar shell (persists across renders),
             // so reflect its pressed/active state here like the other aria-pressed toggles
@@ -1605,9 +2771,37 @@
                 batchToggleBtn.classList.toggle('is-active', batchActive);
             }
 
+            let batchPendingSelectedCount = 0;
+            let batchVisibleSelectedCount = 0;
+            let batchHiddenSelectedCount = 0;
             if (state.isBatchMode) {
                 const allVisibleSelected = visibleBatchOperableKeys.size > 0
                     && Array.from(visibleBatchOperableKeys).every((key) => pendingBatchKeys.has(key));
+                const visibleSelectedCount = Array.from(visibleBatchOperableKeys)
+                    .filter((key) => pendingBatchKeys.has(key))
+                    .length;
+                const hiddenSelectedCount = Math.max(0, pendingBatchKeys.size - visibleSelectedCount);
+                batchPendingSelectedCount = pendingBatchKeys.size;
+                batchVisibleSelectedCount = visibleSelectedCount;
+                batchHiddenSelectedCount = hiddenSelectedCount;
+                const lastBatchDeleteResult = getLastBatchDeleteResult();
+                const hasUnsafeLocalReconcileFailure = Boolean(
+                    Array.isArray(lastBatchDeleteResult?.failed)
+                    && lastBatchDeleteResult.failed.some(
+                        (entry) => entry?.reason === 'native_delete_local_apply_failed'
+                    )
+                );
+                const hasRetryableBatchDelete = Boolean(
+                    pendingBatchKeys.size > 0
+                    && !hasUnsafeLocalReconcileFailure
+                    && (
+                        (Array.isArray(lastBatchDeleteResult?.failed) && lastBatchDeleteResult.failed.length > 0)
+                        || (
+                            Array.isArray(lastBatchDeleteResult?.unattempted)
+                            && lastBatchDeleteResult.unattempted.length > 0
+                        )
+                    )
+                );
                 const actionBar = el('div', {
                     className: 'sp-batch-action-bar',
                     role: 'listitem'
@@ -1623,7 +2817,10 @@
                             role: 'status',
                             'aria-live': 'polite',
                             'aria-atomic': 'true'
-                        }, [getMessage('ui_batch_selected_count', [String(pendingBatchKeys.size)])]),
+                        }, [getMessage('ui_batch_selection_breakdown', [
+                            String(visibleSelectedCount),
+                            String(hiddenSelectedCount)
+                        ])]),
                         el('button', {
                             className: 'sp-button sp-glare-hover sp-batch-select-visible-btn',
                             disabled: visibleBatchOperableKeys.size === 0 || allVisibleSelected || getIsDeletingSources()
@@ -1632,6 +2829,16 @@
                             className: 'sp-button sp-glare-hover sp-batch-clear-selection-btn',
                             disabled: pendingBatchKeys.size === 0 || getIsDeletingSources()
                         }, [getMessage('ui_batch_clear_selection')]),
+                        el('button', {
+                            className: 'sp-button sp-glare-hover sp-batch-clear-hidden-selection-btn',
+                            disabled: hiddenSelectedCount === 0 || getIsDeletingSources()
+                        }, [getMessage('ui_batch_clear_hidden_selection', [String(hiddenSelectedCount)])]),
+                        hasRetryableBatchDelete
+                            ? el('button', {
+                                className: 'sp-button sp-glare-hover sp-batch-retry-remaining-btn',
+                                disabled: getIsDeletingSources()
+                            }, [getMessage('ui_batch_retry_remaining', [String(pendingBatchKeys.size)])])
+                            : null,
                         el('div', { className: 'sp-batch-actions' }, [
                             el('button', {
                                 className: 'sp-button sp-glare-hover sp-batch-add-folder-btn',
@@ -1660,12 +2867,62 @@
                 ]);
                 fragment.appendChild(actionBar);
             }
+            const fragmentCompletedAt = performanceNow();
 
+            const windowStart = Math.min(
+                sourceWindowRange.start,
+                visibleSourceKeysForWindow.length
+            );
+            const windowEnd = Math.min(
+                Math.max(windowStart, sourceWindowRange.end),
+                visibleSourceKeysForWindow.length
+            );
+            setSourceWindowMetadata(listContainer, {
+                active: sourceWindowRange.active,
+                logicalTotal: logicalFilteredSourceTotal,
+                logicalVisible: visibleSourceKeysForWindow.length,
+                logicalSourceCount: logicalFilteredSourceTotal,
+                visibleLogicalSourceCount: visibleSourceKeysForWindow.length,
+                materializedSources: materializedSourceCount,
+                materializedSourceCount,
+                renderGeneration: sourceRenderGeneration,
+                start: windowStart,
+                end: windowEnd,
+                pinnedCount: sourceWindowPinnedKeys.size,
+                overscan: sourceWindowRange.overscan,
+                pendingSelected: batchPendingSelectedCount,
+                visibleSelected: batchVisibleSelectedCount,
+                hiddenSelected: batchHiddenSelectedCount,
+                visibleBatchOperable: visibleBatchOperableKeys.size
+            });
             const previousBatchCountSnapshot = collectBatchCountSnapshot(listContainer);
             if (typeof deps.onBeforeRowsPatch === 'function') {
                 try { deps.onBeforeRowsPatch(); } catch (_) { /* ignore hook errors */ }
             }
             patchChildren(listContainer, fragment);
+            const patchCompletedAt = performanceNow();
+            const renderPhaseValues = {
+                sourceContextIndexRebuilt: sourceContextIndexRebuilt ? 1 : 0,
+                derivedGroupCacheInvalidated: derivedGroupCacheInvalidated ? 1 : 0,
+                recomputedGroupEffectiveStateCount,
+                setupFilterEvaluationCount: sourceFilterMatchCache.size,
+                renderBaseSetupMs: baseSetupCompletedAt - renderStartedAt,
+                renderGroupRenderabilityMs:
+                    renderabilityCompletedAt - baseSetupCompletedAt,
+                renderSetupFinalizeMs: setupCompletedAt - renderabilityCompletedAt,
+                renderSetupMs: setupCompletedAt - renderStartedAt,
+                renderLogicalProjectionMs: logicalProjectionCompletedAt - setupCompletedAt,
+                renderProjectionFinalizeMs: projectionCompletedAt - logicalProjectionCompletedAt,
+                renderProjectionMs: projectionCompletedAt - renderStartedAt,
+                renderFragmentMs: fragmentCompletedAt - projectionCompletedAt,
+                renderPatchMs: patchCompletedAt - fragmentCompletedAt,
+                renderTotalMs: patchCompletedAt - renderStartedAt
+            };
+            Object.entries(renderPhaseValues).forEach(([key, value]) => {
+                if (listContainer.dataset) {
+                    listContainer.dataset[key] = Number(value).toFixed(3);
+                }
+            });
             animateBatchCountChanges(listContainer, previousBatchCountSnapshot);
             renderSourceActionMenuLayer();
 
@@ -1683,6 +2940,27 @@
             }
         }
 
+        function scheduleRender() {
+            if (isRenderScheduled) return false;
+            const win = typeof deps.getWindow === 'function'
+                ? deps.getWindow()
+                : (typeof window !== 'undefined' ? window : null);
+            const requestFrame = win && typeof win.requestAnimationFrame === 'function'
+                ? win.requestAnimationFrame.bind(win)
+                : null;
+            if (!requestFrame) {
+                render();
+                return true;
+            }
+
+            isRenderScheduled = true;
+            requestFrame(() => {
+                isRenderScheduled = false;
+                render();
+            });
+            return true;
+        }
+
         return {
             createBatchCountMessageChildren,
             collectBatchCountSnapshot,
@@ -1698,6 +2976,16 @@
             updateSearchResultCount,
             collectSearchExpandedGroupIds,
             getGroupEffectiveState,
+            resolveSourceWindowRange,
+            collectSourceWindowPinnedKeys,
+            shouldMaterializeWindowedSource,
+            createSourceWindowSpacer,
+            appendSourceRenderResult,
+            setSourceWindowMetadata,
+            getSourceWindowMetadata: () => Object.assign({}, lastSourceWindowMetadata),
+            getVisibleLogicalSourceKeys: () => lastVisibleLogicalSourceKeys.slice(),
+            invalidateDerivedGroupEffectiveStateCache,
+            bindSourceWindowingScroll,
             patchNode,
             patchChildren,
             renderQuickViewRail,
@@ -1715,6 +3003,8 @@
             handleSourceIconImageError,
             bindSourceIconFallbackDelegation,
             createSourceIconElement,
+            scheduleRender,
+            isRenderScheduled: () => isRenderScheduled,
             render
         };
     }

@@ -24,6 +24,13 @@
                 'GeminiNotebook-Source-Management: createContentSearchSemantics requires getGroupsById, getTagsById, getParentMap and getSourceTagIds.'
             );
         }
+        let lastParsedQueryRaw = null;
+        let lastParsedQuery = null;
+        const normalizedCriteriaByObject = new WeakMap();
+        const sourceContextByKey = new Map();
+        const lowercaseValuesByContext = new WeakMap();
+        let sourceContextIndexCohort = null;
+        let sourceContextIndexReady = false;
 
         function normalizeSearchTerm(value) {
             return String(value || '')
@@ -46,6 +53,9 @@
 
         function parseQuery(query) {
             const raw = String(query || '');
+            if (lastParsedQuery && raw === lastParsedQueryRaw) {
+                return lastParsedQuery;
+            }
             const tagTerms = [];
             const folderTerms = [];
             const remainingParts = [];
@@ -75,7 +85,7 @@
             const parsedTagTerms = getUniqueSearchTerms(tagTerms);
             const parsedFolderTerms = getUniqueSearchTerms(folderTerms);
 
-            return {
+            const parsedQuery = {
                 raw,
                 textTerms,
                 tagTerms: parsedTagTerms,
@@ -84,22 +94,31 @@
                     || parsedTagTerms.length > 0
                     || parsedFolderTerms.length > 0
             };
+            lastParsedQueryRaw = raw;
+            lastParsedQuery = parsedQuery;
+            normalizedCriteriaByObject.set(parsedQuery, parsedQuery);
+            return parsedQuery;
         }
 
         function normalizeCriteria(criteria) {
             if (typeof criteria === 'string') return parseQuery(criteria);
             if (!criteria || typeof criteria !== 'object') return parseQuery('');
+            const cachedCriteria = normalizedCriteriaByObject.get(criteria);
+            if (cachedCriteria) return cachedCriteria;
 
             const textTerms = getUniqueSearchTerms(criteria.textTerms);
             const tagTerms = getUniqueSearchTerms(criteria.tagTerms);
             const folderTerms = getUniqueSearchTerms(criteria.folderTerms);
-            return {
+            const normalizedCriteria = {
                 raw: typeof criteria.raw === 'string' ? criteria.raw : '',
                 textTerms,
                 tagTerms,
                 folderTerms,
                 hasQuery: textTerms.length > 0 || tagTerms.length > 0 || folderTerms.length > 0
             };
+            normalizedCriteriaByObject.set(criteria, normalizedCriteria);
+            normalizedCriteriaByObject.set(normalizedCriteria, normalizedCriteria);
+            return normalizedCriteria;
         }
 
         function readMapValue(map, key) {
@@ -115,13 +134,30 @@
                 };
             }
 
+            const sourceKey = String(source.key || '');
+            const indexedContext = sourceContextByKey.get(sourceKey);
+            if (
+                sourceContextIndexReady
+                && indexedContext?.sourceRef === source
+            ) {
+                return indexedContext.context;
+            }
+
             const tagsById = getTagsById();
             const groupsById = getGroupsById();
             const parentMap = getParentMap();
             const sourceTagIds = getSourceTagIds(source.key);
-            const tagLabels = (Array.isArray(sourceTagIds) ? sourceTagIds : [])
-                .map((tagId) => readMapValue(tagsById, tagId)?.label)
-                .filter(Boolean);
+            const tagLabels = [];
+            let contextSignature = [
+                source.title || '',
+                source.normalizedTitle || '',
+                source.lowercaseTitle || ''
+            ].join('\u001f');
+            (Array.isArray(sourceTagIds) ? sourceTagIds : []).forEach((tagId) => {
+                const label = readMapValue(tagsById, tagId)?.label;
+                contextSignature += `\u001e${String(tagId)}\u001f${String(label || '')}`;
+                if (label) tagLabels.push(label);
+            });
             const folderLabels = [];
             const visitedGroupIds = new Set();
             let parentId = readMapValue(parentMap, source.key);
@@ -129,24 +165,83 @@
             while (parentId && !visitedGroupIds.has(parentId)) {
                 visitedGroupIds.add(parentId);
                 const group = readMapValue(groupsById, parentId);
+                contextSignature += `\u001d${String(parentId)}\u001f${String(group?.title || '')}`;
                 if (group?.title) folderLabels.push(group.title);
                 parentId = readMapValue(parentMap, parentId);
             }
 
-            return {
+            const cachedContext = sourceContextByKey.get(sourceKey);
+            if (cachedContext?.signature === contextSignature) {
+                cachedContext.sourceRef = source;
+                return cachedContext.context;
+            }
+
+            const context = {
                 titles: [source.title, source.normalizedTitle, source.lowercaseTitle].filter(Boolean),
                 tagLabels,
                 folderLabels
             };
+            sourceContextByKey.set(sourceKey, {
+                signature: contextSignature,
+                context,
+                sourceRef: source,
+                matchesByCriteria: new Map()
+            });
+            return context;
         }
 
-        function anyTextIncludesTerm(values, term) {
-            return (Array.isArray(values) ? values : [])
-                .some((value) => String(value || '').toLowerCase().includes(term));
+        function invalidateSourceContextIndex() {
+            sourceContextIndexCohort = null;
+            sourceContextIndexReady = false;
         }
 
-        function allTermsMatchAnyValue(terms, values) {
-            return terms.every((term) => anyTextIncludesTerm(values, term));
+        function ensureSourceContextIndex(sourcesByKey) {
+            if (!sourcesByKey || typeof sourcesByKey.forEach !== 'function') {
+                invalidateSourceContextIndex();
+                return false;
+            }
+            const firstSource = typeof sourcesByKey.values === 'function'
+                ? sourcesByKey.values().next().value || null
+                : null;
+            const nextCohort = {
+                sourcesByKey,
+                size: sourcesByKey.size || 0,
+                firstSource
+            };
+            if (
+                sourceContextIndexReady
+                && sourceContextIndexCohort
+                && sourceContextIndexCohort.sourcesByKey === nextCohort.sourcesByKey
+                && sourceContextIndexCohort.size === nextCohort.size
+                && sourceContextIndexCohort.firstSource === nextCohort.firstSource
+            ) {
+                return false;
+            }
+
+            sourceContextIndexReady = false;
+            sourcesByKey.forEach((source) => {
+                const context = buildSourceContext(source);
+                getLowercaseContextValues(context);
+            });
+            sourceContextIndexCohort = nextCohort;
+            sourceContextIndexReady = true;
+            return true;
+        }
+
+        function getLowercaseContextValues(context) {
+            const cachedValues = lowercaseValuesByContext.get(context);
+            if (cachedValues) return cachedValues;
+            const values = {
+                titles: context.titles.map((value) => String(value || '').toLowerCase()),
+                tagLabels: context.tagLabels.map((value) => String(value || '').toLowerCase()),
+                folderLabels: context.folderLabels.map((value) => String(value || '').toLowerCase())
+            };
+            lowercaseValuesByContext.set(context, values);
+            return values;
+        }
+
+        function allTermsMatchAnyLowercaseValue(terms, values) {
+            return terms.every((term) => values.some((value) => value.includes(term)));
         }
 
         function matchesSource(source, criteria) {
@@ -155,15 +250,33 @@
             if (!parsedCriteria.hasQuery) return true;
 
             const context = buildSourceContext(source);
+            const contextEntry = sourceContextByKey.get(String(source.key || ''));
+            const criteriaKey = [
+                parsedCriteria.textTerms.join('\u001f'),
+                parsedCriteria.tagTerms.join('\u001f'),
+                parsedCriteria.folderTerms.join('\u001f')
+            ].join('\u001e');
+            if (contextEntry?.matchesByCriteria?.has(criteriaKey)) {
+                return contextEntry.matchesByCriteria.get(criteriaKey);
+            }
+            const lowercaseContext = getLowercaseContextValues(context);
             const allTextValues = [
-                ...context.titles,
-                ...context.tagLabels,
-                ...context.folderLabels
+                ...lowercaseContext.titles,
+                ...lowercaseContext.tagLabels,
+                ...lowercaseContext.folderLabels
             ];
 
-            return allTermsMatchAnyValue(parsedCriteria.textTerms, allTextValues)
-                && allTermsMatchAnyValue(parsedCriteria.tagTerms, context.tagLabels)
-                && allTermsMatchAnyValue(parsedCriteria.folderTerms, context.folderLabels);
+            const matches = allTermsMatchAnyLowercaseValue(parsedCriteria.textTerms, allTextValues)
+                && allTermsMatchAnyLowercaseValue(
+                    parsedCriteria.tagTerms,
+                    lowercaseContext.tagLabels
+                )
+                && allTermsMatchAnyLowercaseValue(
+                    parsedCriteria.folderTerms,
+                    lowercaseContext.folderLabels
+                );
+            contextEntry?.matchesByCriteria?.set(criteriaKey, matches);
+            return matches;
         }
 
         function matchesGroup(group, criteria) {
@@ -171,10 +284,10 @@
             const parsedCriteria = normalizeCriteria(criteria);
             if (!parsedCriteria.hasQuery) return false;
 
-            const titleValues = [group.title || ''];
+            const titleValues = [String(group.title || '').toLowerCase()];
             return parsedCriteria.tagTerms.length === 0
-                && allTermsMatchAnyValue(parsedCriteria.textTerms, titleValues)
-                && allTermsMatchAnyValue(parsedCriteria.folderTerms, titleValues);
+                && allTermsMatchAnyLowercaseValue(parsedCriteria.textTerms, titleValues)
+                && allTermsMatchAnyLowercaseValue(parsedCriteria.folderTerms, titleValues);
         }
 
         function getHighlightTerms(criteria, scope = 'text') {
@@ -305,6 +418,8 @@
         return {
             parseQuery,
             buildSourceContext,
+            ensureSourceContextIndex,
+            invalidateSourceContextIndex,
             matchesSource,
             matchesGroup,
             getHighlightTerms,

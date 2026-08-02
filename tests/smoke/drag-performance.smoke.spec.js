@@ -332,7 +332,12 @@ test.describe.serial('drag performance baseline', () => {
         let env;
         try {
             env = await launchExtensionContext(benchmarkExtensionRoot);
-            await installNotebookFixture(env.context);
+            await installNotebookFixture(env.context, {
+                resolveSources: ({ notebookId }) => {
+                    const match = String(notebookId).match(/^drag-benchmark-(\d+)$/);
+                    return match ? createSyntheticSources(Number(match[1])) : null;
+                }
+            });
             const extensionId = await waitForExtensionId(env.context, env.userDataDir, benchmarkExtensionRoot);
             await seedReflowPreference(env.context, extensionId);
             const allResults = [];
@@ -705,9 +710,14 @@ test.describe.serial('drag performance baseline', () => {
                         };
                     };
 
-                    window.__swapNotebook({ notebookId: `drag-benchmark-${nextRowCount}`, sources });
-                    await waitFor(() => getRoot()?.querySelectorAll('#sources-list .source-item').length === nextRowCount,
-                        `Manager did not render ${nextRowCount} synthetic sources.`);
+                    window.__swapNotebook({
+                        notebookId: `drag-benchmark-${nextRowCount}`,
+                        sources
+                    });
+                    await waitFor(
+                        () => getRoot()?.querySelectorAll('#sources-list .source-item').length === nextRowCount,
+                        `Manager did not render ${nextRowCount} synthetic sources.`
+                    );
                     sourceKeysByNumber = new Map(Array.from(getRoot()?.querySelectorAll('#sources-list .source-item') || [])
                         .map((row) => {
                             const title = row.querySelector('.source-title-text')?.textContent || '';

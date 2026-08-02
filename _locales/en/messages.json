@@ -68,11 +68,11 @@
     "popup_body_notebook_home": {
         "message": "You are in Gemini Notebook, but not inside a specific notebook yet. Open one notebook, then use this launcher again."
     },
-    "popup_title_notebook_home_new_tab": {
-        "message": "Open Gemini Notebook in a new tab"
+    "popup_title_notebook_home_ready": {
+        "message": "Gemini Notebook home is ready"
     },
-    "popup_body_notebook_home_new_tab": {
-        "message": "You are already on the Gemini Notebook home page. This launcher will open a new Gemini Notebook tab so the click has a clear result."
+    "popup_body_notebook_home_reuse": {
+        "message": "Continue in this tab to choose or create a notebook. The launcher will not open a duplicate home tab."
     },
     "popup_title_switch_notebook": {
         "message": "Switch to your open notebook in Gemini Notebook"
@@ -110,8 +110,8 @@
     "popup_cta_go_to_open_notebook": {
         "message": "Go to open notebook"
     },
-    "popup_cta_open_notebooklm_new_tab": {
-        "message": "Open Gemini Notebook in new tab"
+    "popup_cta_continue_current_tab": {
+        "message": "Continue in this tab"
     },
     "popup_cta_refresh_notebook": {
         "message": "Refresh this notebook"
@@ -615,7 +615,31 @@
         "message": "What's new"
     },
     "ui_whats_new_subtitle": {
-        "message": "A quick look at this release's main updates."
+        "message": "Safer recovery, native actions, batch workflows, and large source libraries."
+    },
+    "ui_whats_new_transaction_title": {
+        "message": "Transactional recovery"
+    },
+    "ui_whats_new_transaction_body": {
+        "message": "Recovery points, history restores, import backups, and Source Repair now save atomically, detect stale notebook context, and roll back the visible state when persistence is not confirmed."
+    },
+    "ui_whats_new_native_safety_title": {
+        "message": "Safer native source actions"
+    },
+    "ui_whats_new_native_safety_body": {
+        "message": "Rename and delete run one at a time, re-check the source and dialog before each native click, and only confirm deletion after a complete inventory proves the source is gone. Native deletion clears Undo and Redo because it cannot be reversed."
+    },
+    "ui_whats_new_batch_storage_title": {
+        "message": "Recoverable batch and storage workflows"
+    },
+    "ui_whats_new_batch_storage_body": {
+        "message": "Batch results distinguish succeeded, failed, skipped, and unattempted sources, while hidden selections can be reviewed or cleared. History can be pruned, storage usage is visible, and backups rotate from the last verified primary state."
+    },
+    "ui_whats_new_accessibility_scale_title": {
+        "message": "Accessible, faster large libraries"
+    },
+    "ui_whats_new_accessibility_scale_body": {
+        "message": "Command search follows combobox and listbox patterns, shortcut editing uses its own dialog, and contrast, resizing, narrow layouts, deep trees, search, and large-list rendering are more robust."
     },
     "ui_whats_new_drag_title": {
         "message": "Smoother, more reliable reflow drag (Beta)"
@@ -747,6 +771,55 @@
     },
     "ui_history_restore_failed": {
         "message": "Could not restore that version"
+    },
+    "ui_history_clear_automatic": {
+        "message": "Clear automatic history"
+    },
+    "ui_history_clear_all": {
+        "message": "Clear all history"
+    },
+    "ui_history_storage_summary": {
+        "message": "Storage: $1 · Approx. releasable history: $2",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" }
+        }
+    },
+    "ui_history_delete_entry": {
+        "message": "Delete history entry"
+    },
+    "ui_history_delete_success": {
+        "message": "$1 history entry(s) deleted",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_history_delete_failed": {
+        "message": "Could not delete that history entry"
+    },
+    "ui_history_clear_automatic_confirm": {
+        "message": "Clear all automatic history? Manual restore points will be kept."
+    },
+    "ui_history_clear_automatic_success": {
+        "message": "$1 automatic history entry(s) cleared",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_history_clear_automatic_failed": {
+        "message": "Could not clear automatic history"
+    },
+    "ui_history_clear_all_confirm": {
+        "message": "Clear all version history, including manual restore points? This cannot be undone."
+    },
+    "ui_history_clear_all_success": {
+        "message": "$1 history entry(s) cleared",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_history_clear_all_failed": {
+        "message": "Could not clear version history"
     },
     "ui_diagnostics_notebook_id": {
         "message": "Notebook"
@@ -1053,6 +1126,9 @@
     "ui_save_status_refresh": {
         "message": "Refresh"
     },
+    "ui_save_status_manage_storage": {
+        "message": "Manage storage"
+    },
     "ui_recovery_restore": {
         "message": "Restore"
     },
@@ -1099,6 +1175,9 @@
     },
     "ui_tag_create_duplicate": {
         "message": "That tag already exists."
+    },
+    "ui_tag_not_found": {
+        "message": "That tag no longer exists."
     },
     "ui_batch_action": {
         "message": "Batch Action"
@@ -1360,13 +1439,19 @@
         "message": "No folders available yet.\nCreate one first."
     },
     "ui_delete_group_confirm_non_empty": {
-        "message": "The folder \"$1\" is not empty.\n\nDelete it and move its contents to \"$2\"?",
+        "message": "The folder \"$1\" contains $3 direct source(s) and $4 direct subfolder(s).\n\nDelete it? Direct sources will move to \"$2\", and direct subfolders will be promoted to the root.",
         "placeholders": {
             "1": {
                 "content": "$1"
             },
             "2": {
                 "content": "$2"
+            },
+            "3": {
+                "content": "$3"
+            },
+            "4": {
+                "content": "$4"
             }
         }
     },
@@ -1539,5 +1624,149 @@
         "placeholders": {
             "1": { "content": "$1" }
         }
+    },
+    "ui_batch_selection_breakdown": {
+        "message": "$1 visible selected · $2 hidden selected",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" }
+        }
+    },
+    "ui_batch_clear_hidden_selection": {
+        "message": "Clear $1 hidden selection(s)",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_batch_retry_remaining": {
+        "message": "Retry $1 remaining",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_batch_delete_confirm_hidden": {
+        "message": "$1 selected in total, including $2 hidden by the current view.",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" }
+        }
+    },
+    "ui_batch_delete_result": {
+        "message": "$1 deleted · $2 failed · $3 not attempted",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" },
+            "3": { "content": "$3" }
+        }
+    },
+    "ui_move_folder_search_placeholder": {
+        "message": "Search folders"
+    },
+    "ui_move_folder_search_label": {
+        "message": "Search destination folders"
+    },
+    "ui_move_already_here": {
+        "message": "Already here"
+    },
+    "ui_move_recent_target": {
+        "message": "Recent"
+    },
+    "ui_native_deleted_irreversible": {
+        "message": "Source deleted from Gemini Notebook. This cannot be undone."
+    },
+    "ui_native_deleted_local_reconcile_failed": {
+        "message": "The source was deleted from Gemini Notebook and cannot be undone, but the manager could not reconcile its local tree. Refresh the page."
+    },
+    "ui_native_selection_sync_failed": {
+        "message": "Could not synchronize a Gemini Notebook source state ($1).",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_search_results_summary": {
+        "message": "$1 sources · $2 folders",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" }
+        }
+    },
+    "ui_onboarding_checklist_title": {
+        "message": "Your first organization checklist"
+    },
+    "ui_onboarding_step_create_folder_title": {
+        "message": "Create a folder"
+    },
+    "ui_onboarding_step_create_folder_body": {
+        "message": "Group related sources without changing their content."
+    },
+    "ui_onboarding_step_move_source_title": {
+        "message": "Move a source"
+    },
+    "ui_onboarding_step_move_source_body": {
+        "message": "Use drag and drop or Move to folder."
+    },
+    "ui_onboarding_step_add_tag_title": {
+        "message": "Add a tag"
+    },
+    "ui_onboarding_step_add_tag_body": {
+        "message": "Add a reusable label for faster filtering."
+    },
+    "ui_welcome_skip": {
+        "message": "Skip for now"
+    },
+    "ui_settings_replay_onboarding": {
+        "message": "Replay onboarding"
+    },
+    "ui_settings_shortcuts_guide_title": {
+        "message": "Keyboard shortcuts"
+    },
+    "ui_settings_shortcuts_guide_body": {
+        "message": "Open the Command Palette to view commands and assign your own modifier-based shortcuts."
+    },
+    "ui_settings_import_guide_title": {
+        "message": "Import guide"
+    },
+    "ui_settings_import_guide_body": {
+        "message": "Preview an exported JSON backup before applying it. Existing 50-level folder backups remain supported."
+    },
+    "ui_import_backup_title": {
+        "message": "Pending import backup"
+    },
+    "ui_import_backup_created_unknown": {
+        "message": "Creation time unavailable"
+    },
+    "ui_import_backup_created_at": {
+        "message": "Created $1",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_import_backup_counts": {
+        "message": "$1 sources · $2 folders",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" }
+        }
+    },
+    "ui_import_backup_restore": {
+        "message": "Restore backup"
+    },
+    "ui_import_backup_discard": {
+        "message": "Discard backup"
+    },
+    "ui_import_backup_restore_success": {
+        "message": "Import backup restored"
+    },
+    "ui_import_backup_restore_failed": {
+        "message": "Could not restore the import backup"
+    },
+    "ui_import_backup_discard_confirm": {
+        "message": "Discard this import backup? This cannot be undone."
+    },
+    "ui_import_backup_discard_success": {
+        "message": "Import backup discarded"
+    },
+    "ui_import_backup_discard_failed": {
+        "message": "Could not discard the import backup"
     }
 }

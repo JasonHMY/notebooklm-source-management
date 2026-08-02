@@ -59,8 +59,12 @@
                 --sp-text-tertiary: #6e6e73;
                 --sp-text-toast: #fff;
                 --sp-text-badge: #6E6E73;
-                --sp-accent: #007aff;
-                --sp-accent-danger: #ff3b30;
+                --sp-accent-fill: #007aff;
+                --sp-accent-text: #0066cc;
+                --sp-danger-fill: #ff3b30;
+                --sp-danger-text: #c62828;
+                --sp-accent: var(--sp-accent-fill);
+                --sp-accent-danger: var(--sp-danger-fill);
                 --sp-accent-success: #34c759;
                 --sp-drag-bg: rgba(0, 122, 255, 0.05);
                 --sp-drag-into-bg: rgba(0, 122, 255, 0.1);
@@ -81,7 +85,7 @@
                 --sp-icon-button-hover: rgba(0,0,0,0.08);
                 --sp-tag-active-bg: rgba(0, 122, 255, 0.12);
                 --sp-tag-active-border: rgba(0, 122, 255, 0.3);
-                --sp-tag-active-text: var(--sp-accent);
+                --sp-tag-active-text: var(--sp-accent-text);
                 --sp-isolate-active-bg: rgba(0, 122, 255, 0.12);
                 --sp-delete-hover-bg: rgba(255, 59, 48, 0.1);
                 --sp-overlay-backdrop: rgba(0, 0, 0, 0.2);
@@ -137,8 +141,12 @@
                     --sp-text-tertiary: #b0b0b5;
                     --sp-text-toast: #000;
                     --sp-text-badge: #98989d;
-                    --sp-accent: #0a84ff;
-                    --sp-accent-danger: #ff453a;
+                    --sp-accent-fill: #0a84ff;
+                    --sp-accent-text: #64a8ff;
+                    --sp-danger-fill: #ff453a;
+                    --sp-danger-text: #ff6961;
+                    --sp-accent: var(--sp-accent-fill);
+                    --sp-accent-danger: var(--sp-danger-fill);
                     --sp-accent-success: #30d158;
                     --sp-drag-bg: rgba(10, 132, 255, 0.1);
                     --sp-drag-into-bg: rgba(10, 132, 255, 0.15);
@@ -159,7 +167,7 @@
                     --sp-icon-button-hover: rgba(255,255,255,0.15);
                     --sp-tag-active-bg: rgba(10, 132, 255, 0.16);
                     --sp-tag-active-border: rgba(10, 132, 255, 0.34);
-                    --sp-tag-active-text: var(--sp-accent);
+                    --sp-tag-active-text: var(--sp-accent-text);
                     --sp-isolate-active-bg: rgba(10, 132, 255, 0.16);
                     --sp-delete-hover-bg: rgba(255, 69, 58, 0.16);
                     --sp-overlay-backdrop: rgba(0, 0, 0, 0.6);
@@ -191,6 +199,8 @@
             .sp-container {
                 display: flex;
                 flex-direction: column;
+                container-name: sp-manager-panel;
+                container-type: inline-size;
                 max-height: calc(100vh - 220px);
                 min-height: 150px;
                 font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -262,6 +272,14 @@
             .sp-resizer:hover::after {
                 background-color: var(--sp-accent);
             }
+            .sp-resizer:focus-visible {
+                outline: none;
+            }
+            .sp-resizer:focus-visible::after {
+                width: 36px;
+                background-color: var(--sp-accent);
+                box-shadow: var(--sp-focus-ring);
+            }
             
             /* Sticky Header */
             .sp-controls {
@@ -326,7 +344,7 @@
                     box-shadow var(--sp-motion-base) var(--sp-ease-standard);
             }
             .sp-button.sp-toolbar-action.is-active {
-                color: var(--sp-accent);
+                color: var(--sp-accent-text);
                 border-color: var(--sp-search-focus-border);
                 background: var(--sp-tag-active-bg);
             }
@@ -392,16 +410,16 @@
                 text-overflow: ellipsis;
             }
             .sp-save-status-saving {
-                color: var(--sp-accent);
+                color: var(--sp-accent-text);
                 border-color: rgba(0, 122, 255, 0.24);
             }
             .sp-save-status-saved {
-                color: var(--sp-accent);
+                color: var(--sp-accent-text);
             }
             .sp-save-status-failed,
             .sp-save-status-stale,
             .sp-save-status-recovery_available {
-                color: var(--sp-accent-danger);
+                color: var(--sp-danger-text);
                 border-color: rgba(255, 59, 48, 0.28);
                 box-shadow: 0 8px 22px rgba(255, 59, 48, 0.12);
             }
@@ -409,7 +427,7 @@
                 border: 0;
                 border-radius: 999px;
                 background: rgba(0, 122, 255, 0.12);
-                color: var(--sp-accent);
+                color: var(--sp-accent-text);
                 font: inherit;
                 padding: 2px 6px;
                 cursor: pointer;
@@ -504,7 +522,7 @@
                 color: var(--sp-text-tertiary);
             }
             .sp-batch-delete-confirm-warning {
-                color: var(--sp-accent-danger);
+                color: var(--sp-danger-text);
                 font-weight: 700;
             }
             .sp-batch-delete-confirm-final-btn {
@@ -624,7 +642,7 @@
             .sp-quick-view-btn:hover,
             .sp-quick-view-btn:focus-visible,
             .sp-quick-view-btn.is-active {
-                color: var(--sp-accent);
+                color: var(--sp-accent-text);
                 border-color: var(--sp-search-focus-border);
                 background: var(--sp-tag-active-bg);
             }
@@ -777,7 +795,7 @@
             }
             .sp-search-cluster:focus-within .sp-search-trigger .google-symbols,
             .sp-search-cluster:focus-within .sp-search-close .google-symbols {
-                color: var(--sp-accent);
+                color: var(--sp-accent-text);
             }
             #sp-search::placeholder {
                 color: var(--sp-text-secondary);
@@ -1526,12 +1544,12 @@
                 opacity: 1;
                 transform: translateX(0) scale(1);
                 pointer-events: auto;
-                color: var(--sp-accent);
+                color: var(--sp-accent-text);
                 background-color: var(--sp-isolate-active-bg);
             }
             .sp-delete-button:hover {
                 background-color: var(--sp-delete-hover-bg);
-                color: var(--sp-accent-danger);
+                color: var(--sp-danger-text);
                 transform: scale(1.06);
                 box-shadow: inset 0 0 0 1px rgba(255, 59, 48, 0.18), 0 0 14px var(--sp-danger-glow);
             }
@@ -1539,15 +1557,16 @@
                 transform: scale(0.95);
             }
             .icon-color {
-                color: var(--sp-accent);
-                } .youtube-icon-color { color: var(--sp-accent-danger);
-                } .pdf-icon-color { color: var(--sp-accent-danger);
+                color: var(--sp-accent-text);
+                } .youtube-icon-color { color: var(--sp-danger-text);
+                } .pdf-icon-color { color: var(--sp-danger-text);
             }
             .group-container {
                 display: flex;
                 flex-direction: column;
                 overflow: visible;
                 margin-bottom: 2px;
+                padding-left: var(--sp-tree-indent, 0px);
                 position: relative;
                 transition: transform var(--sp-motion-base) var(--sp-ease-emphasized);
             }
@@ -1559,7 +1578,7 @@
                 cursor: not-allowed;
             }
             .failed-source .title-container, .failed-source .icon-container {
-                color: var(--sp-accent-danger) !important;
+                color: var(--sp-danger-text) !important;
             }
             .failed-source .sp-checkbox {
                 opacity: 0.5;
@@ -1576,7 +1595,7 @@
                 animation: pulse-text 2s cubic-bezier(0.25, 1, 0.5, 1) infinite; 
             }
             .loading-source .source-loading-status {
-                color: var(--sp-accent);
+                color: var(--sp-accent-text);
             }
             .loading-source .sp-checkbox {
                 opacity: 0;
@@ -1811,7 +1830,7 @@
             }
             .sp-folder-option .google-symbols {
                 font-size: 20px;
-                color: var(--sp-accent);
+                color: var(--sp-accent-text);
                 margin-right: 12px;
                 opacity: 0.8;
             }
@@ -1867,7 +1886,7 @@
                 gap: 8px;
             }
             .sp-native-label-import-item-header .google-symbols {
-                color: var(--sp-accent);
+                color: var(--sp-accent-text);
                 font-size: 20px;
             }
             .sp-native-label-import-title {
@@ -1936,6 +1955,16 @@
             .sp-tag-input:focus {
                 border-color: var(--sp-accent);
                 box-shadow: var(--sp-focus-ring-soft);
+            }
+            .sp-tag-editor-error {
+                min-height: 18px;
+                margin: 0;
+                color: var(--sp-danger-text);
+                font-size: 12px;
+                line-height: 1.4;
+            }
+            .sp-tag-editor-error[hidden] {
+                display: none;
             }
             .sp-tag-color-group {
                 display: flex;
@@ -2135,7 +2164,7 @@
                 border-radius: 14px;
                 display: grid;
                 place-items: center;
-                color: var(--sp-accent);
+                color: var(--sp-accent-text);
                 background: var(--sp-tag-active-bg);
                 border: 1px solid var(--sp-tag-active-border);
                 box-shadow: var(--sp-shadow-button);
@@ -2185,7 +2214,7 @@
                 border-radius: 10px;
                 display: grid;
                 place-items: center;
-                color: var(--sp-accent);
+                color: var(--sp-accent-text);
                 background: var(--sp-bg-button);
                 border: 1px solid var(--sp-border-light);
                 font-size: 17px;
@@ -2227,7 +2256,7 @@
                 border-radius: 4px;
                 padding: 0;
                 background: transparent;
-                color: var(--sp-accent);
+                color: var(--sp-accent-text);
                 font: inherit;
                 font-size: 11px;
                 line-height: 1.4;
@@ -2240,7 +2269,7 @@
             }
             .sp-welcome-feedback-link:hover,
             .sp-welcome-feedback-link:focus-visible {
-                color: var(--sp-accent);
+                color: var(--sp-accent-text);
             }
             .sp-welcome-feedback-link:focus-visible {
                 outline: none;
@@ -2283,6 +2312,11 @@
             .sp-tag-filter-list {
                 display: grid;
                 gap: 6px;
+            }
+            .sp-command-palette-list {
+                max-height: min(52vh, 420px);
+                overflow-y: auto;
+                overscroll-behavior: contain;
             }
             .sp-tag-filter-content {
                 gap: 8px;
@@ -2362,7 +2396,35 @@
                 line-height: 1.4;
             }
             .sp-command-palette-icon {
-                color: var(--sp-accent);
+                color: var(--sp-accent-text);
+            }
+            .sp-command-shortcut-display {
+                max-width: 132px;
+                overflow: hidden;
+                color: var(--sp-text-secondary);
+                font-size: 11px;
+                font-weight: 650;
+                line-height: 1.2;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+            .sp-command-palette-shortcut-actions {
+                display: flex;
+                justify-content: flex-end;
+                min-height: 28px;
+                padding-top: 2px;
+            }
+            .sp-command-palette-status {
+                min-height: 18px;
+                color: var(--sp-text-secondary);
+                font-size: 12px;
+                line-height: 1.4;
+            }
+            .sp-command-palette-status[hidden] {
+                display: none;
+            }
+            .sp-command-palette-status.is-error {
+                color: var(--sp-danger-text);
             }
             .sp-command-shortcut-btn {
                 border: 1px solid var(--sp-border-light);
@@ -2390,9 +2452,59 @@
             .sp-command-shortcut-btn:focus-visible,
             .sp-command-shortcut-btn.is-recording {
                 border-color: var(--sp-search-focus-border);
-                color: var(--sp-accent);
+                color: var(--sp-accent-text);
                 background: var(--sp-tag-active-bg);
                 outline: none;
+            }
+            .sp-command-shortcut-btn:focus-visible {
+                box-shadow: var(--sp-search-focus-ring);
+            }
+            .sp-command-shortcut-btn:disabled {
+                cursor: default;
+                opacity: 0.55;
+            }
+            .sp-command-shortcut-dialog-backdrop {
+                z-index: 10002;
+            }
+            .sp-command-shortcut-dialog {
+                width: min(360px, calc(100vw - 32px));
+                z-index: 10003;
+            }
+            .sp-command-shortcut-content {
+                gap: 10px;
+            }
+            .sp-command-shortcut-capture {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 8px;
+                min-height: 58px;
+                border: 1px solid var(--sp-search-focus-border);
+                border-radius: 12px;
+                background: var(--sp-tag-active-bg);
+                color: var(--sp-accent-text);
+                font-size: 13px;
+                font-weight: 700;
+                outline: none;
+            }
+            .sp-command-shortcut-capture:focus-visible {
+                box-shadow: var(--sp-search-focus-ring);
+            }
+            .sp-command-shortcut-hint,
+            .sp-command-shortcut-status {
+                margin: 0;
+                color: var(--sp-text-secondary);
+                font-size: 12px;
+                line-height: 1.4;
+            }
+            .sp-command-shortcut-status {
+                min-height: 18px;
+            }
+            .sp-command-shortcut-status[hidden] {
+                display: none;
+            }
+            .sp-command-shortcut-status.is-error {
+                color: var(--sp-danger-text);
             }
             .sp-settings-import-warning {
                 border: 1px solid var(--sp-border-light);
@@ -2538,7 +2650,7 @@
             }
             .sp-settings-developer-unlock-btn:hover,
             .sp-settings-developer-unlock-btn:focus-visible {
-                color: var(--sp-accent);
+                color: var(--sp-accent-text);
                 background: var(--sp-bg-hover);
             }
             .sp-settings-developer-unlock-btn:focus-visible {
@@ -2572,7 +2684,7 @@
             }
             .sp-settings-collapsible-toggle:hover,
             .sp-settings-collapsible-toggle:focus-visible {
-                color: var(--sp-accent);
+                color: var(--sp-accent-text);
             }
             .sp-settings-collapsible-toggle:focus-visible {
                 outline: none;
@@ -2588,7 +2700,7 @@
             }
             .sp-settings-collapsible-toggle:hover .sp-settings-collapsible-chevron,
             .sp-settings-collapsible-toggle:focus-visible .sp-settings-collapsible-chevron {
-                color: var(--sp-accent);
+                color: var(--sp-accent-text);
             }
             .sp-settings-collapsible-section.is-expanded .sp-settings-collapsible-chevron {
                 transform: rotate(180deg);
@@ -2653,10 +2765,10 @@
                 gap: 8px;
             }
             .sp-settings-import-preview.is-valid {
-                color: var(--sp-accent);
+                color: var(--sp-accent-text);
             }
             .sp-settings-import-preview.is-invalid {
-                color: var(--sp-accent-danger);
+                color: var(--sp-danger-text);
             }
             .sp-settings-preview-details {
                 display: grid;
@@ -2735,6 +2847,25 @@
                 margin-top: 2px;
                 color: var(--sp-text-secondary);
                 font-size: 11px;
+            }
+            .sp-history-storage-summary {
+                margin: 0;
+                color: var(--sp-text-secondary);
+                font-size: 12px;
+                line-height: 1.45;
+            }
+            .sp-history-action-status {
+                min-height: 18px;
+                margin: 0;
+                color: var(--sp-text-secondary);
+                font-size: 12px;
+                line-height: 1.45;
+            }
+            .sp-history-action-status.is-error {
+                color: var(--sp-danger-text);
+            }
+            .sp-history-action-status.is-success {
+                color: var(--sp-accent-text);
             }
             .sp-history-restore-btn {
                 min-width: 72px;
@@ -3319,7 +3450,7 @@
             .group-container.drag-into > .group-children > .sp-empty-state {
                 background-color: var(--sp-drag-into-bg);
                 border-color: var(--sp-accent);
-                color: var(--sp-accent);
+                color: var(--sp-accent-text);
                 transform: scale(1.02);
             }
 
@@ -3338,7 +3469,7 @@
                 margin: 4px 8px 8px 18px;
                 border: 2px dashed var(--sp-accent);
                 border-radius: 12px;
-                color: var(--sp-accent);
+                color: var(--sp-accent-text);
                 font-size: 13px;
                 font-weight: 500;
                 background-color: var(--sp-drag-into-bg);
@@ -3366,6 +3497,21 @@
                 overflow: hidden;
                 line-height: 1.4;
                 margin-right: 4px;
+            }
+
+            @container sp-manager-panel (max-width: 320px) {
+                .group-header {
+                    flex-wrap: wrap;
+                }
+                .group-title {
+                    flex: 1 1 6ch;
+                    min-width: 6ch;
+                    overflow-wrap: anywhere;
+                    word-break: break-word;
+                }
+                .group-header > .badge {
+                    flex: 0 0 auto;
+                }
             }
             .group-name {
                 font-weight: 500;
@@ -3424,6 +3570,30 @@
             @media (prefers-color-scheme: dark) {
                 .group-container.drag-invalid > .group-header {
                     background-color: rgba(255, 69, 58, 0.12);
+                }
+            }
+
+            @media (forced-colors: active) {
+                :host {
+                    --sp-accent-text: LinkText;
+                    --sp-danger-text: MarkText;
+                }
+                .sp-command-palette-input,
+                .sp-command-palette-item,
+                .sp-command-shortcut-btn,
+                .sp-resizer {
+                    forced-color-adjust: auto;
+                }
+                .sp-command-palette-item.is-active {
+                    outline: 2px solid Highlight;
+                    outline-offset: -2px;
+                }
+                .sp-resizer::after {
+                    background-color: ButtonText;
+                }
+                .sp-resizer:hover::after,
+                .sp-resizer:focus-visible::after {
+                    background-color: Highlight;
                 }
             }
 
@@ -3545,8 +3715,8 @@
                     /* Note: Modifying Angular Material generic overlay/dialog structures */
 
                     /* 1. Popover Menus (More button floating menus) */
-                    body .cdk-overlay-container .mat-mdc-menu-panel,
-                    body .cdk-overlay-container .mat-menu-panel {
+                    body.sources-plus-native-action-active[data-nsm-native-action-active="true"] .cdk-overlay-container .mat-mdc-menu-panel,
+                    body.sources-plus-native-action-active[data-nsm-native-action-active="true"] .cdk-overlay-container .mat-menu-panel {
                         background-color: var(--sp-glass-bg-menu, rgba(255, 255, 255, 0.85)) !important;
                         backdrop-filter: blur(20px) saturate(150%) !important;
                         -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
@@ -3557,14 +3727,14 @@
                     }
                     
                     /* Menu item hover effects inside the glass panel */
-                    body .cdk-overlay-container .mat-mdc-menu-item:hover,
-                    body .cdk-overlay-container .mat-menu-item:hover {
+                    body.sources-plus-native-action-active[data-nsm-native-action-active="true"] .cdk-overlay-container .mat-mdc-menu-item:hover,
+                    body.sources-plus-native-action-active[data-nsm-native-action-active="true"] .cdk-overlay-container .mat-menu-item:hover {
                         background-color: var(--sp-menu-item-hover-bg, rgba(128, 128, 128, 0.1)) !important;
                     }
 
                     /* 2. Dialogs / Modals (New Note, Rename, Delete Confirmation) */
-                    body .cdk-overlay-container .mat-mdc-dialog-surface,
-                    body .cdk-overlay-container .mat-dialog-container {
+                    body.sources-plus-native-action-active[data-nsm-native-action-active="true"] .cdk-overlay-container .mat-mdc-dialog-surface,
+                    body.sources-plus-native-action-active[data-nsm-native-action-active="true"] .cdk-overlay-container .mat-dialog-container {
                         background-color: var(--sp-glass-bg-body, rgba(255, 255, 255, 0.75)) !important;
                         backdrop-filter: blur(24px) saturate(180%) !important;
                         -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
@@ -3575,7 +3745,7 @@
 
                     /* Respect system dark mode for global variables if not defined in shadow root */
                     @media (prefers-color-scheme: dark) {
-                        body .cdk-overlay-container {
+                        body.sources-plus-native-action-active[data-nsm-native-action-active="true"] .cdk-overlay-container {
                             --sp-glass-bg-body: rgba(28, 28, 30, 0.85);
                             --sp-glass-bg-menu: rgba(44, 44, 46, 0.85);
                             --sp-glass-border: rgba(255, 255, 255, 0.15);

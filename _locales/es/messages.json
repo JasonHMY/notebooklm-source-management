@@ -68,11 +68,11 @@
     "popup_body_notebook_home": {
         "message": "Estás en Gemini Notebook, pero todavía no dentro de un cuaderno específico. Abre un cuaderno y luego vuelve a usar este lanzador."
     },
-    "popup_title_notebook_home_new_tab": {
-        "message": "Abrir Gemini Notebook en una pestaña nueva"
+    "popup_title_notebook_home_ready": {
+        "message": "La página de inicio de Gemini Notebook está lista"
     },
-    "popup_body_notebook_home_new_tab": {
-        "message": "Ya estás en la página de inicio de Gemini Notebook. Este lanzador abrirá una nueva pestaña de Gemini Notebook para que el clic tenga un resultado claro."
+    "popup_body_notebook_home_reuse": {
+        "message": "Continúa en esta pestaña para elegir o crear un cuaderno. El lanzador no abrirá una página de inicio duplicada."
     },
     "popup_title_switch_notebook": {
         "message": "Cambiar al cuaderno abierto de Gemini Notebook"
@@ -110,8 +110,8 @@
     "popup_cta_go_to_open_notebook": {
         "message": "Ir al cuaderno abierto"
     },
-    "popup_cta_open_notebooklm_new_tab": {
-        "message": "Abrir Gemini Notebook en una pestaña nueva"
+    "popup_cta_continue_current_tab": {
+        "message": "Continuar en esta pestaña"
     },
     "popup_cta_refresh_notebook": {
         "message": "Actualizar este cuaderno"
@@ -615,7 +615,31 @@
         "message": "Novedades"
     },
     "ui_whats_new_subtitle": {
-        "message": "Un vistazo rápido a las novedades principales de esta versión."
+        "message": "Recuperación, acciones nativas, lotes y bibliotecas grandes más seguros."
+    },
+    "ui_whats_new_transaction_title": {
+        "message": "Recuperación transaccional"
+    },
+    "ui_whats_new_transaction_body": {
+        "message": "Los puntos de recuperación, las restauraciones del historial, las copias de importación y Reparar fuentes ahora se guardan de forma atómica, detectan si cambió el cuaderno y revierten el estado visible cuando no se confirma la persistencia."
+    },
+    "ui_whats_new_native_safety_title": {
+        "message": "Acciones nativas más seguras"
+    },
+    "ui_whats_new_native_safety_body": {
+        "message": "El cambio de nombre y la eliminación se ejecutan de uno en uno, vuelven a comprobar la fuente y el diálogo antes de cada clic nativo y solo confirman una eliminación cuando un inventario completo demuestra que la fuente desapareció. Una eliminación nativa borra Deshacer y Rehacer porque no se puede revertir."
+    },
+    "ui_whats_new_batch_storage_title": {
+        "message": "Lotes y almacenamiento recuperables"
+    },
+    "ui_whats_new_batch_storage_body": {
+        "message": "Los resultados por lotes distinguen fuentes correctas, fallidas, omitidas y no intentadas, y las selecciones ocultas se pueden revisar o borrar. Ahora se puede depurar el historial, ver el uso de almacenamiento y rotar la copia de seguridad desde el último estado principal verificado."
+    },
+    "ui_whats_new_accessibility_scale_title": {
+        "message": "Accesibilidad y rapidez a gran escala"
+    },
+    "ui_whats_new_accessibility_scale_body": {
+        "message": "La búsqueda de comandos sigue los patrones combobox y listbox, la edición de atajos usa su propio diálogo y se refuerzan el contraste, el redimensionado, los paneles estrechos, los árboles profundos, la búsqueda y el renderizado de listas grandes."
     },
     "ui_whats_new_drag_title": {
         "message": "Arrastre con reflujo más fluido y fiable (Beta)"
@@ -747,6 +771,55 @@
     },
     "ui_history_restore_failed": {
         "message": "No se pudo restaurar esa versión"
+    },
+    "ui_history_clear_automatic": {
+        "message": "Borrar historial automático"
+    },
+    "ui_history_clear_all": {
+        "message": "Borrar todo el historial"
+    },
+    "ui_history_storage_summary": {
+        "message": "Almacenamiento: $1 · Historial liberable aprox.: $2",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" }
+        }
+    },
+    "ui_history_delete_entry": {
+        "message": "Eliminar entrada del historial"
+    },
+    "ui_history_delete_success": {
+        "message": "Se eliminaron $1 entrada(s) del historial",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_history_delete_failed": {
+        "message": "No se pudo eliminar esa entrada del historial"
+    },
+    "ui_history_clear_automatic_confirm": {
+        "message": "¿Borrar todo el historial automático? Se conservarán los puntos de restauración manuales."
+    },
+    "ui_history_clear_automatic_success": {
+        "message": "Se borraron $1 entrada(s) automáticas del historial",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_history_clear_automatic_failed": {
+        "message": "No se pudo borrar el historial automático"
+    },
+    "ui_history_clear_all_confirm": {
+        "message": "¿Borrar todo el historial de versiones, incluidos los puntos de restauración manuales? Esta acción no se puede deshacer."
+    },
+    "ui_history_clear_all_success": {
+        "message": "Se borraron $1 entrada(s) del historial",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_history_clear_all_failed": {
+        "message": "No se pudo borrar el historial de versiones"
     },
     "ui_diagnostics_notebook_id": {
         "message": "Notebook"
@@ -1053,6 +1126,9 @@
     "ui_save_status_refresh": {
         "message": "Actualizar"
     },
+    "ui_save_status_manage_storage": {
+        "message": "Gestionar almacenamiento"
+    },
     "ui_recovery_restore": {
         "message": "Restaurar"
     },
@@ -1099,6 +1175,9 @@
     },
     "ui_tag_create_duplicate": {
         "message": "Esa etiqueta ya existe."
+    },
+    "ui_tag_not_found": {
+        "message": "Esa etiqueta ya no existe."
     },
     "ui_batch_action": {
         "message": "Acción por lotes"
@@ -1360,13 +1439,19 @@
         "message": "Todavía no hay carpetas disponibles.\nPrimero crea una."
     },
     "ui_delete_group_confirm_non_empty": {
-        "message": "La carpeta \"$1\" no está vacía.\n\n¿Eliminarla y mover su contenido a \"$2\"?",
+        "message": "La carpeta \"$1\" contiene $3 fuente(s) directa(s) y $4 subcarpeta(s) directa(s).\n\n¿Eliminarla? Las fuentes directas se moverán a \"$2\" y las subcarpetas directas subirán al nivel raíz.",
         "placeholders": {
             "1": {
                 "content": "$1"
             },
             "2": {
                 "content": "$2"
+            },
+            "3": {
+                "content": "$3"
+            },
+            "4": {
+                "content": "$4"
             }
         }
     },
@@ -1539,5 +1624,149 @@
         "placeholders": {
             "1": { "content": "$1" }
         }
+    },
+    "ui_batch_selection_breakdown": {
+        "message": "$1 seleccionadas visibles · $2 seleccionadas ocultas",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" }
+        }
+    },
+    "ui_batch_clear_hidden_selection": {
+        "message": "Borrar $1 selección(es) oculta(s)",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_batch_retry_remaining": {
+        "message": "Reintentar $1 restante(s)",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_batch_delete_confirm_hidden": {
+        "message": "$1 seleccionadas en total, incluidas $2 ocultas por la vista actual.",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" }
+        }
+    },
+    "ui_batch_delete_result": {
+        "message": "$1 eliminadas · $2 fallidas · $3 sin intentar",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" },
+            "3": { "content": "$3" }
+        }
+    },
+    "ui_move_folder_search_placeholder": {
+        "message": "Buscar carpetas"
+    },
+    "ui_move_folder_search_label": {
+        "message": "Buscar carpetas de destino"
+    },
+    "ui_move_already_here": {
+        "message": "Ya está aquí"
+    },
+    "ui_move_recent_target": {
+        "message": "Reciente"
+    },
+    "ui_native_deleted_irreversible": {
+        "message": "La fuente se eliminó de Gemini Notebook. No se puede deshacer."
+    },
+    "ui_native_deleted_local_reconcile_failed": {
+        "message": "La fuente se eliminó de Gemini Notebook y no se puede deshacer, pero el gestor no pudo conciliar su árbol local. Actualiza la página."
+    },
+    "ui_native_selection_sync_failed": {
+        "message": "No se pudo sincronizar el estado de una fuente de Gemini Notebook ($1).",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_search_results_summary": {
+        "message": "$1 fuentes · $2 carpetas",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" }
+        }
+    },
+    "ui_onboarding_checklist_title": {
+        "message": "Lista de primeros pasos de organización"
+    },
+    "ui_onboarding_step_create_folder_title": {
+        "message": "Crear una carpeta"
+    },
+    "ui_onboarding_step_create_folder_body": {
+        "message": "Agrupa fuentes relacionadas sin cambiar su contenido."
+    },
+    "ui_onboarding_step_move_source_title": {
+        "message": "Mover una fuente"
+    },
+    "ui_onboarding_step_move_source_body": {
+        "message": "Usa arrastrar y soltar o Mover a carpeta."
+    },
+    "ui_onboarding_step_add_tag_title": {
+        "message": "Añadir una etiqueta"
+    },
+    "ui_onboarding_step_add_tag_body": {
+        "message": "Añade una etiqueta reutilizable para filtrar más rápido."
+    },
+    "ui_welcome_skip": {
+        "message": "Omitir por ahora"
+    },
+    "ui_settings_replay_onboarding": {
+        "message": "Repetir introducción"
+    },
+    "ui_settings_shortcuts_guide_title": {
+        "message": "Atajos de teclado"
+    },
+    "ui_settings_shortcuts_guide_body": {
+        "message": "Abre la Paleta de comandos para ver comandos y asignar atajos propios con modificadores."
+    },
+    "ui_settings_import_guide_title": {
+        "message": "Guía de importación"
+    },
+    "ui_settings_import_guide_body": {
+        "message": "Previsualiza una copia JSON exportada antes de aplicarla. Las copias con carpetas de hasta 50 niveles siguen siendo compatibles."
+    },
+    "ui_import_backup_title": {
+        "message": "Copia de importación pendiente"
+    },
+    "ui_import_backup_created_unknown": {
+        "message": "Hora de creación no disponible"
+    },
+    "ui_import_backup_created_at": {
+        "message": "Creada $1",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_import_backup_counts": {
+        "message": "$1 fuentes · $2 carpetas",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" }
+        }
+    },
+    "ui_import_backup_restore": {
+        "message": "Restaurar copia"
+    },
+    "ui_import_backup_discard": {
+        "message": "Descartar copia"
+    },
+    "ui_import_backup_restore_success": {
+        "message": "Copia de importación restaurada"
+    },
+    "ui_import_backup_restore_failed": {
+        "message": "No se pudo restaurar la copia de importación"
+    },
+    "ui_import_backup_discard_confirm": {
+        "message": "¿Descartar esta copia de importación? No se puede deshacer."
+    },
+    "ui_import_backup_discard_success": {
+        "message": "Copia de importación descartada"
+    },
+    "ui_import_backup_discard_failed": {
+        "message": "No se pudo descartar la copia de importación"
     }
 }

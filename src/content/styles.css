@@ -40,6 +40,11 @@
 }
 
 /* Some basic styling for our own UI */
+#sources-plus-root {
+  container-name: sp-manager-panel;
+  container-type: inline-size;
+}
+
 .sp-container {
   padding: 0 16px 16px 16px;
   border-bottom: 1px solid rgba(0, 0, 0, 0.05);
@@ -49,9 +54,10 @@
 /* NATIVE MENU UI OPTIMIZATION                          */
 /* ==================================================== */
 
-/* Add soft shadows, rounded corners, and animations to the Google native secondary menu */
-.cdk-overlay-pane .mat-mdc-menu-panel,
-.cdk-overlay-pane [role="menu"] {
+/* Add soft shadows, rounded corners, and animations only while a manager-owned
+   native action is active. The coordinator owns this marker's lifecycle. */
+body.sources-plus-native-action-active[data-nsm-native-action-active="true"] .cdk-overlay-pane .mat-mdc-menu-panel,
+body.sources-plus-native-action-active[data-nsm-native-action-active="true"] .cdk-overlay-pane [role="menu"] {
   border-radius: 16px !important;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08) !important;
   border: 1px solid rgba(0, 0, 0, 0.05) !important;
@@ -82,7 +88,7 @@
 }
 
 /* Round the individual native menu items */
-.cdk-overlay-pane .mat-mdc-menu-content .mat-mdc-menu-item {
+body.sources-plus-native-action-active[data-nsm-native-action-active="true"] .cdk-overlay-pane .mat-mdc-menu-content .mat-mdc-menu-item {
   border-radius: 10px !important;
   margin: 4px 8px !important;
   width: calc(100% - 16px) !important;
@@ -93,21 +99,21 @@
     transform var(--sp-motion-base, 180ms) var(--sp-ease-standard, cubic-bezier(0.2, 0.8, 0.2, 1)) !important;
 }
 
-.cdk-overlay-pane .mat-mdc-menu-content .mat-mdc-menu-item:hover {
+body.sources-plus-native-action-active[data-nsm-native-action-active="true"] .cdk-overlay-pane .mat-mdc-menu-content .mat-mdc-menu-item:hover {
   transform: scale(1.02) !important;
   opacity: 1 !important;
   background-color: transparent !important;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .cdk-overlay-pane .mat-mdc-menu-panel,
-  .cdk-overlay-pane [role="menu"],
-  .cdk-overlay-pane .mat-mdc-menu-content .mat-mdc-menu-item {
+  body.sources-plus-native-action-active[data-nsm-native-action-active="true"] .cdk-overlay-pane .mat-mdc-menu-panel,
+  body.sources-plus-native-action-active[data-nsm-native-action-active="true"] .cdk-overlay-pane [role="menu"],
+  body.sources-plus-native-action-active[data-nsm-native-action-active="true"] .cdk-overlay-pane .mat-mdc-menu-content .mat-mdc-menu-item {
     animation: none !important;
     transition-duration: 1ms !important;
   }
 
-  .cdk-overlay-pane .mat-mdc-menu-content .mat-mdc-menu-item:hover {
+  body.sources-plus-native-action-active[data-nsm-native-action-active="true"] .cdk-overlay-pane .mat-mdc-menu-content .mat-mdc-menu-item:hover {
     transform: none !important;
   }
 }
@@ -115,8 +121,8 @@
 /* Dark mode adjustments for native menu */
 @media (prefers-color-scheme: dark) {
 
-  .cdk-overlay-pane .mat-mdc-menu-panel,
-  .cdk-overlay-pane [role="menu"] {
+  body.sources-plus-native-action-active[data-nsm-native-action-active="true"] .cdk-overlay-pane .mat-mdc-menu-panel,
+  body.sources-plus-native-action-active[data-nsm-native-action-active="true"] .cdk-overlay-pane [role="menu"] {
     background-color: rgba(28, 28, 30, 0.85) !important;
     border-color: rgba(255, 255, 255, 0.05) !important;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25) !important;

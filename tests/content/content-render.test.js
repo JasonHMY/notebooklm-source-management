@@ -505,6 +505,35 @@ describe('manager shell structure', () => {
         expect(css).toContain('--sp-text-tertiary: #6e6e73;');
     });
 
+    it('keeps folder titles readable when the manager panel narrows to 240 or 320 pixels', () => {
+        jest.resetModules();
+        require('../../src/content/content-style-text.js');
+
+        const css = global.NSM_CONTENT_STYLE_TEXT;
+        const containerBlock = extractCssBlock(css, '.sp-container {');
+        const narrowFolderBlock = extractCssBlock(
+            css,
+            '@container sp-manager-panel (max-width: 320px) {'
+        );
+        const pageCss = fs.readFileSync(
+            path.resolve(__dirname, '../../src/content/styles.css'),
+            'utf8'
+        );
+        const hostBlock = extractCssBlock(pageCss, '#sources-plus-root {');
+
+        expect(containerBlock).toContain('container-name: sp-manager-panel;');
+        expect(containerBlock).toContain('container-type: inline-size;');
+        expect(hostBlock).toContain('container-name: sp-manager-panel;');
+        expect(hostBlock).toContain('container-type: inline-size;');
+        expect(narrowFolderBlock).toContain('flex: 1 1 6ch;');
+        expect(narrowFolderBlock).toContain('min-width: 6ch;');
+        expect(narrowFolderBlock).toContain('overflow-wrap: anywhere;');
+        expect(narrowFolderBlock).toContain('.group-header {');
+        expect(narrowFolderBlock).toContain('flex-wrap: wrap;');
+        expect(narrowFolderBlock).toContain('.group-header > .badge {');
+        expect(narrowFolderBlock).not.toContain('display: none;');
+    });
+
     it('declares an .ungrouped-section base block in the shadow DOM style', () => {
         require('../../src/content/content-style-text.js');
         const css = global.NSM_CONTENT_STYLE_TEXT;
@@ -571,8 +600,89 @@ describe('manager shell structure', () => {
         require('../../src/content/content-style-text.js');
 
         const block = extractCssBlock(global.NSM_CONTENT_STYLE_TEXT, '.sp-button.sp-toolbar-action.is-active');
-        expect(block).toContain('color: var(--sp-accent);');
+        expect(block).toContain('color: var(--sp-accent-text);');
         expect(block).toContain('background: var(--sp-tag-active-bg);');
+    });
+
+    it('uses contrast-safe semantic foreground tokens in light and dark themes', () => {
+        jest.resetModules();
+        require('../../src/content/content-style-text.js');
+
+        const relativeLuminance = (hex) => {
+            const channels = String(hex).match(/[0-9a-f]{2}/gi)
+                .map((value) => Number.parseInt(value, 16) / 255)
+                .map((value) => (
+                    value <= 0.04045
+                        ? value / 12.92
+                        : ((value + 0.055) / 1.055) ** 2.4
+                ));
+            return (0.2126 * channels[0]) + (0.7152 * channels[1]) + (0.0722 * channels[2]);
+        };
+        const contrastRatio = (foreground, background) => {
+            const foregroundLuminance = relativeLuminance(foreground);
+            const backgroundLuminance = relativeLuminance(background);
+            return (
+                (Math.max(foregroundLuminance, backgroundLuminance) + 0.05) /
+                (Math.min(foregroundLuminance, backgroundLuminance) + 0.05)
+            );
+        };
+        const css = global.NSM_CONTENT_STYLE_TEXT;
+
+        expect(css).toContain('--sp-accent-fill: #007aff;');
+        expect(css).toContain('--sp-accent-text: #0066cc;');
+        expect(css).toContain('--sp-danger-fill: #ff3b30;');
+        expect(css).toContain('--sp-danger-text: #c62828;');
+        expect(css).toContain('--sp-accent-text: #64a8ff;');
+        expect(css).toContain('--sp-danger-text: #ff6961;');
+        expect(contrastRatio('#0066cc', '#f6f7f9')).toBeGreaterThanOrEqual(4.5);
+        expect(contrastRatio('#c62828', '#f6f7f9')).toBeGreaterThanOrEqual(4.5);
+        expect(contrastRatio('#64a8ff', '#272c33')).toBeGreaterThanOrEqual(4.5);
+        expect(contrastRatio('#ff6961', '#272c33')).toBeGreaterThanOrEqual(4.5);
+        expect(contrastRatio('#007aff', '#f6f7f9')).toBeGreaterThanOrEqual(3);
+        expect(contrastRatio('#ff3b30', '#f6f7f9')).toBeGreaterThanOrEqual(3);
+        expect(contrastRatio('#0a84ff', '#272c33')).toBeGreaterThanOrEqual(3);
+        expect(contrastRatio('#ff453a', '#272c33')).toBeGreaterThanOrEqual(3);
+    });
+
+    it('styles persistent tag and history feedback with semantic text tokens', () => {
+        jest.resetModules();
+        require('../../src/content/content-style-text.js');
+
+        const css = global.NSM_CONTENT_STYLE_TEXT;
+        expect(extractCssBlock(css, '.sp-tag-editor-error {'))
+            .toContain('color: var(--sp-danger-text);');
+        expect(extractCssBlock(css, '.sp-history-action-status.is-error {'))
+            .toContain('color: var(--sp-danger-text);');
+        expect(extractCssBlock(css, '.sp-history-action-status.is-success {'))
+            .toContain('color: var(--sp-accent-text);');
+        expect(extractCssBlock(css, '.sp-history-storage-summary {'))
+            .toContain('color: var(--sp-text-secondary);');
+    });
+
+    it('gives the panel separator visible keyboard and forced-colors focus treatment', () => {
+        jest.resetModules();
+        require('../../src/content/content-style-text.js');
+
+        const css = global.NSM_CONTENT_STYLE_TEXT;
+        const focusBlock = extractCssBlock(css, '.sp-resizer:focus-visible::after {');
+        expect(focusBlock).toContain('background-color: var(--sp-accent);');
+        expect(focusBlock).toContain('box-shadow: var(--sp-focus-ring);');
+        expect(css).toContain('@media (forced-colors: active)');
+        expect(css).toContain('.sp-resizer:focus-visible::after {');
+        expect(css).toContain('background-color: Highlight;');
+    });
+
+    it('keeps native Angular overlay styling behind the operation-scoped marker', () => {
+        jest.resetModules();
+        require('../../src/content/content-style-text.js');
+
+        const css = global.NSM_GLOBAL_OVERLAY_STYLE_TEXT;
+        const marker = 'body.sources-plus-native-action-active[data-nsm-native-action-active="true"]';
+        expect(css).toContain(`${marker} .cdk-overlay-container .mat-mdc-menu-panel`);
+        expect(css).toContain(`${marker} .cdk-overlay-container .mat-mdc-dialog-surface`);
+        expect(css).not.toContain('body[data-nsm-native-action-active="true"] .cdk-overlay-container');
+        expect(css).not.toContain('body .cdk-overlay-container .mat-mdc-menu-panel');
+        expect(css).not.toContain('body .cdk-overlay-container .mat-mdc-dialog-surface');
     });
 
     it('loads Google Symbols from the extension asset instead of the remote font host', () => {
@@ -635,14 +745,14 @@ describe('manager shell structure', () => {
         expect(source).toContain("className: 'sp-tree-order-button sp-glare-hover'");
         expect(source).toContain("dataset: { groupId: group.id, treeDirection: direction }");
         expect(source).toContain("className: 'sp-add-subgroup-button sp-glare-hover'");
-        expect(source).toContain("'aria-label': getMessage('ui_add_subgroup_to', [groupTitle])");
+        expect(source).toContain("'aria-label': getMessage('ui_add_subgroup_to', [groupPath])");
         expect(source).toContain("className: 'sp-isolate-button sp-glare-hover'");
-        expect(source).toContain("'aria-label': getMessage('ui_isolate_group_named', [groupTitle])");
+        expect(source).toContain("'aria-label': getMessage('ui_isolate_group_named', [groupPath])");
         expect(source).toContain("'aria-pressed': activeIsolationGroupId === group.id ? 'true' : 'false'");
         expect(source).toContain("className: 'sp-edit-button sp-glare-hover'");
-        expect(source).toContain("'aria-label': getMessage('ui_rename_group_named', [groupTitle])");
+        expect(source).toContain("'aria-label': getMessage('ui_rename_group_named', [groupPath])");
         expect(source).toContain("className: 'sp-delete-button sp-glare-hover'");
-        expect(source).toContain("'aria-label': getMessage('ui_delete_group_named', [groupTitle])");
+        expect(source).toContain("'aria-label': getMessage('ui_delete_group_named', [groupPath])");
         expect(source).toContain("role: 'listitem'");
         expect(source).toContain("role: 'list'");
         expect(source).toContain("'aria-hidden': isCollapsed ? 'true' : 'false'");
@@ -824,7 +934,7 @@ describe('manager shell structure', () => {
         expect(feedbackNoteBlock).toContain('font-size: 11px;');
         expect(feedbackNoteBlock).toContain('var(--sp-text-tertiary)');
         expect(feedbackLinkBlock).toContain('font-size: 11px;');
-        expect(feedbackLinkBlock).toContain('color: var(--sp-accent)');
+        expect(feedbackLinkBlock).toContain('color: var(--sp-accent-text)');
         expect(feedbackLinkBlock).not.toContain('border: 1px');
         expect(feedbackBlock).not.toContain('#');
         expect(primaryBlock).toContain('background-color: var(--sp-accent)');
@@ -1207,8 +1317,8 @@ describe('batch count and source menu motion rendering', () => {
                 getElementById: (id) => (id === 'sp-search-count' ? countElement : null)
             }),
             getMessage: (key, substitutions = []) => (
-                key === 'ui_search_results_count'
-                    ? `${substitutions[0]} results`
+                key === 'ui_search_results_summary'
+                    ? `${substitutions[0]} sources · ${substitutions[1]} folders`
                     : key
             )
         });
@@ -1222,7 +1332,70 @@ describe('batch count and source menu motion rendering', () => {
         renderModule.updateSearchResultCount('tag:paper', 2);
         expect(countElement).toEqual({
             hidden: false,
-            textContent: '2 results'
+            textContent: '2 sources · 0 folders'
+        });
+
+        renderModule.updateSearchResultCount('folder:archive', 0, 1);
+        expect(countElement).toEqual({
+            hidden: false,
+            textContent: '0 sources · 1 folders'
+        });
+    });
+
+    it('counts a folder-title-only search match even when no source matches', () => {
+        const listContainer = createRenderTestElement('div', { id: 'sources-list' });
+        const countElement = {
+            hidden: true,
+            textContent: ''
+        };
+        const group = {
+            id: 'archive',
+            title: 'Research Archive',
+            enabled: true,
+            collapsed: false,
+            children: []
+        };
+        const state = {
+            root: [{ type: 'group', id: group.id }],
+            ungrouped: [],
+            filterQuery: 'archive',
+            isBatchMode: false,
+            activeTagId: null
+        };
+        const renderModule = createContentRender({
+            el: createRenderTestElement,
+            getDocument: () => ({
+                createDocumentFragment: createRenderTestFragment,
+                createElement: (tag) => createRenderTestElement(tag)
+            }),
+            getShadowRoot: () => ({
+                querySelector: (selector) => (selector === '#sources-list' ? listContainer : null),
+                getElementById: (id) => {
+                    if (id === 'sources-list') return listContainer;
+                    if (id === 'sp-search-count') return countElement;
+                    return null;
+                },
+                appendChild: jest.fn()
+            }),
+            getState: () => state,
+            getGroupsById: () => new Map([[group.id, group]]),
+            getSourcesByKey: () => new Map(),
+            hasActiveRenderFilters: () => true,
+            shouldRenderGroup: () => true,
+            getMessage: (key, substitutions = []) => (
+                key === 'ui_search_results_summary'
+                    ? `${substitutions[0]} sources · ${substitutions[1]} folders`
+                    : key
+            )
+        });
+
+        renderModule.render();
+
+        expect(findRenderTestNodesByClass(listContainer, 'group-container')).toHaveLength(1);
+        expect(findRenderTestNodesByClass(listContainer, 'sp-contextual-empty-state')).toHaveLength(0);
+        expect(countElement).toEqual({
+            hidden: false,
+            textContent: '0 sources · 1 folders'
         });
     });
 
@@ -1326,15 +1499,20 @@ describe('batch count and source menu motion rendering', () => {
         const selectedCount = findRenderTestNodesByClass(listContainer, 'sp-batch-selection-count')[0];
         const selectVisibleButton = findRenderTestNodesByClass(listContainer, 'sp-batch-select-visible-btn')[0];
         const clearSelectionButton = findRenderTestNodesByClass(listContainer, 'sp-batch-clear-selection-btn')[0];
+        const clearHiddenButton = findRenderTestNodesByClass(
+            listContainer,
+            'sp-batch-clear-hidden-selection-btn'
+        )[0];
         expect(addFolderButton.textContent).toBe('Add');
         expect(addTagsButton.textContent).toBe('Add Tags');
         expect(removeTagsButton.textContent).toBe('Remove Tags');
         expect(ungroupButton.textContent).toBe('Ungroup');
         expect(deleteButton.textContent).toBe('Delete (2)');
-        expect(selectedCount.textContent).toBe('ui_batch_selected_count');
+        expect(selectedCount.textContent).toBe('ui_batch_selection_breakdown');
         expect(selectedCount.attrs['aria-live']).toBe('polite');
         expect(selectVisibleButton.attrs.disabled).toBe(true);
         expect(clearSelectionButton.attrs.disabled).toBe(false);
+        expect(clearHiddenButton.attrs.disabled).toBe(true);
         expect(findRenderTestNodesByClass(addFolderButton, 'sp-count-up-number')).toHaveLength(0);
         expect(findRenderTestNodesByClass(addTagsButton, 'sp-count-up-number')).toHaveLength(0);
         expect(findRenderTestNodesByClass(removeTagsButton, 'sp-count-up-number')).toHaveLength(0);
@@ -1413,6 +1591,102 @@ describe('batch count and source menu motion rendering', () => {
         expect(groupChildren[0].attrs.inert).toBeNull();
         expect(selectVisibleButton.attrs.disabled).toBe(false);
         expect(groupsById.get('group-1').collapsed).toBe(true);
+    });
+
+    it('shows visible and hidden batch selections and exposes retry for a blocked delete', () => {
+        const listContainer = createRenderTestElement('div', { id: 'sources-list' });
+        const pendingBatchKeys = new Set(['visible', 'hidden']);
+        const renderModule = createContentRender({
+            el: createRenderTestElement,
+            getDocument: () => ({
+                createDocumentFragment: createRenderTestFragment,
+                createElement: (tag) => createRenderTestElement(tag)
+            }),
+            getShadowRoot: () => ({
+                querySelector: jest.fn((selector) => (selector === '#sources-list' ? listContainer : null)),
+                getElementById: jest.fn((id) => (id === 'sources-list' ? listContainer : null)),
+                appendChild: jest.fn()
+            }),
+            getState: () => ({
+                root: [],
+                ungrouped: ['visible'],
+                isBatchMode: true,
+                filterQuery: 'visible'
+            }),
+            getPendingBatchKeys: () => pendingBatchKeys,
+            getSourcesByKey: () => new Map([
+                ['visible', { key: 'visible', title: 'Visible' }],
+                ['hidden', { key: 'hidden', title: 'Hidden' }]
+            ]),
+            getLastBatchDeleteResult: () => ({
+                failed: [{ key: 'visible', reason: 'confirm_missing' }],
+                unattempted: [{ key: 'hidden', reason: 'blocked_by_previous_failure' }]
+            }),
+            getMessage: (key, substitutions = []) => (
+                key === 'ui_batch_selection_breakdown'
+                    ? `${substitutions[0]} visible · ${substitutions[1]} hidden`
+                    : key
+            )
+        });
+
+        renderModule.render();
+
+        const selectedCount = findRenderTestNodesByClass(
+            listContainer,
+            'sp-batch-selection-count'
+        )[0];
+        const clearHiddenButton = findRenderTestNodesByClass(
+            listContainer,
+            'sp-batch-clear-hidden-selection-btn'
+        )[0];
+        const retryButton = findRenderTestNodesByClass(
+            listContainer,
+            'sp-batch-retry-remaining-btn'
+        )[0];
+        expect(selectedCount.textContent).toBe('1 visible · 1 hidden');
+        expect(clearHiddenButton.attrs.disabled).toBe(false);
+        expect(retryButton.attrs.disabled).toBe(false);
+    });
+
+    it('does not offer native delete retry after the source was deleted but local reconciliation failed', () => {
+        const listContainer = createRenderTestElement('div', { id: 'sources-list' });
+        const renderModule = createContentRender({
+            el: createRenderTestElement,
+            getDocument: () => ({
+                createDocumentFragment: createRenderTestFragment,
+                createElement: (tag) => createRenderTestElement(tag)
+            }),
+            getShadowRoot: () => ({
+                querySelector: jest.fn((selector) => (selector === '#sources-list' ? listContainer : null)),
+                getElementById: jest.fn((id) => (id === 'sources-list' ? listContainer : null)),
+                appendChild: jest.fn()
+            }),
+            getState: () => ({
+                root: [],
+                ungrouped: ['deleted-remotely'],
+                isBatchMode: true,
+                filterQuery: ''
+            }),
+            getPendingBatchKeys: () => new Set(['deleted-remotely']),
+            getSourcesByKey: () => new Map([
+                ['deleted-remotely', { key: 'deleted-remotely', title: 'Deleted remotely' }]
+            ]),
+            getLastBatchDeleteResult: () => ({
+                failed: [{
+                    key: 'deleted-remotely',
+                    reason: 'native_delete_local_apply_failed'
+                }],
+                unattempted: []
+            }),
+            getMessage: (key) => key
+        });
+
+        renderModule.render();
+
+        expect(findRenderTestNodesByClass(
+            listContainer,
+            'sp-batch-retry-remaining-btn'
+        )).toHaveLength(0);
     });
 
     it('keeps pending initial-name folders visible through filters, isolation, and collapsed ancestors', () => {
@@ -1653,6 +1927,13 @@ describe('batch count and source menu motion rendering', () => {
             }),
             appendChild: jest.fn()
         };
+        const sourceViewInfo = { kind: 'label', confidence: 0.78 };
+        const getSourceViewInfo = jest.fn(() => sourceViewInfo);
+        const getNativeLabelImportPreview = jest.fn(() => ({
+            ok: true,
+            labelCount: 2,
+            sourceCount: 4
+        }));
 
         const renderModule = createContentRender({
             el: createRenderTestElement,
@@ -1661,8 +1942,8 @@ describe('batch count and source menu motion rendering', () => {
                 createElement: (tag) => createRenderTestElement(tag)
             }),
             getShadowRoot: () => shadowRoot,
-            getSourceViewInfo: () => ({ kind: 'label', confidence: 0.78 }),
-            getNativeLabelImportPreview: () => ({ ok: true, labelCount: 2, sourceCount: 4 }),
+            getSourceViewInfo,
+            getNativeLabelImportPreview,
             getMessage: (key) => {
                 if (key === 'ui_native_label_view_active') return 'NotebookLM label view is active';
                 if (key === 'ui_import_native_labels') return 'Import NotebookLM groups';
@@ -1678,6 +1959,49 @@ describe('batch count and source menu motion rendering', () => {
         expect(viewState.textContent).toContain('Import NotebookLM groups');
         expect(findRenderTestNodesByClass(viewState, 'sp-view-banner-btn')[0].disabled).toBe(false);
         expect(listContainer.childNodes).toHaveLength(0);
+        expect(getSourceViewInfo).toHaveBeenCalledTimes(1);
+        expect(getNativeLabelImportPreview).toHaveBeenCalledWith({ viewInfo: sourceViewInfo });
+    });
+
+    it('reuses cached list view info without building a native label import preview', () => {
+        const container = createRenderTestElement('div', { className: 'sp-container' });
+        const viewState = createRenderTestElement('div', { id: 'sp-view-state' });
+        const listContainer = createRenderTestElement('div', { id: 'sources-list' });
+        const actionLayer = createRenderTestElement('div', { id: 'sp-source-actions-layer' });
+        const sourceViewInfo = { kind: 'list', confidence: 0.96 };
+        const getSourceViewInfo = jest.fn(() => sourceViewInfo);
+        const getNativeLabelImportPreview = jest.fn();
+        const shadowRoot = {
+            querySelector: jest.fn((selector) => {
+                if (selector === '#sources-list') return listContainer;
+                if (selector === '.sp-container') return container;
+                return null;
+            }),
+            getElementById: jest.fn((id) => {
+                if (id === 'sources-list') return listContainer;
+                if (id === 'sp-view-state') return viewState;
+                if (id === 'sp-source-actions-layer') return actionLayer;
+                return null;
+            }),
+            appendChild: jest.fn()
+        };
+
+        const renderModule = createContentRender({
+            el: createRenderTestElement,
+            getDocument: () => ({
+                createDocumentFragment: createRenderTestFragment,
+                createElement: (tag) => createRenderTestElement(tag)
+            }),
+            getShadowRoot: () => shadowRoot,
+            getSourceViewInfo,
+            getNativeLabelImportPreview
+        });
+
+        renderModule.render();
+
+        expect(getSourceViewInfo).toHaveBeenCalledTimes(1);
+        expect(getNativeLabelImportPreview).not.toHaveBeenCalled();
+        expect(container.className).not.toContain('is-native-label-view');
     });
 
     it('keeps native label import button clickable when preview is unavailable', () => {
@@ -1725,6 +2049,62 @@ describe('batch count and source menu motion rendering', () => {
         expect(importButton.disabled).toBe(false);
         expect(importButton.attrs.disabled).toBeUndefined();
         expect(importButton.attrs.title).toBe('No groups available');
+    });
+
+    it('keeps native checkbox sync failures visible until retry succeeds', async () => {
+        const viewState = createRenderTestElement('div', { id: 'sp-view-state' });
+        const findById = (root, id) => {
+            if (root?.attrs?.id === id) return root;
+            for (const child of root?.childNodes || []) {
+                if (!child || typeof child !== 'object') continue;
+                const match = findById(child, id);
+                if (match) return match;
+            }
+            return null;
+        };
+        viewState.querySelector = jest.fn((selector) => (
+            selector.startsWith('#') ? findById(viewState, selector.slice(1)) : null
+        ));
+        let failure = { sourceKey: 'source-1', reason: 'native_checkbox_timeout' };
+        const retryNativeSelectionSync = jest.fn(async () => {
+            failure = null;
+            return { ok: true };
+        });
+        const renderModule = createContentRender({
+            el: createRenderTestElement,
+            getDocument: () => ({
+                createDocumentFragment: createRenderTestFragment,
+                createElement: (tag) => createRenderTestElement(tag)
+            }),
+            getShadowRoot: () => ({
+                getElementById: jest.fn((id) => (
+                    id === 'sp-view-state' ? viewState : null
+                ))
+            }),
+            getNativeSelectionSyncFailure: () => failure,
+            retryNativeSelectionSync,
+            getMessage: (key, substitutions = []) => (
+                substitutions.length > 0 ? `${key}:${substitutions.join('|')}` : key
+            )
+        });
+
+        renderModule.renderViewStateBar();
+
+        expect(viewState.hidden).toBe(false);
+        expect(viewState.textContent).toContain(
+            'ui_native_selection_sync_failed:native_checkbox_timeout'
+        );
+        const retryButton = findById(viewState, 'sp-retry-native-selection-sync-btn');
+        expect(retryButton).not.toBeNull();
+
+        await retryButton.onclick({ preventDefault: jest.fn() });
+
+        expect(retryNativeSelectionSync).toHaveBeenCalledWith({
+            sourceKey: 'source-1',
+            reason: 'native_checkbox_timeout'
+        });
+        expect(viewState.hidden).toBe(true);
+        expect(viewState.textContent).toBe('');
     });
 
     it('shows the latest native label import summary in label view', () => {
@@ -2248,8 +2628,12 @@ describe('batch count and source menu motion rendering', () => {
         const treeOrderButtons = findRenderTestNodesByClass(listContainer, 'sp-tree-order-button');
         const glareButtons = findRenderTestNodesByClass(listContainer, 'sp-glare-hover');
         expect(groups.map((group) => [group.dataset.groupId, group.attrs.style])).toEqual([
-            ['root', 'padding-left: 0px;--sp-list-item-index:0;'],
-            ['child', 'padding-left: 20px;--sp-list-item-index:2;']
+            ['root', '--sp-tree-indent:0px;--sp-list-item-index:0;'],
+            ['child', '--sp-tree-indent:12px;--sp-list-item-index:2;']
+        ]);
+        expect(groups.map((group) => [group.dataset.groupId, group.dataset.treeDepth])).toEqual([
+            ['root', '0'],
+            ['child', '1']
         ]);
         expect(sources.map((source) => [source.dataset.sourceKey, source.attrs.style])).toEqual([
             ['source-1', '--sp-list-item-index:1;'],
@@ -2270,37 +2654,46 @@ describe('batch count and source menu motion rendering', () => {
         );
         expect(carets.map((caret) => caret.attrs['aria-label'])).toEqual([
             'ui_collapse_group_named:Root',
-            'ui_collapse_group_named:Child'
+            'ui_collapse_group_named:Root / Child'
         ]);
         expect(groupSwitches.map((control) => control.attrs['aria-label'])).toEqual([
             'ui_disable_group_named:Root',
-            'ui_disable_group_named:Child'
+            'ui_disable_group_named:Root / Child'
         ]);
         expect(addSubgroupButtons.map((button) => button.attrs['aria-label'])).toEqual([
             'ui_add_subgroup_to:Root',
-            'ui_add_subgroup_to:Child'
+            'ui_add_subgroup_to:Root / Child'
         ]);
         expect(isolateButtons.map((button) => button.attrs['aria-label'])).toEqual([
             'ui_isolate_group_named:Root',
-            'ui_isolate_group_named:Child'
+            'ui_isolate_group_named:Root / Child'
         ]);
         expect(editButtons.map((button) => button.attrs['aria-label'])).toEqual([
             'ui_rename_group_named:Root',
-            'ui_rename_group_named:Child'
+            'ui_rename_group_named:Root / Child'
         ]);
         expect(deleteButtons.map((button) => button.attrs['aria-label'])).toEqual([
             'ui_delete_group_named:Root',
-            'ui_delete_group_named:Child'
+            'ui_delete_group_named:Root / Child'
         ]);
         expect(sourceActionButtons.map((button) => button.attrs['aria-label'])).toEqual([
-            'ui_source_actions_for:Source 1',
-            'ui_source_actions_for:Source 2',
-            'ui_source_actions_for:Loose'
+            'ui_source_actions_for:Root / Source 1',
+            'ui_source_actions_for:Root / Child / Source 2',
+            'ui_source_actions_for:ui_ungrouped / Loose'
         ]);
         expect(sourceCheckboxes.map((control) => control.attrs['aria-label'])).toEqual([
-            'ui_source_enabled_checkbox:Source 1',
-            'ui_source_enabled_checkbox:Source 2',
-            'ui_source_enabled_checkbox:Loose'
+            'ui_source_enabled_checkbox:Root / Source 1',
+            'ui_source_enabled_checkbox:Root / Child / Source 2',
+            'ui_source_enabled_checkbox:ui_ungrouped / Loose'
+        ]);
+        expect(groups.map((group) => group.attrs['aria-label'])).toEqual([
+            'Root',
+            'Root / Child'
+        ]);
+        expect(sources.map((source) => source.attrs['aria-label'])).toEqual([
+            'Root / Source 1',
+            'Root / Child / Source 2',
+            'ui_ungrouped / Loose'
         ]);
         expect(tagPills).toHaveLength(1);
         expect(tagPills[0].attrs['aria-pressed']).toBe('true');
@@ -2367,6 +2760,695 @@ describe('batch count and source menu motion rendering', () => {
         const longSources = findRenderTestNodesByClass(listContainer, 'source-item');
         expect(longSources[10].attrs.style).toBe('--sp-list-item-index:10;');
         expect(longSources[11].attrs.style).toBe('--sp-list-item-index:10;');
+    });
+
+    it('caps visual indentation at eight levels while retaining the full tree depth', () => {
+        require('../../src/content/content-style-text.js');
+        const listContainer = createRenderTestElement('div', { id: 'sources-list' });
+        const groupsById = new Map();
+        for (let level = 0; level < 12; level += 1) {
+            groupsById.set(`group-${level}`, {
+                id: `group-${level}`,
+                title: `Group ${level}`,
+                enabled: true,
+                collapsed: false,
+                children: level < 11
+                    ? [{ type: 'group', id: `group-${level + 1}` }]
+                    : []
+            });
+        }
+        const renderModule = createContentRender({
+            el: createRenderTestElement,
+            getDocument: () => ({
+                createDocumentFragment: createRenderTestFragment,
+                createElement: (tag) => createRenderTestElement(tag)
+            }),
+            getShadowRoot: () => ({
+                querySelector: jest.fn((selector) => (selector === '#sources-list' ? listContainer : null)),
+                getElementById: jest.fn((id) => (id === 'sources-list' ? listContainer : null)),
+                appendChild: jest.fn()
+            }),
+            getState: () => ({
+                root: [{ type: 'group', id: 'group-0' }],
+                ungrouped: [],
+                isBatchMode: false
+            }),
+            getGroupsById: () => groupsById,
+            getMessage: (key) => key
+        });
+
+        renderModule.render();
+
+        const groups = findRenderTestNodesByClass(listContainer, 'group-container');
+        expect(groups).toHaveLength(12);
+        expect(groups[7].attrs.style).toContain('--sp-tree-indent:84px;');
+        expect(groups[8].attrs.style).toContain('--sp-tree-indent:96px;');
+        expect(groups[11].attrs.style).toContain('--sp-tree-indent:96px;');
+        expect(groups[11].dataset.treeDepth).toBe('11');
+        expect(extractCssBlock(
+            global.NSM_CONTENT_STYLE_TEXT,
+            '.group-container {'
+        )).toContain('padding-left: var(--sp-tree-indent, 0px);');
+    });
+
+    it('renders a fifty-level imported tree without recursive traversal', () => {
+        const listContainer = createRenderTestElement('div', { id: 'sources-list' });
+        const groupsById = new Map();
+        const depth = 50;
+        for (let level = 0; level < depth; level += 1) {
+            groupsById.set(`deep-group-${level}`, {
+                id: `deep-group-${level}`,
+                title: `Deep group ${level}`,
+                enabled: true,
+                collapsed: false,
+                children: level < depth - 1
+                    ? [{ type: 'group', id: `deep-group-${level + 1}` }]
+                    : [{ type: 'source', key: 'deep-source' }]
+            });
+        }
+        const sourceMatchesCurrentFilters = jest.fn(() => true);
+        const isSourceEffectivelyEnabled = jest.fn(() => true);
+        const renderModule = createContentRender({
+            el: createRenderTestElement,
+            getDocument: () => ({
+                createDocumentFragment: createRenderTestFragment,
+                createElement: (tag) => createRenderTestElement(tag)
+            }),
+            getShadowRoot: () => ({
+                querySelector: jest.fn((selector) => (
+                    selector === '#sources-list' ? listContainer : null
+                )),
+                getElementById: jest.fn((id) => (
+                    id === 'sources-list' ? listContainer : null
+                )),
+                appendChild: jest.fn()
+            }),
+            getState: () => ({
+                root: [{ type: 'group', id: 'deep-group-0' }],
+                ungrouped: [],
+                filterQuery: '',
+                isBatchMode: false
+            }),
+            getGroupsById: () => groupsById,
+            getSourcesByKey: () => new Map([[
+                'deep-source',
+                { key: 'deep-source', title: 'Deep source', enabled: true }
+            ]]),
+            sourceMatchesCurrentFilters,
+            isSourceEffectivelyEnabled,
+            getMessage: (key) => key
+        });
+
+        renderModule.render();
+
+        const groups = findRenderTestNodesByClass(listContainer, 'group-container');
+        expect(groups).toHaveLength(depth);
+        expect(groups[depth - 1].dataset.treeDepth).toBe(String(depth - 1));
+        expect(groups[depth - 1].attrs.style).toContain('--sp-tree-indent:96px;');
+        const sources = findRenderTestNodesByClass(listContainer, 'source-item');
+        const expectedGroupPath = Array.from(
+            { length: depth },
+            (_, level) => `Deep group ${level}`
+        ).join(' / ');
+        expect(groups[depth - 1].attrs['aria-label']).toBe(expectedGroupPath);
+        expect(sources).toHaveLength(1);
+        expect(sources[0].attrs['aria-label']).toBe(`${expectedGroupPath} / Deep source`);
+        expect(sourceMatchesCurrentFilters).toHaveBeenCalledTimes(1);
+        expect(isSourceEffectivelyEnabled).toHaveBeenCalledTimes(1);
+    });
+
+    it('caches filter results when an ungrouped source is counted and rendered', () => {
+        const listContainer = createRenderTestElement('div', { id: 'sources-list' });
+        const source = { key: 'cached-source', title: 'Cached source', enabled: true };
+        const sourceMatchesCurrentFilters = jest.fn(() => true);
+        const renderModule = createContentRender({
+            el: createRenderTestElement,
+            getDocument: () => ({
+                createDocumentFragment: createRenderTestFragment,
+                createElement: (tag) => createRenderTestElement(tag)
+            }),
+            getShadowRoot: () => ({
+                querySelector: jest.fn((selector) => (
+                    selector === '#sources-list' ? listContainer : null
+                )),
+                getElementById: jest.fn((id) => (
+                    id === 'sources-list' ? listContainer : null
+                )),
+                appendChild: jest.fn()
+            }),
+            getState: () => ({
+                root: [],
+                ungrouped: [source.key],
+                filterQuery: '',
+                isBatchMode: false
+            }),
+            getSourcesByKey: () => new Map([[source.key, source]]),
+            sourceMatchesCurrentFilters,
+            getMessage: (key) => key
+        });
+
+        renderModule.render();
+
+        expect(findRenderTestNodesByClass(listContainer, 'source-item')).toHaveLength(1);
+        expect(sourceMatchesCurrentFilters).toHaveBeenCalledTimes(1);
+    });
+
+    it('windows large logical source lists with twenty-row overscan and explicit metadata', () => {
+        const sourceCount = 100;
+        const listContainer = createRenderTestElement('div', { id: 'sources-list' });
+        listContainer.scrollTop = 50 * 44;
+        listContainer.clientHeight = 2 * 44;
+        const sources = Array.from({ length: sourceCount }, (_, index) => ({
+            key: `source-${index}`,
+            title: `Source ${index}`,
+            enabled: true
+        }));
+        const sourcesByKey = new Map(sources.map((source) => [source.key, source]));
+        const renderModule = createContentRender({
+            el: createRenderTestElement,
+            sourceWindowThreshold: 5,
+            sourceWindowRowHeight: 44,
+            getDocument: () => ({
+                activeElement: null,
+                createDocumentFragment: createRenderTestFragment,
+                createElement: (tag) => createRenderTestElement(tag)
+            }),
+            getShadowRoot: () => ({
+                activeElement: null,
+                querySelector: jest.fn((selector) => (
+                    selector === '#sources-list' ? listContainer : null
+                )),
+                getElementById: jest.fn((id) => (
+                    id === 'sources-list' ? listContainer : null
+                )),
+                appendChild: jest.fn()
+            }),
+            getState: () => ({
+                root: sources.map((source) => ({ type: 'source', key: source.key })),
+                ungrouped: [],
+                filterQuery: '',
+                isBatchMode: false
+            }),
+            getSourcesByKey: () => sourcesByKey,
+            getMessage: (key) => key
+        });
+
+        renderModule.render();
+
+        const materialized = findRenderTestNodesByClass(listContainer, 'source-item');
+        expect(materialized.map((row) => row.dataset.sourceKey)).toEqual(
+            sources.slice(30, 72).map((source) => source.key)
+        );
+        expect(materialized[0].getAttribute('aria-posinset')).toBe('31');
+        expect(materialized[0].getAttribute('aria-setsize')).toBe('100');
+        const spacers = findRenderTestNodesByClass(listContainer, 'sp-source-window-spacer');
+        expect(spacers.map((spacer) => spacer.dataset.sourceWindowRows)).toEqual(['30', '28']);
+        expect(listContainer.dataset).toEqual(expect.objectContaining({
+            sourceWindowingActive: 'true',
+            logicalTotal: '100',
+            logicalVisible: '100',
+            materializedSources: '42',
+            renderGeneration: '1',
+            windowStart: '30',
+            windowEnd: '72',
+            pinnedCount: '0'
+        }));
+        expect(renderModule.getSourceWindowMetadata()).toEqual(expect.objectContaining({
+            active: true,
+            logicalTotal: 100,
+            logicalVisible: 100,
+            materializedSources: 42,
+            start: 30,
+            end: 72,
+            overscan: 20
+        }));
+        expect(renderModule.getVisibleLogicalSourceKeys()).toEqual(
+            sources.map((source) => source.key)
+        );
+    });
+
+    it('keeps expanded group structure while windowing a flattened logical source projection', () => {
+        const listContainer = createRenderTestElement('div', { id: 'sources-list' });
+        listContainer.scrollTop = 140 * 44;
+        listContainer.clientHeight = 2 * 44;
+        const sources = Array.from({ length: 300 }, (_, index) => ({
+            key: `grouped-source-${index}`,
+            title: `Grouped source ${index}`,
+            enabled: true
+        }));
+        const sourcesByKey = new Map(sources.map((source) => [source.key, source]));
+        const groups = Array.from({ length: 3 }, (_, groupIndex) => ({
+            id: `window-group-${groupIndex}`,
+            title: `Window group ${groupIndex}`,
+            enabled: true,
+            collapsed: false,
+            children: sources
+                .slice(groupIndex * 100, (groupIndex + 1) * 100)
+                .map((source) => ({ type: 'source', key: source.key }))
+        }));
+        const groupsById = new Map(groups.map((group) => [group.id, group]));
+        const renderModule = createContentRender({
+            el: createRenderTestElement,
+            sourceWindowThreshold: 5,
+            sourceWindowRowHeight: 44,
+            getDocument: () => ({
+                createDocumentFragment: createRenderTestFragment,
+                createElement: (tag) => createRenderTestElement(tag)
+            }),
+            getShadowRoot: () => ({
+                activeElement: null,
+                querySelector: (selector) => (
+                    selector === '#sources-list' ? listContainer : null
+                ),
+                getElementById: (id) => (id === 'sources-list' ? listContainer : null),
+                appendChild: jest.fn()
+            }),
+            getState: () => ({
+                root: groups.map((group) => ({ type: 'group', id: group.id })),
+                ungrouped: [],
+                filterQuery: '',
+                isBatchMode: false
+            }),
+            getGroupsById: () => groupsById,
+            getSourcesByKey: () => sourcesByKey,
+            getParentMap: () => new Map(
+                sources.map((source, index) => [
+                    source.key,
+                    groups[Math.floor(index / 100)].id
+                ])
+            ),
+            getMessage: (key) => key
+        });
+
+        renderModule.render();
+
+        expect(findRenderTestNodesByClass(listContainer, 'group-container')).toHaveLength(3);
+        expect(
+            findRenderTestNodesByClass(listContainer, 'source-item')
+                .map((row) => row.dataset.sourceKey)
+        ).toEqual(
+            sources.slice(120, 162).map((source) => source.key)
+        );
+        expect(listContainer.dataset).toEqual(expect.objectContaining({
+            sourceWindowingActive: 'true',
+            logicalVisible: '300',
+            materializedSources: '42',
+            windowStart: '120',
+            windowEnd: '162'
+        }));
+    });
+
+    it('keeps batch-visible selection logical while only a source window is materialized', () => {
+        const sourceCount = 100;
+        const listContainer = createRenderTestElement('div', { id: 'sources-list' });
+        listContainer.scrollTop = 50 * 44;
+        listContainer.clientHeight = 2 * 44;
+        const sources = Array.from({ length: sourceCount }, (_, index) => ({
+            key: `batch-source-${index}`,
+            title: `Batch source ${index}`,
+            enabled: true
+        }));
+        const sourcesByKey = new Map(sources.map((source) => [source.key, source]));
+        const pendingBatchKeys = new Set(sources.map((source) => source.key));
+        const renderModule = createContentRender({
+            el: createRenderTestElement,
+            sourceWindowThreshold: 5,
+            sourceWindowRowHeight: 44,
+            getDocument: () => ({
+                createDocumentFragment: createRenderTestFragment,
+                createElement: (tag) => createRenderTestElement(tag)
+            }),
+            getShadowRoot: () => ({
+                querySelector: (selector) => (
+                    selector === '#sources-list' ? listContainer : null
+                ),
+                getElementById: (id) => (id === 'sources-list' ? listContainer : null),
+                appendChild: jest.fn()
+            }),
+            getState: () => ({
+                root: sources.map((source) => ({ type: 'source', key: source.key })),
+                ungrouped: [],
+                filterQuery: '',
+                isBatchMode: true
+            }),
+            getSourcesByKey: () => sourcesByKey,
+            getPendingBatchKeys: () => pendingBatchKeys,
+            getMessage: (key) => key
+        });
+
+        renderModule.render();
+
+        expect(findRenderTestNodesByClass(listContainer, 'source-item')).toHaveLength(42);
+        const selectVisible = findRenderTestNodesByClass(
+            listContainer,
+            'sp-batch-select-visible-btn'
+        )[0];
+        const clearHidden = findRenderTestNodesByClass(
+            listContainer,
+            'sp-batch-clear-hidden-selection-btn'
+        )[0];
+        expect(selectVisible.disabled).toBe(true);
+        expect(clearHidden.disabled).toBe(true);
+        expect(pendingBatchKeys.size).toBe(sourceCount);
+        expect(listContainer.dataset).toEqual(expect.objectContaining({
+            pendingSelected: '100',
+            visibleSelected: '100',
+            hiddenSelected: '0',
+            visibleBatchOperable: '100',
+            materializedSources: '42'
+        }));
+    });
+
+    it('materializes focused, action, and drag sources outside the window and pins drag rows until drag ends', () => {
+        const sourceCount = 100;
+        const listContainer = createRenderTestElement('div', {
+            id: 'sources-list',
+            className: 'sp-drag-active'
+        });
+        listContainer.scrollTop = 50 * 44;
+        listContainer.clientHeight = 2 * 44;
+        let dragActive = true;
+        let renderedDragRows = [createRenderTestElement('div', {
+            className: 'source-item dragging',
+            dataset: { sourceKey: 'source-99' }
+        })];
+        listContainer.classList.contains = (className) => (
+            className === 'sp-drag-active' && dragActive
+        );
+        listContainer.querySelectorAll = (selector) => (
+            selector === '.source-item.dragging' ? renderedDragRows : []
+        );
+        const focusedRow = createRenderTestElement('div', {
+            className: 'source-item',
+            dataset: { sourceKey: 'source-1' }
+        });
+        const focusedControl = {
+            closest: jest.fn(() => focusedRow)
+        };
+        const sources = Array.from({ length: sourceCount }, (_, index) => ({
+            key: `source-${index}`,
+            title: `Source ${index}`,
+            enabled: true
+        }));
+        const sourcesByKey = new Map(sources.map((source) => [source.key, source]));
+        const shadowRoot = {
+            activeElement: focusedControl,
+            querySelector: (selector) => (
+                selector === '#sources-list' ? listContainer : null
+            ),
+            getElementById: (id) => (id === 'sources-list' ? listContainer : null),
+            appendChild: jest.fn()
+        };
+        const renderModule = createContentRender({
+            el: createRenderTestElement,
+            sourceWindowThreshold: 5,
+            sourceWindowRowHeight: 44,
+            getDocument: () => ({
+                createDocumentFragment: createRenderTestFragment,
+                createElement: (tag) => createRenderTestElement(tag)
+            }),
+            getShadowRoot: () => shadowRoot,
+            getState: () => ({
+                root: sources.map((source) => ({ type: 'source', key: source.key })),
+                ungrouped: [],
+                filterQuery: '',
+                isBatchMode: false
+            }),
+            getSourcesByKey: () => sourcesByKey,
+            getActiveSourceActionSourceKey: () => 'source-0',
+            getMessage: (key) => key
+        });
+
+        renderModule.render();
+
+        const materializedKeys = new Set(
+            findRenderTestNodesByClass(listContainer, 'source-item')
+                .map((row) => row.dataset.sourceKey)
+        );
+        expect(materializedKeys).toEqual(new Set([
+            'source-0',
+            'source-1',
+            ...sources.slice(30, 72).map((source) => source.key),
+            'source-99'
+        ]));
+        expect(listContainer.dataset.pinnedCount).toBe('3');
+
+        renderedDragRows = [];
+        expect(renderModule.collectSourceWindowPinnedKeys(listContainer)).toContain('source-99');
+        dragActive = false;
+        listContainer.className = '';
+        expect(renderModule.collectSourceWindowPinnedKeys(listContainer)).not.toContain('source-99');
+    });
+
+    it('activates source windowing only at the configured logical threshold', () => {
+        const listContainer = {
+            scrollTop: 44 * 50,
+            clientHeight: 44 * 2
+        };
+        const renderModule = createContentRender({
+            sourceWindowThreshold: 240,
+            sourceWindowRowHeight: 44,
+            sourceWindowOverscan: 20
+        });
+
+        expect(renderModule.resolveSourceWindowRange(listContainer, 239)).toEqual({
+            active: false,
+            start: 0,
+            end: 239,
+            overscan: 20,
+            rowHeight: 44
+        });
+        expect(renderModule.resolveSourceWindowRange(listContainer, 240)).toEqual({
+            active: true,
+            start: 30,
+            end: 72,
+            overscan: 20,
+            rowHeight: 44
+        });
+    });
+
+    it('reconciles reversed stable-key rows with linear child-list access', () => {
+        const rowCount = 300;
+        let childNodeReads = 0;
+        const backingChildren = Array.from({ length: rowCount }, (_, index) => {
+            const row = createRenderTestElement('div', {
+                className: 'source-item',
+                dataset: { sourceKey: `linear-${index}` }
+            });
+            row.attributes = [];
+            return row;
+        });
+        const target = {
+            get childNodes() {
+                childNodeReads += 1;
+                return backingChildren;
+            },
+            appendChild(node) {
+                backingChildren.push(node);
+                node.parentNode = this;
+                return node;
+            },
+            insertBefore(node, referenceNode) {
+                const currentIndex = backingChildren.indexOf(node);
+                if (currentIndex >= 0) backingChildren.splice(currentIndex, 1);
+                const referenceIndex = referenceNode
+                    ? backingChildren.indexOf(referenceNode)
+                    : -1;
+                backingChildren.splice(
+                    referenceIndex >= 0 ? referenceIndex : backingChildren.length,
+                    0,
+                    node
+                );
+                node.parentNode = this;
+                return node;
+            },
+            removeChild(node) {
+                const index = backingChildren.indexOf(node);
+                if (index >= 0) backingChildren.splice(index, 1);
+                return node;
+            }
+        };
+        backingChildren.forEach((row) => {
+            row.parentNode = target;
+        });
+        const originalRowsByKey = new Map(
+            backingChildren.map((row) => [row.dataset.sourceKey, row])
+        );
+        const fragment = createRenderTestFragment();
+        backingChildren.slice().reverse().forEach((row) => {
+            const sourceRow = createRenderTestElement('div', {
+                className: 'source-item',
+                dataset: { sourceKey: row.dataset.sourceKey }
+            });
+            sourceRow.attributes = [];
+            fragment.appendChild(sourceRow);
+        });
+        const renderModule = createContentRender({});
+
+        renderModule.patchChildren(target, fragment);
+
+        expect(backingChildren.map((row) => row.dataset.sourceKey)).toEqual(
+            Array.from(originalRowsByKey.keys()).reverse()
+        );
+        backingChildren.forEach((row) => {
+            expect(row).toBe(originalRowsByKey.get(row.dataset.sourceKey));
+        });
+        expect(childNodeReads).toBeLessThanOrEqual(rowCount + 5);
+    });
+
+    it('coalesces scheduled renders to one callback per animation frame', () => {
+        const listContainer = createRenderTestElement('div', { id: 'sources-list' });
+        const frameCallbacks = [];
+        const onAfterRender = jest.fn();
+        const renderModule = createContentRender({
+            el: createRenderTestElement,
+            getWindow: () => ({
+                requestAnimationFrame: (callback) => {
+                    frameCallbacks.push(callback);
+                    return frameCallbacks.length;
+                }
+            }),
+            getDocument: () => ({
+                createDocumentFragment: createRenderTestFragment,
+                createElement: (tag) => createRenderTestElement(tag)
+            }),
+            getShadowRoot: () => ({
+                querySelector: jest.fn((selector) => (
+                    selector === '#sources-list' ? listContainer : null
+                )),
+                getElementById: jest.fn((id) => (
+                    id === 'sources-list' ? listContainer : null
+                )),
+                appendChild: jest.fn()
+            }),
+            getState: () => ({
+                root: [],
+                ungrouped: [],
+                filterQuery: '',
+                isBatchMode: false
+            }),
+            onAfterRender,
+            getMessage: (key) => key
+        });
+
+        expect(renderModule.scheduleRender()).toBe(true);
+        expect(renderModule.scheduleRender()).toBe(false);
+        expect(renderModule.isRenderScheduled()).toBe(true);
+        expect(frameCallbacks).toHaveLength(1);
+
+        frameCallbacks[0]();
+
+        expect(renderModule.isRenderScheduled()).toBe(false);
+        expect(onAfterRender).toHaveBeenCalledTimes(1);
+        expect(renderModule.scheduleRender()).toBe(true);
+        expect(frameCallbacks).toHaveLength(2);
+    });
+
+    it('keeps a replacement text node when reconciliation removes an inline editor', () => {
+        const target = {
+            childNodes: [],
+            appendChild(node) {
+                this.childNodes.push(node);
+                node.parentNode = this;
+                return node;
+            },
+            insertBefore(node, referenceNode) {
+                const index = this.childNodes.indexOf(referenceNode);
+                this.childNodes.splice(index < 0 ? this.childNodes.length : index, 0, node);
+                node.parentNode = this;
+                return node;
+            },
+            replaceChild(replacement, previous) {
+                const index = this.childNodes.indexOf(previous);
+                this.childNodes[index] = replacement;
+                replacement.parentNode = this;
+                previous.parentNode = null;
+                return previous;
+            },
+            removeChild(node) {
+                this.childNodes = this.childNodes.filter((candidate) => candidate !== node);
+                node.parentNode = null;
+                return node;
+            }
+        };
+        const inlineInput = {
+            nodeType: 1,
+            nodeName: 'INPUT',
+            cloneNode: jest.fn()
+        };
+        const sourceText = {
+            nodeType: 3,
+            nodeName: '#text',
+            textContent: 'Batch drag destination',
+            cloneNode() {
+                return {
+                    nodeType: 3,
+                    nodeName: '#text',
+                    textContent: this.textContent,
+                    cloneNode: this.cloneNode
+                };
+            }
+        };
+        target.appendChild(inlineInput);
+        const renderModule = createContentRender({});
+
+        renderModule.patchChildren(target, {
+            childNodes: [sourceText]
+        });
+
+        expect(target.childNodes).toHaveLength(1);
+        expect(target.childNodes[0]).not.toBe(inlineInput);
+        expect(target.childNodes[0].textContent).toBe('Batch drag destination');
+    });
+
+    it('reorders source rows by stable key without replacing existing row nodes', () => {
+        const listContainer = createRenderTestElement('div', { id: 'sources-list' });
+        const firstRow = createRenderTestElement('div', {
+            className: 'source-item',
+            dataset: { sourceKey: 'first' }
+        });
+        const secondRow = createRenderTestElement('div', {
+            className: 'source-item',
+            dataset: { sourceKey: 'second' }
+        });
+        [listContainer, firstRow, secondRow].forEach((node) => {
+            node.attributes = [];
+        });
+        listContainer.insertBefore = function insertBefore(node, referenceNode) {
+            this.childNodes = this.childNodes.filter((candidate) => candidate !== node);
+            this.children = this.children.filter((candidate) => candidate !== node);
+            const index = referenceNode ? this.childNodes.indexOf(referenceNode) : -1;
+            const insertionIndex = index >= 0 ? index : this.childNodes.length;
+            this.childNodes.splice(insertionIndex, 0, node);
+            this.children.splice(insertionIndex, 0, node);
+            node.parentNode = this;
+            return node;
+        };
+        listContainer.appendChild(firstRow);
+        listContainer.appendChild(secondRow);
+
+        const nextSecondRow = createRenderTestElement('div', {
+            className: 'source-item',
+            dataset: { sourceKey: 'second' }
+        });
+        const nextFirstRow = createRenderTestElement('div', {
+            className: 'source-item',
+            dataset: { sourceKey: 'first' }
+        });
+        nextSecondRow.attributes = [];
+        nextFirstRow.attributes = [];
+        const sourceFragment = createRenderTestFragment();
+        sourceFragment.appendChild(nextSecondRow);
+        sourceFragment.appendChild(nextFirstRow);
+        const renderModule = createContentRender({
+            getMessage: (key) => key
+        });
+
+        renderModule.patchChildren(listContainer, sourceFragment);
+
+        expect(listContainer.childNodes).toEqual([secondRow, firstRow]);
+        expect(listContainer.childNodes[0]).toBe(secondRow);
+        expect(listContainer.childNodes[1]).toBe(firstRow);
     });
 
     it('renders state.root entries interleaved in order (source between two folders)', () => {
@@ -3119,16 +4201,18 @@ describe('group rendering rules', () => {
         expect(mod.shouldRenderGroup(emptyGroup)).toBe(false);
     });
 
-    it('clears an active tag filter when the same tag is selected again', () => {
+    it('clears an active tag filter when the same tag is selected again', async () => {
         mod.tagsById.set('tag_alpha', {
             id: 'tag_alpha',
             label: 'Alpha',
             color: '#007AFF'
         });
 
-        expect(mod._applyTagQuickFilterForTest('tag_alpha')).toBe(true);
+        await expect(mod._applyTagQuickFilterForTest('tag_alpha'))
+            .resolves.toEqual(expect.objectContaining({ success: true }));
         expect(mod.state.activeTagId).toBe('tag_alpha');
-        expect(mod._applyTagQuickFilterForTest('tag_alpha')).toBe(true);
+        await expect(mod._applyTagQuickFilterForTest('tag_alpha'))
+            .resolves.toEqual(expect.objectContaining({ success: true }));
         expect(mod.state.activeTagId).toBeNull();
     });
 });
@@ -3296,13 +4380,15 @@ describe('command palette commands', () => {
         ]);
     });
 
-    it('executes search and quick view commands without persisting the active view', () => {
+    it('executes search and quick view commands without persisting the active view', async () => {
         mod._setActiveIsolationGroupId('group1');
 
         expect(mod._executeCommandPaletteCommandForTest('search-sources', { payload: { query: 'report' } })).toBe(true);
         expect(mod.state.filterQuery).toBe('report');
 
-        expect(mod._executeCommandPaletteCommandForTest('quick-view', { payload: { kind: 'issues' } })).toBe(true);
+        await expect(mod._executeCommandPaletteCommandForTest('quick-view', {
+            payload: { kind: 'issues' }
+        })).resolves.toEqual(expect.objectContaining({ success: true }));
         expect(mod.state.activeQuickViewKind).toBe('issues');
         expect(mod.state.activeTagId).toBeNull();
         expect(mod._getActiveIsolationGroupId()).toBeNull();

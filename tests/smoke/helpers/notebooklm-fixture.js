@@ -537,6 +537,22 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
                 return { notebookId, sourceCount: Array.isArray(sources) ? sources.length : 0 };
             };
 
+            window.__replaceNotebookSources = function replaceNotebookSources(nextSources) {
+                const scrollArea = document.querySelector('[data-testid="scroll-area"]');
+                if (!scrollArea) {
+                    return { success: false, sourceCount: 0 };
+                }
+                const sources = Array.isArray(nextSources) ? nextSources : initialSources;
+                hydrateSources(scrollArea, sources, Object.assign({}, initialOptions, {
+                    stagedHydration: false,
+                    labelView: false
+                }));
+                return {
+                    success: true,
+                    sourceCount: sources.length
+                };
+            };
+
             window.__getNotebookId = function () {
                 return document.title.replace(/^Notebook\\s+/, '');
             };
@@ -609,7 +625,10 @@ function renderHomeHtml() {
 </html>`;
 }
 
-async function installNotebookFixture(context) {
+async function installNotebookFixture(context, options = {}) {
+    const resolveSources = typeof options.resolveSources === 'function'
+        ? options.resolveSources
+        : null;
     const handleNotebookRoute = async (route) => {
         const request = route.request();
         const url = new URL(request.url());
@@ -638,7 +657,12 @@ async function installNotebookFixture(context) {
             : 'a';
 
         const fixtureName = url.searchParams.get('fixture');
-        const sources = fixtureName === 'malicious-icons'
+        const resolvedSources = resolveSources
+            ? await Promise.resolve(resolveSources({ fixtureName, notebookId, url }))
+            : null;
+        const sources = Array.isArray(resolvedSources)
+            ? resolvedSources
+            : fixtureName === 'malicious-icons'
             ? [
                 {
                     id: `${notebookId}-source-a`,
@@ -652,7 +676,7 @@ async function installNotebookFixture(context) {
                     token: `${notebookId}-source-b`
                 }
             ]
-            : null;
+                : null;
 
         await route.fulfill({
             status: 200,

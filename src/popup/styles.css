@@ -20,6 +20,7 @@
     --popup-text-secondary: #6e6e73;
     --popup-text-tertiary: #6e6e73;
     --popup-accent: #007aff;
+    --popup-accent-text: #0066cc;
     --popup-accent-hover: #006ee6;
     --popup-accent-active: #0062cc;
     --popup-accent-soft: rgba(0, 122, 255, 0.12);
@@ -57,6 +58,7 @@
         --popup-text-secondary: #98989d;
         --popup-text-tertiary: #b0b0b5;
         --popup-accent: #0a84ff;
+        --popup-accent-text: #64a8ff;
         --popup-accent-hover: #409cff;
         --popup-accent-active: #0066cc;
         --popup-accent-soft: rgba(10, 132, 255, 0.16);
@@ -124,7 +126,7 @@ body {
     border: 1px solid var(--popup-accent-border);
     border-radius: var(--popup-radius-pill);
     background: var(--popup-accent-soft);
-    color: var(--popup-accent);
+    color: var(--popup-accent-text);
     font-size: 12px;
     font-weight: 600;
     letter-spacing: 0;
@@ -267,7 +269,7 @@ body {
 .popup-source-view-button[aria-pressed="true"] {
     border-color: var(--popup-accent-border);
     background: var(--popup-accent-soft);
-    color: var(--popup-accent);
+    color: var(--popup-accent-text);
 }
 
 .popup-source-view-button:hover:not(:disabled) {
@@ -462,5 +464,68 @@ body {
     .popup-button:hover:not(:disabled),
     .popup-button:active:not(:disabled) {
         transform: none;
+    }
+}
+
+@media (forced-colors: active) {
+    :root {
+        --popup-page-bg: Canvas;
+        --popup-surface-bg: Canvas;
+        --popup-surface-hover: Highlight;
+        --popup-surface-active: Highlight;
+        --popup-subtle-bg: Canvas;
+        --popup-border-light: ButtonText;
+        --popup-border-medium: ButtonText;
+        --popup-text-primary: CanvasText;
+        --popup-text-secondary: CanvasText;
+        --popup-text-tertiary: CanvasText;
+        --popup-accent: Highlight;
+        --popup-accent-text: LinkText;
+        --popup-accent-hover: Highlight;
+        --popup-accent-active: Highlight;
+        --popup-accent-soft: Canvas;
+        --popup-accent-border: LinkText;
+        --popup-success: Highlight;
+        --popup-warning-bg: Canvas;
+        --popup-warning-border: ButtonText;
+        --popup-warning-text: CanvasText;
+        --popup-button-text: ButtonText;
+        --popup-focus-ring: none;
+        --popup-focus-ring-strong: none;
+        --popup-shadow-control: none;
+        --popup-shadow-action: none;
+    }
+
+    .popup-source-view-button,
+    .popup-button,
+    .popup-switch-track {
+        border-color: ButtonText;
+    }
+
+    .popup-source-view-button[aria-pressed="true"],
+    .popup-source-view-button:hover:not(:disabled),
+    .popup-button:hover:not(:disabled),
+    .popup-button:active:not(:disabled) {
+        border-color: Highlight;
+        background: Highlight;
+        color: HighlightText;
+    }
+
+    .popup-switch-input:checked + .popup-switch-track {
+        border-color: Highlight;
+        background: Highlight;
+    }
+
+    .popup-switch-track::after {
+        background: ButtonText;
+        box-shadow: none;
+    }
+
+    .popup-source-view-button:focus-visible,
+    .popup-switch-input:focus-visible + .popup-switch-track,
+    .popup-button:focus-visible {
+        outline: 2px solid Highlight;
+        outline-offset: 2px;
+        box-shadow: none;
     }
 }

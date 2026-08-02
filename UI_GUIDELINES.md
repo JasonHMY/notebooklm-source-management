@@ -83,6 +83,14 @@ Use this path only when a UI element lives outside the Shadow DOM tree, for exam
 
 If a new UI can be kept inside the Shadow DOM, keep it there.
 
+Global native-menu/dialog styling is operation-scoped. `content-native-action-coordinator.js`
+adds the `sources-plus-native-action-active` class and
+`data-nsm-native-action-active="true"` attribute only while a manager-owned
+details/rename/delete or batch-delete operation is active; every global Angular Material selector
+must also require the operation marker. Success, failure, cancellation, timeout,
+route change, and teardown all remove both markers. The manager's normal mounted
+lifetime must not restyle unrelated Gemini Notebook menus or dialogs.
+
 ### 2.4 Popup implementation
 
 The popup is a normal extension page, not part of the Shadow DOM system.
@@ -166,8 +174,12 @@ Light mode:
 - `--sp-panel-bg: #f6f7f9`
 - `--sp-text-primary: #1A1A1C`
 - `--sp-text-secondary: #6E6E73`
-- `--sp-accent: #007aff`
-- `--sp-accent-danger: #ff3b30`
+- `--sp-accent-fill: #007aff`
+- `--sp-accent-text: #0066cc`
+- `--sp-danger-fill: #ff3b30`
+- `--sp-danger-text: #c62828`
+- `--sp-accent: var(--sp-accent-fill)`
+- `--sp-accent-danger: var(--sp-danger-fill)`
 - `--sp-accent-success: #34c759`
 
 Dark mode overrides:
@@ -180,8 +192,12 @@ Dark mode overrides:
 - `--sp-panel-bg: #272c33`
 - `--sp-text-primary: #f5f5f7`
 - `--sp-text-secondary: #98989d`
-- `--sp-accent: #0a84ff`
-- `--sp-accent-danger: #ff453a`
+- `--sp-accent-fill: #0a84ff`
+- `--sp-accent-text: #64a8ff`
+- `--sp-danger-fill: #ff453a`
+- `--sp-danger-text: #ff6961`
+- `--sp-accent: var(--sp-accent-fill)`
+- `--sp-accent-danger: var(--sp-danger-fill)`
 - `--sp-accent-success: #30d158`
 
 Semantic usage:
@@ -190,12 +206,19 @@ Semantic usage:
 - Danger red: destructive actions, failed imports, delete affordances.
 - Success green: enabled group switch.
 - Secondary neutrals: passive chrome, tags, badges, helper text.
+- `*-text` tokens: foreground text/icons on panel or modal surfaces; these values
+  are contrast-tested separately from the brighter fill colors.
+- `*-fill` tokens: selected fills, switches, borders, drag indicators, and
+  destructive button backgrounds. Do not use a fill token as ordinary text.
 
 Rules:
 
 - New UI must use existing semantic tokens first.
 - If a new color is needed, add a token before using a literal value.
 - Avoid one-off colors in component rules.
+- Ordinary text must meet WCAG contrast ratio `4.5:1`; large text and non-text
+  controls/indicators must meet `3:1`. Keep the pure contrast-ratio regression
+  checks in `tests/content/content-render.test.js` aligned with token changes.
 
 ### 5.2 Border tokens
 
@@ -656,7 +679,7 @@ Canonical traits:
 
 - Same motion language as source rows
 - Heavier emphasis through weight and hierarchy, not loud color
-- Indentation driven by inline `padding-left: level * 20px`
+- Indentation driven by inline `--sp-tree-indent`: `min(level, 8) * 12px`
 - Tree line via left border on `.group-children`
 
 Group header contents:
@@ -678,7 +701,23 @@ Rules:
 
 - Group UI must feel structurally related to source rows, not like a separate product.
 - Future nested controls must not break indentation rhythm or tree-line clarity.
+- Persisted/imported trees remain compatible through 50 levels. Visual
+  indentation stops growing after level 8 so deep rows retain usable width;
+  the full ancestor breadcrumb remains in the group container and named-control
+  ARIA labels, and `data-tree-depth` retains the logical level.
+- At 240 or more logical visible sources, source rows are windowed with 20 rows
+  of overscan above and below the viewport. Aggregate presentation-only spacers
+  preserve scroll geometry; group headers and the canonical 50-level tree stay
+  intact.
+- Search counts, visible/hidden batch selection, keyboard ordering, and drag
+  placement must use the full logical projection, never the current DOM row
+  count. Focused rows, an open source-action row, and active drag source/target
+  rows remain materialized until their interaction ends.
+- Windowed rows expose their logical position and complete set size through
+  `aria-posinset` and `aria-setsize`. Reconciliation must reuse stable source
+  keys and scrolling may schedule at most one render per animation frame.
 - The four precise-order buttons are omitted in batch mode. In filtered/search/isolation views they still operate on the canonical full tree, and their status reports canonical position rather than the visible subset.
+- At manager container widths of 320px or less, the group header wraps while its title keeps at least `6ch` of inline space and may use the existing two-line allowance. The count badge, precise-order cluster, add-subfolder, isolate, edit, and delete actions remain present and keyboard reachable; they may flow onto another line instead of collapsing the title. This breakpoint follows the manager container, not the browser viewport, so it also covers side panels under 200%/400% zoom.
 - New folders and subfolders enter inline naming immediately. A non-empty name commits one save, while Escape or an empty name cancels the temporary folder without creating an undo step. A rows patch must capture and restore the pending draft/editor, and persistence must omit the temporary folder and its parent/root edge until the name is confirmed. While naming, render must force the pending folder and ancestor path through search/tag/Quick View/isolation filters and virtual collapse; confirmation clears those view constraints and expands any stored-collapsed ancestors so the committed folder and focus target remain visible, while cancellation preserves the user's prior view.
 - Group containers are `listitem`s and `.group-children` is the controlled nested `list`; collapse state must update both visual rotation and the accessibility attributes documented in §16.
 
@@ -864,11 +903,30 @@ Settings preferences:
 - Persistent on/off settings use `.sp-toggle-switch` (input gets `sp-group-toggle-checkbox` + the settings-specific class, wrapped in `<label class="sp-toggle-switch">` with a `.sp-toggle-slider`), not native checkboxes — consistent with §9.2. A switch inside a preference row is right-aligned via `.sp-settings-preference-row > .sp-toggle-switch { justify-self: end }`.
 - Group long button clusters into titled `.sp-settings-subsection`s (e.g. the developer section splits Logs and Test tools), matching the backup section's export/import/history grouping.
 - Keep preference copy short and functional; do not add explanatory cards inside settings sections.
+- Export, copy, language, history, Import Backup, and import-file feedback shown
+  while Settings is open belongs in modal-owned `role="status"`/`aria-live`
+  regions (`.sp-settings-action-status`, `.sp-history-action-status`,
+  `.sp-import-backup-status`) rather than a toast hidden behind the frosted
+  backdrop. Use polite live updates for success and assertive updates for errors.
+- Retryable error status remains visible until the operation succeeds or the user
+  closes the modal. If a settings action requires rebuilding the modal, capture
+  and restore the focused control key, expanded sections, and content `scrollTop`.
 
 Command palette:
 
 - `.sp-command-palette-modal` uses the same modal shell and focus trap.
-- It is opened from the Settings preferences section; command rows also expose a compact shortcut control.
+- The search input is a standard `role="combobox"` with `aria-expanded`,
+  `aria-controls`, `aria-activedescendant`, and `aria-autocomplete="list"`.
+  Its controlled container is `role="listbox"` and contains only pure
+  `role="option"` command rows.
+- It is opened from the Settings preferences section. A single "Edit shortcut"
+  button sits outside the listbox and operates on the active option; shortcut
+  recording opens a separate small modal dialog rather than placing an editable
+  control inside an option.
+- Pointer movement updates only the previously active and newly active options,
+  including `aria-selected`; it must not rebuild the whole result list. Closing
+  shortcut recording restores focus to the originating shortcut button, or the
+  combobox when that button is no longer available.
 - No command ships with a default shortcut. Users may assign their own modifier-based shortcuts, and those shortcuts are stored in global preferences.
 - Repeating a user-defined shortcut should reverse reversible command state where possible: collapse search, clear an active quick view, or close the corresponding modal.
 - Commands should bridge to existing manager actions instead of duplicating business logic.
@@ -1085,7 +1143,7 @@ Required rules:
 - The source list and nested folder contents use owned `list` / `listitem` relationships. Root empty states and the batch surface use `listitem` wrappers; the batch commands remain a nested toolbar. The Ungrouped bin is one root list item with its own labeled inner list. Do not claim an ARIA tree unless the complete tree keyboard model is implemented.
 - Folder carets synchronize `aria-expanded` and `aria-controls`. Collapsed child lists use both `aria-hidden="true"` and `inert`; expanding removes both blocks before focus can enter the descendants.
 - Folder switches have an explicit `:focus-visible` ring, and source/group toggle labels describe the affected item rather than repeating a generic control name.
-- Related control clusters and dynamic regions carry landmark/grouping semantics: the quick-view rail is `role="group"` (`ui_quick_view_rail_label`), the batch surface is a root `listitem` containing a `role="toolbar"` (`ui_batch_actions_region`), and the panel resizer is a focusable `role="separator"` (`aria-orientation="horizontal"`, `ui_panel_resizer_label`, `tabindex=0`) operable with ArrowUp/ArrowDown (steps height, clamped to the same per-view min as drag, persisted). The toggle buttons that flip state (batch mode, quick-view, isolate) expose `aria-pressed`.
+- Related control clusters and dynamic regions carry landmark/grouping semantics: the quick-view rail is `role="group"` (`ui_quick_view_rail_label`), the batch surface is a root `listitem` containing a `role="toolbar"` (`ui_batch_actions_region`), and the panel resizer is a focusable `role="separator"` (`aria-orientation="horizontal"`, `ui_panel_resizer_label`, `tabindex=0`) with dynamic `aria-valuemin`, `aria-valuemax`, `aria-valuenow`, and `aria-valuetext`. ArrowUp/ArrowDown steps height, clamps to the same per-view bounds as drag, updates those values, and persists the result. The toggle buttons that flip state (batch mode, quick-view, isolate) expose `aria-pressed`.
 - Precise tree ordering uses the persistent `#sp-tree-order-status.sp-sr-only` polite/atomic live region. Success text contains only direction and canonical position `N/M`; it must never include private source titles, group names, tags, or URLs, and no-op commands must not announce success.
 - After a successful precise-order render, focus returns by stable source key or group id + direction. If that control becomes disabled or lands inside a collapsed folder, use another enabled control for the same item, then the visible destination/parent folder caret as the fallback. Do not add a second Enter key handler: native buttons already translate Enter into one click.
 - Folder precise-order controls use an absolutely positioned hover/focus surface so revealing them does not change row height or drag geometry. Keep the surface hidden and non-interactive while `#sources-list.sp-drag-active` is present.
@@ -1094,6 +1152,18 @@ Required rules:
 - Loading states must block interaction when the action cannot succeed.
 - Empty, loading, error, and disabled states should exist for any non-trivial flow.
 - Saving, failed, stale, and recovery-available states are persistent in the manager surface. Retry, Refresh, Restore, and Dismiss stay adjacent to the state they resolve; short-lived success may collapse automatically.
+- `forced-colors: active` keeps the command combobox/options, shortcut control,
+  resizer, active-option outline, and semantic foregrounds mapped to system
+  colors. Do not disable forced-color adjustment for interactive controls unless
+  an equivalent system-color treatment is supplied.
+- `prefers-reduced-motion: reduce` collapses duration tokens and removes
+  non-essential transitions/animations while preserving visible state changes,
+  focus, and loading identification.
+- At 240px and 320px panel widths, toolbars and batch actions wrap without
+  shrinking controls below an operable size; modal content may scroll instead of
+  clipping actions. At 200% and 400% browser zoom, the same rule applies: no
+  essential control or status may require horizontal scrolling, overlap another
+  action, or become hover-only.
 
 Recommended rules:
 
@@ -1234,6 +1304,8 @@ Before merging a UI change, check:
 - Does it define hover, active, focus, disabled, and loading states when applicable?
 - For tree ordering, does disabled state come from `resolveDirectionalTarget`, does one activation cause one mutation/save/render, and does focus survive render?
 - Does it work in both light and dark mode?
+- Do semantic foregrounds pass 4.5:1 text contrast and controls/indicators pass 3:1?
+- Does it remain operable in forced colors, reduced motion, 240/320px panels, and 200%/400% zoom?
 - Does it keep toolbar, row, and modal density consistent with existing UI?
 - Does it use i18n strings?
 - Does it stay inside the documented z-index system?
@@ -1254,11 +1326,12 @@ This section is not mandatory for feature work, but it is worth doing over time.
 Use this map when updating UI. It lists UI / style / render / modal / toast modules only — pure state, persistence, message-routing, and logic modules live in `docs/PROJECT_DIRECTORY.md`.
 
 - `src/content/content-style-text.js`: content-panel tokens, components, motion, overlays (Shadow-DOM `NSM_CONTENT_STYLE_TEXT` + global-overlay `NSM_GLOBAL_OVERLAY_STYLE_TEXT`)
-- `src/content/styles.css`: native Gemini Notebook DOM overrides — injected via manifest `content_scripts[0].css`, scoped under `.sources-plus-manager-active`, uses `!important` to hide native source-list containers and restyle native Material menus (the third CSS mechanism; lives in the page, not the Shadow DOM)
+- `src/content/styles.css`: native Gemini Notebook DOM overrides plus the `#sources-plus-root` inline-size container context — injected via manifest `content_scripts[0].css`, scoped under `.sources-plus-manager-active` for source-list hiding and under `body.sources-plus-native-action-active[data-nsm-native-action-active="true"]` for manager-owned native Material menu styling (the third CSS mechanism; lives in the page, not the Shadow DOM)
 - `src/content/content-template.js`: shell structure and persistent tree-order live region
 - `src/content/content-panel-dom.js`: source panel lookup, renderability, lifecycle scheduling helpers
 - `src/content/content-source-actions.js`: source action menu state, precise-order submenu dispatch, menu models, native menu bridge
 - `src/content/content-source-action-menu.js`: source action menu item generation, resolver-derived precise-order children, and failed-source menu variants
+- `src/content/content-native-action-coordinator.js`: exclusive native-action lifecycle and operation-scoped host marker ownership
 - `src/content/content-tags.js`: tag normalization, serialization, CRUD helpers
 - `src/content/content-state-reconcile.js`: persisted source and tag reconciliation
 - `src/content/content-persistence.js`: state load/save, schema normalization, lifecycle persistence
@@ -1266,7 +1339,7 @@ Use this map when updating UI. It lists UI / style / render / modal / toast modu
 - `src/content/content-modal-move.js`: move-to-folder modal — flattened group-tree picker, executes move of current/batch sources
 - `src/content/content-modal-tag.js`: tag-management + batch-tag modals; reusable tag editor + tag color control (preset swatches + hex input)
 - `src/content/content-modal-tag-filter.js`: quick-view "filter by tag" modal (single-select tag chips)
-- `src/content/content-modal-command-palette.js`: command-palette modal (search, keyboard nav, in-place shortcut rebinding)
+- `src/content/content-modal-command-palette.js`: standard combobox/listbox command palette, keyboard navigation, external shortcut action, and independent shortcut-recording dialog
 - `src/content/content-modal-settings.js`: settings modal + quick-view visibility sub-modal + developer settings panel
 - `src/content/content-modal-welcome.js`: first-run welcome modal; exports the feature-row builder reused by What's New + Settings
 - `src/content/content-modal-whats-new.js`: post-upgrade What's New modal (reuses welcome feature rows, marks version seen)

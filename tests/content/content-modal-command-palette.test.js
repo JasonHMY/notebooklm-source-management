@@ -14,6 +14,12 @@ function createElement(tag, attrs = {}, children = []) {
         addEventListener(event, handler) {
             (this.listeners[event] || (this.listeners[event] = [])).push(handler);
         },
+        setAttribute(name, value) {
+            this.attrs[name] = String(value);
+        },
+        getAttribute(name) {
+            return this.attrs[name] ?? null;
+        },
         appendChild(child) {
             this.children.push(child);
             this.childNodes.push(child);
@@ -23,8 +29,23 @@ function createElement(tag, attrs = {}, children = []) {
             this.children = this.children.filter((c) => c !== child);
             this.childNodes = this.childNodes.filter((c) => c !== child);
         },
-        classList: { add: jest.fn() },
+        classList: {
+            add(...classNames) {
+                const classes = new Set(String(node.className || '').split(/\s+/).filter(Boolean));
+                classNames.forEach((className) => classes.add(className));
+                node.className = Array.from(classes).join(' ');
+            },
+            toggle(className, force) {
+                const classes = new Set(String(node.className || '').split(/\s+/).filter(Boolean));
+                const shouldAdd = force === undefined ? !classes.has(className) : Boolean(force);
+                if (shouldAdd) classes.add(className);
+                else classes.delete(className);
+                node.className = Array.from(classes).join(' ');
+                return shouldAdd;
+            }
+        },
         focus: jest.fn(),
+        scrollIntoView: jest.fn(),
         querySelector(selector) {
             return collectDescendants(this).find((node) => matchesSelector(node, selector)) || null;
         },
@@ -124,7 +145,11 @@ describe('content modal command palette', () => {
         helper.renderCommandPaletteModal();
 
         const emptyState = deps.getShadowRoot().querySelector('.sp-command-palette-empty');
+        const list = deps.getShadowRoot().querySelector('.sp-command-palette-list');
         expect(emptyState).toBeTruthy();
+        expect(emptyState.parentNode).not.toBe(list);
+        expect(emptyState.hidden).toBe(false);
+        expect(list.childNodes).toHaveLength(0);
         expect(deps.getMessage).toHaveBeenCalledWith('ui_command_palette_empty');
     });
 
@@ -141,6 +166,29 @@ describe('content modal command palette', () => {
         expect(items).toHaveLength(2);
         expect(items[0].className).toContain('is-active');
         expect(items[1].className).not.toContain('is-active');
+    });
+
+    it('uses a standard combobox/listbox relationship with pure options', () => {
+        const commands = [{ id: 'a', action: 'go-a', title: 'A' }];
+        const deps = createDeps({ getCommandPaletteCommands: jest.fn(() => commands) });
+        const helper = createContentModalCommandPalette(deps);
+        helper.renderCommandPaletteModal();
+
+        const input = deps.getShadowRoot().querySelector('.sp-command-palette-input');
+        const list = deps.getShadowRoot().querySelector('.sp-command-palette-list');
+        const item = deps.getShadowRoot().querySelector('.sp-command-palette-item');
+
+        expect(input.attrs.role).toBe('combobox');
+        expect(input.attrs['aria-autocomplete']).toBe('list');
+        expect(input.attrs['aria-expanded']).toBe('true');
+        expect(input.attrs['aria-controls']).toBe('sp-command-palette-list');
+        expect(input.attrs['aria-activedescendant']).toBe(item.id);
+        expect(list.id).toBe('sp-command-palette-list');
+        expect(list.attrs.role).toBe('listbox');
+        expect(list.childNodes.every((child) => child.attrs.role === 'option')).toBe(true);
+        expect(item.attrs.role).toBe('option');
+        expect(item.querySelector('button')).toBeNull();
+        expect(deps.getShadowRoot().querySelector('.sp-command-shortcut-btn').parentNode).not.toBe(item);
     });
 
     it('clicking a non-disabled command executes it and closes the palette', () => {
@@ -236,22 +284,36 @@ describe('content modal command palette', () => {
         expect(calls).toContain('app');
     });
 
-    it('mousemove on an item updates the active index to that row', () => {
+    it('pointerenter updates the active row without rebuilding the list', () => {
         const commands = [
             { id: 'a', action: 'a', title: 'A' },
-            { id: 'b', action: 'b', title: 'B' }
+            { id: 'b', action: 'b', title: 'B' },
+            { id: 'c', action: 'c', title: 'C' }
         ];
         const deps = createDeps({ getCommandPaletteCommands: jest.fn(() => commands) });
         const helper = createContentModalCommandPalette(deps);
         helper.renderCommandPaletteModal();
 
         const items = deps.getShadowRoot().querySelectorAll('.sp-command-palette-item');
-        items[1].listeners.mousemove[0]();
+        const itemCallsBefore = deps.el.mock.calls.filter(([tag, attrs]) => (
+            tag === 'div' && String(attrs?.className || '').includes('sp-command-palette-item')
+        )).length;
+        items.forEach((item) => {
+            item.setAttribute = jest.fn(item.setAttribute);
+        });
+        items[2].listeners.pointerenter[0]();
         const refreshed = deps.getShadowRoot().querySelectorAll('.sp-command-palette-item');
-        expect(refreshed[1].className).toContain('is-active');
+        expect(refreshed[2].className).toContain('is-active');
+        expect(refreshed[0].className).not.toContain('is-active');
+        expect(refreshed[1].setAttribute).not.toHaveBeenCalled();
+        expect(deps.getShadowRoot().querySelector('.sp-command-palette-input').attrs['aria-activedescendant'])
+            .toBe(refreshed[2].id);
+        expect(deps.el.mock.calls.filter(([tag, attrs]) => (
+            tag === 'div' && String(attrs?.className || '').includes('sp-command-palette-item')
+        ))).toHaveLength(itemCallsBefore);
     });
 
-    it('clicking the shortcut button starts shortcut capture mode', () => {
+    it('opens shortcut recording in a separate small dialog outside the palette', () => {
         const commands = [{ id: 'a', action: 'a', title: 'A' }];
         const deps = createDeps({ getCommandPaletteCommands: jest.fn(() => commands) });
         const helper = createContentModalCommandPalette(deps);
@@ -262,11 +324,19 @@ describe('content modal command palette', () => {
         shortcutBtn.listeners.click[0](evt);
 
         expect(evt.preventDefault).toHaveBeenCalled();
-        const refreshed = deps.getShadowRoot().querySelector('.sp-command-shortcut-btn');
-        expect(refreshed.className).toContain('is-recording');
+        const palette = deps.getShadowRoot().querySelector('.sp-command-palette-modal');
+        const shortcutDialog = deps.getShadowRoot().querySelector('.sp-command-shortcut-dialog');
+        const captureSurface = shortcutDialog.querySelector('.sp-command-shortcut-capture');
+        expect(shortcutDialog).toBeTruthy();
+        expect(shortcutDialog.attrs.role).toBe('dialog');
+        expect(shortcutDialog.attrs['aria-modal']).toBe('true');
+        expect(shortcutDialog.parentNode).toBe(deps.getShadowRoot());
+        expect(shortcutDialog.parentNode).not.toBe(palette);
+        expect(deps.bindModalKeyboardNavigation.mock.calls[1][1].initialFocusTarget()).toBe(captureSurface);
+        expect(deps.bindModalKeyboardNavigation.mock.results[1].value.focusInitial).toHaveBeenCalled();
     });
 
-    it('in capture mode, a keypress writes the resolved combo via setCommandShortcut', async () => {
+    it('records a shortcut in the dialog and restores focus to the Edit shortcut button', async () => {
         const commands = [{ id: 'a', action: 'a', title: 'A' }];
         const deps = createDeps({
             getCommandPaletteCommands: jest.fn(() => commands),
@@ -278,14 +348,16 @@ describe('content modal command palette', () => {
         const shortcutBtn = deps.getShadowRoot().querySelector('.sp-command-shortcut-btn');
         shortcutBtn.listeners.click[0]({ preventDefault: jest.fn(), stopPropagation: jest.fn() });
 
-        const modal = deps.getShadowRoot().querySelector('.sp-command-palette-modal');
-        modal.listeners.keydown[0](createKeyEvent('K', { ctrlKey: true }));
+        const shortcutDialog = deps.getShadowRoot().querySelector('.sp-command-shortcut-dialog');
+        shortcutDialog.listeners.keydown[0](createKeyEvent('K', { ctrlKey: true }));
 
-        await Promise.resolve();
+        await new Promise((resolve) => setImmediate(resolve));
         expect(deps.setCommandShortcut).toHaveBeenCalledWith('a', 'Ctrl+K');
+        expect(deps.getShadowRoot().querySelector('.sp-command-shortcut-dialog')).toBeNull();
+        expect(shortcutBtn.focus).toHaveBeenCalled();
     });
 
-    it('in capture mode, Backspace clears the shortcut by passing an empty string', async () => {
+    it('Backspace in the shortcut dialog clears the shortcut', async () => {
         const commands = [{ id: 'a', action: 'a', title: 'A' }];
         const deps = createDeps({
             getCommandPaletteCommands: jest.fn(() => commands)
@@ -296,14 +368,14 @@ describe('content modal command palette', () => {
         const shortcutBtn = deps.getShadowRoot().querySelector('.sp-command-shortcut-btn');
         shortcutBtn.listeners.click[0]({ preventDefault: jest.fn(), stopPropagation: jest.fn() });
 
-        const modal = deps.getShadowRoot().querySelector('.sp-command-palette-modal');
-        modal.listeners.keydown[0](createKeyEvent('Backspace'));
+        const shortcutDialog = deps.getShadowRoot().querySelector('.sp-command-shortcut-dialog');
+        shortcutDialog.listeners.keydown[0](createKeyEvent('Backspace'));
 
-        await Promise.resolve();
+        await new Promise((resolve) => setImmediate(resolve));
         expect(deps.setCommandShortcut).toHaveBeenCalledWith('a', '');
     });
 
-    it('in capture mode, Escape cancels capture without writing', () => {
+    it('Escape cancels the shortcut dialog without writing and restores focus', () => {
         const commands = [{ id: 'a', action: 'a', title: 'A' }];
         const deps = createDeps({ getCommandPaletteCommands: jest.fn(() => commands) });
         const helper = createContentModalCommandPalette(deps);
@@ -312,15 +384,32 @@ describe('content modal command palette', () => {
         const shortcutBtn = deps.getShadowRoot().querySelector('.sp-command-shortcut-btn');
         shortcutBtn.listeners.click[0]({ preventDefault: jest.fn(), stopPropagation: jest.fn() });
 
-        const modal = deps.getShadowRoot().querySelector('.sp-command-palette-modal');
-        modal.listeners.keydown[0](createKeyEvent('Escape'));
+        const shortcutDialog = deps.getShadowRoot().querySelector('.sp-command-shortcut-dialog');
+        shortcutDialog.listeners.keydown[0](createKeyEvent('Escape'));
 
         expect(deps.setCommandShortcut).not.toHaveBeenCalled();
-        const refreshed = deps.getShadowRoot().querySelector('.sp-command-shortcut-btn');
-        expect(refreshed.className).not.toContain('is-recording');
+        expect(deps.getShadowRoot().querySelector('.sp-command-shortcut-dialog')).toBeNull();
+        expect(shortcutBtn.focus).toHaveBeenCalled();
     });
 
-    it('shows a toast when setCommandShortcut rejects', async () => {
+    it('restores focus to the palette search when the original shortcut button is stale', () => {
+        const commands = [{ id: 'a', action: 'a', title: 'A' }];
+        const deps = createDeps({ getCommandPaletteCommands: jest.fn(() => commands) });
+        const helper = createContentModalCommandPalette(deps);
+        helper.renderCommandPaletteModal();
+
+        const input = deps.getShadowRoot().querySelector('.sp-command-palette-input');
+        const shortcutBtn = deps.getShadowRoot().querySelector('.sp-command-shortcut-btn');
+        shortcutBtn.listeners.click[0]({ preventDefault: jest.fn(), stopPropagation: jest.fn() });
+        shortcutBtn.isConnected = false;
+
+        const shortcutDialog = deps.getShadowRoot().querySelector('.sp-command-shortcut-dialog');
+        shortcutDialog.listeners.keydown[0](createKeyEvent('Escape'));
+
+        expect(input.focus).toHaveBeenCalled();
+    });
+
+    it('keeps the shortcut dialog open with an inline error when saving fails', async () => {
         const commands = [{ id: 'a', action: 'a', title: 'A' }];
         const deps = createDeps({
             getCommandPaletteCommands: jest.fn(() => commands),
@@ -333,11 +422,74 @@ describe('content modal command palette', () => {
         const shortcutBtn = deps.getShadowRoot().querySelector('.sp-command-shortcut-btn');
         shortcutBtn.listeners.click[0]({ preventDefault: jest.fn(), stopPropagation: jest.fn() });
 
-        const modal = deps.getShadowRoot().querySelector('.sp-command-palette-modal');
-        modal.listeners.keydown[0](createKeyEvent('Z', { altKey: true }));
+        const shortcutDialog = deps.getShadowRoot().querySelector('.sp-command-shortcut-dialog');
+        shortcutDialog.listeners.keydown[0](createKeyEvent('Z', { altKey: true }));
 
         await new Promise((resolve) => setImmediate(resolve));
-        expect(deps.showToast).toHaveBeenCalledWith('ui_command_shortcut_save_failed', { variant: 'error' });
+        const retainedDialog = deps.getShadowRoot().querySelector('.sp-command-shortcut-dialog');
+        const dialogStatus = retainedDialog.querySelector('.sp-command-shortcut-status');
+        const captureSurface = retainedDialog.querySelector('.sp-command-shortcut-capture');
+        expect(retainedDialog).toBeTruthy();
+        expect(dialogStatus.hidden).toBe(false);
+        expect(dialogStatus.textContent).toBe('ui_command_shortcut_save_failed');
+        expect(dialogStatus.attrs.role).toBe('alert');
+        expect(dialogStatus.attrs['aria-live']).toBe('assertive');
+        expect(captureSurface.focus).toHaveBeenCalled();
+        expect(deps.showToast).not.toHaveBeenCalled();
+
+        retainedDialog.querySelector('.sp-secondary-btn').listeners.click[0]();
+        expect(deps.getShadowRoot().querySelector('.sp-command-shortcut-dialog')).toBeNull();
+        expect(shortcutBtn.focus).toHaveBeenCalled();
+    });
+
+    it('waits for async command acknowledgement and retains the palette on failure', async () => {
+        const commands = [{ id: 'a', action: 'go-a', title: 'A' }];
+        const deps = createDeps({
+            getCommandPaletteCommands: jest.fn(() => commands),
+            executeCommandPaletteCommand: jest.fn(() => Promise.resolve({
+                success: false,
+                errorMessageKey: 'popup_source_view_switch_failed'
+            }))
+        });
+        const helper = createContentModalCommandPalette(deps);
+        helper.renderCommandPaletteModal();
+
+        const item = deps.getShadowRoot().querySelector('.sp-command-palette-item');
+        item.listeners.click[0]();
+        expect(deps.getShadowRoot().querySelector('.sp-command-palette-modal').attrs['aria-busy']).toBe('true');
+
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(deps.closeManagedModal).not.toHaveBeenCalled();
+        const status = deps.getShadowRoot().querySelector('.sp-command-palette-status');
+        expect(status.hidden).toBe(false);
+        expect(status.textContent).toBe('popup_source_view_switch_failed');
+        expect(status.className).toContain('is-error');
+        expect(status.attrs.role).toBe('alert');
+        expect(status.attrs['aria-live']).toBe('assertive');
+    });
+
+    it('closes only after an async command explicitly succeeds', async () => {
+        const commands = [{ id: 'a', action: 'go-a', title: 'A' }];
+        const deps = createDeps({
+            getCommandPaletteCommands: jest.fn(() => commands),
+            executeCommandPaletteCommand: jest.fn(() => Promise.resolve({ success: true }))
+        });
+        const helper = createContentModalCommandPalette(deps);
+        helper.renderCommandPaletteModal();
+
+        deps.getShadowRoot().querySelector('.sp-command-palette-item').listeners.click[0]();
+        expect(deps.closeManagedModal).not.toHaveBeenCalled();
+
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(deps.closeManagedModal).toHaveBeenCalledWith(
+            'sp-command-palette-modal',
+            'sp-command-palette-backdrop',
+            { immediate: true }
+        );
     });
 
     it('backdrop click closes the modal', () => {

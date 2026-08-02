@@ -44,6 +44,17 @@ describe('content search semantics', () => {
         });
     });
 
+    it('reuses parsed criteria objects for repeated render predicates', () => {
+        const search = createModule();
+        const parsed = search.parseQuery('alpha tag:paper');
+
+        expect(search.parseQuery('alpha tag:paper')).toBe(parsed);
+        expect(search.matchesSource(
+            { key: 'source-1', title: 'Alpha' },
+            parsed
+        )).toBe(true);
+    });
+
     it('normalizes case, deduplicates terms and applies AND matching', () => {
         const search = createModule();
         const source = {
@@ -75,6 +86,56 @@ describe('content search semantics', () => {
             tagLabels: ['Research Paper', 'Research Notes'],
             folderLabels: ['Chapter One', 'Research Archive']
         });
+    });
+
+    it('refreshes cached source text when titles, tags, or folder paths change', () => {
+        const source = { key: 'source-cache', title: 'Original title' };
+        const group = { id: 'folder-cache', title: 'Original folder' };
+        const tag = { id: 'tag-cache', label: 'Original tag' };
+        const search = createContentSearchSemantics({
+            getGroupsById: () => new Map([[group.id, group]]),
+            getTagsById: () => new Map([[tag.id, tag]]),
+            getParentMap: () => new Map([[source.key, group.id]]),
+            getSourceTagIds: () => [tag.id]
+        });
+
+        expect(search.matchesSource(source, 'original')).toBe(true);
+
+        source.title = 'Updated title';
+        group.title = 'Updated folder';
+        tag.label = 'Updated tag';
+
+        expect(search.matchesSource(source, 'original')).toBe(false);
+        expect(search.matchesSource(source, 'updated')).toBe(true);
+    });
+
+    it('primes source contexts by cohort and refreshes them after explicit invalidation', () => {
+        const source = { key: 'source-index', title: 'Indexed title' };
+        const group = { id: 'folder-index', title: 'Indexed folder' };
+        const tag = { id: 'tag-index', label: 'Indexed tag' };
+        const sourcesByKey = new Map([[source.key, source]]);
+        const getSourceTagIds = jest.fn(() => [tag.id]);
+        const search = createContentSearchSemantics({
+            getGroupsById: () => new Map([[group.id, group]]),
+            getTagsById: () => new Map([[tag.id, tag]]),
+            getParentMap: () => new Map([[source.key, group.id]]),
+            getSourceTagIds
+        });
+
+        expect(search.ensureSourceContextIndex(sourcesByKey)).toBe(true);
+        const primedReadCount = getSourceTagIds.mock.calls.length;
+        expect(search.ensureSourceContextIndex(sourcesByKey)).toBe(false);
+        expect(search.matchesSource(source, 'indexed')).toBe(true);
+        expect(getSourceTagIds).toHaveBeenCalledTimes(primedReadCount);
+
+        source.title = 'Refreshed title';
+        group.title = 'Refreshed folder';
+        tag.label = 'Refreshed tag';
+        search.invalidateSourceContextIndex();
+
+        expect(search.ensureSourceContextIndex(sourcesByKey)).toBe(true);
+        expect(search.matchesSource(source, 'indexed')).toBe(false);
+        expect(search.matchesSource(source, 'refreshed')).toBe(true);
     });
 
     it('keeps tag and folder scopes limited to their corresponding fields', () => {

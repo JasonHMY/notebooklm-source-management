@@ -68,11 +68,11 @@
     "popup_body_notebook_home": {
         "message": "你当前在 Gemini Notebook 中，但还没有进入具体笔记本。打开任意笔记本后，再使用这个启动器即可。"
     },
-    "popup_title_notebook_home_new_tab": {
-        "message": "在新标签页中打开 Gemini Notebook"
+    "popup_title_notebook_home_ready": {
+        "message": "Gemini Notebook 首页已就绪"
     },
-    "popup_body_notebook_home_new_tab": {
-        "message": "你当前已经在 Gemini Notebook 首页。这个启动器会再打开一个新的 Gemini Notebook 标签页，确保点击后有明确反馈。"
+    "popup_body_notebook_home_reuse": {
+        "message": "请直接在当前标签页选择或新建笔记本，启动器不会重复打开另一个首页。"
     },
     "popup_title_switch_notebook": {
         "message": "切换到已打开的 Gemini Notebook 笔记本"
@@ -110,8 +110,8 @@
     "popup_cta_go_to_open_notebook": {
         "message": "前往已打开的笔记本"
     },
-    "popup_cta_open_notebooklm_new_tab": {
-        "message": "在新标签页中打开 Gemini Notebook"
+    "popup_cta_continue_current_tab": {
+        "message": "继续使用当前标签页"
     },
     "popup_cta_refresh_notebook": {
         "message": "刷新当前笔记本"
@@ -615,7 +615,31 @@
         "message": "更新介绍"
     },
     "ui_whats_new_subtitle": {
-        "message": "快速了解这次的主要更新。"
+        "message": "更安全地恢复、执行原生操作和批量工作，也更适合大型来源库。"
+    },
+    "ui_whats_new_transaction_title": {
+        "message": "事务化恢复"
+    },
+    "ui_whats_new_transaction_body": {
+        "message": "恢复点、历史恢复、导入备份和来源修复现在会以原子事务保存，并识别过期的笔记本上下文；持久化未确认时，界面会回滚到操作前状态。"
+    },
+    "ui_whats_new_native_safety_title": {
+        "message": "更安全的原生来源操作"
+    },
+    "ui_whats_new_native_safety_body": {
+        "message": "重命名和删除现在串行执行，每次原生点击前都会重新核对来源与对话框；只有完整来源清单证明目标已消失后，才会报告删除成功。原生删除不可恢复，因此会同时清空撤销和重做。"
+    },
+    "ui_whats_new_batch_storage_title": {
+        "message": "可恢复的批量与存储流程"
+    },
+    "ui_whats_new_batch_storage_body": {
+        "message": "批量结果会区分成功、失败、跳过和未尝试来源，隐藏选择也可查看或清除。历史记录可以按项或范围清理，并显示存储占用；备份会从上一代已验证主状态轮换生成。"
+    },
+    "ui_whats_new_accessibility_scale_title": {
+        "message": "更易用、更快的大型来源库"
+    },
+    "ui_whats_new_accessibility_scale_body": {
+        "message": "命令搜索遵循 combobox 和 listbox 无障碍规范，快捷键使用独立对话框编辑；文字对比度、分隔条、窄面板、深层文件夹、搜索与大列表渲染也更稳健。"
     },
     "ui_whats_new_drag_title": {
         "message": "更顺滑可靠的避让拖拽(Beta)"
@@ -747,6 +771,55 @@
     },
     "ui_history_restore_failed": {
         "message": "无法恢复该版本"
+    },
+    "ui_history_clear_automatic": {
+        "message": "清理自动历史"
+    },
+    "ui_history_clear_all": {
+        "message": "清空全部历史"
+    },
+    "ui_history_storage_summary": {
+        "message": "存储空间：$1 · 历史预计可释放：$2",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" }
+        }
+    },
+    "ui_history_delete_entry": {
+        "message": "删除历史记录"
+    },
+    "ui_history_delete_success": {
+        "message": "已删除 $1 条历史记录",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_history_delete_failed": {
+        "message": "无法删除该历史记录"
+    },
+    "ui_history_clear_automatic_confirm": {
+        "message": "确定清理全部自动历史吗？手动恢复点会保留。"
+    },
+    "ui_history_clear_automatic_success": {
+        "message": "已清理 $1 条自动历史记录",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_history_clear_automatic_failed": {
+        "message": "无法清理自动历史"
+    },
+    "ui_history_clear_all_confirm": {
+        "message": "确定清空全部版本历史（包括手动恢复点）吗？此操作无法撤销。"
+    },
+    "ui_history_clear_all_success": {
+        "message": "已清空 $1 条历史记录",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_history_clear_all_failed": {
+        "message": "无法清空版本历史"
     },
     "ui_diagnostics_notebook_id": {
         "message": "Notebook"
@@ -1053,6 +1126,9 @@
     "ui_save_status_refresh": {
         "message": "刷新"
     },
+    "ui_save_status_manage_storage": {
+        "message": "管理存储空间"
+    },
     "ui_recovery_restore": {
         "message": "恢复"
     },
@@ -1099,6 +1175,9 @@
     },
     "ui_tag_create_duplicate": {
         "message": "该标签已存在。"
+    },
+    "ui_tag_not_found": {
+        "message": "该标签已不存在。"
     },
     "ui_batch_action": {
         "message": "批量操作"
@@ -1360,13 +1439,19 @@
         "message": "当前没有可用的文件夹。\n请先创建一个。"
     },
     "ui_delete_group_confirm_non_empty": {
-        "message": "文件夹 \"$1\" 不为空。\n\n删除该文件夹，并将其中内容移动到“$2”吗？",
+        "message": "文件夹“$1”包含 $3 个直接来源和 $4 个直接子文件夹。\n\n确认删除吗？直接来源会移到“$2”，直接子文件夹会提升到根目录。",
         "placeholders": {
             "1": {
                 "content": "$1"
             },
             "2": {
                 "content": "$2"
+            },
+            "3": {
+                "content": "$3"
+            },
+            "4": {
+                "content": "$4"
             }
         }
     },
@@ -1539,5 +1624,149 @@
         "placeholders": {
             "1": { "content": "$1" }
         }
+    },
+    "ui_batch_selection_breakdown": {
+        "message": "可见已选 $1 个 · 隐藏已选 $2 个",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" }
+        }
+    },
+    "ui_batch_clear_hidden_selection": {
+        "message": "清除 $1 个隐藏选择",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_batch_retry_remaining": {
+        "message": "重试剩余 $1 项",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_batch_delete_confirm_hidden": {
+        "message": "共选择 $1 个，其中 $2 个被当前视图隐藏。",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" }
+        }
+    },
+    "ui_batch_delete_result": {
+        "message": "已删除 $1 个 · 失败 $2 个 · 未尝试 $3 个",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" },
+            "3": { "content": "$3" }
+        }
+    },
+    "ui_move_folder_search_placeholder": {
+        "message": "搜索文件夹"
+    },
+    "ui_move_folder_search_label": {
+        "message": "搜索目标文件夹"
+    },
+    "ui_move_already_here": {
+        "message": "已在此处"
+    },
+    "ui_move_recent_target": {
+        "message": "最近使用"
+    },
+    "ui_native_deleted_irreversible": {
+        "message": "来源已从 Gemini Notebook 删除，无法撤销。"
+    },
+    "ui_native_deleted_local_reconcile_failed": {
+        "message": "来源已从 Gemini Notebook 删除且无法撤销，但管理器未能完成本地树对账。请刷新页面。"
+    },
+    "ui_native_selection_sync_failed": {
+        "message": "无法同步 Gemini Notebook 来源状态（$1）。",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_search_results_summary": {
+        "message": "$1 个来源 · $2 个文件夹",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" }
+        }
+    },
+    "ui_onboarding_checklist_title": {
+        "message": "首次整理检查表"
+    },
+    "ui_onboarding_step_create_folder_title": {
+        "message": "创建文件夹"
+    },
+    "ui_onboarding_step_create_folder_body": {
+        "message": "把相关来源归在一起，不会修改来源内容。"
+    },
+    "ui_onboarding_step_move_source_title": {
+        "message": "移动来源"
+    },
+    "ui_onboarding_step_move_source_body": {
+        "message": "可使用拖拽或“移动到文件夹”。"
+    },
+    "ui_onboarding_step_add_tag_title": {
+        "message": "添加 Tag"
+    },
+    "ui_onboarding_step_add_tag_body": {
+        "message": "添加可复用的标签，以便更快筛选。"
+    },
+    "ui_welcome_skip": {
+        "message": "暂时跳过"
+    },
+    "ui_settings_replay_onboarding": {
+        "message": "重新播放新手引导"
+    },
+    "ui_settings_shortcuts_guide_title": {
+        "message": "快捷键说明"
+    },
+    "ui_settings_shortcuts_guide_body": {
+        "message": "打开命令面板可查看命令，并为命令设置带修饰键的自定义快捷键。"
+    },
+    "ui_settings_import_guide_title": {
+        "message": "导入指南"
+    },
+    "ui_settings_import_guide_body": {
+        "message": "应用前请先预览导出的 JSON 备份；仍兼容最多 50 层文件夹的旧备份。"
+    },
+    "ui_import_backup_title": {
+        "message": "待处理的导入备份"
+    },
+    "ui_import_backup_created_unknown": {
+        "message": "创建时间不可用"
+    },
+    "ui_import_backup_created_at": {
+        "message": "创建于 $1",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_import_backup_counts": {
+        "message": "$1 个来源 · $2 个文件夹",
+        "placeholders": {
+            "1": { "content": "$1" },
+            "2": { "content": "$2" }
+        }
+    },
+    "ui_import_backup_restore": {
+        "message": "恢复备份"
+    },
+    "ui_import_backup_discard": {
+        "message": "丢弃备份"
+    },
+    "ui_import_backup_restore_success": {
+        "message": "已恢复导入备份"
+    },
+    "ui_import_backup_restore_failed": {
+        "message": "无法恢复导入备份"
+    },
+    "ui_import_backup_discard_confirm": {
+        "message": "确定丢弃这份导入备份吗？此操作无法撤销。"
+    },
+    "ui_import_backup_discard_success": {
+        "message": "已丢弃导入备份"
+    },
+    "ui_import_backup_discard_failed": {
+        "message": "无法丢弃导入备份"
     }
 }

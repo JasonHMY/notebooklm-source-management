@@ -38,8 +38,12 @@
 - **空状态提供准确诊断与恢复入口 (Make Empty States Contextual and Actionable)**: **影响**: 真正没有来源、搜索无匹配、筛选无匹配和隔离文件夹无内容现在显示不同说明，并分别提供 Clear search、Clear filters 或 Show all；退出隔离的组合清除操作会同步恢复 Gemini Notebook 原生来源启用状态，不再把所有情况误报为筛选无结果或留下界面与原生状态不一致。
 - **核心树与窄面板无障碍改进 (Improve Core Tree Accessibility and Narrow-Panel Layout)**: **影响**: 来源与嵌套文件夹使用 list/listitem 关系，重复控件名称带来源或文件夹上下文，折叠内容从 Tab 和辅助技术路径中移除，标签状态与 switch focus 更清晰；工具栏和批量栏在窄宽度及长译文下可换行，浅色次要文字和自定义标签文字保持可读。
 - **设置、Popup 与首次引导保持操作上下文 (Preserve Context in Settings, Popup, and Onboarding)**: **影响**: 设置操作在弹窗内持续反馈并在必要重建后恢复焦点、展开区与滚动位置；导入备份会持续显示来源数量、文件夹数量与恢复/丢弃入口。Popup 优先复用当前首页或聚焦已有笔记本管理器，首次引导改为可跳过的三步检查表，Help 可重播引导并查看快捷键与导入说明。
+- **命令面板与视觉语义符合无障碍规范 (Align Command Palette and Visual Semantics with Accessibility Standards)**: **影响**: 命令搜索现在使用标准 combobox/listbox 与独立快捷键编辑弹窗，键盘焦点可准确恢复；分隔条暴露完整范围值，浅色、深色、forced-colors、reduced-motion、240/320px 窄面板及高倍缩放使用统一语义颜色和布局规则。
+- **大列表按完整逻辑状态窗口化渲染 (Window Large Lists Without Truncating Logical State)**: **影响**: 240 个及以上可见来源只挂载视口与上下各 20 行缓冲，搜索、Quick View、Tag 筛选和批量选择仍作用于完整逻辑集合；焦点、操作菜单与拖拽目标会临时保持挂载。筛选条件和派生计数复用缓存，搜索输入在 80ms 总预算内合并，每帧最多触发一次 render，并用 100/500/1000/5000 来源基准验证交互门槛。
+- **Manager 基准记录隔离世界 DOM 调用 (Record Isolated-World Manager DOM Calls)**: **影响**: 对扩展使用无可感知变化。 `benchmark:manager` 现在在临时 content-script 隔离世界中按样本记录 DOM mutation、querySelector/querySelectorAll 与 layout-read 调用，并在成功、异常或清理路径都还原被测原型；恢复失败会让基准明确失败，避免样本之间相互污染。
 
 ### Fixed
+- **窄面板文件夹标题保持可读 (Keep Folder Titles Readable in Narrow Panels)**: **影响**: 在 240px、320px 侧栏及高倍缩放下，文件夹标题不再被计数和悬浮操作挤成单字或完全消失；标题与文件夹操作会自动换行，同时保留计数、精准排序、新建子文件夹、隔离、编辑和删除入口。
 - **视图与树位置变更保持原生状态一致 (Keep Native State Consistent Across View and Tree Transitions)**: **影响**: 用户切换 Quick View、Tag、Isolation 或命令面板视图，以及移动来源、拖拽或调整文件夹位置后，Gemini Notebook 原生复选框会按操作前后有效状态差异同步；无变化和放置失败不会保存或显示成功，原生同步失败会保留可重试状态。
 - **恢复与来源盘点改为事务式 (Make Restore and Inventory Reconciliation Transactional)**: **影响**: Recovery、History、Import Backup 和 Source Repair 现在按笔记本实例串行应用，只有明确保存成功且 `sessionStorage` recovery 清理已确认才清除恢复入口；即使主状态已落盘，清理失败也会结构化失败并回滚。Recovery Restore 全程保留原始恢复目标，拒绝、空响应、过期修订、页面切换、清理失败或回滚无法确认时均保留该目标的 Restore/Refresh 入口。来源扫描会区分 complete、partial、virtualized 和 loading，单次缺失或虚拟化换窗不再丢失来源的文件夹、Tag 与启用状态。
 - **原生删除证明与复选框同步加固 (Harden Native Delete Proof and Checkbox Synchronization)**: **影响**: 删除在点击不可逆原生确认前会先验证完整 identity 清单、显式原生 totalHint 与唯一绑定目标；对话框关闭后仍需同类证据证明目标消失、总数 N→N−1 才成功。当前 DOM 行数、虚拟化卸载、等数量补位、不完整盘点或缺失/重复目标都不会误判。真实删除会清空 Undo/Redo 并明确提示不可恢复；原生复选框以每来源 last-write-wins 队列同步，快速反向操作、超时或页面切换会返回可重试的结构化失败。
