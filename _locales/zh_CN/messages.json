@@ -615,31 +615,31 @@
         "message": "更新介绍"
     },
     "ui_whats_new_subtitle": {
-        "message": "更安全地恢复、执行原生操作和批量工作，也更适合大型来源库。"
+        "message": "来源操作更准确，保存提示更安静，批量整理也更简洁。"
     },
     "ui_whats_new_transaction_title": {
-        "message": "事务化恢复"
+        "message": "更安静的保存提示"
     },
     "ui_whats_new_transaction_body": {
-        "message": "恢复点、历史恢复、导入备份和来源修复现在会以原子事务保存，并识别过期的笔记本上下文；持久化未确认时，界面会回滚到操作前状态。"
+        "message": "日常的“正在保存”和“已保存”不再占用界面；保存失败、版本过期和可恢复状态仍会显示，并保留解决问题所需的操作。"
     },
     "ui_whats_new_native_safety_title": {
-        "message": "更安全的原生来源操作"
+        "message": "操作与来源能力一致"
     },
     "ui_whats_new_native_safety_body": {
-        "message": "重命名和删除现在串行执行，每次原生点击前都会重新核对来源与对话框；只有完整来源清单证明目标已消失后，才会报告删除成功。原生删除不可恢复，因此会同时清空撤销和重做。"
+        "message": "没有原生操作菜单的来源仍可使用自定义标签、文件夹和排序，但不再显示无法执行的详情、重命名或删除。批量删除会跳过这些来源并保持选中。"
     },
     "ui_whats_new_batch_storage_title": {
-        "message": "可恢复的批量与存储流程"
+        "message": "更简洁的批量模式"
     },
     "ui_whats_new_batch_storage_body": {
-        "message": "批量结果会区分成功、失败、跳过和未尝试来源，隐藏选择也可查看或清除。历史记录可以按项或范围清理，并显示存储占用；备份会从上一代已验证主状态轮换生成。"
+        "message": "尚未选择来源时，批量栏只显示取消、选择计数和选择当前可见；选中来源后，才显示清除选择和各项批量操作。"
     },
     "ui_whats_new_accessibility_scale_title": {
-        "message": "更易用、更快的大型来源库"
+        "message": "更清楚的标签与搜索计数"
     },
     "ui_whats_new_accessibility_scale_body": {
-        "message": "命令搜索遵循 combobox 和 listbox 无障碍规范，快捷键使用独立对话框编辑；文字对比度、分隔条、窄面板、深层文件夹、搜索与大列表渲染也更稳健。"
+        "message": "“管理自定义标签”与 Gemini Notebook 原生标签区分得更清楚；搜索计数有更多显示空间，截断时可查看全文，“来源排序”也不再被识别成标签视图。"
     },
     "ui_whats_new_drag_title": {
         "message": "更顺滑可靠的避让拖拽(Beta)"

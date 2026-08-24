@@ -111,25 +111,25 @@ describe('content modal whats-new', () => {
         expect(customRow).toHaveBeenCalledTimes(4);
         expect(customRow).toHaveBeenNthCalledWith(
             1,
-            'restore',
+            'notifications_off',
             'ui_whats_new_transaction_title',
             'ui_whats_new_transaction_body'
         );
         expect(customRow).toHaveBeenNthCalledWith(
             2,
-            'verified_user',
+            'rule',
             'ui_whats_new_native_safety_title',
             'ui_whats_new_native_safety_body'
         );
         expect(customRow).toHaveBeenNthCalledWith(
             3,
-            'inventory_2',
+            'checklist',
             'ui_whats_new_batch_storage_title',
             'ui_whats_new_batch_storage_body'
         );
         expect(customRow).toHaveBeenNthCalledWith(
             4,
-            'accessibility_new',
+            'manage_search',
             'ui_whats_new_accessibility_scale_title',
             'ui_whats_new_accessibility_scale_body'
         );

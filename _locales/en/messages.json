@@ -615,31 +615,31 @@
         "message": "What's new"
     },
     "ui_whats_new_subtitle": {
-        "message": "Safer recovery, native actions, batch workflows, and large source libraries."
+        "message": "Clearer source actions, quieter status feedback, and a cleaner batch workflow."
     },
     "ui_whats_new_transaction_title": {
-        "message": "Transactional recovery"
+        "message": "Quieter save feedback"
     },
     "ui_whats_new_transaction_body": {
-        "message": "Recovery points, history restores, import backups, and Source Repair now save atomically, detect stale notebook context, and roll back the visible state when persistence is not confirmed."
+        "message": "Routine Saving and Saved messages stay out of the way. Failed, stale, and recovery states remain visible with the actions needed to resolve them."
     },
     "ui_whats_new_native_safety_title": {
-        "message": "Safer native source actions"
+        "message": "Actions that match each source"
     },
     "ui_whats_new_native_safety_body": {
-        "message": "Rename and delete run one at a time, re-check the source and dialog before each native click, and only confirm deletion after a complete inventory proves the source is gone. Native deletion clears Undo and Redo because it cannot be reversed."
+        "message": "Sources without a native action menu keep custom-tag, folder, and ordering actions without showing unavailable Details, Rename, or Delete commands. Batch delete skips them and keeps them selected."
     },
     "ui_whats_new_batch_storage_title": {
-        "message": "Recoverable batch and storage workflows"
+        "message": "Cleaner batch mode"
     },
     "ui_whats_new_batch_storage_body": {
-        "message": "Batch results distinguish succeeded, failed, skipped, and unattempted sources, while hidden selections can be reviewed or cleared. History can be pruned, storage usage is visible, and backups rotate from the last verified primary state."
+        "message": "Before a source is selected, the batch bar shows only Cancel, the selection count, and Select visible. Clear and batch actions appear once there is something to act on."
     },
     "ui_whats_new_accessibility_scale_title": {
-        "message": "Accessible, faster large libraries"
+        "message": "Clearer labels and search counts"
     },
     "ui_whats_new_accessibility_scale_body": {
-        "message": "Command search follows combobox and listbox patterns, shortcut editing uses its own dialog, and contrast, resizing, narrow layouts, deep trees, search, and large-list rendering are more robust."
+        "message": "Manage Custom Tags now differs clearly from Gemini Notebook labels. Search counts have more room and expose their full text when truncated, while Sort sources no longer looks like a label view."
     },
     "ui_whats_new_drag_title": {
         "message": "Smoother, more reliable reflow drag (Beta)"

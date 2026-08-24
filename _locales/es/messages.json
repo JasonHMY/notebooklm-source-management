@@ -615,31 +615,31 @@
         "message": "Novedades"
     },
     "ui_whats_new_subtitle": {
-        "message": "Recuperación, acciones nativas, lotes y bibliotecas grandes más seguros."
+        "message": "Acciones más claras, estados de guardado más discretos y un flujo por lotes más limpio."
     },
     "ui_whats_new_transaction_title": {
-        "message": "Recuperación transaccional"
+        "message": "Avisos de guardado más discretos"
     },
     "ui_whats_new_transaction_body": {
-        "message": "Los puntos de recuperación, las restauraciones del historial, las copias de importación y Reparar fuentes ahora se guardan de forma atómica, detectan si cambió el cuaderno y revierten el estado visible cuando no se confirma la persistencia."
+        "message": "Los mensajes rutinarios Guardando y Guardado dejan de ocupar espacio. Los estados de error, desactualización y recuperación siguen visibles con las acciones necesarias para resolverlos."
     },
     "ui_whats_new_native_safety_title": {
-        "message": "Acciones nativas más seguras"
+        "message": "Acciones adaptadas a cada fuente"
     },
     "ui_whats_new_native_safety_body": {
-        "message": "El cambio de nombre y la eliminación se ejecutan de uno en uno, vuelven a comprobar la fuente y el diálogo antes de cada clic nativo y solo confirman una eliminación cuando un inventario completo demuestra que la fuente desapareció. Una eliminación nativa borra Deshacer y Rehacer porque no se puede revertir."
+        "message": "Las fuentes sin menú nativo conservan las etiquetas personalizadas, carpetas y opciones de orden sin mostrar Detalles, Cambiar nombre o Eliminar cuando no están disponibles. La eliminación por lotes las omite y mantiene seleccionadas."
     },
     "ui_whats_new_batch_storage_title": {
-        "message": "Lotes y almacenamiento recuperables"
+        "message": "Modo por lotes más limpio"
     },
     "ui_whats_new_batch_storage_body": {
-        "message": "Los resultados por lotes distinguen fuentes correctas, fallidas, omitidas y no intentadas, y las selecciones ocultas se pueden revisar o borrar. Ahora se puede depurar el historial, ver el uso de almacenamiento y rotar la copia de seguridad desde el último estado principal verificado."
+        "message": "Antes de seleccionar una fuente, la barra solo muestra Cancelar, el recuento y Seleccionar visibles. Las opciones para borrar la selección y las acciones por lotes aparecen cuando hay algo sobre lo que actuar."
     },
     "ui_whats_new_accessibility_scale_title": {
-        "message": "Accesibilidad y rapidez a gran escala"
+        "message": "Etiquetas y recuentos más claros"
     },
     "ui_whats_new_accessibility_scale_body": {
-        "message": "La búsqueda de comandos sigue los patrones combobox y listbox, la edición de atajos usa su propio diálogo y se refuerzan el contraste, el redimensionado, los paneles estrechos, los árboles profundos, la búsqueda y el renderizado de listas grandes."
+        "message": "Gestionar etiquetas personalizadas se distingue mejor de las etiquetas de Gemini Notebook. Los recuentos de búsqueda tienen más espacio y muestran el texto completo cuando se recortan; Ordenar fuentes ya no parece una vista de etiquetas."
     },
     "ui_whats_new_drag_title": {
         "message": "Arrastre con reflujo más fluido y fiable (Beta)"
