@@ -440,6 +440,7 @@ Search implementation details:
 - Icon button: `#sp-search-btn`
 - Search is debounced at `300ms`
 - Enter triggers immediate search
+- The result summary reserves enough trailing space for the normal panel width. When ellipsized, both the status and underlying search input expose the complete localized summary through `title`; the count only switches to the compact `74px` width at manager widths of `320px` or less.
 
 Rules:
 
@@ -666,6 +667,7 @@ Rules:
 - New row-level visuals must respect the same density and feedback language.
 - Do not add permanent heavy borders around normal rows.
 - The title area should remain the primary click target.
+- Treat the native three-dot action button as a per-row capability signal. If it is absent, omit native Details/Rename/Delete while keeping plugin-local custom-tag, folder, and precise-order actions available.
 
 ### 10.2 Group row
 
@@ -1100,7 +1102,9 @@ Rules:
 
 - Temporary mode UI should layer on top of the system, not replace it.
 - When introducing a new mode, prefer banner + sticky action area rather than rebuilding the whole screen.
+- With zero selected sources, render only Cancel, the selection count, and Select visible. Reveal clear-selection controls and the batch action group only after at least one source is selected.
 - Select visible is scoped to sources that remain visible and operable after the current search, quick view, tag filter, isolation, and folder-collapse state. It must not silently select filtered, collapsed/hidden/inert, failed, loading, native-checkbox-less, or deletion-pending rows.
+- Batch delete must skip sources without a native action menu, keep them selected for plugin-local organization, and explain the excluded count before or after deletion.
 
 ## 15. Popup UI Specification
 

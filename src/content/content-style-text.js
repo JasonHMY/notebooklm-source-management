@@ -763,7 +763,7 @@
                 inset: 0;
                 width: 100%;
                 box-sizing: border-box;
-                padding: 0 78px 0 12px;
+                padding: 0 132px 0 12px;
                 border: 0;
                 border-radius: 0;
                 font-size: 13px;
@@ -803,7 +803,7 @@
             .sp-search-count {
                 position: absolute;
                 right: 10px;
-                max-width: 64px;
+                max-width: 118px;
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
@@ -3517,6 +3517,12 @@
             }
 
             @container sp-manager-panel (max-width: 320px) {
+                #sp-search {
+                    padding-right: 88px;
+                }
+                .sp-search-count {
+                    max-width: 74px;
+                }
                 .group-header {
                     flex-wrap: wrap;
                 }

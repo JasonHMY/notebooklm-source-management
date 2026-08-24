@@ -3,14 +3,15 @@
 
     /**
      * createContentSourceActionMenu(deps) — 源行右键 action 菜单的 item 列表纯函数。
-     * 区分 normal source (查看详情/重命名/打标签/移动/删除) vs failed source (仅删除)。
+     * 区分 normal source (按原生能力显示详情/重命名/删除,始终保留本地整理操作)
+     * vs failed source (仅删除)。
      * 不渲染 DOM,只生成 `{ action, kind, icon, label, disabled? }[]` 描述,
      * 实际渲染 + 定位在 content-source-actions.js。
      *
      * @param {Object} deps Optional: getState, getSourcesByKey (Map), getMessage,
      *   canMoveSourceToUngrouped(sourceKey), resolveDirectionalTarget(item, direction)
      *   全部有 fallback。
-     * @returns {{ canOpenSourceActionMenu, createNativeActionResult, getSourceActionMenuItems, getSourceActionSubmenuItems }}
+     * @returns {{ canOpenSourceActionMenu, canUseNativeSourceActions, createNativeActionResult, getSourceActionMenuItems, getSourceActionSubmenuItems }}
      *   `canOpenSourceActionMenu`: batch mode / loading 不允许;failed 允许(可删)。
      */
     function createContentSourceActionMenu(deps = {}) {
@@ -36,6 +37,10 @@
             if (!source || state.isBatchMode || source.isLoading) return false;
             if (source.isFailed) return true;
             return !source.isDisabled;
+        }
+
+        function canUseNativeSourceActions(source) {
+            return Boolean(source && source.hasNativeActionMenu !== false);
         }
 
         function createNativeActionResult(ok, reason = '') {
@@ -76,19 +81,7 @@
                 };
             });
 
-            return [
-                {
-                    action: 'view-source-details',
-                    kind: 'action',
-                    icon: 'description',
-                    label: getMessage('ui_view_source_details')
-                },
-                {
-                    action: 'rename-source',
-                    kind: 'action',
-                    icon: 'edit',
-                    label: getMessage('ui_rename_source')
-                },
+            const localItems = [
                 {
                     action: 'tags',
                     kind: 'action',
@@ -115,7 +108,27 @@
                     label: getMessage('ui_tree_order'),
                     disabled: treeOrderChildren.every((item) => item.disabled),
                     children: treeOrderChildren
+                }
+            ];
+
+            if (!canUseNativeSourceActions(source)) {
+                return localItems;
+            }
+
+            return [
+                {
+                    action: 'view-source-details',
+                    kind: 'action',
+                    icon: 'description',
+                    label: getMessage('ui_view_source_details')
                 },
+                {
+                    action: 'rename-source',
+                    kind: 'action',
+                    icon: 'edit',
+                    label: getMessage('ui_rename_source')
+                },
+                ...localItems,
                 {
                     action: 'delete-source',
                     kind: 'action',
@@ -134,6 +147,7 @@
 
         return {
             canOpenSourceActionMenu,
+            canUseNativeSourceActions,
             createNativeActionResult,
             getSourceActionMenuItems,
             getSourceActionSubmenuItems

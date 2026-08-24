@@ -107,6 +107,7 @@ describe('content native label detector', () => {
         it('rejects select-all and native source control wording', () => {
             expect(detector.isLikelyNativeLabelTitle('Select all')).toBe(false);
             expect(detector.isLikelyNativeLabelTitle('Add source')).toBe(false);
+            expect(detector.isLikelyNativeLabelTitle('Sort sources')).toBe(false);
         });
 
         it('rejects relabel/recategorize control text', () => {
@@ -181,10 +182,39 @@ describe('content native label detector', () => {
         });
     });
 
+    describe('isNativeSourceSortControl', () => {
+        it('recognizes the current Gemini Notebook source-sort menu button', () => {
+            const el = createElement({
+                className: 'mat-mdc-menu-trigger source-sort-button',
+                attrs: {
+                    'aria-label': 'Sort sources',
+                    'aria-expanded': 'false'
+                },
+                textContent: 'sort'
+            });
+
+            expect(detector.isNativeSourceSortControl(el)).toBe(true);
+        });
+
+        it('does not reject a real label expansion control', () => {
+            const el = createElement({
+                className: 'source-label-group',
+                attrs: {
+                    'aria-label': 'Research label',
+                    'aria-expanded': 'true'
+                },
+                textContent: 'Research'
+            });
+
+            expect(detector.isNativeSourceSortControl(el)).toBe(false);
+        });
+    });
+
     describe('returned patterns', () => {
         it('exposes the regex constants used by source-sync', () => {
             expect(detector.ACTIVE_LABEL_VIEW_CONTROL_PATTERN).toBeInstanceOf(RegExp);
             expect(detector.NATIVE_LABEL_ENTRY_POINT_TEXT_PATTERN).toBeInstanceOf(RegExp);
+            expect(detector.NATIVE_SOURCE_SORT_CONTROL_PATTERN).toBeInstanceOf(RegExp);
             expect(detector.SOURCE_VIEW_SWITCH_TEXT_PATTERN).toBeInstanceOf(RegExp);
         });
     });

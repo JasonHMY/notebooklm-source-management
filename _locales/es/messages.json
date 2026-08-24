@@ -994,7 +994,7 @@
         "message": "Nuevo grupo"
     },
     "ui_manage_tags": {
-        "message": "Gestionar etiquetas"
+        "message": "Gestionar etiquetas personalizadas"
     },
     "ui_new_subgroup": {
         "message": "Nuevo subgrupo"
@@ -1649,6 +1649,18 @@
         "placeholders": {
             "1": { "content": "$1" },
             "2": { "content": "$2" }
+        }
+    },
+    "ui_batch_delete_confirm_unsupported": {
+        "message": "$1 fuente(s) seleccionada(s) no ofrece(n) acciones nativas y permanecerá(n) seleccionada(s).",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_batch_delete_unsupported_selection": {
+        "message": "$1 fuente(s) seleccionada(s) no se puede(n) eliminar de Gemini Notebook y permanecerá(n) seleccionada(s) para acciones de organización local.",
+        "placeholders": {
+            "1": { "content": "$1" }
         }
     },
     "ui_batch_delete_result": {

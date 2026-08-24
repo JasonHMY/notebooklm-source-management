@@ -719,17 +719,23 @@
             const shadowRoot = getShadowRoot();
             const countEl = shadowRoot?.getElementById?.('sp-search-count');
             if (!countEl) return;
+            const searchInput = shadowRoot?.getElementById?.('sp-search');
             const criteria = parseSearchQuery(query || '');
             if (!criteria.hasQuery) {
                 countEl.hidden = true;
                 countEl.textContent = '';
+                countEl.title = '';
+                if (searchInput) searchInput.title = '';
                 return;
             }
-            countEl.hidden = false;
-            countEl.textContent = getMessage('ui_search_results_summary', [
+            const summary = getMessage('ui_search_results_summary', [
                 String(sourceCount),
                 String(folderCount)
             ]);
+            countEl.hidden = false;
+            countEl.textContent = summary;
+            countEl.title = summary;
+            if (searchInput) searchInput.title = summary;
         }
 
         function collectSearchExpandedGroupIds(groupIds, query = null) {
@@ -2827,44 +2833,50 @@
                             className: 'sp-button sp-glare-hover sp-batch-select-visible-btn',
                             disabled: visibleBatchOperableKeys.size === 0 || allVisibleSelected || getIsDeletingSources()
                         }, [getMessage('ui_batch_select_visible')]),
-                        el('button', {
-                            className: 'sp-button sp-glare-hover sp-batch-clear-selection-btn',
-                            disabled: pendingBatchKeys.size === 0 || getIsDeletingSources()
-                        }, [getMessage('ui_batch_clear_selection')]),
-                        el('button', {
-                            className: 'sp-button sp-glare-hover sp-batch-clear-hidden-selection-btn',
-                            disabled: hiddenSelectedCount === 0 || getIsDeletingSources()
-                        }, [getMessage('ui_batch_clear_hidden_selection', [String(hiddenSelectedCount)])]),
-                        hasRetryableBatchDelete
+                        pendingBatchKeys.size > 0
+                            ? el('button', {
+                                className: 'sp-button sp-glare-hover sp-batch-clear-selection-btn',
+                                disabled: getIsDeletingSources()
+                            }, [getMessage('ui_batch_clear_selection')])
+                            : null,
+                        pendingBatchKeys.size > 0
+                            ? el('button', {
+                                className: 'sp-button sp-glare-hover sp-batch-clear-hidden-selection-btn',
+                                disabled: hiddenSelectedCount === 0 || getIsDeletingSources()
+                            }, [getMessage('ui_batch_clear_hidden_selection', [String(hiddenSelectedCount)])])
+                            : null,
+                        pendingBatchKeys.size > 0 && hasRetryableBatchDelete
                             ? el('button', {
                                 className: 'sp-button sp-glare-hover sp-batch-retry-remaining-btn',
                                 disabled: getIsDeletingSources()
                             }, [getMessage('ui_batch_retry_remaining', [String(pendingBatchKeys.size)])])
                             : null,
-                        el('div', { className: 'sp-batch-actions' }, [
-                            el('button', {
-                                className: 'sp-button sp-glare-hover sp-batch-add-folder-btn',
-                                disabled: pendingBatchKeys.size === 0 || getIsDeletingSources()
-                            }, [getMessage('ui_batch_add')]),
-                            el('button', {
-                                className: 'sp-button sp-glare-hover sp-batch-add-tags-btn',
-                                disabled: pendingBatchKeys.size === 0 || getIsDeletingSources()
-                            }, [getMessage('ui_batch_add_tags_title')]),
-                            el('button', {
-                                className: 'sp-button sp-glare-hover sp-batch-remove-tags-btn',
-                                disabled: pendingBatchKeys.size === 0 || getIsDeletingSources()
-                            }, [getMessage('ui_batch_remove_tags_title')]),
-                            el('button', {
-                                className: 'sp-button sp-glare-hover sp-batch-ungroup-btn',
-                                disabled: pendingBatchKeys.size === 0 || getIsDeletingSources()
-                            }, [getMessage('ui_move_to_ungrouped')]),
-                            el('button', {
-                                className: 'sp-button sp-glare-hover sp-confirm-delete-btn',
-                                disabled: pendingBatchKeys.size === 0 || getIsDeletingSources()
-                            }, getIsDeletingSources()
-                                ? [getMessage('ui_deleting')]
-                                : createBatchCountMessageChildren('ui_delete_count', pendingBatchKeys.size, 'batch-delete'))
-                        ])
+                        pendingBatchKeys.size > 0
+                            ? el('div', { className: 'sp-batch-actions' }, [
+                                el('button', {
+                                    className: 'sp-button sp-glare-hover sp-batch-add-folder-btn',
+                                    disabled: getIsDeletingSources()
+                                }, [getMessage('ui_batch_add')]),
+                                el('button', {
+                                    className: 'sp-button sp-glare-hover sp-batch-add-tags-btn',
+                                    disabled: getIsDeletingSources()
+                                }, [getMessage('ui_batch_add_tags_title')]),
+                                el('button', {
+                                    className: 'sp-button sp-glare-hover sp-batch-remove-tags-btn',
+                                    disabled: getIsDeletingSources()
+                                }, [getMessage('ui_batch_remove_tags_title')]),
+                                el('button', {
+                                    className: 'sp-button sp-glare-hover sp-batch-ungroup-btn',
+                                    disabled: getIsDeletingSources()
+                                }, [getMessage('ui_move_to_ungrouped')]),
+                                el('button', {
+                                    className: 'sp-button sp-glare-hover sp-confirm-delete-btn',
+                                    disabled: getIsDeletingSources()
+                                }, getIsDeletingSources()
+                                    ? [getMessage('ui_deleting')]
+                                    : createBatchCountMessageChildren('ui_delete_count', pendingBatchKeys.size, 'batch-delete'))
+                            ])
+                            : null
                     ])
                 ]);
                 fragment.appendChild(actionBar);

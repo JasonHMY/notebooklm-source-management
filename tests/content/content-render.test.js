@@ -482,6 +482,22 @@ describe('manager shell structure', () => {
         expect(actionsBlock).toContain('max-width: 100%;');
     });
 
+    it('allocates more room for search counts and compacts them only in very narrow panels', () => {
+        jest.resetModules();
+        require('../../src/content/content-style-text.js');
+
+        const css = global.NSM_CONTENT_STYLE_TEXT;
+        const searchInputBlock = extractCssBlock(css, '#sp-search {');
+        const searchCountBlock = extractCssBlock(css, '.sp-search-count {');
+        const narrowPanelBlock = extractCssBlock(css, '@container sp-manager-panel (max-width: 320px) {');
+
+        expect(searchInputBlock).toContain('padding: 0 132px 0 12px;');
+        expect(searchCountBlock).toContain('max-width: 118px;');
+        expect(narrowPanelBlock).toContain('#sp-search');
+        expect(narrowPanelBlock).toContain('padding-right: 88px;');
+        expect(narrowPanelBlock).toContain('max-width: 74px;');
+    });
+
     it('keeps batch controls operable in a narrow panel and exposes visible focus', () => {
         jest.resetModules();
         require('../../src/content/content-style-text.js');
@@ -1222,6 +1238,9 @@ describe('batch count and source menu motion rendering', () => {
         expect(toolbar).toBeDefined();
         expect(toolbar.attrs.role).toBe('toolbar');
         expect(toolbar.attrs['aria-label']).toBe('ui_batch_actions_region');
+        expect(findRenderTestNodesByClass(listContainer, 'sp-batch-actions')).toHaveLength(0);
+        expect(findRenderTestNodesByClass(listContainer, 'sp-batch-clear-selection-btn')).toHaveLength(0);
+        expect(findRenderTestNodesByClass(listContainer, 'sp-batch-clear-hidden-selection-btn')).toHaveLength(0);
         expect(listContainer.childNodes.every((child) => child.attrs?.role === 'listitem')).toBe(true);
     });
 
@@ -1323,11 +1342,17 @@ describe('batch count and source menu motion rendering', () => {
     it('shows result counts for scoped queries and clears them for empty queries', () => {
         const countElement = {
             hidden: false,
-            textContent: 'stale'
+            textContent: 'stale',
+            title: 'stale'
         };
+        const searchInput = { title: 'stale' };
         const renderModule = createContentRender({
             getShadowRoot: () => ({
-                getElementById: (id) => (id === 'sp-search-count' ? countElement : null)
+                getElementById: (id) => {
+                    if (id === 'sp-search-count') return countElement;
+                    if (id === 'sp-search') return searchInput;
+                    return null;
+                }
             }),
             getMessage: (key, substitutions = []) => (
                 key === 'ui_search_results_summary'
@@ -1339,27 +1364,34 @@ describe('batch count and source menu motion rendering', () => {
         renderModule.updateSearchResultCount('', 3);
         expect(countElement).toEqual({
             hidden: true,
-            textContent: ''
+            textContent: '',
+            title: ''
         });
+        expect(searchInput.title).toBe('');
 
         renderModule.updateSearchResultCount('tag:paper', 2);
         expect(countElement).toEqual({
             hidden: false,
-            textContent: '2 sources · 0 folders'
+            textContent: '2 sources · 0 folders',
+            title: '2 sources · 0 folders'
         });
+        expect(searchInput.title).toBe('2 sources · 0 folders');
 
         renderModule.updateSearchResultCount('folder:archive', 0, 1);
         expect(countElement).toEqual({
             hidden: false,
-            textContent: '0 sources · 1 folders'
+            textContent: '0 sources · 1 folders',
+            title: '0 sources · 1 folders'
         });
+        expect(searchInput.title).toBe('0 sources · 1 folders');
     });
 
     it('counts a folder-title-only search match even when no source matches', () => {
         const listContainer = createRenderTestElement('div', { id: 'sources-list' });
         const countElement = {
             hidden: true,
-            textContent: ''
+            textContent: '',
+            title: ''
         };
         const group = {
             id: 'archive',
@@ -1408,7 +1440,8 @@ describe('batch count and source menu motion rendering', () => {
         expect(findRenderTestNodesByClass(listContainer, 'sp-contextual-empty-state')).toHaveLength(0);
         expect(countElement).toEqual({
             hidden: false,
-            textContent: '0 sources · 1 folders'
+            textContent: '0 sources · 1 folders',
+            title: '0 sources · 1 folders'
         });
     });
 

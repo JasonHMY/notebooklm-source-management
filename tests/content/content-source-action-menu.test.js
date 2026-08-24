@@ -110,6 +110,22 @@ describe('content source action menu helper', () => {
         });
     });
 
+    it('keeps local organization actions but hides native actions when the row has no native menu', () => {
+        const menu = createMenu({
+            sources: new Map([['read-only', {
+                hasNativeActionMenu: false
+            }]])
+        });
+
+        expect(menu.canUseNativeSourceActions({ hasNativeActionMenu: false })).toBe(false);
+        expect(menu.getSourceActionMenuItems('read-only').map((item) => item.action)).toEqual([
+            'tags',
+            'move',
+            'move-ungrouped',
+            'tree-order'
+        ]);
+    });
+
     it('creates native action results', () => {
         const menu = createMenu();
 

@@ -994,7 +994,7 @@
         "message": "新建分组"
     },
     "ui_manage_tags": {
-        "message": "管理标签"
+        "message": "管理自定义标签"
     },
     "ui_new_subgroup": {
         "message": "新建子分组"
@@ -1649,6 +1649,18 @@
         "placeholders": {
             "1": { "content": "$1" },
             "2": { "content": "$2" }
+        }
+    },
+    "ui_batch_delete_confirm_unsupported": {
+        "message": "$1 个已选来源没有可用的原生来源操作，将保持选中。",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_batch_delete_unsupported_selection": {
+        "message": "$1 个已选来源无法从 Gemini Notebook 删除，仍保持选中，可继续用于本地整理操作。",
+        "placeholders": {
+            "1": { "content": "$1" }
         }
     },
     "ui_batch_delete_result": {

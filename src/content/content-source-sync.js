@@ -568,7 +568,8 @@
             getComparableNativeLabelTitle,
             isLikelyNativeLabelTitle,
             isNativeLabelEntryPointControl,
-            isNativeSourceViewSwitchControl
+            isNativeSourceViewSwitchControl,
+            isNativeSourceSortControl
         } = createContentNativeLabelDetectorFactory({ getAttributeValue, getElementTextSignal });
 
 
@@ -1090,6 +1091,7 @@
             if (!element || isNodeHiddenForSourceScan(element, panel, options)) return false;
             if (isInsideNativeSourceRowElement(element, panel)) return false;
             if (isNativeLabelEntryPointControl(element)) return false;
+            if (isNativeSourceSortControl(element)) return false;
             const text = getElementTextSignal(element);
             if (isGenericNativeControlTitleElement(element, cleanNativeLabelTitleCandidate(text))) return false;
             if (ACTIVE_LABEL_VIEW_CONTROL_PATTERN.test(text)) {

@@ -218,6 +218,8 @@ function getRequiredMessageKeys() {
         'ui_batch_delete_confirm_title',
         'ui_batch_delete_confirm_summary',
         'ui_batch_delete_confirm_warning',
+        'ui_batch_delete_confirm_unsupported',
+        'ui_batch_delete_unsupported_selection',
         'ui_source_actions_for',
         'ui_batch_select_source',
         'ui_source_enabled_checkbox',
@@ -322,6 +324,12 @@ describe('locale message catalogs', () => {
             expect(messages.actionTitle.message).toContain('GeminiNotebook-Source-Management');
             expect(messages.ui_welcome_title.message).toContain('GeminiNotebook-Source-Management');
         }
+    });
+
+    it('distinguishes plugin custom tags from Gemini Notebook native labels', () => {
+        expect(localeMessages.en.ui_manage_tags.message).toBe('Manage Custom Tags');
+        expect(localeMessages.es.ui_manage_tags.message).toBe('Gestionar etiquetas personalizadas');
+        expect(localeMessages.zh_CN.ui_manage_tags.message).toBe('管理自定义标签');
     });
 
     it('retains critical fallback and popup copy keys', () => {

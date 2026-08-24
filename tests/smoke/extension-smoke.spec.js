@@ -406,6 +406,11 @@ test.describe.serial('extension smoke', () => {
         await setPanelWidth(null);
         await notebookPage.locator('#sp-batch-action-btn').click();
         await expect(notebookPage.locator('.sp-batch-action-bar')).toBeVisible();
+        await expect(notebookPage.locator('.sp-batch-clear-selection-btn')).toHaveCount(0);
+        await expect(notebookPage.locator('.sp-batch-clear-hidden-selection-btn')).toHaveCount(0);
+        await expect(notebookPage.locator('.sp-batch-actions')).toHaveCount(0);
+        await notebookPage.locator('.sp-batch-select-visible-btn').click();
+        await expect(notebookPage.locator('.sp-batch-actions')).toBeVisible();
         await notebookPage.evaluate(() => {
             const root = document.querySelector('#sources-plus-root')?.shadowRoot || null;
             const count = root?.querySelector('.sp-batch-selection-count') || null;

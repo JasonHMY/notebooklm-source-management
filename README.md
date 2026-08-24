@@ -17,11 +17,11 @@ The extension supports the current `https://notebook.google.com/` site and keeps
 - Choose your drag mode in Settings → Appearance: **classic** (default — a blue insertion line, loose sources land in folders or the bottom "Ungrouped" bin) or **reflow (Beta)** — other sources move aside as you drag and you can drop a source anywhere at the root level, including between two folders.
 - Search by source title, tag, or folder, with simple `tag:` and `folder:` filters.
 - Automatically expand folders that contain search results, then restore the previous collapsed state when search is cleared.
-- Add color-coded tags, search the tag picker, filter by tag, and batch add or remove tags.
+- Add color-coded custom tags, search the tag picker, filter by tag, and batch add or remove tags.
 - Move sources into folders one at a time or in batches, create the destination folder without leaving the move dialog, and move selected sources back to ungrouped.
 - Select every currently visible, operable source or clear the selection from the batch action bar.
-- Delete multiple sources only after an extension confirmation and Gemini Notebook's native confirmation; local state is updated only after a complete source-panel scan proves that the native row is gone.
-- Open source details, rename sources, and delete sources from a single plugin menu.
+- Delete multiple sources only after an extension confirmation and Gemini Notebook's native confirmation; sources without native actions stay selected for local organization, and local state is updated only after a complete source-panel scan proves that the native row is gone.
+- Open source details, rename sources, and delete sources from the plugin menu when Gemini Notebook exposes those native actions for the row; custom-tag, folder, and ordering actions remain available independently.
 - Undo and redo recent plugin-side organization changes from the toolbar, command palette, or keyboard. Undo uses `Command+Z` on macOS or `Ctrl+Z` on Windows/Linux; redo uses `Command+Shift+Z`, `Ctrl+Shift+Z`, or `Ctrl+Y`.
 - See save status only when attention is required: failed saves, stale state, or available recovery stay visible with the relevant retry, refresh, restore, or dismiss action.
 - Get distinct guidance for an empty notebook, a search with no matches, a filtered view with no matches, or an isolated folder with nothing to show.

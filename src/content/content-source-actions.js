@@ -138,6 +138,9 @@
         const menuCanOpenSourceActionMenu = typeof sourceActionMenu.canOpenSourceActionMenu === 'function'
             ? sourceActionMenu.canOpenSourceActionMenu
             : null;
+        const menuCanUseNativeSourceActions = typeof sourceActionMenu.canUseNativeSourceActions === 'function'
+            ? sourceActionMenu.canUseNativeSourceActions
+            : null;
         const menuCreateNativeActionResult = typeof sourceActionMenu.createNativeActionResult === 'function'
             ? sourceActionMenu.createNativeActionResult
             : null;
@@ -243,6 +246,11 @@
         function canOpenSourceActionMenu(source) {
             if (menuCanOpenSourceActionMenu) return menuCanOpenSourceActionMenu(source);
             return Boolean(source && !source.isDisabled && !source.isLoading);
+        }
+
+        function canUseNativeSourceActions(source) {
+            if (menuCanUseNativeSourceActions) return menuCanUseNativeSourceActions(source);
+            return Boolean(source && source.hasNativeActionMenu !== false);
         }
 
         function createNativeActionResult(ok, reason = '') {
@@ -2745,6 +2753,7 @@
 
         return {
             canOpenSourceActionMenu,
+            canUseNativeSourceActions,
             getViewportSize,
             findSourceActionButton,
             getSourceActionMenuItems,

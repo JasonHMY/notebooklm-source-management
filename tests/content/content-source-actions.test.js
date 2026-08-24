@@ -615,6 +615,41 @@ describe('executeBatchDelete result contract', () => {
         expect(mod.state.isBatchMode).toBe(false);
     });
 
+    it('skips sources without a native action menu and keeps them selected for local batch actions', async () => {
+        mod.pendingBatchKeys.add('read-only');
+        mod.pendingBatchKeys.add('editable');
+        mod.sourcesByKey.set('read-only', {
+            key: 'read-only',
+            title: 'Gemini Chat',
+            hasNativeActionMenu: false
+        });
+        mod.sourcesByKey.set('editable', {
+            key: 'editable',
+            title: 'Editable source'
+        });
+        const deleteSource = jest.fn(async () => ({ deleted: true }));
+
+        const result = await mod.executeBatchDelete({
+            deleteSource,
+            beginSession: () => ({ ok: true, operation: null }),
+            endSession: jest.fn()
+        });
+
+        expect(result).toEqual(expect.objectContaining({
+            ok: false,
+            changed: true,
+            succeeded: ['editable'],
+            failed: [],
+            skipped: [{ key: 'read-only', reason: 'native_actions_unavailable' }],
+            unattempted: [],
+            reason: 'partial'
+        }));
+        expect(deleteSource).toHaveBeenCalledTimes(1);
+        expect(deleteSource).toHaveBeenCalledWith('editable', { operation: null });
+        expect(Array.from(mod.pendingBatchKeys)).toEqual(['read-only']);
+        expect(mod.state.isBatchMode).toBe(true);
+    });
+
     it('does not count a native deletion with failed local reconciliation as success', async () => {
         ['deleted-remotely', 'not-attempted'].forEach((key) => {
             mod.pendingBatchKeys.add(key);

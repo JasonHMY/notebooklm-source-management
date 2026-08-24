@@ -9,12 +9,12 @@
      * @param {Object} deps Optional: getAttributeValue(el, attr) — 来自 panel-dom;
      *   getElementTextSignal(el) — 聚合 aria-label / title / alt / textContent。
      *   两者都有内置 fallback。
-     * @returns {Object} 9 个 pattern 常量 + 9 个 helper:
+     * @returns {Object} 10 个 pattern 常量 + 9 个 helper:
      *   - `cleanAccessibleLabelTitle / collapseRepeatedNativeLabelTitle / cleanNativeLabelTitleCandidate`
      *     一组标题清洗 (去 "expand/collapse" 前缀、symbols ligature、source-count 后缀)
      *   - `getComparableLabelText / getComparableNativeLabelTitle` — 转 lowercase 用于等值比对
-     *   - `isLikelyNativeLabelTitle / isNativeLabelEntryPointControl / isNativeSourceViewSwitchControl`
-     *     三类布尔判定;入参既可以是字符串也可以是 element。
+     *   - `isLikelyNativeLabelTitle / isNativeLabelEntryPointControl / isNativeSourceViewSwitchControl /
+     *     isNativeSourceSortControl` 四类布尔判定;入参既可以是字符串也可以是 element。
      */
     function createContentNativeLabelDetector(deps = {}) {
         const getAttributeValue = typeof deps.getAttributeValue === 'function'
@@ -45,6 +45,7 @@
         const NATIVE_LABEL_ENTRY_POINT_TEXT_PATTERN = /\b(?:auto[-\s]*label|label\s+sources?\s+by\s+topic|categor(?:ize|ise)\s+sources?\s+by\s+topic|organize\s+sources?\s+by\s+topic)\b|按主题.*(?:来源)?(?:加|打)?标签|自动.*(?:来源)?(?:加|打)?标签/i;
         const SELECT_ALL_TEXT_PATTERN = /\bselect\s+all\b|全选/i;
         const NATIVE_SOURCE_CONTROL_TEXT_PATTERN = /\b(add\s+source|web|fast\s+research|submit)\b|language\s*web|languageWeb|fastResearch|添加来源|提交/i;
+        const NATIVE_SOURCE_SORT_CONTROL_PATTERN = /\b(?:sort\s+sources?|source[-_\s]*sort|source-sort-button)\b|来源排序|排序来源/i;
         const NATIVE_LABEL_TITLE_BLOCKED_TEXT_PATTERN = /\b(more\s+options?|source\s+guide|source\s+details?|loading|analyzing|failed|error|dock_to_(?:right|left|top|bottom)|left_panel_open|left_panel_close)\b|来源指南|来源详情|加载中|正在分析|失败|出错/i;
         const NATIVE_LABEL_TITLE_RESERVED_TEXT_PATTERN = /^(?:sources?|source|来源)$|\bsources?\s+for\b/i;
 
@@ -99,6 +100,7 @@
             if (NATIVE_LABEL_ENTRY_POINT_TEXT_PATTERN.test(String(value || ''))) return false;
             if (SELECT_ALL_TEXT_PATTERN.test(title)) return false;
             if (NATIVE_SOURCE_CONTROL_TEXT_PATTERN.test(title)) return false;
+            if (NATIVE_SOURCE_SORT_CONTROL_PATTERN.test(title)) return false;
             if (ACTIVE_LABEL_VIEW_CONTROL_PATTERN.test(title)) return false;
             if (NATIVE_LABEL_TITLE_BLOCKED_TEXT_PATTERN.test(title)) return false;
             if (NATIVE_LABEL_TITLE_RESERVED_TEXT_PATTERN.test(title)) return false;
@@ -137,6 +139,17 @@
             );
         }
 
+        function isNativeSourceSortControl(element) {
+            if (!element) return false;
+            const text = getElementTextSignal(element);
+            const identityText = [
+                getAttributeValue(element, 'data-testid'),
+                getAttributeValue(element, 'class'),
+                String(element.className || '')
+            ].filter(Boolean).join(' ');
+            return NATIVE_SOURCE_SORT_CONTROL_PATTERN.test(`${text} ${identityText}`);
+        }
+
         return {
             ACTIVE_LABEL_VIEW_CONTROL_PATTERN,
             SOURCE_VIEW_SWITCH_TEXT_PATTERN,
@@ -145,6 +158,7 @@
             NATIVE_LABEL_ENTRY_POINT_TEXT_PATTERN,
             SELECT_ALL_TEXT_PATTERN,
             NATIVE_SOURCE_CONTROL_TEXT_PATTERN,
+            NATIVE_SOURCE_SORT_CONTROL_PATTERN,
             NATIVE_LABEL_TITLE_BLOCKED_TEXT_PATTERN,
             NATIVE_LABEL_TITLE_RESERVED_TEXT_PATTERN,
             cleanAccessibleLabelTitle,
@@ -154,7 +168,8 @@
             getComparableNativeLabelTitle,
             isLikelyNativeLabelTitle,
             isNativeLabelEntryPointControl,
-            isNativeSourceViewSwitchControl
+            isNativeSourceViewSwitchControl,
+            isNativeSourceSortControl
         };
     }
 

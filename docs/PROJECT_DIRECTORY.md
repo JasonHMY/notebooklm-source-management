@@ -36,15 +36,15 @@ GeminiNotebook-Source-Management
 │   │   ├── content-config.js
 │   │   │   └── 选择器、导入限制、schema version、route retry 参数
 │   │   ├── source-descriptor-helpers.js
-│   │   │   └── 来源标题/key/token/fingerprint/icon/loading/failed 状态识别
+│   │   │   └── 来源标题/key/token/fingerprint/icon/loading/failed 状态及原生 action-menu 能力识别
 │   │   ├── content-source-sync.js
 │   │   │   └── 来源扫描、列表/标签视图识别、折叠标签组、MutationObserver 同步；首次扫描先解析全部 persisted refs，虚拟化/加载中 DOM 返回 structured partial result，staging 后以当前 ready 行 + 未显示持久化占位构造身份并集，完整候选树统一归一化并原子提交后才清 pending、消费 native-delete 标记、重建 parent map/同步 checkbox
 │   │   ├── content-native-label-detector.js
-│   │   │   └── 原生标签标题清理、可比较归一、label/view-switch 控件识别 helper
+│   │   │   └── 原生标签标题清理、可比较归一、label/view-switch 控件识别 helper；显式排除来源排序控件
 │   │   ├── content-source-actions.js
 │   │   │   └── 来源三点菜单、精准排序 submenu 分发、详情、重命名、删除、原生 menu/dialog 自动化；点击不可逆原生确认前必须以完整 identity inventory + 显式 totalHint 验证唯一绑定目标，删除只在对话框关闭且新的同类证据共同证明身份消失后成功
 │   │   ├── content-source-action-menu.js
-│   │   │   └── 来源三点菜单和 submenu item 生成 helper；精准排序 disabled state 委托 Tree Placement resolver，失败来源菜单收口
+│   │   │   └── 来源三点菜单和 submenu item 生成 helper；按行能力隐藏不可用的原生详情/重命名/删除并保留本地标签/文件夹/排序，精准排序 disabled state 委托 Tree Placement resolver，失败来源菜单收口
 │   │   ├── content-native-action-coordinator.js
 │   │   │   └── Gemini Notebook 原生详情/重命名/删除及 batch-delete 会话的独占操作协调器；将异步步骤绑定到 operation、notebook、manager instance 和稳定来源身份，并只在操作期间挂载宿主 overlay scope
 │   │   ├── content-native-checkbox-sync.js
@@ -54,7 +54,7 @@ GeminiNotebook-Source-Management
 │   │   ├── content-tree-interactions.js
 │   │   │   └── 分组树、checkbox、可跨重绘恢复草稿、在 filter/isolation/collapse 下强制显示 pending path 且确认前不持久化临时记录的即刻 inline naming、折叠 aria/inert、Select visible/Clear selection、上下文 empty-state CTA 与退出隔离时的 native effective-state 回同步、键盘精准排序、焦点恢复/live-region 播报、批量模式与拖拽 read → plan → write；single/batch drag、新增/删除/移出分组及批量移到未分组通过严格语义 target 适配 Tree Placement，未分组桶以 section rect + 内层 list items host 读取 geometry，批量 payload 必须与可信拖拽会话完全一致，另维护同步 native dropEffect、类型化 geometry snapshot、滚动 delta patch、auto-scroll 静止指针刷新/落下前同步 flush、ResizeObserver/render 失效和 fail-closed 重建
 │   │   ├── content-render.js
-│   │   │   └── Shadow DOM manager 渲染、严格 owned list/listitem 树语义（含未分组 section → inner list、空态与批量条 wrapper）、上下文控件名称、折叠状态、上下文空状态、列表行、文件夹精准排序控件、批量 toolbar、菜单层；将纯搜索分段映射为安全文本节点与高亮 span
+│   │   │   └── Shadow DOM manager 渲染、严格 owned list/listitem 树语义（含未分组 section → inner list、空态与批量条 wrapper）、上下文控件名称、折叠状态、上下文空状态、列表行、文件夹精准排序控件、按选择状态渐进展开的批量 toolbar、菜单层；将纯搜索分段映射为安全文本节点与高亮 span，并为截断的搜索计数保留完整 title
 │   │   ├── content-modals.js
 │   │   │   └── 首次欢迎、更新介绍、设置、导入预览、标签、移动文件夹、批量标签 modal
 │   │   ├── content-search-semantics.js
@@ -351,6 +351,7 @@ manifest.json
 │   ├── 负责
 │   │   ├── 从 Gemini Notebook DOM 提取来源标题、key、stable token、fingerprint
 │   │   ├── 提取安全 icon URL
+│   │   ├── 标记来源行是否暴露原生三点操作菜单
 │   │   ├── 识别导入中 loading 行
 │   │   └── 识别失败 failed 行
 │   ├── 先看
@@ -365,6 +366,7 @@ manifest.json
 ├── 列表视图 / 标签视图同步
 │   ├── 负责
 │   │   ├── 判断原生 list/label view
+│   │   ├── 排除 Sort sources 等非标签展开控件
 │   │   ├── 读取 native checkbox / aria-checked
 │   │   ├── 切回列表前同步标签组选择
 │   │   ├── 持久化并恢复上次 list/label view
@@ -396,11 +398,11 @@ manifest.json
 │   │   ├── 避让 dragover 每帧只读一次 geometry snapshot 后纯计算并集中写入；纯滚动按 root/嵌套 children 精确 delta 修补，auto-scroll 无新 dragover 时仍按静止指针合并刷新，drop 前同步消费 dirty geometry，尺寸/render/混合失效时 fail closed 重建
 │   │   ├── native dropEffect 只在原始 dragover 事件内由 clean snapshot 同步解析；dirty/missing snapshot 保守 move，未知 payload 为 none，异步 drag frame 不保留 DataTransfer
 │   │   ├── reflow transform 使用 source/group 类型化 map；仅可视区 + 一个真实行高 overscan 动画，离屏位移静态应用并在结束/下次 preflight 清理
-│   │   ├── 批量选择、Select visible（基于完整逻辑投影选择所有明确可见且 native-operable 的来源，不受 windowing 当前挂载行限制）、Clear selection、Clear hidden selection、可见/隐藏/真实选中数、加入文件夹、添加/移除标签；删除进行中冻结选择变更
+│   │   ├── 批量选择、Select visible（基于完整逻辑投影选择所有明确可见且 native-operable 的来源，不受 windowing 当前挂载行限制）、Clear selection、Clear hidden selection、可见/隐藏/真实选中数、加入文件夹、添加/移除标签；零选择时只显示取消/计数/Select visible，选中后再显示清除与批量操作；删除进行中冻结选择变更
 │   │   ├── 纯 Tree Placement Interface 集中 entry shape、source XOR、循环拒绝、索引修正、no-op、批量/事务原子提交与 import normalization；single/batch drag、移动到分组、批量/单项移出分组、分组新增/删除、原生来源删除、Classic sweep、来源同步、restore/reconcile、state apply、配置/原生标签导入均已迁移，业务路径不再直接修改放置数组
 │   │   ├── 来源三点菜单与文件夹标题栏共用 up/down/in/out 精准排序 resolver；渲染期以单次快照索引计算全部 disabled state，执行时再按实时树重新解析；边界禁用，成功后恢复可见稳定控件焦点并只播报 canonical N/M（过滤视图不改用可见索引，批量模式隐藏文件夹控件）
 │   │   ├── 移动 modal 内新建目标文件夹并一次完成移动；也可移到未分组
-│   │   └── 批量删除先经过扩展 alertdialog；每个原生确认按钮点击前必须由完整 identity inventory + 显式 native totalHint 验证唯一绑定目标；确认后必须等待 dialog 关闭，并由稳定的同类 inventory 证明目标身份消失、总数减少一且原有 survivors 仍存在才提交本地删除；虚拟窗口卸载、partial scan、缺少/歧义目标 identity、缺少 totalHint 或 DOM 行数变化本身均不构成成功证据，真实删除后的同数量 backfill 仅可由完整 identity/totalHint inventory 正向证明
+│   │   └── 批量删除先排除没有原生 action menu 的来源并保持其选中，再对可操作来源显示扩展 alertdialog；每个原生确认按钮点击前必须由完整 identity inventory + 显式 native totalHint 验证唯一绑定目标；确认后必须等待 dialog 关闭，并由稳定的同类 inventory 证明目标身份消失、总数减少一且原有 survivors 仍存在才提交本地删除；虚拟窗口卸载、partial scan、缺少/歧义目标 identity、缺少 totalHint 或 DOM 行数变化本身均不构成成功证据，真实删除后的同数量 backfill 仅可由完整 identity/totalHint inventory 正向证明
 │   ├── 先看
 │   │   ├── src/content/content-tree-placement.js
 │   │   ├── src/content/content-tree-interactions.js
@@ -807,7 +809,7 @@ content runtime memory
 ├── 扩展真实上下文 smoke
 │   ├── 命令: npm run test:smoke
 │   ├── 文件: tests/smoke/extension-smoke.spec.js, tests/smoke/batch-drag.smoke.spec.js, tests/smoke/drag-reflow-layout.smoke.spec.js
-│   └── 默认: headless，不应该弹出可见浏览器窗口；extension smoke 同时用长批量文案验证 240/320px 窄面板、高倍缩放与跨平台字体度量下无水平溢出
+│   └── 默认: headless，不应该弹出可见浏览器窗口；extension smoke 先验证零选择批量栏只保留基础选择控件，再选中来源并用长批量文案验证 240/320px 窄面板、高倍缩放与跨平台字体度量下无水平溢出
 ├── 拖拽性能基准（opt-in）
 │   ├── 命令: npm run benchmark:drag
 │   ├── 文件: tests/smoke/drag-performance.smoke.spec.js, docs/DRAG_PERFORMANCE_BASELINE.md
@@ -917,7 +919,7 @@ CI: .github/workflows/ci.yml
 │   ├── 然后看: src/content/content-source-actions.js
 │   ├── 继续看: src/content/content-render.js
 │   ├── 测试: content-source-action-menu.test.js, content-source-actions.test.js
-│   └── 注意: 菜单 item 生成逻辑和原生 action 执行逻辑分开排查
+│   └── 注意: 菜单 item 生成逻辑和原生 action 执行逻辑分开排查；没有 native more button 的普通来源只保留本地标签/文件夹/排序操作
 ├── 三点菜单定位层错
 │   ├── 先看: src/content/content-source-actions.js
 │   ├── 然后看: src/content/content-render.js
@@ -937,7 +939,7 @@ CI: .github/workflows/ci.yml
 │   ├── 先看: src/content/content-render.js
 │   ├── 然后看: src/content/content-style-text.js
 │   ├── 测试: content-render.test.js
-│   └── 注意: 不要让隐藏三点按钮改变 grid 列宽
+│   └── 注意: 不要让隐藏三点按钮改变 grid 列宽；零选择时不渲染 disabled 的清除与批量操作组，320px 以下搜索计数使用紧凑宽度
 ├── 分组树数据损坏
 │   ├── 先看: src/content/content-tree-placement.js
 │   ├── 然后看: src/content/content-tree-interactions.js, src/content/content-source-sync.js, src/content/content-state-reconcile.js, src/content/content-state-apply.js, src/content/content-persistence.js

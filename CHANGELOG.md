@@ -29,6 +29,11 @@
 
 ### Changed
 - **保存状态仅在需要处理时显示 (Show Save Status Only When Action Is Required)**: 主面板与设置不再显示“正在保存”或“刚刚已保存”；只有保存失败、版本过期或存在恢复快照时，才持续显示提示及对应的 Retry、Refresh 或 Restore 操作。
+- **整理界面减少歧义与空操作 (Clarify Organization UI and Hide Empty Actions)**: **影响**: 标签入口明确显示为“管理自定义标签”，搜索结果计数在常规面板保留更多显示空间且截断时可查看完整内容；刚进入批量模式但尚未选择来源时，仅显示取消、选择计数和“选择当前可见”，选中后才展开清除与批量操作。
+
+### Fixed
+- **来源排序不再被误判为标签视图 (Do Not Mistake Source Sorting for Label View)**: Gemini Notebook 当前的 “Sort sources” 菜单不再被当作已展开的原生标签控件，普通来源列表会保持正确的列表视图识别与同步状态。
+- **原生来源操作按实际能力显示 (Gate Native Source Actions by Row Capability)**: **影响**: 没有原生三点菜单的来源不再显示无法完成的详情、重命名或删除入口，但仍可使用自定义标签、文件夹和树排序；批量删除会跳过这类来源并保持其选中状态，同时在确认或结果中说明原因。
 
 ## [2026-08-02] [26.8.2]
 

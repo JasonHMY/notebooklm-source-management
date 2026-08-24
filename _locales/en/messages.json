@@ -994,7 +994,7 @@
         "message": "New Group"
     },
     "ui_manage_tags": {
-        "message": "Manage Tags"
+        "message": "Manage Custom Tags"
     },
     "ui_new_subgroup": {
         "message": "New Subgroup"
@@ -1649,6 +1649,18 @@
         "placeholders": {
             "1": { "content": "$1" },
             "2": { "content": "$2" }
+        }
+    },
+    "ui_batch_delete_confirm_unsupported": {
+        "message": "$1 selected source(s) do not expose native source actions and will remain selected.",
+        "placeholders": {
+            "1": { "content": "$1" }
+        }
+    },
+    "ui_batch_delete_unsupported_selection": {
+        "message": "$1 selected source(s) cannot be deleted from Gemini Notebook and remain selected for local organization actions.",
+        "placeholders": {
+            "1": { "content": "$1" }
         }
     },
     "ui_batch_delete_result": {

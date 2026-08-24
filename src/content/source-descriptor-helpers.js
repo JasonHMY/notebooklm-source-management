@@ -832,6 +832,7 @@
         const {
             titleEl,
             checkbox,
+            nativeMoreButton,
             ariaLabel,
             title,
             normalizedTitle,
@@ -876,6 +877,7 @@
             iconImageUrl,
             checkbox,
             hasNativeCheckbox,
+            hasNativeActionMenu: Boolean(nativeMoreButton),
             isLoading,
             isFailed,
             isDisabled

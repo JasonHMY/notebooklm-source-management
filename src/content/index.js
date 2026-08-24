@@ -679,6 +679,7 @@
 
     const {
         canOpenSourceActionMenu,
+        canUseNativeSourceActions,
         findSourceActionButton,
         getSourceActionMenuItems,
         getSourceActionSubmenuItems,
@@ -4693,16 +4694,28 @@
     function requestBatchDeleteConfirmation() {
         if (!shadowRoot || pendingBatchKeys.size === 0 || isDeletingSources) return false;
 
-        const keysToDelete = Array.from(pendingBatchKeys)
+        const selectedKeys = Array.from(pendingBatchKeys)
             .filter((key) => sourcesByKey.has(key));
-        if (keysToDelete.length === 0) return false;
+        const keysToDelete = selectedKeys.filter((key) => (
+            canUseNativeSourceActions(sourcesByKey.get(key))
+        ));
+        const unsupportedSelectedCount = selectedKeys.length - keysToDelete.length;
+        if (keysToDelete.length === 0) {
+            if (unsupportedSelectedCount > 0) {
+                showToast(getMessage('ui_batch_delete_unsupported_selection', [
+                    String(unsupportedSelectedCount)
+                ]), { variant: 'info' });
+            }
+            return false;
+        }
+        const keysToDeleteSet = new Set(keysToDelete);
         const visibleSelectedKeys = new Set(
             Array.from(
                 shadowRoot.querySelectorAll?.('.source-item .sp-batch-checkbox:not(:disabled)') || []
             )
                 .filter((checkbox) => treeInteractionsModule?.isBatchSelectionElementVisible?.(checkbox))
                 .map((checkbox) => checkbox?.dataset?.sourceKey)
-                .filter((key) => key && pendingBatchKeys.has(key))
+                .filter((key) => key && keysToDeleteSet.has(key))
         );
         const hiddenSelectedCount = Math.max(0, keysToDelete.length - visibleSelectedKeys.size);
 
@@ -4763,6 +4776,13 @@
                     ])
                 ])
                 : null,
+            unsupportedSelectedCount > 0
+                ? el('p', { className: 'sp-batch-delete-confirm-unsupported' }, [
+                    getMessage('ui_batch_delete_confirm_unsupported', [
+                        String(unsupportedSelectedCount)
+                    ])
+                ])
+                : null,
             el('ul', { className: 'sp-batch-delete-preview-list' }, previewChildren),
             el('p', {
                 className: 'sp-batch-delete-confirm-warning',
@@ -4777,7 +4797,7 @@
         cancelButton.addEventListener('click', () => closeBatchDeleteConfirmModal());
         confirmButton.addEventListener('click', () => {
             closeBatchDeleteConfirmModal({ immediate: true, restoreFocus: false });
-            Promise.resolve(executeBatchDelete()).catch((error) => {
+            Promise.resolve(executeBatchDelete({ targetKeys: keysToDelete })).catch((error) => {
                 console.error('GeminiNotebook-Source-Management: Confirmed batch delete failed.', error);
             });
         });
@@ -4827,7 +4847,36 @@
                 reason: isDeletingSources ? 'busy' : 'empty_selection'
             };
         }
-        const keysToDelete = Array.from(pendingBatchKeys);
+        const selectedKeys = Array.from(pendingBatchKeys);
+        const requestedTargetKeys = Array.isArray(options?.targetKeys)
+            ? new Set(options.targetKeys)
+            : null;
+        const keysToDelete = selectedKeys.filter((key) => (
+            (!requestedTargetKeys || requestedTargetKeys.has(key))
+            && canUseNativeSourceActions(sourcesByKey.get(key))
+        ));
+        const skipped = selectedKeys
+            .filter((key) => !keysToDelete.includes(key))
+            .map((key) => ({ key, reason: 'native_actions_unavailable' }));
+        if (keysToDelete.length === 0) {
+            lastBatchDeleteResult = {
+                ok: false,
+                changed: false,
+                succeeded: [],
+                failed: [],
+                skipped,
+                unattempted: [],
+                reason: 'unsupported_selection'
+            };
+            state.isBatchMode = pendingBatchKeys.size > 0;
+            if (skipped.length > 0) {
+                showToast(getMessage('ui_batch_delete_unsupported_selection', [
+                    String(skipped.length)
+                ]), { variant: 'info' });
+            }
+            render();
+            return lastBatchDeleteResult;
+        }
         const total = keysToDelete.length;
         const batchSession = beginSession({
             action: 'batch-delete',
@@ -4840,7 +4889,7 @@
                 changed: false,
                 succeeded: [],
                 failed: [],
-                skipped: [],
+                skipped,
                 unattempted: keysToDelete.map((key) => ({
                     key,
                     reason: batchSession?.reason || 'native_action_busy'
@@ -4858,7 +4907,6 @@
 
         const succeeded = [];
         const failed = [];
-        const skipped = [];
         const unattempted = [];
         let firstFailureReason = '';
         let stoppedAtIndex = -1;
@@ -4918,14 +4966,15 @@
             isDeletingSources = false;
             const remainingKeys = new Set([
                 ...failed.map((entry) => entry.key),
-                ...unattempted.map((entry) => entry.key)
+                ...unattempted.map((entry) => entry.key),
+                ...skipped.map((entry) => entry.key)
             ]);
             pendingBatchKeys.clear();
             remainingKeys.forEach((key) => pendingBatchKeys.add(key));
             state.isBatchMode = pendingBatchKeys.size > 0;
             closeSourceActionMenu();
             lastBatchDeleteResult = {
-                ok: failed.length === 0 && unattempted.length === 0,
+                ok: failed.length === 0 && unattempted.length === 0 && skipped.length === 0,
                 changed: succeeded.length > 0,
                 succeeded,
                 failed,
@@ -4933,7 +4982,7 @@
                 unattempted,
                 reason: unattempted.length > 0
                     ? 'blocked'
-                    : (failed.length > 0 ? 'partial' : 'completed')
+                    : (failed.length > 0 || skipped.length > 0 ? 'partial' : 'completed')
             };
 
             try {
@@ -4956,6 +5005,11 @@
                 }
                 if (failed.length > 0) {
                     showToast(getNativeActionFailureMessage('delete', firstFailureReason), { variant: 'error' });
+                }
+                if (skipped.length > 0) {
+                    showToast(getMessage('ui_batch_delete_unsupported_selection', [
+                        String(skipped.length)
+                    ]), { variant: 'info' });
                 }
             } finally {
                 render(); // The heartbeat observer will catch the actual DOM removals eventually

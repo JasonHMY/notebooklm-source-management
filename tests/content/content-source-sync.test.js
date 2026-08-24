@@ -1082,6 +1082,46 @@ describe('scanAndSyncSources', () => {
         });
     });
 
+    it('keeps list view when Gemini Notebook exposes the current Sort sources menu', () => {
+        const source = createMockSourceRow({ title: 'List Source', stableToken: 'list-doc', checked: true });
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const sortSourcesButton = {
+            tagName: 'BUTTON',
+            textContent: 'sort',
+            className: 'mdc-icon-button mat-mdc-menu-trigger source-sort-button',
+            style: {},
+            parentElement: panel,
+            parentNode: panel,
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return 'Sort sources';
+                if (attr === 'aria-expanded') return 'false';
+                if (attr === 'aria-haspopup') return 'menu';
+                if (attr === 'class') return 'mdc-icon-button mat-mdc-menu-trigger source-sort-button';
+                return null;
+            }),
+            matches: jest.fn(() => false),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        source.row.parentElement = panel;
+        source.row.parentNode = panel;
+        panel.querySelectorAll = jest.fn((selector) => {
+            if (selector === 'button' || selector === '[role="button"]') return [sortSourcesButton];
+            if (mod.DEPS.row.includes(selector)) return [source.row];
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+
+        expect(mod.getSourceViewInfo(panel)).toMatchObject({
+            kind: 'list',
+            listRows: 1,
+            labelRows: 0,
+            activeLabelControls: 0
+        });
+    });
+
     it('detects NotebookLM label view and annotates sources with native labels', () => {
         const first = createMockSourceRow({ title: 'Paper One', stableToken: 'paper-1', checked: true });
         const second = createMockSourceRow({ title: 'Paper Two', stableToken: 'paper-2', checked: true });
@@ -3694,6 +3734,7 @@ describe('scanAndSyncSources', () => {
         expect(descriptor).toMatchObject({
             title: 'Checkboxless Source',
             hasNativeCheckbox: false,
+            hasNativeActionMenu: true,
             isDisabled: false
         });
 
@@ -3733,6 +3774,7 @@ describe('scanAndSyncSources', () => {
         expect(descriptor).toMatchObject({
             title: 'Analyzing Source',
             hasNativeCheckbox: false,
+            hasNativeActionMenu: false,
             isLoading: true,
             isDisabled: true
         });
