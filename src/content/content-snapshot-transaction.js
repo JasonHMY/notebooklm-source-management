@@ -192,6 +192,29 @@
                 closeSourceActionMenu();
                 render();
 
+                if (typeof options.beforePersist === 'function') {
+                    const beforePersistResult = await Promise.resolve(options.beforePersist({
+                        beforeSnapshot: cloneSerializableData(beforeSnapshot),
+                        targetSnapshot: cloneSerializableData(targetSnapshot),
+                        transaction
+                    }));
+                    if (
+                        beforePersistResult === false
+                        || beforePersistResult?.ok === false
+                        || beforePersistResult?.success === false
+                    ) {
+                        throw new Error(
+                            normalizeFailureReason(
+                                beforePersistResult,
+                                'snapshot_before_persist_failed'
+                            )
+                        );
+                    }
+                }
+                if (!isContextCurrent(contextToken)) {
+                    throw new Error('snapshot_context_stale');
+                }
+
                 const saveResult = await persistSnapshot(
                     reason,
                     beforeSnapshot,
@@ -209,6 +232,9 @@
 
                 if (typeof options.afterSuccess === 'function') {
                     const afterSuccessResult = await Promise.resolve(options.afterSuccess(saveResult));
+                    if (!isContextCurrent(contextToken)) {
+                        throw new Error('snapshot_context_stale');
+                    }
                     if (
                         afterSuccessResult === false
                         || afterSuccessResult?.ok === false
@@ -221,6 +247,9 @@
                             )
                         );
                     }
+                }
+                if (!isContextCurrent(contextToken)) {
+                    throw new Error('snapshot_context_stale');
                 }
                 return {
                     ok: true,
@@ -240,27 +269,64 @@
                     )
                 });
                 if (applyAttempted && isContextCurrent(contextToken)) {
-                    try {
-                        rolledBack = Boolean(
-                            applyPersistableSnapshotToRuntime(
-                                cloneSerializableData(beforeSnapshot)
+                    let rollbackPrepared = true;
+                    const rollbackFailureReason = failureReason;
+                    if (typeof options.beforeRollback === 'function') {
+                        let beforeRollbackResult;
+                        try {
+                            beforeRollbackResult = await Promise.resolve(options.beforeRollback({
+                                reason: failureReason,
+                                beforeSnapshot: cloneSerializableData(beforeSnapshot),
+                                targetSnapshot: cloneSerializableData(targetSnapshot),
+                                transaction
+                            }));
+                        } catch (rollbackPreparationError) {
+                            failureReason = normalizeFailureReason(
+                                rollbackPreparationError,
+                                'snapshot_before_rollback_failed'
+                            );
+                            rollbackPrepared = false;
+                        }
+                        if (!isContextCurrent(contextToken)) {
+                            failureReason = rollbackFailureReason;
+                            rollbackPrepared = false;
+                        } else if (
+                            rollbackPrepared && (
+                                beforeRollbackResult === false
+                                || beforeRollbackResult?.ok === false
+                                || beforeRollbackResult?.success === false
                             )
-                        );
-                    } catch (rollbackError) {
-                        rolledBack = false;
+                        ) {
+                            failureReason = normalizeFailureReason(
+                                beforeRollbackResult,
+                                'snapshot_before_rollback_failed'
+                            );
+                            rollbackPrepared = false;
+                        }
                     }
-                    if (rolledBack) {
-                        closeSourceActionMenu();
-                        render();
-                        const rollbackResult = await persistSnapshot(
-                            `${reason}_rollback`,
-                            null,
-                            rollbackPersistOptions
-                        );
-                        rollbackPersisted = Boolean(
-                            rollbackResult?.ok === true
-                            || rollbackResult?.persistenceCommitted === true
-                        );
+                    if (rollbackPrepared && isContextCurrent(contextToken)) {
+                        try {
+                            rolledBack = Boolean(
+                                applyPersistableSnapshotToRuntime(
+                                    cloneSerializableData(beforeSnapshot)
+                                )
+                            );
+                        } catch (rollbackError) {
+                            rolledBack = false;
+                        }
+                        if (rolledBack) {
+                            closeSourceActionMenu();
+                            render();
+                            const rollbackResult = await persistSnapshot(
+                                `${reason}_rollback`,
+                                null,
+                                rollbackPersistOptions
+                            );
+                            rollbackPersisted = Boolean(
+                                rollbackResult?.ok === true
+                                || rollbackResult?.persistenceCommitted === true
+                            );
+                        }
                     }
                 }
 

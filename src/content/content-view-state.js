@@ -261,8 +261,7 @@
         function isSourceEffectivelyEnabled(source) {
             if (!source) return false;
             return Boolean(source.enabled)
-                && areAllAncestorsEnabled(source.key)
-                && isSourceWithinActiveIsolation(source.key);
+                && areAllAncestorsEnabled(source.key);
         }
 
         function isGroupWithinActiveIsolation(groupId) {

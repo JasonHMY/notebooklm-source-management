@@ -102,6 +102,19 @@
                     hidden: true
                 })
             ]),
+            el('div', {
+                id: 'sp-native-selection-sync-section',
+                className: 'sp-manager-save-status-region',
+                hidden: true
+            }, [
+                el('div', {
+                    id: 'sp-native-selection-sync-progress',
+                    className: 'sp-save-status',
+                    role: 'status',
+                    'aria-live': 'polite',
+                    'aria-atomic': 'true'
+                })
+            ]),
             el('div', { id: 'sp-quick-view-rail', className: 'sp-quick-view-rail', role: 'group', 'aria-label': getMessage('ui_quick_view_rail_label') }),
             el('div', { id: 'sp-view-state', className: 'sp-view-state', hidden: true }),
             el('div', { id: 'sources-list', role: 'list' }),

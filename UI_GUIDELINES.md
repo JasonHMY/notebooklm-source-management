@@ -411,7 +411,7 @@ Characteristics:
 
 - `position: sticky`
 - top aligned
-- compact layout that wraps at narrow panel widths or with long translations
+- two-column grid: wrapping toolbar actions plus the compact search trigger; expanded search occupies its own full-width row
 - bottom border for separation
 - no heavy visual chrome
 
@@ -419,7 +419,7 @@ Toolbar actions live in `.sp-toolbar-actions`.
 
 Rules:
 
-- Top-level actions should remain compact, but `.sp-controls` and `.sp-toolbar-actions` must be allowed to wrap instead of clipping controls.
+- Top-level actions remain compact. The grid gives `.sp-toolbar-actions` a shrinkable column whose buttons wrap without clipping or hiding the action set.
 - New top-level actions must be justified as "frequently used, global, and not row-scoped".
 - Do not overload the toolbar with low-frequency actions.
 - Undo and Redo are the canonical history actions. Their icon buttons expose localized names and remain disabled until the corresponding transactional history stack can be applied.
@@ -430,7 +430,7 @@ The search UI uses an expandable container:
 
 - Default compact icon state
 - Expanded on interaction
-- Collapses the toolbar action width when open
+- Keeps the toolbar visible and operable while the input expands on a separate row
 - Uses `focus-within` ring on the container
 
 Search implementation details:
@@ -438,7 +438,7 @@ Search implementation details:
 - Container: `.sp-search-container`
 - Input: `#sp-search`
 - Icon button: `#sp-search-btn`
-- Search is debounced at `300ms`
+- Search updates coalesce within an `80ms` interaction budget; scheduled work uses a short `16ms` timer
 - Enter triggers immediate search
 - The result summary reserves enough trailing space for the normal panel width. When ellipsized, both the status and underlying search input expose the complete localized summary through `title`; the count only switches to the compact `74px` width at manager widths of `320px` or less.
 
@@ -582,6 +582,25 @@ Rules:
 
 - Popup CTA is the only strong branded button style in the project.
 - Do not reuse popup button styling inside the content panel.
+
+### Native selection progress
+
+- `#sp-native-selection-sync-section` reuses `.sp-manager-save-status-region` and `.sp-save-status` to display actual native checkbox confirmations.
+- Show it only when a multi-source update remains pending after 150ms; do not flash normal completion messages for immediate operations.
+- The live region reports confirmed/total counts, and `#sources-list` exposes `aria-busy` until all requested native states settle. Completion clears the progress; failures use the existing actionable native-sync failure banner.
+- Lifecycle teardown cancels the remaining plugin queue and resolves its waiting operations. This progress is separate from persistent save status.
+
+### Source matching repair
+
+- Ambiguous saved sources show their saved folder path and current live targets with localized native-list positions. Defaults remain unselected; never present an arbitrary match as a recommendation.
+- Use natural ambiguous/unmatched explanations, not internal resolver reason codes. A changed list or incomplete mapping must leave the original organization and show actionable feedback.
+- Matching authorization is scoped to the current connected native rows; reopening after another ambiguous DOM replacement requires a new explicit choice.
+
+### Native deletion confirmation
+
+- Single-source deletion and batch deletion reuse the same alertdialog pattern and focus Cancel initially.
+- Single-source confirmation shows the complete source title and irreversible-delete copy. Cancel, Escape, backdrop dismissal, and manager teardown all decline the operation before native controls are clicked.
+- After confirmation, the original native identity/inventory checks remain mandatory; a batch uses its one batch confirmation, not an extra dialog per item.
 
 ## 9. Selection Controls
 
@@ -962,7 +981,7 @@ Class: `.sp-view-banner`
 
 Used for:
 
-- Active isolation mode
+- Active isolation mode (visual filter only; the banner explicitly says answer sources remain unchanged)
 - Active tag filter
 - Active native-label view (`.sp-native-label-view-banner` modifier, with its own copy + CTA: `ui_native_label_view_active` / `ui_import_native_labels`)
 
@@ -1011,7 +1030,7 @@ Rules:
 - Empty states should be quiet and actionable.
 - Prefer one clear message over illustration-heavy placeholders.
 - Distinguish a notebook with no native sources from search, filter, or isolated-folder no-results states.
-- Search no-results offers Clear search; filtered no-results offers Clear filters; isolated-folder no-results offers Show all. Each action clears only the state named by its copy; any action that also exits folder isolation must capture and synchronize effective source states so the native Gemini Notebook checkboxes match the restored all-source view.
+- Search no-results offers Clear search; filtered no-results offers Clear filters; isolated-folder no-results offers Show all. Each action clears only the state named by its copy; folder isolation is a visual filter, so entering or leaving it never changes native answer-source checkboxes.
 - A true empty notebook points the user to add sources in Gemini Notebook; it must not imply that the extension can create a native source.
 
 ### 13.4 Drag interaction (physical reflow)
@@ -1168,6 +1187,7 @@ Required rules:
   clipping actions. At 200% and 400% browser zoom, the same rule applies: no
   essential control or status may require horizontal scrolling, overlap another
   action, or become hover-only.
+- The sticky batch action bar is capped to the source-list viewport minus its safe inset and scrolls internally when the panel is short; it must not rise over the top toolbar.
 - Batch toolbar buttons and selection status must override the shared button
   `white-space: nowrap` rule with bounded border-box sizing and wrapping. This
   prevents long translations and platform font metrics from increasing the

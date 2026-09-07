@@ -109,6 +109,9 @@
         const getNativeSourceInventory = typeof deps.getNativeSourceInventory === 'function'
             ? deps.getNativeSourceInventory
             : null;
+        const requestSingleSourceDeleteConfirmation = typeof deps.requestSingleSourceDeleteConfirmation === 'function'
+            ? deps.requestSingleSourceDeleteConfirmation
+            : () => false;
         const createContentNativeActionCoordinator = typeof deps.createContentNativeActionCoordinator === 'function'
             ? deps.createContentNativeActionCoordinator
             : globalThis.NSM_CREATE_CONTENT_NATIVE_ACTION_COORDINATOR;
@@ -167,6 +170,7 @@
         let activeSourceActionSubmenuAction = null;
         let sourceActionMenuPosition = null;
         let sourceActionInvokers = Object.create(null);
+        const pendingSingleSourceDeleteKeys = new Set();
 
         const SOURCE_ACTION_MENU_WIDTH = 220;
         const SOURCE_ACTION_MENU_ITEM_HEIGHT = 42;
@@ -265,6 +269,38 @@
                 fingerprint: String(source?.fingerprint || ''),
                 normalizedTitle: getSourceComparableTitle(source)
             };
+        }
+
+        function normalizeNativeActionContext(context = {}) {
+            return {
+                projectId: String(context?.projectId || ''),
+                managerInstanceToken: Number(context?.managerInstanceToken) || 0
+            };
+        }
+
+        function areSourceOperationIdentitiesEqual(left, right) {
+            return Boolean(
+                left
+                && right
+                && left.stableToken === right.stableToken
+                && left.fingerprint === right.fingerprint
+                && left.normalizedTitle === right.normalizedTitle
+            );
+        }
+
+        function isSingleSourceDeleteConfirmationCurrent(sourceKey, captured) {
+            const source = getSourcesByKey().get(sourceKey);
+            if (!source || !captured) return false;
+
+            const currentContext = normalizeNativeActionContext(getNativeActionContext());
+            return (
+                currentContext.projectId === captured.context.projectId
+                && currentContext.managerInstanceToken === captured.context.managerInstanceToken
+                && areSourceOperationIdentitiesEqual(
+                    getSourceOperationIdentity(source),
+                    captured.sourceIdentity
+                )
+            );
         }
 
         function acquireNativeActionOperation(action, sourceKey, source, options = {}) {
@@ -2630,25 +2666,61 @@
         }
 
         function deleteNativeSourceFromAction(sourceKey) {
-            Promise.resolve(deleteNativeSource(sourceKey))
-                .then((result) => {
-                    if (result && result.deleted && result.localApplied !== false) {
-                        showToast(getMessage('ui_native_deleted_irreversible'), { variant: 'success' });
-                        render();
-                        return;
-                    }
-                    if (result && result.deleted) {
-                        showToast(getMessage('ui_native_deleted_local_reconcile_failed'), {
-                            variant: 'error'
+            const source = getSourcesByKey().get(sourceKey);
+            if (!source || pendingSingleSourceDeleteKeys.has(sourceKey)) return Boolean(source);
+
+            const confirmationContext = {
+                context: normalizeNativeActionContext(getNativeActionContext()),
+                sourceIdentity: getSourceOperationIdentity(source)
+            };
+            pendingSingleSourceDeleteKeys.add(sourceKey);
+
+            Promise.resolve()
+                .then(() => requestSingleSourceDeleteConfirmation(sourceKey))
+                .then((confirmed) => {
+                    if (confirmed !== true) {
+                        developerLog('info', 'native_action', 'delete_confirmation_cancelled', {
+                            sourceKey,
+                            reason: 'cancelled'
                         });
-                        render();
-                        return;
+                        return { skipped: true };
                     }
-                    showNativeActionFailureToast('delete', sourceKey, result?.reason || 'native_delete_error', deleteNativeSourceFromAction);
+                    if (!isSingleSourceDeleteConfirmationCurrent(sourceKey, confirmationContext)) {
+                        developerLog('warn', 'native_action', 'delete_confirmation_stale', {
+                            sourceKey,
+                            reason: 'context_or_identity_changed'
+                        });
+                        return null;
+                    }
+                    return Promise.resolve(deleteNativeSource(sourceKey))
+                        .then((result) => {
+                            if (result && result.deleted && result.localApplied !== false) {
+                                showToast(getMessage('ui_native_deleted_irreversible'), { variant: 'success' });
+                                render();
+                                return;
+                            }
+                            if (result && result.deleted) {
+                                showToast(getMessage('ui_native_deleted_local_reconcile_failed'), {
+                                    variant: 'error'
+                                });
+                                render();
+                                return;
+                            }
+                            showNativeActionFailureToast('delete', sourceKey, result?.reason || 'native_delete_error', deleteNativeSourceFromAction);
+                        })
+                        .catch((error) => {
+                            console.error('GeminiNotebook-Source-Management: Source delete request failed.', error);
+                            showNativeActionFailureToast('delete', sourceKey, 'native_delete_error', deleteNativeSourceFromAction);
+                        });
                 })
-                .catch((error) => {
-                    console.error('GeminiNotebook-Source-Management: Source delete request failed.', error);
-                    showNativeActionFailureToast('delete', sourceKey, 'native_delete_error', deleteNativeSourceFromAction);
+                .catch(() => {
+                    developerLog('warn', 'native_action', 'delete_confirmation_failed', {
+                        sourceKey,
+                        reason: 'confirmation_failed'
+                    });
+                })
+                .finally(() => {
+                    pendingSingleSourceDeleteKeys.delete(sourceKey);
                 });
 
             return true;

@@ -11,7 +11,7 @@
      *   - DOM 工厂: el (XSS-safe text-node-only element factory from src/utils/index.js)
      *   - search/filter: searchSemantics (由 index 注入；独立调用需先加载全局 factory),
      *     sourceMatchesCurrentFilters, areAllAncestorsEnabled,
-     *     isSourceWithinActiveIsolation, isGroupWithinActiveIsolation, isSourceEffectivelyEnabled,
+     *     isGroupWithinActiveIsolation, isSourceEffectivelyEnabled,
      *     shouldRenderGroup, hasActiveRenderFilters, getSourceTagIds, getTagStyleVars
      *   - interaction callbacks: handleInteraction, canOpenSourceActionMenu, syncSearchUi, getMessage
      *   完整 deps 列表见下方 line 6+ 的 destructuring 块。
@@ -79,9 +79,6 @@
             : () => true;
         const areAllAncestorsEnabled = typeof deps.areAllAncestorsEnabled === 'function'
             ? deps.areAllAncestorsEnabled
-            : () => true;
-        const isSourceWithinActiveIsolation = typeof deps.isSourceWithinActiveIsolation === 'function'
-            ? deps.isSourceWithinActiveIsolation
             : () => true;
         const isGroupWithinActiveIsolation = typeof deps.isGroupWithinActiveIsolation === 'function'
             ? deps.isGroupWithinActiveIsolation
@@ -2119,7 +2116,7 @@
                 if (searchCriteria.hasQuery) {
                     countedSearchResultKeys.add(source.key);
                 }
-                const isGated = !areAllAncestorsEnabled(source.key) || !isSourceWithinActiveIsolation(source.key);
+                const isGated = !areAllAncestorsEnabled(source.key);
                 const isFailed = Boolean(source.isFailed || (source.isDisabled && !source.isLoading));
                 const isLoading = source.isLoading;
                 if (

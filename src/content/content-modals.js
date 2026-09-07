@@ -939,11 +939,16 @@
 
         function createSourceRepairNodes(report = getSourceRepairReport()) {
             const normalizedReport = report || {};
+            const ambiguousKeys = new Set(
+                (Array.isArray(normalizedReport.ambiguous) ? normalizedReport.ambiguous : [])
+                    .map((item) => item.storedKey)
+            );
             const repairItems = [
                 ...(Array.isArray(normalizedReport.unmatched) ? normalizedReport.unmatched : []),
                 ...(Array.isArray(normalizedReport.ambiguous) ? normalizedReport.ambiguous : [])
             ];
-            const sourceOptions = Array.isArray(getSourceRepairOptions()) ? getSourceRepairOptions() : [];
+            const availableSourceOptions = getSourceRepairOptions();
+            const sourceOptions = Array.isArray(availableSourceOptions) ? availableSourceOptions : [];
             const nodes = [
                 el('p', { className: 'sp-settings-helper-text sp-source-repair-summary' }, [
                     getMessage('ui_source_repair_summary', [
@@ -961,6 +966,11 @@
                 ]));
                 return nodes;
             }
+            if (ambiguousKeys.size > 0) {
+                nodes.push(el('p', { className: 'sp-settings-helper-text' }, [
+                    getMessage('ui_source_repair_ambiguous_help')
+                ]));
+            }
 
             nodes.push(el('div', { className: 'sp-source-repair-list' }, repairItems.map((item) => (
                 el('div', { className: 'sp-source-repair-item' }, [
@@ -969,8 +979,13 @@
                             item.title || item.storedKey || getMessage('ui_source_untitled')
                         ]),
                         el('div', { className: 'sp-source-repair-meta' }, [
-                            getMessage('ui_source_repair_reason', [item.reason || 'unresolved'])
-                        ])
+                            getMessage(ambiguousKeys.has(item.storedKey)
+                                ? 'ui_source_repair_ambiguous_status'
+                                : 'ui_source_repair_unmatched_status')
+                        ]),
+                        item.savedLocation ? el('div', { className: 'sp-source-repair-meta' }, [
+                            getMessage('ui_source_repair_saved_location', [item.savedLocation])
+                        ]) : null
                     ]),
                     el('select', {
                         className: 'sp-source-repair-select',

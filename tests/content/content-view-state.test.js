@@ -183,7 +183,7 @@ describe('content effective-enabled with state.root', () => {
         expect(mod.sourceMatchesCurrentFilters(sourcesByKey.get('positioned'))).toBe(false);
     });
 
-    it('captures and synchronizes native state around an isolation transition', () => {
+    it('filters isolation without changing the sources used by the notebook', () => {
         const state = {
             root: [{ type: 'group', id: 'g1' }],
             ungrouped: ['outside']
@@ -214,6 +214,8 @@ describe('content effective-enabled with state.root', () => {
             syncSourceToPage
         });
 
+        expect(mod.isSourceWithinActiveIsolation('outside')).toBe(false);
+        expect(mod.isSourceEffectivelyEnabled(sourcesByKey.get('outside'))).toBe(true);
         const result = mod.runEffectiveStateTransition(() => {
             isolationGroupId = null;
             return true;
@@ -221,16 +223,12 @@ describe('content effective-enabled with state.root', () => {
 
         expect(result).toMatchObject({
             ok: true,
-            changedSourceKeys: ['outside']
+            changedSourceKeys: []
         });
-        expect(syncSourceToPage).toHaveBeenCalledTimes(1);
-        expect(syncSourceToPage).toHaveBeenCalledWith(
-            sourcesByKey.get('outside'),
-            true
-        );
+        expect(syncSourceToPage).not.toHaveBeenCalled();
     });
 
-    it('captures ancestor and isolation state before a placement transition, then syncs only changed sources', async () => {
+    it('syncs changed ancestor enablement while an isolated view does not change other sources', async () => {
         const state = {
             root: [
                 { type: 'group', id: 'isolated' },
@@ -295,23 +293,18 @@ describe('content effective-enabled with state.root', () => {
         expect(transition.previousStates).toEqual(new Map([
             ['inside', false],
             ['stable', true],
-            ['outside', false]
+            ['outside', true]
         ]));
-        expect(transition.changedSourceKeys).toEqual(['inside', 'outside']);
+        expect(transition.changedSourceKeys).toEqual(['inside']);
         expect(syncSourceToPage).toHaveBeenNthCalledWith(
             1,
             sourcesByKey.get('inside'),
             true
         );
-        expect(syncSourceToPage).toHaveBeenNthCalledWith(
-            2,
-            sourcesByKey.get('outside'),
-            true
-        );
-        expect(syncSourceToPage).toHaveBeenCalledTimes(2);
+        expect(syncSourceToPage).toHaveBeenCalledTimes(1);
         await expect(transition.confirmation).resolves.toEqual(expect.objectContaining({
             ok: true,
-            changedSourceKeys: ['inside', 'outside']
+            changedSourceKeys: ['inside']
         }));
     });
 
@@ -343,6 +336,7 @@ describe('content effective-enabled with state.root', () => {
         });
 
         const transition = mod.runEffectiveStateTransition(() => {
+            source.enabled = false;
             state.activeQuickViewKind = 'issues';
             return true;
         });

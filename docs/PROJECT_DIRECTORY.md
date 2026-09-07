@@ -78,7 +78,7 @@ GeminiNotebook-Source-Management
 │   │   ├── content-snapshot-signature.js
 │   │   │   └── 快照签名归一化、save revision 解析、storage 配额错误识别 helper
 │   │   ├── content-state-repair.js
-│   │   │   └── 受损分组树结构修复候选筛选、合并和 grouped-source-key 扫描 helper
+│   │   │   └── 历史结构修复候选算法 helper；正常 load 不再自动调用候选合并，手动历史/备份恢复走 snapshot transaction
 │   │   ├── content-persistence.js
 │   │   │   └── runtime-first LOAD_STATE、raw primary/backup 选择、save/history/import-owned recovery；snapshot 构造会剔除尚未确认初始名称的临时文件夹、关联 edge 与 rename-only 字段；无 DOM 恢复汇总 snapshot sourceStateById、legacy enabled map、root、group children 与 ungrouped 的持久化来源引用；首次虚拟化 partial 先 staging，再以 ready DOM + 持久化占位确定性合并，只有原子提交成功才清 pending，其余同步/placement 失败保留待恢复快照
 │   │   ├── content-import-export.js
@@ -88,7 +88,7 @@ GeminiNotebook-Source-Management
 │   │   ├── content-state-apply.js
 │   │   │   └── undo/redo、配置导入/回滚、手动历史/恢复快照与来源修复共用的快照应用 Adapter；先归一化并原子提交树，再更新标签/来源状态、parent map 与原生 checkbox
 │   │   ├── content-snapshot-transaction.js
-│   │   │   └── Recovery、History、Import Backup 和 Source Repair 共用的串行快照事务；绑定 notebook/manager context，要求明确 critical-save ack，失败恢复运行时并确认回滚落盘
+│   │   │   └── Recovery、History、Import Backup 和 Source Repair 共用的串行快照事务；绑定 notebook/manager context，beforePersist 可完成明确绑定的canonical hydration，beforeRollback准备失败或上下文变化时禁止不安全回滚；要求明确 critical-save ack，失败恢复运行时并确认回滚落盘
 │   │   ├── content-toast.js
 │   │   │   └── toast 容器与提示渲染 helper
 │   │   ├── content-source-list-scan.js
@@ -132,7 +132,7 @@ GeminiNotebook-Source-Management
 │   │   ├── content-style-text.js
 │   │   │   └── manager 和 overlay 的 CSS 文本；含 row action family 与 `.sp-sr-only` 无障碍 utility
 │   │   ├── content-template.js
-│   │   │   └── manager shell 模板；含 Undo/Redo 工具栏、主面板保存/恢复状态区、来源 list 与持久化精准排序 polite live region
+│   │   │   └── manager shell 模板；含 Undo/Redo 工具栏、保存/恢复状态区、延迟显示的原生勾选确认进度、来源 list 与精准排序 polite live region
 │   │   └── styles.css
 │   │       └── 原生 Gemini Notebook DOM 覆写（manifest content_scripts[0].css 注入，scoped 在 .sources-plus-manager-active；三套 CSS 之一）
 │   ├── background/
@@ -181,8 +181,12 @@ GeminiNotebook-Source-Management
 │   ├── RELEASE_CHECKLIST.md
 │   └── superpowers/
 │       ├── specs/
+│       │   ├── 2026-09-08-top10-ux-repair-design.md
+│       │   │   └── 十项体验问题的目标行为、兼容边界与验收约束
 │       │   └── 历史设计规格；不是 runtime，也不进入发布包
 │       └── plans/
+│           ├── 2026-09-08-top10-ux-repairs.md
+│           │   └── 十项来源身份、保存恢复、生命周期和UI问题的修复计划与验证状态
 │           ├── 2026-07-26-optimization-hardening-roadmap.md
 │           │   └── 数据完整性、拖拽正确性/性能、架构/无障碍三条工作流的总顺序、依赖、验收和回滚门
 │           ├── 2026-07-26-storage-integrity-hardening.md
@@ -329,7 +333,7 @@ manifest.json
 │   │   ├── Gemini Notebook SPA route change
 │   │   ├── panel reattach
 │   │   ├── teardown/reinitialize
-│   │   └── cleanup 前同步 flush debounce save，再立即移除 UI/事件源
+│   │   └── cleanup 前 flush 保存，取消延迟来源扫描/视图回调/原生勾选并结清Promise；所有后续入口核对live manager与实例token，折叠SPA面板等待展开
 │   ├── 先看
 │   │   ├── src/content/index.js
 │   │   ├── src/content/content-runtime-state.js
@@ -663,6 +667,16 @@ manifest.json
         ├── tests/package.test.js
         └── npm run lint
 ```
+
+### 2026-09-08 Top 10 修复入口
+
+- 删除确认：`index.js` 的 `requestSingleSourceDeleteConfirmation` 复用批量alertdialog；`content-source-actions.js` 在确认前后核对上下文/身份，低层批量删除不重复确认。
+- 生命周期：`getLiveSourceSyncContextToken` 绑定启用状态、当前notebook与已挂载实例；`debouncedScanAndSync.cancel()`、视图click timer与 `cancelNativeSelectionSync()` 在cleanup收口。Popup `SWITCH_SOURCE_VIEW` 的poll/finalize也携带token与request generation；自身native click引发的同notebook DOM重建只允许在原有期限内交接到完成恢复的新实例，route/disable/新请求使旧操作失效。
+- 保存/恢复：`content-persistence.js` 保留最新原始布局，stale仅记录冲突信息；旧快照不能通过提升base后重试覆盖远端，界面提供刷新。
+- 身份/故障：`source-descriptor-helpers.js` 排除标题故障词；`content-state-reconcile.js` 先使用同DOM/稳定ID，传播 `ambiguous_weak_identity` 与 `unresolvedWeakIdentityKeys`，source-sync保留未决组织，不按顺序猜测；现有SourceRepair显示旧位置和当前原生顺序，经用户一对一选择后用会话私有element绑定、canonical保存与失败回滚完成恢复。
+- 搜索/仅看：工具栏与展开搜索用grid分行，批量入口持续可用；仅看只影响渲染，不改变回答来源。
+- 勾选队列：`content-tree-interactions.js` 每轮最多16个即时确认，慢控件每次点击保留10×75ms确认窗口；`getNativeSelectionSyncProgress`/`onNativeSelectionSyncProgress` 输出 `{pending, completed, total}`，cleanup调用cancel结清待完成请求。
+- 回归：现有 `content-source-actions`、`content-lifecycle`、`content-persistence`、`content-source-sync`、`content-tree`、`content-view-state`/`content-render` 和 `tests/smoke/extension-smoke.spec.js` 承担对应验证；详见同日实施计划。
 
 ## 4. 数据与存储树
 

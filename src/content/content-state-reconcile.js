@@ -36,6 +36,9 @@
         } = deps;
         const runtime = deps.runtime || deps;
         const normalizePlacementState = treePlacement?.normalizePlacementState;
+        const getExplicitSourceElementBinding = typeof deps.getExplicitSourceElementBinding === 'function'
+            ? deps.getExplicitSourceElementBinding
+            : () => null;
 
         if (typeof normalizePlacementState !== 'function') {
             throw new Error('GeminiNotebook-Source-Management: createContentStateReconcile requires Tree Placement normalization.');
@@ -139,7 +142,7 @@
         }
 
         function createResolvedSourceKey(key, reason) {
-            return { key: key || null, reason: key ? reason : 'unresolved' };
+            return { key: key || null, reason: key ? reason : (reason || 'unresolved') };
         }
 
         function normalizeStableTokenForComparison(value) {
@@ -169,6 +172,14 @@
                 || extractStableTokenFromSourceKey(storedKey);
         }
 
+        function hasAmbiguousWeakIdentity(sourceLookup, sourceRecord = null, storedKey = '', candidateKey = '') {
+            if (getStoredStableToken(sourceRecord, storedKey)) return false;
+            const candidateSource = sourceLookup?.sourceByKey?.get?.(candidateKey) || null;
+            const fingerprint = getOwnFieldValue(sourceRecord, 'fingerprint', '') || candidateSource?.fingerprint || '';
+            const fingerprintCandidates = sourceLookup?.fingerprintBuckets?.get?.(fingerprint) || [];
+            return Boolean(fingerprint && fingerprintCandidates.length > 1);
+        }
+
         function canResolveSourceByWeakIdentity(sourceLookup, candidateKey, sourceRecord = null, storedKey = '') {
             if (!candidateKey || !sourceRecord) return Boolean(candidateKey);
             const candidateSource = sourceLookup?.sourceByKey?.get?.(candidateKey) || null;
@@ -186,22 +197,39 @@
             return true;
         }
 
+        function isExplicitSourceElementBindingCurrent(binding, candidateSource) {
+            if (!binding || !candidateSource || binding.element !== candidateSource.element) return false;
+            const identity = binding.identity || {};
+            return (
+                String(identity.title || '') === String(candidateSource.title || '') &&
+                String(identity.normalizedTitle || '') === String(candidateSource.normalizedTitle || '') &&
+                String(identity.ariaLabel || '') === String(candidateSource.ariaLabel || '') &&
+                String(identity.stableToken || '') === String(candidateSource.stableToken || '') &&
+                String(identity.fingerprint || '') === String(candidateSource.fingerprint || '') &&
+                String(identity.iconName || '') === String(candidateSource.iconName || '')
+            );
+        }
+
+        function resolveExplicitSourceElementBinding(storedKey, sourceLookup) {
+            const binding = getExplicitSourceElementBinding(storedKey);
+            if (!binding?.element || !sourceLookup?.byElement?.has?.(binding.element)) return null;
+            const candidateKey = sourceLookup.byElement.get(binding.element);
+            const candidateSource = sourceLookup.sourceByKey?.get?.(candidateKey) || null;
+            if (!isExplicitSourceElementBindingCurrent(binding, candidateSource)) return null;
+            return candidateKey || null;
+        }
+
         function resolveStoredSourceKeyWithReason(storedKey, sourceLookup, sourceRecord = null) {
             if (!storedKey || !sourceLookup) return createResolvedSourceKey(null, 'unresolved');
-            if (sourceLookup.byId.has(storedKey)) return createResolvedSourceKey(sourceLookup.byId.get(storedKey), 'id');
-            if (sourceLookup.byLegacyKey.has(storedKey)) return createResolvedSourceKey(sourceLookup.byLegacyKey.get(storedKey), 'legacy');
+
+            const explicitElementKey = resolveExplicitSourceElementBinding(storedKey, sourceLookup);
+            if (explicitElementKey) {
+                return createResolvedSourceKey(explicitElementKey, 'explicit-element');
+            }
 
             const stableToken = getOwnFieldValue(sourceRecord, 'stableToken', '');
             if (stableToken && sourceLookup.uniqueByStableToken.has(stableToken)) {
                 return createResolvedSourceKey(sourceLookup.uniqueByStableToken.get(stableToken), 'stable-token');
-            }
-
-            const fingerprint = getOwnFieldValue(sourceRecord, 'fingerprint', '');
-            if (fingerprint && sourceLookup.uniqueByFingerprint.has(fingerprint)) {
-                const fingerprintKey = sourceLookup.uniqueByFingerprint.get(fingerprint);
-                if (canResolveSourceByWeakIdentity(sourceLookup, fingerprintKey, sourceRecord, storedKey)) {
-                    return createResolvedSourceKey(fingerprintKey, 'fingerprint');
-                }
             }
 
             const sourceElement = getOwnFieldValue(sourceRecord, 'element', null);
@@ -210,7 +238,52 @@
                 sourceLookup.byElement &&
                 sourceLookup.byElement.has(sourceElement)
             ) {
-                return createResolvedSourceKey(sourceLookup.byElement.get(sourceElement), 'element');
+                const elementKey = sourceLookup.byElement.get(sourceElement);
+                if (canResolveSourceByWeakIdentity(sourceLookup, elementKey, sourceRecord, storedKey)) {
+                    return createResolvedSourceKey(elementKey, 'element');
+                }
+            }
+
+            const directKey = sourceLookup.byId.get(storedKey);
+            if (
+                directKey &&
+                !hasAmbiguousWeakIdentity(sourceLookup, sourceRecord, storedKey, directKey) &&
+                canResolveSourceByWeakIdentity(sourceLookup, directKey, sourceRecord, storedKey)
+            ) {
+                return createResolvedSourceKey(directKey, 'id');
+            }
+            const legacyKey = sourceLookup.byLegacyKey.get(storedKey);
+            const legacyCandidate = sourceLookup.sourceByKey?.get?.(legacyKey) || null;
+            const isUniqueLegacyFallbackToStableSource = Boolean(
+                legacyKey &&
+                !getStoredStableToken(sourceRecord, storedKey) &&
+                legacyCandidate?.stableToken &&
+                sourceLookup.legacyKeyBuckets?.get?.(storedKey)?.length === 1
+            );
+            if (
+                legacyKey &&
+                !hasAmbiguousWeakIdentity(sourceLookup, sourceRecord, storedKey, legacyKey) &&
+                (
+                    canResolveSourceByWeakIdentity(sourceLookup, legacyKey, sourceRecord, storedKey) ||
+                    isUniqueLegacyFallbackToStableSource
+                )
+            ) {
+                return createResolvedSourceKey(legacyKey, 'legacy');
+            }
+
+            if (
+                hasAmbiguousWeakIdentity(sourceLookup, sourceRecord, storedKey, directKey) ||
+                hasAmbiguousWeakIdentity(sourceLookup, sourceRecord, storedKey, legacyKey)
+            ) {
+                return createResolvedSourceKey(null, 'ambiguous_weak_identity');
+            }
+
+            const fingerprint = getOwnFieldValue(sourceRecord, 'fingerprint', '');
+            if (fingerprint && sourceLookup.uniqueByFingerprint.has(fingerprint)) {
+                const fingerprintKey = sourceLookup.uniqueByFingerprint.get(fingerprint);
+                if (canResolveSourceByWeakIdentity(sourceLookup, fingerprintKey, sourceRecord, storedKey)) {
+                    return createResolvedSourceKey(fingerprintKey, 'fingerprint');
+                }
             }
 
             const normalizedTitle = normalizeSourceText(
@@ -736,12 +809,17 @@
             const nextSourceStateById = new Map();
             const nextSourceTagsById = new Map();
             const seenSourceRefs = new Set();
+            const unresolvedWeakIdentityKeys = new Set();
             const positionalRemap = buildSingleSourcePositionalRemap(sourceLookup, previousState);
-            const resolveCurrentSourceKey = (storedKey, sourceRecord) => (
-                resolveStoredSourceKey(storedKey, sourceLookup, sourceRecord) ||
-                positionalRemap.get(storedKey)?.key ||
-                null
-            );
+            const resolveCurrentSourceKey = (storedKey, sourceRecord) => {
+                const resolution = resolveStoredSourceKeyWithReason(storedKey, sourceLookup, sourceRecord);
+                if (resolution.key) return resolution.key;
+                if (resolution.reason === 'ambiguous_weak_identity') {
+                    unresolvedWeakIdentityKeys.add(storedKey);
+                    return null;
+                }
+                return positionalRemap.get(storedKey)?.key || null;
+            };
 
             runtime.groupsById.forEach((group, groupId) => {
                 nextGroupsById.set(groupId, {
@@ -845,7 +923,8 @@
                 groupsById: nextGroupsById,
                 sourceStateById: nextSourceStateById,
                 sourceTagsById: nextSourceTagsById,
-                seenSourceRefs
+                seenSourceRefs,
+                unresolvedWeakIdentityKeys
             };
         }
 
@@ -995,12 +1074,24 @@
 
         function reconcilePersistedTree(loadedState, sourceLookup) {
             const nextGroupsById = new Map();
+            const unresolvedWeakIdentityKeys = new Set();
             const rawGroupsById = loadedState && loadedState.groupsById ? loadedState.groupsById : {};
             const liveSourceKeys = new Set(
                 Array.isArray(sourceLookup?.orderedKeys)
                     ? sourceLookup.orderedKeys
                     : Array.from(sourceLookup?.sourceByKey?.keys?.() || [])
             );
+            const resolvePersistedSourceKey = (storedKey, sourceRecord) => {
+                const resolution = resolveStoredSourceKeyWithReason(
+                    storedKey,
+                    sourceLookup,
+                    sourceRecord
+                );
+                if (!resolution.key && resolution.reason === 'ambiguous_weak_identity') {
+                    unresolvedWeakIdentityKeys.add(storedKey);
+                }
+                return resolution.key;
+            };
 
             Object.entries(rawGroupsById).forEach(([groupId, rawGroup]) => {
                 nextGroupsById.set(groupId, {
@@ -1034,11 +1125,7 @@
                         loadedState && loadedState.sourceStateById,
                         childSourceKey
                     );
-                    const resolvedKey = resolveStoredSourceKey(
-                        childSourceKey,
-                        sourceLookup,
-                        sourceRecord
-                    );
+                    const resolvedKey = resolvePersistedSourceKey(childSourceKey, sourceRecord);
                     if (!resolvedKey) return;
 
                     nextGroup.children.push({ type: 'source', key: resolvedKey });
@@ -1070,11 +1157,7 @@
                         loadedState && loadedState.sourceStateById,
                         sourceKey
                     );
-                    const resolvedKey = resolveStoredSourceKey(
-                        sourceKey,
-                        sourceLookup,
-                        sourceRecord
-                    );
+                    const resolvedKey = resolvePersistedSourceKey(sourceKey, sourceRecord);
                     if (!resolvedKey) return;
                     nextRoot.push({ type: 'source', key: resolvedKey });
                 }
@@ -1086,7 +1169,7 @@
                     loadedState && loadedState.sourceStateById,
                     storedKey
                 );
-                const resolvedKey = resolveStoredSourceKey(storedKey, sourceLookup, sourceRecord);
+                const resolvedKey = resolvePersistedSourceKey(storedKey, sourceRecord);
                 if (!resolvedKey) return;
 
                 nextUngrouped.push(resolvedKey);
@@ -1108,7 +1191,8 @@
                     root: [],
                     groupsById: new Map(),
                     ungrouped: [],
-                    seenSourceRefs: new Set()
+                    seenSourceRefs: new Set(),
+                    unresolvedWeakIdentityKeys
                 };
             }
 
@@ -1118,6 +1202,7 @@
                 groupsById: normalized.groupsById,
                 ungrouped: normalized.state.ungrouped,
                 seenSourceRefs: new Set(normalized.liveSourceKeys),
+                unresolvedWeakIdentityKeys,
                 normalization: normalized
             };
         }

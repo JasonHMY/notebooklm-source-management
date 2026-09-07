@@ -12522,3 +12522,258 @@ describe('single-frame drag geometry snapshot budgets', () => {
         expect(runtime.dragGeometryDirty).toBe(true);
     });
 });
+
+describe('native checkbox selection queue', () => {
+    let createContentTreeInteractions;
+
+    function createManualTimer() {
+        const scheduled = [];
+        let elapsedMs = 0;
+        let sequence = 0;
+        return {
+            setTimeout: jest.fn((callback, delay = 0) => {
+                const normalizedDelay = Math.max(Number(delay) || 0, 0);
+                sequence += 1;
+                scheduled.push({
+                    callback,
+                    dueAt: elapsedMs + normalizedDelay,
+                    sequence
+                });
+                return scheduled.length;
+            }),
+            runNext() {
+                scheduled.sort((left, right) => (
+                    left.dueAt - right.dueAt || left.sequence - right.sequence
+                ));
+                const task = scheduled.shift();
+                if (!task) return false;
+                elapsedMs = task.dueAt;
+                task.callback();
+                return true;
+            },
+            drain(limit = 10000) {
+                let steps = 0;
+                while (scheduled.length > 0) {
+                    if (steps >= limit) throw new Error('manual timer did not settle');
+                    steps += 1;
+                    this.runNext();
+                }
+            },
+            get elapsedMs() {
+                return elapsedMs;
+            }
+        };
+    }
+
+    function createSelectionQueueFixture() {
+        const timer = createManualTimer();
+        const clickQueue = [];
+        const sourcesByKey = new Map();
+        const attachedCheckboxes = new Set();
+        const progressUpdates = [];
+        let isProcessingQueue = false;
+        let isSyncingState = false;
+        let contextToken = 'notebook-a:1';
+        const documentObj = {
+            body: {
+                contains: (element) => attachedCheckboxes.has(element)
+            },
+            location: { pathname: '/notebook/a', search: '' }
+        };
+        const tree = createContentTreeInteractions({
+            getState: () => ({ root: [], ungrouped: [] }),
+            getGroupsById: () => new Map(),
+            getSourcesByKey: () => sourcesByKey,
+            getClickQueue: () => clickQueue,
+            getDocument: () => documentObj,
+            getSetTimeout: () => timer.setTimeout,
+            getNativeSelectionContextToken: () => contextToken,
+            getCurrentSourceViewKind: () => 'list',
+            getIsProcessingQueue: () => isProcessingQueue,
+            setIsProcessingQueue: (value) => { isProcessingQueue = Boolean(value); },
+            getIsSyncingState: () => isSyncingState,
+            setIsSyncingState: (value) => { isSyncingState = Boolean(value); },
+            onNativeSelectionSyncProgress: (progress) => progressUpdates.push(progress)
+        });
+
+        function addSource(key, { checked = false, click = null } = {}) {
+            const checkbox = {
+                checked,
+                click: jest.fn(() => {
+                    if (typeof click === 'function') {
+                        click(checkbox);
+                    } else {
+                        checkbox.checked = !checkbox.checked;
+                    }
+                })
+            };
+            const source = {
+                key,
+                checkbox,
+                element: {
+                    querySelector: () => checkbox
+                }
+            };
+            attachedCheckboxes.add(checkbox);
+            sourcesByKey.set(key, source);
+            return { source, checkbox };
+        }
+
+        return {
+            tree,
+            timer,
+            addSource,
+            progressUpdates,
+            setContextToken: (value) => { contextToken = value; },
+            getQueueState: () => ({ isProcessingQueue, isSyncingState, queueLength: clickQueue.length })
+        };
+    }
+
+    beforeEach(() => {
+        jest.resetModules();
+        setupGlobalMocks();
+        require('../../src/content/content-native-checkbox-sync.js');
+        createContentTreeInteractions = require('../../src/content/content-tree-interactions.js');
+    });
+
+    afterEach(teardownGlobalMocks);
+
+    it('confirms 100 immediately-effective checkbox changes in bounded event-loop time', async () => {
+        const fixture = createSelectionQueueFixture();
+        const completionPromises = [];
+        const checkboxes = [];
+        for (let index = 0; index < 100; index += 1) {
+            const entry = fixture.addSource(`source-${index}`);
+            checkboxes.push(entry.checkbox);
+            completionPromises.push(fixture.tree.syncSourceToPageWithResult(entry.source, true, {
+                preferStoredCheckbox: true
+            }));
+        }
+
+        fixture.timer.drain();
+        const completed = await Promise.all(completionPromises);
+
+        expect(completed.every((result) => result.ok)).toBe(true);
+        expect(fixture.timer.elapsedMs).toBeLessThan(2000);
+        expect(fixture.timer.setTimeout.mock.calls.filter(([, delay]) => delay === 0).length)
+            .toBeGreaterThan(1);
+        expect(checkboxes.every((checkbox) => checkbox.click.mock.calls.length === 1)).toBe(true);
+        expect(fixture.tree.getNativeSelectionSyncProgress()).toEqual({
+            pending: 0,
+            completed: 100,
+            total: 100
+        });
+        expect(fixture.progressUpdates[fixture.progressUpdates.length - 1]).toEqual({
+            pending: 0,
+            completed: 100,
+            total: 100
+        });
+    });
+
+    it('waits for a slow checkbox confirmation without repeatedly clicking it', async () => {
+        const fixture = createSelectionQueueFixture();
+        const entry = fixture.addSource('slow-source', { click: () => {} });
+        const resultPromise = fixture.tree.syncSourceToPageWithResult(entry.source, true, {
+            preferStoredCheckbox: true
+        });
+
+        expect(entry.checkbox.click).toHaveBeenCalledTimes(1);
+        fixture.timer.runNext();
+        fixture.timer.runNext();
+        fixture.timer.runNext();
+        expect(entry.checkbox.click).toHaveBeenCalledTimes(1);
+
+        entry.checkbox.checked = true;
+        fixture.timer.runNext();
+
+        await expect(resultPromise).resolves.toEqual(expect.objectContaining({
+            ok: true,
+            reason: 'confirmed',
+            clickAttempts: 1
+        }));
+        expect(entry.checkbox.click).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps a full confirmation window after the second click for a delayed native update', async () => {
+        const fixture = createSelectionQueueFixture();
+        let clickAttempts = 0;
+        const entry = fixture.addSource('delayed-second-click', {
+            click: (checkbox) => {
+                clickAttempts += 1;
+                if (clickAttempts === 2) {
+                    fixture.timer.setTimeout(() => {
+                        checkbox.checked = true;
+                    }, 300);
+                }
+            }
+        });
+        const resultPromise = fixture.tree.syncSourceToPageWithResult(entry.source, true, {
+            preferStoredCheckbox: true
+        });
+
+        fixture.timer.drain();
+
+        await expect(resultPromise).resolves.toEqual(expect.objectContaining({
+            ok: true,
+            reason: 'confirmed',
+            clickAttempts: 2
+        }));
+        expect(clickAttempts).toBe(2);
+        expect(fixture.timer.elapsedMs).toBeGreaterThanOrEqual(1000);
+    });
+
+    it('cancels active and queued checkbox work without late clicks', async () => {
+        const fixture = createSelectionQueueFixture();
+        const first = fixture.addSource('first', { click: () => {} });
+        const second = fixture.addSource('second', { click: () => {} });
+        const third = fixture.addSource('third', { click: () => {} });
+        const resultPromises = [first, second, third].map(({ source }) => (
+            fixture.tree.syncSourceToPageWithResult(source, true, {
+                preferStoredCheckbox: true
+            })
+        ));
+
+        expect(first.checkbox.click).toHaveBeenCalledTimes(1);
+        expect(fixture.tree.cancelNativeSelectionSync('manager_destroyed')).toEqual({
+            pending: 0,
+            completed: 0,
+            total: 3
+        });
+        fixture.timer.drain();
+
+        const results = await Promise.all(resultPromises);
+        expect(results.every((result) => result.ok === false && result.reason === 'manager_destroyed')).toBe(true);
+        expect(first.checkbox.click).toHaveBeenCalledTimes(1);
+        expect(second.checkbox.click).not.toHaveBeenCalled();
+        expect(third.checkbox.click).not.toHaveBeenCalled();
+        expect(fixture.getQueueState()).toEqual({
+            isProcessingQueue: false,
+            isSyncingState: false,
+            queueLength: 0
+        });
+    });
+
+    it('settles an older same-source request as superseded and confirms the latest request', async () => {
+        const fixture = createSelectionQueueFixture();
+        const entry = fixture.addSource('superseded-source', { click: () => {} });
+        const firstResult = fixture.tree.syncSourceToPageWithResult(entry.source, true, {
+            preferStoredCheckbox: true
+        });
+        const latestResult = fixture.tree.syncSourceToPageWithResult(entry.source, false, {
+            preferStoredCheckbox: true
+        });
+
+        fixture.timer.drain();
+
+        await expect(firstResult).resolves.toEqual(expect.objectContaining({
+            ok: false,
+            reason: 'superseded'
+        }));
+        await expect(latestResult).resolves.toEqual(expect.objectContaining({
+            ok: true,
+            reason: 'confirmed',
+            desiredState: false
+        }));
+        expect(entry.checkbox.click).toHaveBeenCalledTimes(1);
+    });
+});

@@ -1024,7 +1024,7 @@
         "message": "Isolate this group"
     },
     "ui_isolation_active": {
-        "message": "Isolating \"$1\"",
+        "message": "Showing \"$1\" only (does not change answer sources)",
         "placeholders": {
             "1": {
                 "content": "$1"
@@ -1780,5 +1780,65 @@
     },
     "ui_import_backup_discard_failed": {
         "message": "Could not discard the import backup"
+    },
+    "ui_single_delete_confirm_title": {
+        "message": "Delete this source?"
+    },
+    "ui_single_delete_confirm_summary": {
+        "message": "The following source will be permanently deleted from Gemini Notebook."
+    },
+    "ui_single_delete_confirm_action": {
+        "message": "Delete source"
+    },
+    "ui_native_selection_sync_progress": {
+        "message": "Updating answer sources: $1 of $2 confirmed. Please wait until this finishes.",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            },
+            "2": {
+                "content": "$2"
+            }
+        }
+    },
+    "ui_source_repair_target_option": {
+        "message": "Source $2 · $1",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            },
+            "2": {
+                "content": "$2"
+            }
+        }
+    },
+    "ui_source_repair_binding_incomplete": {
+        "message": "Choose a current source for every source that needs matching."
+    },
+    "ui_source_repair_binding_stale": {
+        "message": "The source list changed. Reopen source matching and choose the sources again."
+    },
+    "ui_source_repair_context_changed": {
+        "message": "The notebook changed. Reopen source matching in the current notebook."
+    },
+    "ui_source_repair_saved_location": {
+        "message": "Saved location: $1",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            }
+        }
+    },
+    "ui_source_repair_root_location": {
+        "message": "Top level of the source list"
+    },
+    "ui_source_repair_ambiguous_help": {
+        "message": "Some sources have the same name. Match them using their current positions in the native source list. If they are hard to distinguish, first give them different names in Notebook."
+    },
+    "ui_source_repair_ambiguous_status": {
+        "message": "Same-name sources need your confirmation"
+    },
+    "ui_source_repair_unmatched_status": {
+        "message": "No current source was matched automatically"
     }
 }

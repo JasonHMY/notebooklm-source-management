@@ -267,6 +267,126 @@ describe('content snapshot transaction', () => {
     });
 
     it.each([
+        ['returns false', () => false, 'snapshot_before_persist_failed'],
+        ['returns structured failure', () => ({ ok: false, reason: 'binding_stale' }), 'binding_stale'],
+        ['throws', () => {
+            throw new Error('binding_validation_failed');
+        }, 'binding_validation_failed']
+    ])('rolls back when beforePersist %s', async (_label, beforePersist, expectedReason) => {
+        const beforeRollback = jest.fn((payload) => {
+            expect(payload.beforeSnapshot).toEqual({ value: 'before' });
+            expect(harness.getRuntimeSnapshot()).toEqual({ value: 'target' });
+        });
+        const harness = createHarness();
+
+        await expect(harness.transaction.runSnapshotTransaction({
+            snapshot: { value: 'target' },
+            beforePersist,
+            beforeRollback
+        })).resolves.toMatchObject({
+            ok: false,
+            reason: expectedReason,
+            rolledBack: true,
+            rollbackPersisted: true
+        });
+        expect(beforeRollback).toHaveBeenCalledTimes(1);
+        expect(harness.getRuntimeSnapshot()).toEqual({ value: 'before' });
+        expect(harness.saveState).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+        ['returns false', () => false, 'snapshot_before_rollback_failed'],
+        ['returns structured failure', () => ({ ok: false, reason: 'binding_cleanup_failed' }), 'binding_cleanup_failed'],
+        ['throws', () => {
+            throw new Error('binding_cleanup_threw');
+        }, 'binding_cleanup_threw']
+    ])('does not apply a rollback snapshot when beforeRollback %s', async (_label, beforeRollback, expectedReason) => {
+        const harness = createHarness({
+            saveState: jest.fn().mockResolvedValueOnce({ ok: false, reason: 'target_save_failed' })
+        });
+
+        await expect(harness.transaction.runSnapshotTransaction({
+            snapshot: { value: 'target' },
+            beforeRollback
+        })).resolves.toMatchObject({
+            ok: false,
+            reason: expectedReason,
+            rolledBack: false,
+            rollbackPersisted: false
+        });
+        expect(harness.applyPersistableSnapshotToRuntime).toHaveBeenCalledTimes(1);
+        expect(harness.getRuntimeSnapshot()).toEqual({ value: 'target' });
+        expect(harness.saveState).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not apply a rollback snapshot when context changes during beforeRollback', async () => {
+        const harness = createHarness({
+            saveState: jest.fn().mockResolvedValueOnce({ ok: false, reason: 'target_save_failed' })
+        });
+        const beforeRollback = jest.fn(() => {
+            harness.setContextCurrent(false);
+            return true;
+        });
+
+        await expect(harness.transaction.runSnapshotTransaction({
+            snapshot: { value: 'target' },
+            beforeRollback
+        })).resolves.toMatchObject({
+            ok: false,
+            reason: 'target_save_failed',
+            rolledBack: false,
+            rollbackPersisted: false
+        });
+        expect(beforeRollback).toHaveBeenCalledTimes(1);
+        expect(harness.applyPersistableSnapshotToRuntime).toHaveBeenCalledTimes(1);
+        expect(harness.getRuntimeSnapshot()).toEqual({ value: 'target' });
+    });
+
+    it('keeps the original failure reason when context changes during a failing beforeRollback hook', async () => {
+        const harness = createHarness({
+            saveState: jest.fn().mockResolvedValueOnce({ ok: false, reason: 'target_save_failed' })
+        });
+        const beforeRollback = jest.fn(() => {
+            harness.setContextCurrent(false);
+            throw new Error('binding_cleanup_threw');
+        });
+
+        await expect(harness.transaction.runSnapshotTransaction({
+            snapshot: { value: 'target' },
+            beforeRollback
+        })).resolves.toMatchObject({
+            ok: false,
+            reason: 'target_save_failed',
+            rolledBack: false,
+            rollbackPersisted: false
+        });
+        expect(beforeRollback).toHaveBeenCalledTimes(1);
+        expect(harness.applyPersistableSnapshotToRuntime).toHaveBeenCalledTimes(1);
+        expect(harness.getRuntimeSnapshot()).toEqual({ value: 'target' });
+    });
+
+    it('does not report success when context changes during afterSuccess', async () => {
+        const harness = createHarness();
+        const afterSuccess = jest.fn(() => {
+            harness.setContextCurrent(false);
+            return true;
+        });
+
+        await expect(harness.transaction.runSnapshotTransaction({
+            snapshot: { value: 'target' },
+            afterSuccess
+        })).resolves.toMatchObject({
+            ok: false,
+            reason: 'snapshot_context_stale',
+            rolledBack: false,
+            rollbackPersisted: false
+        });
+        expect(afterSuccess).toHaveBeenCalledTimes(1);
+        expect(harness.applyPersistableSnapshotToRuntime).toHaveBeenCalledTimes(1);
+        expect(harness.getRuntimeSnapshot()).toEqual({ value: 'target' });
+    });
+
+    it.each([
         ['rejects', () => Promise.reject(new Error('cleanup_failed')), 'cleanup_failed'],
         ['returns false', () => false, 'snapshot_after_success_failed']
     ])('rolls back when afterSuccess %s', async (_label, afterSuccess, expectedReason) => {

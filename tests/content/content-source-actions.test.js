@@ -3001,79 +3001,6 @@ describe('source action menu', () => {
         expect(renameMenuItem.click).toHaveBeenCalled();
     });
 
-    it('retries native delete through the native confirmation flow', async () => {
-        global.chrome.i18n.getMessage = jest.fn((key) => {
-            if (key === 'ui_delete_source_failed') return 'Delete failed';
-            if (key === 'ui_native_action_menu_button_missing') return 'Menu missing';
-            if (key === 'ui_deleted_toast') return 'Deleted one';
-            if (key === 'ui_retry') return 'Retry';
-            return key;
-        });
-        const sourceElement = createMockSourceRow({
-            title: 'Source One',
-            stableToken: 'source-one-doc'
-        });
-        const descriptor = mod.createSourceDescriptor(sourceElement.row, new Map(), new Map());
-        mod.sourcesByKey.set('source-1', {
-            key: 'source-1',
-            title: 'Source One',
-            stableToken: descriptor.stableToken,
-            fingerprint: descriptor.fingerprint,
-            element: sourceElement.row,
-            enabled: true,
-            isLoading: false,
-            isDisabled: false
-        });
-
-        mod.handleSourceActionSelection('source-1', 'delete-source');
-        await Promise.resolve();
-
-        const toastItem = mod._getActiveToastItemForTest();
-        expect(toastItem.message).toBe('Delete failed Menu missing');
-        expect(toastItem.actionLabel).toBe('Retry');
-
-        let nativeMenuOpened = false;
-        let deleteClicked = false;
-        const moreButton = { click: jest.fn(() => { nativeMenuOpened = true; }) };
-        const deleteMenuItem = createNativeMenuItem({ text: 'Delete', icon: 'delete' });
-        deleteMenuItem.click = jest.fn(() => { deleteClicked = true; });
-        const confirmButton = {
-            textContent: 'Delete',
-            className: 'warn',
-            click: jest.fn(),
-            querySelector: jest.fn(() => null),
-            getAttribute: jest.fn(() => null)
-        };
-        const confirmDialog = {
-            textContent: 'Delete Source One?',
-            getAttribute: jest.fn(() => null),
-            querySelectorAll: jest.fn((selector) => (selector === 'button' ? [confirmButton] : []))
-        };
-        const retrySourceElement = createMockSourceRow({
-            title: 'Source One',
-            stableToken: 'source-one-doc',
-            nativeMoreButton: moreButton
-        });
-        mod.sourcesByKey.get('source-1').element = retrySourceElement.row;
-        global.document.querySelectorAll = jest.fn((selector) => {
-            if (selector.includes('[role="menuitem"]')) return nativeMenuOpened ? [deleteMenuItem] : [];
-            if (selector.includes('dialog')) return deleteClicked ? [confirmDialog] : [];
-            return [];
-        });
-        global.setTimeout = (callback) => {
-            callback();
-            return 1;
-        };
-
-        toastItem.onAction();
-        await Promise.resolve();
-        await Promise.resolve();
-
-        expect(moreButton.click).toHaveBeenCalled();
-        expect(deleteMenuItem.click).toHaveBeenCalled();
-        expect(confirmButton.click).not.toHaveBeenCalled();
-    });
-
     it('optimistically removes an accepted native delete from the manager state', async () => {
         global.chrome.i18n.getMessage = jest.fn((key, substitutions) => {
             if (key === 'ui_deleted_toast') return `Deleted ${substitutions[0]}`;
@@ -3154,10 +3081,7 @@ describe('source action menu', () => {
             return 1;
         };
 
-        expect(mod.handleSourceActionSelection('source-1', 'delete-source')).toBe(true);
-        for (let i = 0; i < 8; i++) {
-            await Promise.resolve();
-        }
+        await expect(mod.deleteNativeSource('source-1')).resolves.toEqual({ deleted: true });
 
         expect(confirmButton.click).toHaveBeenCalled();
         expect(mod.sourcesByKey.has('source-1')).toBe(false);
@@ -3962,5 +3886,189 @@ describe('native source title dialog matching', () => {
         };
 
         expect(actions.getDialogSourceTitleMatchState(dialog, first)).toBe('ambiguous');
+    });
+});
+
+describe('single-source delete confirmation gate', () => {
+    function createConfirmationFixture({ requestConfirmation } = {}) {
+        const createContentSourceActions = require(
+            '../../src/content/content-source-actions.js'
+        );
+        const createContentSourceActionMenu = require(
+            '../../src/content/content-source-action-menu.js'
+        );
+        const context = {
+            projectId: 'notebook-a',
+            managerInstanceToken: 7
+        };
+        const sourceRow = {
+            getAttribute: jest.fn(() => null),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const source = {
+            key: 'source-a',
+            title: 'Important source',
+            normalizedTitle: 'important source',
+            stableToken: 'source-a-token',
+            fingerprint: 'important source||article',
+            element: sourceRow,
+            isDisabled: false,
+            isLoading: false,
+            hasNativeActionMenu: true
+        };
+        const sourcesByKey = new Map([[source.key, source]]);
+        const showToast = jest.fn();
+        const developerLog = jest.fn();
+        const actions = createContentSourceActions({
+            getState: () => ({}),
+            getSourcesByKey: () => sourcesByKey,
+            getDocument: () => ({
+                body: {
+                    contains: jest.fn((element) => element === sourceRow),
+                    click: jest.fn()
+                },
+                querySelector: jest.fn(() => null),
+                querySelectorAll: jest.fn(() => [])
+            }),
+            getWindow: () => null,
+            getDEPS: () => ({
+                panel: ['.panel'],
+                row: ['.row'],
+                title: ['.title'],
+                moreBtn: ['.more']
+            }),
+            getNativeActionContext: () => ({ ...context }),
+            extractSourceIdentitySnapshot: () => ({
+                stableToken: source.stableToken,
+                fingerprint: source.fingerprint,
+                normalizedTitle: source.normalizedTitle
+            }),
+            requestSingleSourceDeleteConfirmation: requestConfirmation,
+            createContentSourceActionMenu,
+            showToast,
+            developerLog
+        });
+
+        return {
+            actions,
+            context,
+            source,
+            sourceRow,
+            sourcesByKey,
+            showToast,
+            developerLog
+        };
+    }
+
+    it('fails closed before any native delete work when the injected confirmation is unavailable', async () => {
+        const fixture = createConfirmationFixture();
+
+        expect(fixture.actions.handleSourceActionSelection('source-a', 'delete-source')).toBe(true);
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(fixture.sourceRow.querySelector).not.toHaveBeenCalled();
+        expect(fixture.showToast).not.toHaveBeenCalled();
+    });
+
+    it('does not touch the native row when the user cancels the extension confirmation', async () => {
+        const requestConfirmation = jest.fn(() => Promise.resolve(false));
+        const fixture = createConfirmationFixture({ requestConfirmation });
+
+        expect(fixture.actions.handleSourceActionSelection('source-a', 'delete-source')).toBe(true);
+        for (let index = 0; index < 8; index += 1) {
+            await Promise.resolve();
+        }
+
+        expect(requestConfirmation).toHaveBeenCalledWith('source-a');
+        expect(fixture.sourceRow.querySelector).not.toHaveBeenCalled();
+        expect(fixture.showToast).not.toHaveBeenCalled();
+    });
+
+    it('fails closed when the notebook context changes while confirmation is open', async () => {
+        let resolveConfirmation;
+        const requestConfirmation = jest.fn(() => new Promise((resolve) => {
+            resolveConfirmation = resolve;
+        }));
+        const fixture = createConfirmationFixture({ requestConfirmation });
+
+        fixture.actions.handleSourceActionSelection('source-a', 'delete-source');
+        await Promise.resolve();
+        fixture.context.managerInstanceToken += 1;
+        resolveConfirmation(true);
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(fixture.sourceRow.querySelector).not.toHaveBeenCalled();
+        expect(fixture.showToast).not.toHaveBeenCalled();
+    });
+
+    it('fails closed when the source identity changes while confirmation is open', async () => {
+        let resolveConfirmation;
+        const requestConfirmation = jest.fn(() => new Promise((resolve) => {
+            resolveConfirmation = resolve;
+        }));
+        const fixture = createConfirmationFixture({ requestConfirmation });
+
+        fixture.actions.handleSourceActionSelection('source-a', 'delete-source');
+        await Promise.resolve();
+        fixture.sourcesByKey.set('source-a', {
+            ...fixture.source,
+            stableToken: 'replacement-token',
+            fingerprint: 'replacement||article',
+            normalizedTitle: 'replacement'
+        });
+        resolveConfirmation(true);
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(fixture.sourceRow.querySelector).not.toHaveBeenCalled();
+        expect(fixture.showToast).not.toHaveBeenCalled();
+    });
+
+    it('starts the existing low-level native delete only after explicit confirmation', async () => {
+        const requestConfirmation = jest.fn(() => Promise.resolve(true));
+        const fixture = createConfirmationFixture({ requestConfirmation });
+
+        expect(fixture.actions.handleSourceActionSelection('source-a', 'delete-source')).toBe(true);
+        expect(fixture.sourceRow.querySelector).not.toHaveBeenCalled();
+
+        for (let index = 0; index < 8; index += 1) {
+            await Promise.resolve();
+        }
+
+        expect(requestConfirmation).toHaveBeenCalledWith('source-a');
+        expect(fixture.sourceRow.querySelector).toHaveBeenCalled();
+    });
+
+    it('asks for confirmation again when a failed native delete is retried', async () => {
+        const requestConfirmation = jest.fn()
+            .mockResolvedValueOnce(true)
+            .mockResolvedValueOnce(false);
+        const fixture = createConfirmationFixture({ requestConfirmation });
+
+        fixture.actions.handleSourceActionSelection('source-a', 'delete-source');
+        for (let index = 0; index < 8; index += 1) {
+            await Promise.resolve();
+        }
+
+        expect(requestConfirmation).toHaveBeenCalledTimes(1);
+        const retryOptions = fixture.showToast.mock.calls.find(([, options]) => (
+            typeof options?.onAction === 'function'
+        ))?.[1];
+        expect(retryOptions?.onAction).toEqual(expect.any(Function));
+        for (let index = 0; index < 4; index += 1) {
+            await Promise.resolve();
+        }
+        fixture.sourceRow.querySelector.mockClear();
+
+        retryOptions.onAction();
+        for (let index = 0; index < 8; index += 1) {
+            await Promise.resolve();
+        }
+
+        expect(requestConfirmation).toHaveBeenCalledTimes(2);
+        expect(fixture.sourceRow.querySelector).not.toHaveBeenCalled();
     });
 });

@@ -63,12 +63,20 @@
         '[aria-invalid="true"]',
         '[data-state="failed"]',
         '[data-status="failed"]',
+        '[data-state="failure"]',
+        '[data-status="failure"]',
+        '[data-state="error"]',
+        '[data-status="error"]',
+        '[data-state="invalid"]',
+        '[data-status="invalid"]',
+        '[data-state="unsupported"]',
+        '[data-status="unsupported"]',
         '[data-testid*="failed" i]',
         '[data-testid*="error" i]'
     ].join(', ');
+    const SOURCE_FAILURE_ICON_PATTERN = /^(?:error|error_outline|report_problem|warning|warning_amber|cancel|cancel_outline|dangerous|failure)$/i;
     const SOURCE_PROCESSING_TEXT_PATTERN = /\b(?:loading|analy[sz](?:ing|e)?|processing|parsing|uploading|importing|adding|pending)\b|正在|正在添加|添加中|载入|載入|加载|讀取|读取|分析|处理中|處理中|cargando|analizando|procesando|importando|subiendo/i;
     const SOURCE_PROCESSING_STATUS_VALUE_PATTERN = /^(?:true|loading|loaded_pending|in_progress|analy[sz](?:ing|e)?|processing|parsing|uploading|importing|adding|pending|正在|正在添加|添加中|载入|載入|加载|讀取|读取|分析|处理中|處理中|cargando|analizando|procesando|importando|subiendo)$/i;
-    const SOURCE_FAILURE_TEXT_PATTERN = /\b(?:failed|failure|could(?:n['’]?t| not)|unable|unsupported|invalid)\b|\b(?:error (?:loading|processing|importing|analy[sz]ing)|(?:loading|processing|importing|analy[sz]ing) error)\b|失败|失敗|错误|錯誤|无法|無法|fall[oó]|no se pudo|no pudo|no compatible/i;
     const STABLE_SOURCE_TOKEN_ATTRIBUTES = [
         'data-source-id',
         'data-source-key',
@@ -445,13 +453,53 @@
 
     function hasSourceFailureSignal(sourceElement) {
         if (!sourceElement) return false;
-        if (
-            typeof sourceElement.querySelector === 'function' &&
-            sourceElement.querySelector(SOURCE_FAILURE_SELECTOR)
-        ) {
+        const hasExplicitFailureStatusAttribute = (element) => {
+            if (!element || typeof element.getAttribute !== 'function') return false;
+            if (element.getAttribute('aria-invalid') === 'true') return true;
+            return ['data-state', 'data-status'].some((attributeKey) => (
+                /^(?:failed|failure|error|invalid|unsupported)$/i.test(
+                    String(element.getAttribute(attributeKey) || '').trim()
+                )
+            ));
+        };
+        const hasVisibleFailureElement = (element) => (
+            element && isElementVisibleForSignal(element)
+        );
+        if (hasVisibleFailureElement(sourceElement) && hasExplicitFailureStatusAttribute(sourceElement)) {
             return true;
         }
-        return SOURCE_FAILURE_TEXT_PATTERN.test(getElementSignalText(sourceElement));
+        if (typeof sourceElement.querySelectorAll === 'function') {
+            try {
+                if (Array.from(sourceElement.querySelectorAll(SOURCE_FAILURE_SELECTOR))
+                    .some(hasVisibleFailureElement)) {
+                    return true;
+                }
+            } catch (error) {
+                // Ignore selector support differences in NotebookLM's runtime DOM.
+            }
+        }
+        if (typeof sourceElement.querySelector === 'function') {
+            try {
+                if (hasVisibleFailureElement(sourceElement.querySelector(SOURCE_FAILURE_SELECTOR))) {
+                    return true;
+                }
+            } catch (error) {
+                // Ignore selector support differences in NotebookLM's runtime DOM.
+            }
+        }
+        if (typeof sourceElement.querySelectorAll !== 'function') return false;
+        try {
+            return Array.from(sourceElement.querySelectorAll('mat-icon, .material-icons, .google-symbols, [role="img"]'))
+                .slice(0, MAX_QUERY_RESULTS_PER_SELECTOR * 2)
+                .some((element) => {
+                    if (!hasVisibleFailureElement(element)) return false;
+                    return SOURCE_FAILURE_ICON_PATTERN.test(
+                        String(element.textContent || element.getAttribute?.('aria-label') || '').trim()
+                    );
+                });
+        } catch (error) {
+            return false;
+        }
     }
 
     function extractSourceStableToken(sourceRow) {

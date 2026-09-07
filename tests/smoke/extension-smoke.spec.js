@@ -10,7 +10,8 @@ const {
 } = require('./helpers/extension-context');
 const {
     installNotebookFixture,
-    defaultSourcesForNotebook
+    defaultSourcesForNotebook,
+    renderNotebookHtml
 } = require('./helpers/notebooklm-fixture');
 
 const repoRoot = path.resolve(__dirname, '../..');
@@ -1031,7 +1032,12 @@ test.describe.serial('extension smoke', () => {
                 labelView: false
             });
         });
-        await sendNotebookMessage('/notebook/label-import', { type: 'SWITCH_SOURCE_VIEW', viewKind: 'list' });
+        await expect.poll(async () => (
+            sendNotebookMessage('/notebook/label-import', { type: 'GET_MANAGER_STATUS' })
+        ), { timeout: 10_000 }).toMatchObject({ ready: true, reason: 'ready' });
+        await expect(
+            sendNotebookMessage('/notebook/label-import', { type: 'SWITCH_SOURCE_VIEW', viewKind: 'list' })
+        ).resolves.toMatchObject({ success: true, viewKind: 'list' });
 
         await expect.poll(async () => notebookPage.evaluate(() => {
             const root = document.querySelector('#sources-plus-root')?.shadowRoot || null;
@@ -1216,6 +1222,376 @@ test.describe.serial('extension smoke', () => {
 
         expect(status).toMatchObject({ ready: true, reason: 'ready' });
         expect(navigationCountAfter).toBe(navigationCountBefore);
+    });
+
+    test('keeps saved folders when a queued native source update outlives manager disable', async () => {
+        const notebookPage = await env.context.newPage();
+        await notebookPage.goto('https://notebooklm.google.com/notebook/disable-pending-sync');
+        await expect(notebookPage.locator('#sources-list .source-item')).toHaveCount(2);
+        await notebookPage.locator('#sp-new-group-btn').click();
+        await notebookPage.locator('.sp-inline-group-name-input').fill('Preserved folder');
+        await notebookPage.locator('.sp-inline-group-name-input').press('Enter');
+        await notebookPage.locator('#sp-batch-action-btn').click();
+        await notebookPage.locator('.sp-batch-checkbox').first().check();
+        await notebookPage.locator('.sp-batch-add-folder-btn').click();
+        await notebookPage.getByRole('dialog').getByRole('button', { name: 'Preserved folder', exact: true }).click();
+        await expect(notebookPage.locator('#sp-move-modal')).toHaveCount(0);
+        const bridgePage = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
+        await expect.poll(async () => {
+            const stored = await readProjectState('disable-pending-sync', bridgePage);
+            return Object.values(stored.primary?.groupsById || {})[0]?.children?.length;
+        }).toBe(1);
+        const before = await readProjectState('disable-pending-sync', bridgePage);
+
+        await notebookPage.locator('[data-testid="source-title"]').last().evaluate((title) => {
+            title.textContent = 'Native title update just before disable';
+        });
+        await notebookPage.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+        await sendNotebookMessage('/notebook/disable-pending-sync', { type: 'DISABLE_MANAGER' });
+        await expect(notebookPage.locator('#sources-plus-root')).toHaveCount(0);
+        // Exercise both the 500ms native scan and its 1500ms persistence debounce.
+        await notebookPage.waitForTimeout(2300);
+
+        const after = await readProjectState('disable-pending-sync', bridgePage);
+        expect(after.primary.groupsById).toEqual(before.primary.groupsById);
+        expect(after.primary.root).toEqual(before.primary.root);
+        expect(after.primary.ungrouped).toEqual(before.primary.ungrouped);
+    });
+
+    test('does not reload a collapsed SPA destination and attaches after it expands', async () => {
+        const notebookPage = await env.context.newPage();
+        await notebookPage.goto('https://notebooklm.google.com/notebook/route-visible');
+        await expect(notebookPage.locator('#sources-plus-root')).toBeVisible();
+        const documentRequests = [];
+        notebookPage.on('request', (request) => {
+            if (request.resourceType() === 'document') documentRequests.push(request.url());
+        });
+        await notebookPage.evaluate((nextSources) => {
+            window.__swapNotebook({ notebookId: 'route-collapsed', sources: nextSources });
+            document.querySelector('[data-testid="scroll-area"]').style.display = 'none';
+        }, defaultSourcesForNotebook('route-collapsed'));
+        await expect(notebookPage.locator('[data-testid="source-panel"]')).toBeVisible();
+        await notebookPage.waitForTimeout(2000);
+        expect(documentRequests).toEqual([]);
+        await expect(notebookPage.locator('#sources-plus-root')).toHaveCount(0);
+
+        await notebookPage.locator('[data-testid="scroll-area"]').evaluate((area) => {
+            area.style.removeProperty('display');
+        });
+        await expect(notebookPage.locator('#sources-plus-root')).toBeVisible();
+        await expect(notebookPage.locator('#sources-list .source-item')).toHaveCount(2);
+        expect(documentRequests).toEqual([]);
+    });
+
+    test('keeps the toolbar usable when searching before a batch move in a narrow panel', async () => {
+        await installNotebookFixture(env.context, {
+            resolveSources: () => [
+                { id: 'search-target', token: 'search-target', title: 'Target document' },
+                { id: 'search-other', token: 'search-other', title: 'Other document' }
+            ]
+        });
+        const notebookPage = await env.context.newPage();
+        await notebookPage.goto('https://notebooklm.google.com/notebook/search-batch');
+        await expect(notebookPage.locator('#sources-list .source-item')).toHaveCount(2);
+        await notebookPage.locator('[data-testid="source-panel"]').evaluate((panel) => {
+            panel.style.width = '360px';
+        });
+        await notebookPage.locator('#sp-new-group-btn').click();
+        await notebookPage.locator('.sp-inline-group-name-input').fill('Search destination');
+        await notebookPage.locator('.sp-inline-group-name-input').press('Enter');
+        await notebookPage.locator('#sp-search-btn').click();
+        await notebookPage.locator('#sp-search').fill('Target');
+        await notebookPage.locator('#sp-search').press('Enter');
+        await expect(notebookPage.locator('#sources-list .source-item')).toHaveCount(1);
+        await expect.poll(async () => notebookPage.locator('.sp-toolbar-actions')
+            .evaluate((toolbar) => getComputedStyle(toolbar).opacity)).toBe('1');
+        await notebookPage.locator('#sp-batch-action-btn').click();
+        await expect(notebookPage.locator('#sp-search')).toHaveValue('Target');
+        await notebookPage.locator('.sp-batch-select-visible-btn').click();
+        await expect(notebookPage.locator('.sp-batch-checkbox:checked')).toHaveCount(1);
+        const layout = await notebookPage.locator('.sp-controls').evaluate((controls) => ({
+            height: controls.getBoundingClientRect().height,
+            overflow: controls.scrollWidth - controls.clientWidth
+        }));
+        expect(layout.height).toBeLessThan(160);
+        expect(layout.overflow).toBeLessThanOrEqual(1);
+        await notebookPage.locator('.sp-batch-add-folder-btn').click();
+        await notebookPage.getByRole('dialog').getByRole('button', { name: 'Search destination', exact: true }).click();
+        await expect(notebookPage.locator('#sp-move-modal')).toHaveCount(0);
+        await expect(notebookPage.locator('.group-container .source-item')).toHaveCount(1);
+    });
+
+    test('requires cancellable single-source confirmation before clicking any native delete controls', async () => {
+        const notebookPage = await env.context.newPage();
+        await notebookPage.goto('https://notebooklm.google.com/notebook/single-delete-confirm');
+        await expect(notebookPage.locator('#sources-list .source-item')).toHaveCount(2);
+        await notebookPage.evaluate(() => {
+            window.__nativeMenuClickCount = 0;
+            document.querySelector('[data-testid="source-item"] button').addEventListener('click', () => {
+                window.__nativeMenuClickCount += 1;
+            });
+        });
+        const openConfirmation = async () => {
+            await notebookPage.locator('.sp-source-actions-button').first().click();
+            await notebookPage.locator('.sp-source-actions-menu [data-action="delete-source"]').click();
+            await expect(notebookPage.getByRole('alertdialog')).toBeVisible();
+        };
+        await openConfirmation();
+        await expect(notebookPage.getByRole('alertdialog')).toContainText('Notebook single-delete-confirm source A');
+        await expect(notebookPage.getByRole('alertdialog').locator('.sp-modal-cancel')).toBeFocused();
+        expect(await notebookPage.evaluate(() => window.__nativeMenuClickCount)).toBe(0);
+        await notebookPage.getByRole('alertdialog').press('Escape');
+        await expect(notebookPage.getByRole('alertdialog')).toHaveCount(0);
+        expect(await notebookPage.evaluate(() => window.__nativeMenuClickCount)).toBe(0);
+
+        await openConfirmation();
+        await notebookPage.locator('.sp-batch-delete-confirm-final-btn').click();
+        await expect.poll(async () => notebookPage.evaluate(() => window.__nativeMenuClickCount)).toBe(1);
+        await expect(notebookPage.getByRole('alertdialog')).toHaveCount(0);
+        // This fixture has no native menu implementation; only the explicit confirmation
+        // is permitted to begin that native flow. Native deletion is covered in unit tests.
+        await expect(notebookPage.locator('[data-testid="source-item"]')).toHaveCount(2);
+    });
+
+    test('keeps native answer sources unchanged while entering and leaving visual isolation', async () => {
+        const notebookPage = await env.context.newPage();
+        await notebookPage.goto('https://notebooklm.google.com/notebook/visual-isolation');
+        await expect(notebookPage.locator('#sources-list .source-item')).toHaveCount(2);
+        for (let index = 0; index < 2; index += 1) {
+            await notebookPage.locator('.source-item input.sp-checkbox').nth(index).check();
+        }
+        const readNativeStates = () => notebookPage.locator('[data-testid="source-item"] input')
+            .evaluateAll((checkboxes) => checkboxes.map((checkbox) => checkbox.checked));
+        await expect.poll(readNativeStates).toEqual([true, true]);
+        await notebookPage.locator('#sp-new-group-btn').click();
+        await notebookPage.locator('.sp-inline-group-name-input').fill('Visual folder');
+        await notebookPage.locator('.sp-inline-group-name-input').press('Enter');
+        await notebookPage.locator('#sp-batch-action-btn').click();
+        await notebookPage.locator('.sp-batch-checkbox').first().check();
+        await notebookPage.locator('.sp-batch-add-folder-btn').click();
+        await notebookPage.getByRole('dialog').getByRole('button', { name: 'Visual folder', exact: true }).click();
+        await expect(notebookPage.locator('#sp-move-modal')).toHaveCount(0);
+        await notebookPage.locator('.group-header').hover();
+        await notebookPage.locator('.sp-isolate-button').click();
+        await expect(notebookPage.locator('#sources-list .source-item')).toHaveCount(1);
+        await notebookPage.waitForTimeout(350);
+        expect(await readNativeStates()).toEqual([true, true]);
+        await notebookPage.locator('#sp-clear-isolate-btn').click();
+        await expect(notebookPage.locator('#sources-list .source-item')).toHaveCount(2);
+        expect(await readNativeStates()).toEqual([true, true]);
+        await notebookPage.locator('.group-header').hover();
+        await notebookPage.locator('.sp-isolate-button').click();
+        await sendNotebookMessage('/notebook/visual-isolation', { type: 'DISABLE_MANAGER' });
+        await expect(notebookPage.locator('#sources-plus-root')).toHaveCount(0);
+        expect(await readNativeStates()).toEqual([true, true]);
+    });
+
+    test('keeps healthy sources usable when their titles discuss errors and failures', async () => {
+        await installNotebookFixture(env.context, {
+            resolveSources: () => [
+                { id: 'error-topic', token: 'error-topic', title: '错误处理与异常机制.pdf' },
+                { id: 'failure-topic', token: 'failure-topic', title: '为什么创业失败.pdf' },
+                { id: 'failure-analysis', token: 'failure-analysis', title: 'Failure Analysis.pdf' }
+            ]
+        });
+        const notebookPage = await env.context.newPage();
+        await notebookPage.goto('https://notebooklm.google.com/notebook/healthy-failure-topics');
+        await expect(notebookPage.locator('#sources-list .source-item')).toHaveCount(3);
+        await expect(notebookPage.locator('.failed-source')).toHaveCount(0);
+        await expect(notebookPage.locator('.source-item input.sp-checkbox:disabled')).toHaveCount(0);
+        await notebookPage.locator('.source-item input.sp-checkbox').first().check();
+        await expect(notebookPage.locator('[data-source-id="error-topic"] input')).toBeChecked();
+    });
+
+    test('shows real confirmation progress for delayed native group selection and hides it on completion', async () => {
+        const notebookPage = await env.context.newPage();
+        await notebookPage.goto('https://notebooklm.google.com/notebook/selection-progress');
+        await expect(notebookPage.locator('#sources-list .source-item')).toHaveCount(2);
+        for (let index = 0; index < 2; index += 1) {
+            await notebookPage.locator('.source-item input.sp-checkbox').nth(index).check();
+        }
+        const readNativeStates = () => notebookPage.locator('[data-testid="source-item"] input')
+            .evaluateAll((checkboxes) => checkboxes.map((checkbox) => checkbox.checked));
+        await expect.poll(readNativeStates).toEqual([true, true]);
+        await notebookPage.locator('#sp-new-group-btn').click();
+        await notebookPage.locator('.sp-inline-group-name-input').fill('Delayed folder');
+        await notebookPage.locator('.sp-inline-group-name-input').press('Enter');
+        await notebookPage.locator('#sp-batch-action-btn').click();
+        await notebookPage.locator('.sp-batch-select-visible-btn').click();
+        await notebookPage.locator('.sp-batch-add-folder-btn').click();
+        await notebookPage.getByRole('dialog').getByRole('button', { name: 'Delayed folder', exact: true }).click();
+        await expect(notebookPage.locator('#sp-move-modal')).toHaveCount(0);
+        await notebookPage.locator('[data-testid="source-item"] input').evaluateAll((checkboxes) => {
+            checkboxes.forEach((checkbox) => {
+                checkbox.addEventListener('click', () => {
+                    const nextChecked = checkbox.checked;
+                    checkbox.checked = !nextChecked;
+                    setTimeout(() => {
+                        checkbox.checked = nextChecked;
+                        checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+                    }, 250);
+                });
+            });
+        });
+        await notebookPage.locator('.sp-toggle-switch').click();
+        await expect(notebookPage.locator('#sp-native-selection-sync-section')).toBeVisible();
+        await expect(notebookPage.locator('#sp-native-selection-sync-progress')).toHaveText(/(?:0|1)\D+2/);
+        await expect(notebookPage.locator('#sources-list')).toHaveAttribute('aria-busy', 'true');
+        await expect.poll(readNativeStates).toEqual([false, false]);
+        await expect(notebookPage.locator('#sp-native-selection-sync-section')).toBeHidden();
+        await expect(notebookPage.locator('#sources-list')).toHaveAttribute('aria-busy', 'false');
+    });
+
+    test('immediately exposes a failed single-source native selection and lets it retry', async () => {
+        const notebookPage = await env.context.newPage();
+        await notebookPage.goto('https://notebooklm.google.com/notebook/selection-retry');
+        await expect(notebookPage.locator('#sources-list .source-item')).toHaveCount(2);
+        const nativeCheckbox = notebookPage.locator('[data-testid="source-item"] input').first();
+        await nativeCheckbox.evaluate((checkbox) => {
+            checkbox.__ignoreSelectionForTest = () => { checkbox.checked = false; };
+            checkbox.addEventListener('click', checkbox.__ignoreSelectionForTest);
+        });
+        await notebookPage.locator('.source-item input.sp-checkbox').first().check();
+        await expect(notebookPage.locator('[data-native-selection-sync-failure="true"]')).toBeVisible({ timeout: 3000 });
+        await expect(notebookPage.locator('#sp-retry-native-selection-sync-btn')).toBeVisible();
+        expect(await nativeCheckbox.isChecked()).toBe(false);
+
+        await nativeCheckbox.evaluate((checkbox) => {
+            checkbox.removeEventListener('click', checkbox.__ignoreSelectionForTest);
+            delete checkbox.__ignoreSelectionForTest;
+        });
+        await notebookPage.locator('#sp-retry-native-selection-sync-btn').click();
+        await expect(nativeCheckbox).toBeChecked();
+        await expect(notebookPage.locator('[data-native-selection-sync-failure="true"]')).toHaveCount(0);
+    });
+
+    test('preserves an intentionally emptied folder after reload instead of restoring its old children', async () => {
+        const notebookPage = await env.context.newPage();
+        await notebookPage.goto('https://notebooklm.google.com/notebook/intentional-ungroup');
+        await expect(notebookPage.locator('#sources-list .source-item')).toHaveCount(2);
+        await notebookPage.locator('#sp-new-group-btn').click();
+        await notebookPage.locator('.sp-inline-group-name-input').fill('Intentionally empty');
+        await notebookPage.locator('.sp-inline-group-name-input').press('Enter');
+        await notebookPage.locator('#sp-batch-action-btn').click();
+        await notebookPage.locator('.sp-batch-checkbox').first().check();
+        await notebookPage.locator('.sp-batch-add-folder-btn').click();
+        await notebookPage.getByRole('dialog').getByRole('button', { name: 'Intentionally empty', exact: true }).click();
+        await expect(notebookPage.locator('#sp-move-modal')).toHaveCount(0);
+        await expect(notebookPage.locator('.group-container .source-item')).toHaveCount(1);
+        await notebookPage.locator('#sp-batch-action-btn').click();
+        await notebookPage.locator('.group-container .sp-batch-checkbox').check();
+        await notebookPage.locator('.sp-batch-ungroup-btn').click();
+        await expect(notebookPage.locator('.group-container .source-item')).toHaveCount(0);
+        const bridgePage = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
+        await expect.poll(async () => {
+            const stored = await readProjectState('intentional-ungroup', bridgePage);
+            return Object.values(stored.primary?.groupsById || {})[0]?.children;
+        }).toEqual([]);
+
+        await notebookPage.reload();
+        await expect(notebookPage.locator('.group-title')).toHaveText('Intentionally empty');
+        await expect(notebookPage.locator('.group-container .source-item')).toHaveCount(0);
+        await expect(notebookPage.locator('.ungrouped-section .source-item')).toHaveCount(2);
+    });
+
+    test('preserves the newer tab state and the losing tab recovery until an explicit refresh', async () => {
+        const firstPage = await env.context.newPage();
+        await firstPage.goto('https://notebooklm.google.com/notebook/two-tab-conflict');
+        await expect(firstPage.locator('#sources-list .source-item')).toHaveCount(2);
+        const secondPage = await env.context.newPage();
+        await secondPage.goto('https://notebooklm.google.com/notebook/two-tab-conflict');
+        await expect(secondPage.locator('#sources-list .source-item')).toHaveCount(2);
+        const bridgePage = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
+        await firstPage.locator('#sp-new-group-btn').click();
+        await firstPage.locator('.sp-inline-group-name-input').fill('Saved by first tab');
+        await firstPage.locator('.sp-inline-group-name-input').press('Enter');
+        await expect.poll(async () => {
+            const stored = await readProjectState('two-tab-conflict', bridgePage);
+            return Object.values(stored.primary?.groupsById || {}).map((group) => group.title);
+        }).toEqual(['Saved by first tab']);
+
+        await secondPage.locator('#sp-new-group-btn').click();
+        await secondPage.locator('.sp-inline-group-name-input').fill('Unsaved second tab work');
+        await secondPage.locator('.sp-inline-group-name-input').press('Enter');
+        const staleStatus = secondPage.locator('#sp-manager-save-status.sp-save-status-stale');
+        await expect(staleStatus).toBeVisible();
+        await expect(staleStatus.locator('button')).toHaveCount(1);
+        const stored = await readProjectState('two-tab-conflict', bridgePage);
+        expect(Object.values(stored.primary.groupsById).map((group) => group.title)).toEqual(['Saved by first tab']);
+        expect(await secondPage.evaluate(() => {
+            const recovery = JSON.parse(sessionStorage.getItem('sourcesPlusRecovery_two-tab-conflict'));
+            return Object.values(recovery.snapshot.groupsById).map((group) => group.title);
+        })).toEqual(['Unsaved second tab work']);
+
+        await Promise.all([
+            secondPage.waitForEvent('domcontentloaded'),
+            staleStatus.locator('button').click()
+        ]);
+        await expect(secondPage.locator('.group-title')).toHaveText('Saved by first tab');
+        expect(await secondPage.evaluate(() => Boolean(sessionStorage.getItem('sourcesPlusRecovery_two-tab-conflict')))).toBe(true);
+    });
+
+    test('lets the user bind ambiguous saved sources to actual native rows and preserves the result after reorder', async () => {
+        const title = 'Shared source.pdf';
+        const fingerprint = 'shared source.pdf||description';
+        const html = renderNotebookHtml('weak-ui-repair', [
+            { id: 'physical-a', token: 'physical-a', title },
+            { id: 'physical-b', token: 'physical-b', title }
+        ]).replace(
+            "wrapper.setAttribute('data-source-id', source.token);",
+            "wrapper.setAttribute('data-fixture-id', source.id);"
+        );
+        await env.context.route('https://notebooklm.google.com/notebook/weak-ui-repair', (route) => (
+            route.fulfill({ status: 200, contentType: 'text/html', body: html })
+        ));
+        const record = (enabled) => ({
+            title, normalizedTitle: title.toLowerCase(), fingerprint,
+            stableToken: '', identityType: 'fingerprint', enabled
+        });
+        const savedState = {
+            schemaVersion: 5,
+            _saveRevision: 1,
+            sourceViewDisplayKind: 'list',
+            root: [{ type: 'group', id: 'saved-folder' }],
+            groupsById: {
+                'saved-folder': { id: 'saved-folder', title: 'Saved folder', enabled: true, collapsed: false, children: [{ type: 'source', key: 'old-a' }] }
+            },
+            ungrouped: ['old-b'],
+            sourceStateById: { 'old-a': record(true), 'old-b': record(false) },
+            tagsById: { important: { id: 'important', label: 'Important', color: '#007AFF' } },
+            tagOrder: ['important'],
+            sourceTagsById: { 'old-a': ['important'] }
+        };
+        const bridgePage = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
+        await bridgePage.evaluate((snapshot) => chrome.storage.local.set({
+            'sourcesPlusState_weak-ui-repair': snapshot
+        }), savedState);
+        const notebookPage = await env.context.newPage();
+        await notebookPage.goto('https://notebooklm.google.com/notebook/weak-ui-repair');
+        await expect(notebookPage.locator('.group-title')).toHaveText('Saved folder');
+        await notebookPage.locator('#sp-settings-btn').click();
+        await expect(notebookPage.locator('.sp-source-repair-select')).toHaveCount(2);
+        const options = await notebookPage.locator('.sp-source-repair-select').first().locator('option')
+            .evaluateAll((items) => items.filter((item) => item.value).map((item) => ({ value: item.value, label: item.textContent })));
+        expect(options).toHaveLength(2);
+        expect(options[0].label).not.toBe(options[1].label);
+        await expect(notebookPage.locator('.sp-source-repair-select[data-stored-key="old-a"]')).toHaveValue('');
+        await notebookPage.locator('.sp-source-repair-select[data-stored-key="old-a"]').selectOption(options[1].value);
+        await notebookPage.locator('.sp-source-repair-select[data-stored-key="old-b"]').selectOption(options[0].value);
+        await notebookPage.locator('.sp-source-repair-apply-btn').click();
+        await expect(notebookPage.locator('#sp-settings-modal')).toHaveCount(0);
+        await expect(notebookPage.locator('[data-fixture-id="physical-b"] input')).toBeChecked();
+        await expect(notebookPage.locator('[data-fixture-id="physical-a"] input')).not.toBeChecked();
+        const stored = await readProjectState('weak-ui-repair', bridgePage);
+        expect(stored.primary.groupsById['saved-folder'].children).toEqual([{ type: 'source', key: options[1].value }]);
+        expect(stored.primary.sourceTagsById[options[1].value]).toEqual(['important']);
+
+        await notebookPage.locator('[data-testid="scroll-area"]').evaluate((area) => area.appendChild(area.firstElementChild));
+        await notebookPage.waitForTimeout(700);
+        await notebookPage.locator('#sp-settings-btn').click();
+        await expect(notebookPage.locator('.sp-source-repair-select')).toHaveCount(0);
+        await expect(notebookPage.locator('[data-fixture-id="physical-b"] input')).toBeChecked();
+        await expect(notebookPage.locator('[data-fixture-id="physical-a"] input')).not.toBeChecked();
     });
 
     test('preserves folders and tags across a hard reload with staged source hydration', async () => {

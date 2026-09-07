@@ -401,8 +401,8 @@ describe('manager shell structure', () => {
         expect(saveStatusRegion.attrs.hidden).toBe(true);
         expect(saveStatusRegion.children[0].attrs.id).toBe('sp-manager-save-status');
         expect(saveStatusRegion.children[0].attrs['aria-live']).toBe('polite');
-        expect(shell.children[2].attrs.id).toBe('sp-quick-view-rail');
-        expect(shell.children[2].attrs.className).toBe('sp-quick-view-rail');
+        const quickViewRail = shell.children.find((child) => child.attrs.id === 'sp-quick-view-rail');
+        expect(quickViewRail.attrs.className).toBe('sp-quick-view-rail');
         const sourcesList = shell.children.find((child) => child.attrs.id === 'sources-list');
         expect(sourcesList.attrs.role).toBe('list');
     });
@@ -447,7 +447,7 @@ describe('manager shell structure', () => {
             i18n: { getMessage: (key) => key }
         });
 
-        const rail = shell.children[2];
+        const rail = shell.children.find((child) => child.attrs.id === 'sp-quick-view-rail');
         expect(rail.attrs.id).toBe('sp-quick-view-rail');
         expect(rail.attrs.role).toBe('group');
         expect(rail.attrs['aria-label']).toBe('ui_quick_view_rail_label');
@@ -476,8 +476,7 @@ describe('manager shell structure', () => {
         );
         const controlsBlock = extractCssBlock(toolbarCss, '.sp-controls {');
         const actionsBlock = extractCssBlock(toolbarCss, '.sp-toolbar-actions {');
-        expect(controlsBlock).toContain('display: flex;');
-        expect(controlsBlock).toContain('flex-wrap: wrap;');
+        expect(controlsBlock).toContain('grid-template-columns: minmax(0, 1fr) auto;');
         expect(actionsBlock).toContain('flex-wrap: wrap;');
         expect(actionsBlock).toContain('max-width: 100%;');
     });
@@ -570,15 +569,6 @@ describe('manager shell structure', () => {
         const block = extractCssBlock(css, '.ungrouped-section {');
         expect(block).toContain('display: flex');
         expect(block).toContain('flex-direction: column');
-    });
-
-    it('collapses the leading toolbar buttons when the search rail expands', () => {
-        jest.resetModules();
-        require('../../src/content/content-style-text.js');
-
-        expect(global.NSM_CONTENT_STYLE_TEXT).toContain('.sp-controls.is-search-expanded .sp-toolbar-actions {');
-        expect(global.NSM_CONTENT_STYLE_TEXT).toContain('max-width: 0;');
-        expect(global.NSM_CONTENT_STYLE_TEXT).toContain('pointer-events: none;');
     });
 
     it('renders unavailable history actions as neutral disabled icon buttons', () => {
@@ -4406,22 +4396,22 @@ describe('isolate runtime state', () => {
 
     afterEach(teardownGlobalMocks);
 
-    it('isolates a top-level group and excludes ungrouped sources', () => {
+    it('keeps answer sources enabled while showing a top-level group in isolation', () => {
         mod._setActiveIsolationGroupId('group1');
 
         expect(mod.isSourceEffectivelyEnabled(mod.sourcesByKey.get('sourceA'))).toBe(true);
         expect(mod.isSourceEffectivelyEnabled(mod.sourcesByKey.get('sourceNested'))).toBe(true);
-        expect(mod.isSourceEffectivelyEnabled(mod.sourcesByKey.get('sourceB'))).toBe(false);
-        expect(mod.isSourceEffectivelyEnabled(mod.sourcesByKey.get('sourceU'))).toBe(false);
+        expect(mod.isSourceEffectivelyEnabled(mod.sourcesByKey.get('sourceB'))).toBe(true);
+        expect(mod.isSourceEffectivelyEnabled(mod.sourcesByKey.get('sourceU'))).toBe(true);
     });
 
-    it('isolates a nested group subtree only', () => {
+    it('keeps answer sources enabled while showing a nested subtree in isolation', () => {
         mod._setActiveIsolationGroupId('group1a');
 
-        expect(mod.isSourceEffectivelyEnabled(mod.sourcesByKey.get('sourceA'))).toBe(false);
+        expect(mod.isSourceEffectivelyEnabled(mod.sourcesByKey.get('sourceA'))).toBe(true);
         expect(mod.isSourceEffectivelyEnabled(mod.sourcesByKey.get('sourceNested'))).toBe(true);
-        expect(mod.isSourceEffectivelyEnabled(mod.sourcesByKey.get('sourceB'))).toBe(false);
-        expect(mod.isSourceEffectivelyEnabled(mod.sourcesByKey.get('sourceU'))).toBe(false);
+        expect(mod.isSourceEffectivelyEnabled(mod.sourcesByKey.get('sourceB'))).toBe(true);
+        expect(mod.isSourceEffectivelyEnabled(mod.sourcesByKey.get('sourceU'))).toBe(true);
     });
 
     it('does not persist active isolation runtime state', () => {
@@ -4440,10 +4430,10 @@ describe('isolate runtime state', () => {
         expect(mod._getActiveIsolationGroupId()).toBeNull();
     });
 
-    it('restores non-isolated sources when exiting isolation', () => {
+    it('preserves explicit source enablement when exiting a visual isolation filter', () => {
         mod._setActiveIsolationGroupId('group1');
         mod.sourcesByKey.get('sourceA').enabled = false;
-        expect(mod.isSourceEffectivelyEnabled(mod.sourcesByKey.get('sourceU'))).toBe(false);
+        expect(mod.isSourceEffectivelyEnabled(mod.sourcesByKey.get('sourceU'))).toBe(true);
 
         mod._setActiveIsolationGroupId(null);
 

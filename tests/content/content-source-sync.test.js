@@ -37,6 +37,15 @@ function seedMockSource(mod, mockSourceRow, overrides = {}) {
     return descriptor.key;
 }
 
+function mountManagerForDebouncedSourceSync(mod) {
+    const manager = createInitShadowRoot();
+    mod._setManagerRuntimeForTest({
+        extensionHost: manager.host,
+        shadowRoot: manager.shadowRoot
+    });
+    return manager;
+}
+
 describe('accepted native source deletion reconciliation', () => {
     let mod;
 
@@ -2933,6 +2942,7 @@ describe('scanAndSyncSources', () => {
         ));
         mod.scanAndSyncSources(null, true);
         global.chrome.runtime.sendMessage.mockClear();
+        mountManagerForDebouncedSourceSync(mod);
 
         panel.querySelectorAll = jest.fn((selector) => (
             mod.DEPS.row.includes(selector) ? [secondRow.row] : []
@@ -3958,6 +3968,135 @@ describe('scanAndSyncSources', () => {
         });
     });
 
+    it.each([
+        ['Error handling guide', ''],
+        ['错误处理说明', ''],
+        ['为什么失败：排查笔记', ''],
+        ['无法重现的问题', ''],
+        ['Failure Analysis', ''],
+        ['Ready source', 'Unable to import? Read this guide first']
+    ])('does not treat ordinary source wording as a failure signal: %s', (title, ariaLabel) => {
+        const mock = createMockSourceRow({
+            title,
+            ariaLabel,
+            stableToken: 'ready-status-doc',
+            checked: true
+        });
+
+        const descriptor = mod.createSourceDescriptor(mock.row, new Map(), new Map());
+
+        expect(descriptor).toMatchObject({
+            title,
+            isFailed: false,
+            isDisabled: false
+        });
+    });
+
+    it('ignores a hidden stale failure status while keeping a ready source enabled', () => {
+        const mock = createMockSourceRow({
+            title: 'Error handling guide',
+            stableToken: 'hidden-failure-status-doc',
+            checked: true
+        });
+        const hiddenFailureStatus = {
+            hidden: true,
+            style: { display: 'none' },
+            parentElement: mock.row
+        };
+        const originalQuerySelector = mock.row.querySelector;
+        const originalQuerySelectorAll = mock.row.querySelectorAll;
+        mock.row.querySelector = jest.fn((selector) => {
+            if (String(selector).includes('[data-state="failed"]')) return hiddenFailureStatus;
+            return originalQuerySelector(selector);
+        });
+        mock.row.querySelectorAll = jest.fn((selector) => {
+            if (String(selector).includes('[data-state="failed"]')) return [hiddenFailureStatus];
+            return originalQuerySelectorAll(selector);
+        });
+
+        const descriptor = mod.createSourceDescriptor(mock.row, new Map(), new Map());
+
+        expect(descriptor).toMatchObject({
+            isFailed: false,
+            isDisabled: false
+        });
+    });
+
+    it('recognizes a visible independent failure icon without using source title text', () => {
+        const mock = createMockSourceRow({
+            title: 'Ready source',
+            stableToken: 'visible-failure-icon-doc',
+            checked: true
+        });
+        const failureIcon = {
+            textContent: 'error_outline',
+            style: {},
+            parentElement: mock.row,
+            getAttribute: jest.fn(() => null)
+        };
+        const originalQuerySelectorAll = mock.row.querySelectorAll;
+        mock.row.querySelectorAll = jest.fn((selector) => {
+            if (String(selector).includes('mat-icon')) return [failureIcon];
+            return originalQuerySelectorAll(selector);
+        });
+
+        const descriptor = mod.createSourceDescriptor(mock.row, new Map(), new Map());
+
+        expect(descriptor).toMatchObject({
+            isFailed: true,
+            isDisabled: true
+        });
+    });
+
+    it('recognizes an explicit failed status on the source row itself', () => {
+        const mock = createMockSourceRow({
+            title: 'Failed import',
+            stableToken: 'row-failure-status-doc',
+            checked: true,
+            status: 'failed'
+        });
+        const originalQuerySelector = mock.row.querySelector;
+        mock.row.querySelector = jest.fn((selector) => {
+            if (String(selector).includes('[data-status="failed"]')) return null;
+            return originalQuerySelector(selector);
+        });
+
+        const descriptor = mod.createSourceDescriptor(mock.row, new Map(), new Map());
+
+        expect(descriptor).toMatchObject({
+            isFailed: true,
+            isDisabled: true
+        });
+    });
+
+    it('recognizes a visible child error status without reading the source title', () => {
+        const mock = createMockSourceRow({
+            title: 'Error handling guide',
+            stableToken: 'child-error-status-doc',
+            checked: true
+        });
+        const errorStatus = {
+            style: {},
+            parentElement: mock.row,
+            getAttribute: jest.fn((attr) => (attr === 'data-status' ? 'error' : null))
+        };
+        const originalQuerySelector = mock.row.querySelector;
+        const originalQuerySelectorAll = mock.row.querySelectorAll;
+        mock.row.querySelector = jest.fn((selector) => {
+            if (String(selector).includes('[data-status="error"]')) return errorStatus;
+            return originalQuerySelector(selector);
+        });
+        mock.row.querySelectorAll = jest.fn((selector) => {
+            if (String(selector).includes('[data-status="error"]')) return [errorStatus];
+            return originalQuerySelectorAll(selector);
+        });
+
+        expect(mod.createSourceDescriptor(mock.row, new Map(), new Map())).toMatchObject({
+            isFailed: true,
+            isDisabled: true
+        });
+    });
+
     it('does not treat failed source rows as source detail views', () => {
         const { panel } = createMockPanel({ visible: true, contentVisible: true });
         const mock = createMockSourceRow({
@@ -4069,6 +4208,7 @@ describe('scanAndSyncSources', () => {
         ));
         mod.scanAndSyncSources(null, true);
         global.chrome.runtime.sendMessage.mockClear();
+        mountManagerForDebouncedSourceSync(mod);
 
         global.document.querySelectorAll = jest.fn((selector) => (
             mod.DEPS.row.includes(selector) ? [newRow.row] : []
@@ -4123,6 +4263,7 @@ describe('scanAndSyncSources', () => {
         ));
         mod.scanAndSyncSources(null, true);
         global.chrome.runtime.sendMessage.mockClear();
+        mountManagerForDebouncedSourceSync(mod);
 
         global.document.querySelectorAll = jest.fn((selector) => (
             mod.DEPS.row.includes(selector) ? [loadingRow.row] : []
@@ -4181,6 +4322,7 @@ describe('scanAndSyncSources', () => {
         ));
         mod.scanAndSyncSources(null, true);
         global.chrome.runtime.sendMessage.mockClear();
+        mountManagerForDebouncedSourceSync(mod);
 
         panel.querySelectorAll = jest.fn((selector) => {
             if (selector === '[role="listitem"]') return [loadingRow.row];
@@ -4246,6 +4388,7 @@ describe('scanAndSyncSources', () => {
         ));
         mod.scanAndSyncSources(null, true);
         global.chrome.runtime.sendMessage.mockClear();
+        mountManagerForDebouncedSourceSync(mod);
 
         panel.querySelectorAll = jest.fn((selector) => {
             if (selector === '[role="listitem"]') return [loadingRow.row];
@@ -4288,6 +4431,7 @@ describe('scanAndSyncSources', () => {
         ));
         mod.scanAndSyncSources(null, true);
         global.chrome.runtime.sendMessage.mockClear();
+        mountManagerForDebouncedSourceSync(mod);
 
         global.document.querySelectorAll = jest.fn((selector) => (
             mod.DEPS.row.includes(selector) ? [] : []
@@ -4404,6 +4548,756 @@ describe('scanAndSyncSources', () => {
         expect(mod.groupsById.get('group1').children).toEqual([]);
         expect(mod.sourcesByKey.get(renamedDescriptor.key).enabled).toBe(true);
         expect(mod.getSourceTagIds(renamedDescriptor.key)).toEqual([]);
+    });
+
+    it('keeps duplicate weak identities bound to their original DOM elements when rows reorder', () => {
+        const sourceA = createMockSourceRow({
+            title: 'Duplicate source',
+            stableToken: null,
+            checked: true
+        });
+        const sourceB = createMockSourceRow({
+            title: 'Duplicate source',
+            stableToken: null,
+            checked: true
+        });
+
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [sourceA.row, sourceB.row] : []
+        ));
+        mod.scanAndSyncSources(null, true);
+        const sourceKeyByElement = new Map(Array.from(mod.sourcesByKey.entries()).map(([key, source]) => [
+            source.element,
+            key
+        ]));
+        const sourceAKey = sourceKeyByElement.get(sourceA.row);
+        const sourceBKey = sourceKeyByElement.get(sourceB.row);
+
+        const tagA = mod.createTag('Source A').tagId;
+        const tagB = mod.createTag('Source B').tagId;
+        mod.sourcesByKey.get(sourceAKey).enabled = false;
+        mod.sourcesByKey.get(sourceBKey).enabled = true;
+        mod.setSourceTagIds(sourceAKey, [tagA]);
+        mod.setSourceTagIds(sourceBKey, [tagB]);
+        mod.state.root = [{ type: 'group', id: 'duplicates' }];
+        mod.state.ungrouped = [];
+        mod.groupsById.set('duplicates', {
+            id: 'duplicates',
+            title: 'Duplicates',
+            children: [
+                { type: 'source', key: sourceAKey },
+                { type: 'source', key: sourceBKey }
+            ]
+        });
+        const beforeByElement = new Map(Array.from(mod.sourcesByKey.values()).map((source) => [
+            source.element,
+            {
+                enabled: source.enabled,
+                tagIds: mod.getSourceTagIds(source.key)
+            }
+        ]));
+
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [sourceB.row, sourceA.row] : []
+        ));
+        expect(mod.scanAndSyncSources(null, false, { scanCompleteness: 'complete' }))
+            .toEqual(expect.objectContaining({ ok: true, reason: 'completed' }));
+
+        const afterByElement = new Map(Array.from(mod.sourcesByKey.values()).map((source) => [
+            source.element,
+            {
+                enabled: source.enabled,
+                tagIds: mod.getSourceTagIds(source.key)
+            }
+        ]));
+        expect(afterByElement.get(sourceA.row)).toEqual(beforeByElement.get(sourceA.row));
+        expect(afterByElement.get(sourceB.row)).toEqual(beforeByElement.get(sourceB.row));
+        expect(mod.groupsById.get('duplicates').children.map(({ key }) => (
+            mod.sourcesByKey.get(key).element
+        ))).toEqual([sourceA.row, sourceB.row]);
+    });
+
+    it('fails closed when fresh duplicate weak rows cannot be bound to the existing organization', () => {
+        const sourceA = createMockSourceRow({
+            title: 'Duplicate source',
+            stableToken: null,
+            checked: true
+        });
+        const sourceB = createMockSourceRow({
+            title: 'Duplicate source',
+            stableToken: null,
+            checked: true
+        });
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [sourceA.row, sourceB.row] : []
+        ));
+        mod.scanAndSyncSources(null, true);
+        const sourceKeyByElement = new Map(Array.from(mod.sourcesByKey.entries()).map(([key, source]) => [
+            source.element,
+            key
+        ]));
+        const sourceAKey = sourceKeyByElement.get(sourceA.row);
+        const sourceBKey = sourceKeyByElement.get(sourceB.row);
+        const sourceATag = mod.createTag('Source A').tagId;
+        const sourceBTag = mod.createTag('Source B').tagId;
+        mod.sourcesByKey.get(sourceAKey).enabled = false;
+        mod.setSourceTagIds(sourceAKey, [sourceATag]);
+        mod.setSourceTagIds(sourceBKey, [sourceBTag]);
+        mod.state.root = [{ type: 'group', id: 'duplicates' }];
+        mod.state.ungrouped = [];
+        mod.groupsById.set('duplicates', {
+            id: 'duplicates',
+            title: 'Duplicates',
+            children: [
+                { type: 'source', key: sourceAKey },
+                { type: 'source', key: sourceBKey }
+            ]
+        });
+
+        const freshA = createMockSourceRow({
+            title: 'Duplicate source',
+            stableToken: null,
+            checked: true
+        });
+        const freshB = createMockSourceRow({
+            title: 'Duplicate source',
+            stableToken: null,
+            checked: true
+        });
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [freshB.row, freshA.row] : []
+        ));
+
+        expect(mod.scanAndSyncSources(null, false, { scanCompleteness: 'complete' }))
+            .toEqual(expect.objectContaining({ ok: false, reason: 'partial_source_sync' }));
+        const secondResult = mod.scanAndSyncSources(null, false, { scanCompleteness: 'complete' });
+        expect(secondResult)
+            .toEqual(expect.objectContaining({ ok: false, reason: 'unsafe_remap' }));
+        expect(mod.sourcesByKey.get(sourceAKey)).toMatchObject({
+            element: sourceA.row,
+            enabled: false
+        });
+        expect(mod.getSourceTagIds(sourceAKey)).toEqual([sourceATag]);
+        expect(mod.getSourceTagIds(sourceBKey)).toEqual([sourceBTag]);
+        expect(mod.groupsById.get('duplicates').children).toEqual([
+            { type: 'source', key: sourceAKey },
+            { type: 'source', key: sourceBKey }
+        ]);
+    });
+
+    it('does not hydrate persisted duplicate weak identities onto fresh reload rows', () => {
+        const oldA = createMockSourceRow({
+            title: 'Duplicate source',
+            stableToken: null,
+            checked: false
+        });
+        const oldB = createMockSourceRow({
+            title: 'Duplicate source',
+            stableToken: null,
+            checked: true
+        });
+        const seenSourceIds = new Map();
+        const seenLegacyKeys = new Map();
+        const oldDescriptorA = mod.createSourceDescriptor(oldA.row, seenSourceIds, seenLegacyKeys);
+        const oldDescriptorB = mod.createSourceDescriptor(oldB.row, seenSourceIds, seenLegacyKeys);
+        const loadedState = {
+            schemaVersion: 5,
+            root: [{ type: 'group', id: 'duplicates' }],
+            groupsById: {
+                duplicates: {
+                    id: 'duplicates',
+                    title: 'Duplicates',
+                    children: [
+                        { type: 'source', key: oldDescriptorA.key },
+                        { type: 'source', key: oldDescriptorB.key }
+                    ]
+                }
+            },
+            ungrouped: [],
+            sourceStateById: {
+                [oldDescriptorA.key]: {
+                    enabled: false,
+                    title: oldDescriptorA.title,
+                    normalizedTitle: oldDescriptorA.normalizedTitle,
+                    stableToken: '',
+                    fingerprint: oldDescriptorA.fingerprint,
+                    identityType: 'fingerprint'
+                },
+                [oldDescriptorB.key]: {
+                    enabled: true,
+                    title: oldDescriptorB.title,
+                    normalizedTitle: oldDescriptorB.normalizedTitle,
+                    stableToken: '',
+                    fingerprint: oldDescriptorB.fingerprint,
+                    identityType: 'fingerprint'
+                }
+            },
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {
+                [oldDescriptorA.key]: ['tag-a'],
+                [oldDescriptorB.key]: ['tag-b']
+            }
+        };
+        const freshA = createMockSourceRow({
+            title: 'Duplicate source',
+            stableToken: null,
+            checked: true
+        });
+        const freshB = createMockSourceRow({
+            title: 'Duplicate source',
+            stableToken: null,
+            checked: true
+        });
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [freshB.row, freshA.row] : []
+        ));
+
+        expect(mod.scanAndSyncSources(loadedState, true, { scanCompleteness: 'complete' }))
+            .toEqual(expect.objectContaining({ ok: false, reason: 'partial_initial_source_sync' }));
+        expect(mod.sourcesByKey).toEqual(new Map());
+        expect(loadedState.groupsById.duplicates.children).toEqual([
+            { type: 'source', key: oldDescriptorA.key },
+            { type: 'source', key: oldDescriptorB.key }
+        ]);
+        expect(freshA.checkbox.click).not.toHaveBeenCalled();
+        expect(freshB.checkbox.click).not.toHaveBeenCalled();
+    });
+
+    it('hydrates an explicitly bound fresh duplicate reload through the pending initial-state path', async () => {
+        const oldA = createMockSourceRow({ title: 'Duplicate source', stableToken: null, checked: false });
+        const oldB = createMockSourceRow({ title: 'Duplicate source', stableToken: null, checked: true });
+        const seenSourceIds = new Map();
+        const seenLegacyKeys = new Map();
+        const descriptorA = mod.createSourceDescriptor(oldA.row, seenSourceIds, seenLegacyKeys);
+        const descriptorB = mod.createSourceDescriptor(oldB.row, seenSourceIds, seenLegacyKeys);
+        const legacyCKey = 'legacy-c';
+        const loadedState = {
+            schemaVersion: 5,
+            root: [{ type: 'group', id: 'duplicates' }],
+            groupsById: {
+                duplicates: {
+                    id: 'duplicates',
+                    title: 'Duplicates',
+                    children: [
+                        { type: 'source', key: descriptorA.key },
+                        { type: 'source', key: descriptorB.key }
+                    ]
+                }
+            },
+            ungrouped: [legacyCKey],
+            sourceStateById: {
+                [descriptorA.key]: {
+                    enabled: false,
+                    title: descriptorA.title,
+                    normalizedTitle: descriptorA.normalizedTitle,
+                    stableToken: '',
+                    fingerprint: descriptorA.fingerprint,
+                    identityType: 'fingerprint'
+                },
+                [descriptorB.key]: {
+                    enabled: true,
+                    title: descriptorB.title,
+                    normalizedTitle: descriptorB.normalizedTitle,
+                    stableToken: '',
+                    fingerprint: descriptorB.fingerprint,
+                    identityType: 'fingerprint'
+                },
+                [legacyCKey]: {
+                    enabled: false,
+                    title: 'Legacy C',
+                    normalizedTitle: 'legacy c',
+                    stableToken: '',
+                    fingerprint: 'legacy c||article',
+                    identityType: 'fingerprint'
+                }
+            },
+            tagsById: {
+                tagA: { id: 'tagA', label: 'A', color: '#5B6CFF' },
+                tagB: { id: 'tagB', label: 'B', color: '#5B6CFF' },
+                tagC: { id: 'tagC', label: 'C', color: '#5B6CFF' }
+            },
+            tagOrder: ['tagA', 'tagB', 'tagC'],
+            sourceTagsById: {
+                [descriptorA.key]: ['tagA'],
+                [descriptorB.key]: ['tagB'],
+                [legacyCKey]: ['tagC']
+            }
+        };
+        const freshA = createMockSourceRow({ title: 'Duplicate source', stableToken: null, checked: true });
+        const freshB = createMockSourceRow({ title: 'Duplicate source', stableToken: null, checked: true });
+        const freshC = createMockSourceRow({ title: 'Current C', stableToken: 'current-c', checked: true });
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        panel.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [freshB.row, freshA.row, freshC.row] : []
+        ));
+        mod._setProjectId('repair-duplicates');
+        mountManagerForDebouncedSourceSync(mod);
+        global.document.body.contains = jest.fn(() => true);
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [freshB.row, freshA.row, freshC.row] : []
+        ));
+
+        expect(mod.restoreInitialLoadedState(loadedState)).toEqual({
+            deferred: true,
+            shouldUpgradeStorage: false
+        });
+        const options = mod.getSourceRepairOptions();
+        expect(options.map(({ nativeOrder }) => nativeOrder)).toEqual([1, 2, 3]);
+        expect(options.map(({ fullTitle }) => fullTitle)).toEqual([
+            'Duplicate source',
+            'Duplicate source',
+            'Current C'
+        ]);
+        const optionForA = options.find(({ nativeOrder }) => nativeOrder === 2);
+        const optionForB = options.find(({ nativeOrder }) => nativeOrder === 1);
+        const optionForC = options.find(({ nativeOrder }) => nativeOrder === 3);
+        global.chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+            if (message?.type === 'APPEND_STATE_HISTORY') {
+                callback({ success: true, history: [] });
+                return;
+            }
+            if (message?.type === 'SAVE_STATE') {
+                callback({
+                    success: true,
+                    saveRevision: 1,
+                    savedAt: '2026-09-08T00:00:00.000Z'
+                });
+                return;
+            }
+            if (message?.type === 'LOAD_STATE_HISTORY') {
+                callback({ success: true, history: [] });
+            }
+        });
+
+        await expect(mod.applySourceRepairRemaps({
+            [descriptorA.key]: optionForA.key,
+            [descriptorB.key]: optionForB.key,
+            [legacyCKey]: optionForC.key
+        })).resolves.toBe(true);
+
+        expect(mod._getPendingInitialLoadedState()).toBeNull();
+        const byElement = new Map(Array.from(mod.sourcesByKey.values()).map((source) => [
+            source.element,
+            {
+                key: source.key,
+                enabled: source.enabled,
+                tagIds: mod.getSourceTagIds(source.key)
+            }
+        ]));
+        expect(byElement.get(freshA.row)).toEqual(expect.objectContaining({
+            enabled: false,
+            tagIds: ['tagA']
+        }));
+        expect(byElement.get(freshB.row)).toEqual(expect.objectContaining({
+            enabled: true,
+            tagIds: ['tagB']
+        }));
+        expect(byElement.get(freshC.row)).toEqual(expect.objectContaining({
+            enabled: false,
+            tagIds: ['tagC']
+        }));
+        const savedSnapshot = global.chrome.runtime.sendMessage.mock.calls
+            .map(([message]) => message)
+            .filter((message) => message?.type === 'SAVE_STATE')
+            .at(-1)?.data;
+        expect(savedSnapshot.sourceStateById[byElement.get(freshA.row).key].enabled).toBe(false);
+        expect(savedSnapshot.sourceStateById[byElement.get(freshB.row).key].enabled).toBe(true);
+        expect(savedSnapshot.sourceStateById[byElement.get(freshC.row).key].enabled).toBe(false);
+        expect(savedSnapshot.groupsById.duplicates.children.map(({ key }) => key)).toEqual([
+            byElement.get(freshA.row).key,
+            byElement.get(freshB.row).key
+        ]);
+        expect(mod.groupsById.get('duplicates').children.map(({ key }) => (
+            mod.sourcesByKey.get(key).element
+        ))).toEqual([freshA.row, freshB.row]);
+        panel.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [freshA.row, freshB.row, freshC.row] : []
+        ));
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [freshA.row, freshB.row, freshC.row] : []
+        ));
+        expect(mod.scanAndSyncSources(null, false, { scanCompleteness: 'complete' }))
+            .toEqual(expect.objectContaining({ ok: true, reason: 'completed' }));
+        expect(mod.scanAndSyncSources(null, false, { scanCompleteness: 'complete' }))
+            .toEqual(expect.objectContaining({ ok: true, reason: 'completed' }));
+        expect(mod.groupsById.get('duplicates').children.map(({ key }) => (
+            mod.sourcesByKey.get(key).element
+        ))).toEqual([freshA.row, freshB.row]);
+        expect(mod.getSourceRepairReport()).toMatchObject({
+            matchedSources: 3,
+            ambiguousSources: 0,
+            unmatchedSources: 0
+        });
+    });
+
+    it('rejects duplicate, changed, and route-stale explicit duplicate bindings without changing pending layout', async () => {
+        const oldA = createMockSourceRow({ title: 'Duplicate source', stableToken: null, checked: false });
+        const oldB = createMockSourceRow({ title: 'Duplicate source', stableToken: null, checked: true });
+        const seenSourceIds = new Map();
+        const seenLegacyKeys = new Map();
+        const descriptorA = mod.createSourceDescriptor(oldA.row, seenSourceIds, seenLegacyKeys);
+        const descriptorB = mod.createSourceDescriptor(oldB.row, seenSourceIds, seenLegacyKeys);
+        const loadedState = {
+            schemaVersion: 5,
+            root: [{ type: 'group', id: 'duplicates' }],
+            groupsById: {
+                duplicates: {
+                    id: 'duplicates',
+                    title: 'Duplicates',
+                    children: [
+                        { type: 'source', key: descriptorA.key },
+                        { type: 'source', key: descriptorB.key }
+                    ]
+                }
+            },
+            ungrouped: [],
+            sourceStateById: {
+                [descriptorA.key]: {
+                    enabled: false,
+                    title: descriptorA.title,
+                    normalizedTitle: descriptorA.normalizedTitle,
+                    stableToken: '',
+                    fingerprint: descriptorA.fingerprint,
+                    identityType: 'fingerprint'
+                },
+                [descriptorB.key]: {
+                    enabled: true,
+                    title: descriptorB.title,
+                    normalizedTitle: descriptorB.normalizedTitle,
+                    stableToken: '',
+                    fingerprint: descriptorB.fingerprint,
+                    identityType: 'fingerprint'
+                }
+            },
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {}
+        };
+        const freshA = createMockSourceRow({ title: 'Duplicate source', stableToken: null, checked: true });
+        const freshB = createMockSourceRow({ title: 'Duplicate source', stableToken: null, checked: true });
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        panel.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [freshB.row, freshA.row] : []
+        ));
+        mod._setProjectId('repair-stale');
+        mountManagerForDebouncedSourceSync(mod);
+        global.document.body.contains = jest.fn(() => true);
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [freshB.row, freshA.row] : []
+        ));
+
+        expect(mod.restoreInitialLoadedState(loadedState)).toEqual({
+            deferred: true,
+            shouldUpgradeStorage: false
+        });
+        const options = mod.getSourceRepairOptions();
+        const optionForA = options.find(({ nativeOrder }) => nativeOrder === 2);
+        const optionForB = options.find(({ nativeOrder }) => nativeOrder === 1);
+        const validSelections = {
+            [descriptorA.key]: optionForA.key,
+            [descriptorB.key]: optionForB.key
+        };
+
+        await expect(mod.applySourceRepairRemaps({
+            [descriptorA.key]: optionForA.key,
+            [descriptorB.key]: optionForA.key
+        })).resolves.toBe(false);
+        freshA.titleEl.textContent = 'Changed source';
+        await expect(mod.applySourceRepairRemaps(validSelections)).resolves.toBe(false);
+        freshA.titleEl.textContent = 'Duplicate source';
+        mod._setProjectId('repair-stale-route');
+        await expect(mod.applySourceRepairRemaps(validSelections)).resolves.toBe(false);
+
+        expect(mod._getPendingInitialLoadedState()).toBe(loadedState);
+        expect(mod.groupsById.get('duplicates').children).toEqual([
+            { type: 'source', key: descriptorA.key },
+            { type: 'source', key: descriptorB.key }
+        ]);
+        expect(mod.sourcesByKey.get(descriptorA.key)).toMatchObject({
+            element: null,
+            enabled: false,
+            isPendingNativeHydration: true
+        });
+        expect(freshA.checkbox.click).not.toHaveBeenCalled();
+        expect(freshB.checkbox.click).not.toHaveBeenCalled();
+    });
+
+    it('rolls an explicit duplicate binding back before native selection changes when its canonical save fails', async () => {
+        const oldA = createMockSourceRow({ title: 'Duplicate source', stableToken: null, checked: false });
+        const oldB = createMockSourceRow({ title: 'Duplicate source', stableToken: null, checked: true });
+        const seenSourceIds = new Map();
+        const seenLegacyKeys = new Map();
+        const descriptorA = mod.createSourceDescriptor(oldA.row, seenSourceIds, seenLegacyKeys);
+        const descriptorB = mod.createSourceDescriptor(oldB.row, seenSourceIds, seenLegacyKeys);
+        const loadedState = {
+            schemaVersion: 5,
+            root: [{ type: 'group', id: 'duplicates' }],
+            groupsById: {
+                duplicates: {
+                    id: 'duplicates',
+                    title: 'Duplicates',
+                    children: [
+                        { type: 'source', key: descriptorA.key },
+                        { type: 'source', key: descriptorB.key }
+                    ]
+                }
+            },
+            ungrouped: [],
+            sourceStateById: {
+                [descriptorA.key]: {
+                    enabled: false,
+                    title: descriptorA.title,
+                    normalizedTitle: descriptorA.normalizedTitle,
+                    stableToken: '',
+                    fingerprint: descriptorA.fingerprint,
+                    identityType: 'fingerprint'
+                },
+                [descriptorB.key]: {
+                    enabled: true,
+                    title: descriptorB.title,
+                    normalizedTitle: descriptorB.normalizedTitle,
+                    stableToken: '',
+                    fingerprint: descriptorB.fingerprint,
+                    identityType: 'fingerprint'
+                }
+            },
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {}
+        };
+        const freshA = createMockSourceRow({ title: 'Duplicate source', stableToken: null, checked: true });
+        const freshB = createMockSourceRow({ title: 'Duplicate source', stableToken: null, checked: true });
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        panel.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [freshB.row, freshA.row] : []
+        ));
+        mod._setProjectId('repair-save-failure');
+        mountManagerForDebouncedSourceSync(mod);
+        global.document.body.contains = jest.fn(() => true);
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [freshB.row, freshA.row] : []
+        ));
+
+        expect(mod.restoreInitialLoadedState(loadedState)).toEqual({
+            deferred: true,
+            shouldUpgradeStorage: false
+        });
+        const options = mod.getSourceRepairOptions();
+        const selections = {
+            [descriptorA.key]: options.find(({ nativeOrder }) => nativeOrder === 2).key,
+            [descriptorB.key]: options.find(({ nativeOrder }) => nativeOrder === 1).key
+        };
+        let saveCount = 0;
+        global.chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+            if (message?.type === 'APPEND_STATE_HISTORY') {
+                callback({ success: true, history: [] });
+                return;
+            }
+            if (message?.type === 'SAVE_STATE') {
+                saveCount += 1;
+                callback(saveCount === 1
+                    ? { success: false, errorCode: 'runtime_failure' }
+                    : {
+                        success: true,
+                        saveRevision: saveCount,
+                        savedAt: '2026-09-08T00:00:00.000Z'
+                    });
+                return;
+            }
+            if (message?.type === 'LOAD_STATE_HISTORY') {
+                callback({ success: true, history: [] });
+            }
+        });
+
+        await expect(mod.applySourceRepairRemaps(selections)).resolves.toBe(false);
+        expect(mod._getPendingInitialLoadedState()).toBe(loadedState);
+        expect(mod.groupsById.get('duplicates').children).toEqual([
+            { type: 'source', key: descriptorA.key },
+            { type: 'source', key: descriptorB.key }
+        ]);
+        expect(mod.sourcesByKey.get(descriptorA.key)).toMatchObject({
+            element: null,
+            enabled: false,
+            isPendingNativeHydration: true
+        });
+        expect(freshA.checkbox.click).not.toHaveBeenCalled();
+        expect(freshB.checkbox.click).not.toHaveBeenCalled();
+
+        global.chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+            if (message?.type === 'APPEND_STATE_HISTORY' || message?.type === 'LOAD_STATE_HISTORY') {
+                callback({ success: true, history: [] });
+                return;
+            }
+            if (message?.type === 'SAVE_STATE') {
+                callback({
+                    success: true,
+                    saveRevision: 3,
+                    savedAt: '2026-09-08T00:00:00.000Z'
+                });
+            }
+        });
+        await expect(mod.applySourceRepairRemaps(selections)).resolves.toBe(true);
+        expect(freshA.checkbox.click).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not restore stale duplicate bindings after the source-repair URL context changes during save', async () => {
+        const oldA = createMockSourceRow({ title: 'Duplicate source', stableToken: null, checked: false });
+        const oldB = createMockSourceRow({ title: 'Duplicate source', stableToken: null, checked: true });
+        const seenSourceIds = new Map();
+        const seenLegacyKeys = new Map();
+        const descriptorA = mod.createSourceDescriptor(oldA.row, seenSourceIds, seenLegacyKeys);
+        const descriptorB = mod.createSourceDescriptor(oldB.row, seenSourceIds, seenLegacyKeys);
+        const loadedState = {
+            schemaVersion: 5,
+            root: [],
+            groupsById: {},
+            ungrouped: [descriptorA.key, descriptorB.key],
+            sourceStateById: {
+                [descriptorA.key]: {
+                    enabled: false,
+                    title: descriptorA.title,
+                    normalizedTitle: descriptorA.normalizedTitle,
+                    stableToken: '',
+                    fingerprint: descriptorA.fingerprint,
+                    identityType: 'fingerprint'
+                },
+                [descriptorB.key]: {
+                    enabled: true,
+                    title: descriptorB.title,
+                    normalizedTitle: descriptorB.normalizedTitle,
+                    stableToken: '',
+                    fingerprint: descriptorB.fingerprint,
+                    identityType: 'fingerprint'
+                }
+            },
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {}
+        };
+        const freshA = createMockSourceRow({ title: 'Duplicate source', stableToken: null, checked: true });
+        const freshB = createMockSourceRow({ title: 'Duplicate source', stableToken: null, checked: true });
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        panel.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [freshB.row, freshA.row] : []
+        ));
+        mod._setProjectId('repair-url-stale');
+        mountManagerForDebouncedSourceSync(mod);
+        global.document.body.contains = jest.fn(() => true);
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [freshB.row, freshA.row] : []
+        ));
+
+        expect(mod.restoreInitialLoadedState(loadedState)).toEqual({
+            deferred: true,
+            shouldUpgradeStorage: false
+        });
+        const options = mod.getSourceRepairOptions();
+        const selections = {
+            [descriptorA.key]: options.find(({ nativeOrder }) => nativeOrder === 2).key,
+            [descriptorB.key]: options.find(({ nativeOrder }) => nativeOrder === 1).key
+        };
+        let saveCount = 0;
+        global.chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+            if (message?.type === 'APPEND_STATE_HISTORY') {
+                callback({ success: true, history: [] });
+                return;
+            }
+            if (message?.type === 'SAVE_STATE') {
+                saveCount += 1;
+                global.window.location.href = 'http://localhost/notebook/repair-url-stale?next=1';
+                callback({ success: false, errorCode: 'runtime_failure' });
+            }
+        });
+
+        await expect(mod.applySourceRepairRemaps(selections)).resolves.toBe(false);
+
+        expect(saveCount).toBe(1);
+        expect(mod._getPendingInitialLoadedState()).toBeNull();
+        expect(Array.from(mod.sourcesByKey.values()).map((source) => source.element)).toEqual(
+            expect.arrayContaining([freshA.row, freshB.row])
+        );
+        expect(freshA.checkbox.click).not.toHaveBeenCalled();
+        expect(freshB.checkbox.click).not.toHaveBeenCalled();
+    });
+
+    it('reports each unresolved duplicate source with its saved folder path', () => {
+        const liveA = createMockSourceRow({ title: 'Duplicate source', stableToken: null, checked: true });
+        const liveB = createMockSourceRow({ title: 'Duplicate source', stableToken: null, checked: true });
+        const seenSourceIds = new Map();
+        const seenLegacyKeys = new Map();
+        const descriptorA = mod.createSourceDescriptor(liveA.row, seenSourceIds, seenLegacyKeys);
+        const descriptorB = mod.createSourceDescriptor(liveB.row, seenSourceIds, seenLegacyKeys);
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        panel.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [liveB.row, liveA.row] : []
+        ));
+        mod._setProjectId('repair-location');
+        mountManagerForDebouncedSourceSync(mod);
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [liveB.row, liveA.row] : []
+        ));
+
+        const report = mod.getSourceRepairReport({
+            schemaVersion: 5,
+            root: [{ type: 'group', id: 'archive' }],
+            groupsById: {
+                archive: {
+                    id: 'archive',
+                    title: 'Archive',
+                    children: [{ type: 'group', id: 'review' }]
+                },
+                review: {
+                    id: 'review',
+                    title: 'Review',
+                    children: [{ type: 'source', key: descriptorA.key }]
+                }
+            },
+            ungrouped: [descriptorB.key],
+            sourceStateById: {
+                [descriptorA.key]: {
+                    title: descriptorA.title,
+                    normalizedTitle: descriptorA.normalizedTitle,
+                    stableToken: '',
+                    fingerprint: descriptorA.fingerprint
+                },
+                [descriptorB.key]: {
+                    title: descriptorB.title,
+                    normalizedTitle: descriptorB.normalizedTitle,
+                    stableToken: '',
+                    fingerprint: descriptorB.fingerprint
+                }
+            },
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {}
+        });
+
+        expect(report.ambiguous).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                storedKey: descriptorA.key,
+                savedLocation: 'Archive / Review'
+            }),
+            expect.objectContaining({
+                storedKey: descriptorB.key,
+                savedLocation: expect.any(String)
+            })
+        ]));
     });
 
     it('leaves ambiguous remaps ungrouped instead of guessing', () => {
@@ -4604,6 +5498,7 @@ describe('scanAndSyncSources', () => {
         };
         const row = createMockSourceRow({ title: 'Deferred Source', stableToken: 'doc-1', checked: true });
 
+        mod._setProjectId('test-project');
         global.document.querySelectorAll = jest.fn((selector) => (
             mod.DEPS.row.includes(selector) ? [] : []
         ));
@@ -5098,6 +5993,7 @@ describe('scanAndSyncSources', () => {
         global.document.querySelectorAll = jest.fn((selector) => (
             mod.DEPS.row.includes(selector) ? [row.row] : []
         ));
+        mountManagerForDebouncedSourceSync(mod);
 
         mod._debouncedScanAndSyncForTest();
         expect(mod.state.root).toEqual([{ type: 'group', id: 'group1' }]);
@@ -5313,6 +6209,7 @@ describe('syncSourceToPage', () => {
         const descriptor = mod.createSourceDescriptor(row.row, new Map(), new Map());
         const source = { ...descriptor, element: row.row, checkbox: row.checkbox };
         mod.sourcesByKey.set(descriptor.key, source);
+        row.checkbox.click = jest.fn();
         global.document.body.contains = jest.fn(() => true);
         global.document.querySelectorAll = jest.fn((selector) => (
             mod.DEPS.row.includes(selector) ? [row.row] : []
@@ -5333,7 +6230,7 @@ describe('syncSourceToPage', () => {
             reason: 'confirmed',
             desiredState: true
         }));
-        expect(row.checkbox.click).toHaveBeenCalledTimes(2);
+        expect(row.checkbox.click).toHaveBeenCalledTimes(1);
         expect(mod._getClickQueueLength()).toBe(0);
     });
 
@@ -5438,6 +6335,7 @@ describe('syncSourceToPage', () => {
         const descriptor = mod.createSourceDescriptor(row.row, new Map(), new Map());
         const source = { ...descriptor, element: row.row, checkbox: row.checkbox };
         mod.sourcesByKey.set(descriptor.key, source);
+        row.checkbox.click = jest.fn();
         global.document.body.contains = jest.fn(() => true);
         global.document.querySelectorAll = jest.fn((selector) => (
             mod.DEPS.row.includes(selector) ? [row.row] : []
@@ -5569,6 +6467,40 @@ describe('findFreshCheckbox', () => {
         expect(mod.findFreshCheckbox(descriptor.key)).toBeNull();
     });
 
+    it('evicts a cached weak-identity row when replacement DOM becomes ambiguous', () => {
+        const original = createMockSourceRow({
+            title: 'Duplicate source',
+            stableToken: null,
+            checked: true
+        });
+        const replacementA = createMockSourceRow({
+            title: 'Duplicate source',
+            stableToken: null,
+            checked: true
+        });
+        const replacementB = createMockSourceRow({
+            title: 'Duplicate source',
+            stableToken: null,
+            checked: false
+        });
+        const descriptor = mod.createSourceDescriptor(original.row, new Map(), new Map());
+        mod.sourcesByKey.set(descriptor.key, descriptor);
+        global.document.body.contains = jest.fn((node) => (
+            node === replacementA.row || node === replacementB.row
+        ));
+
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [replacementA.row] : []
+        ));
+        expect(mod.findFreshCheckbox(descriptor.key)).toBe(replacementA.checkbox);
+
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? [replacementA.row, replacementB.row] : []
+        ));
+        expect(mod.findFreshCheckbox(descriptor.key)).toBeNull();
+        expect(mod._getFreshRowCache().has(descriptor.key)).toBe(false);
+    });
+
     it('clears freshRowCache when mutation observer triggers', () => {
         const sourceTitle = 'Temp Title';
         mod.sourcesByKey.set('source3', { key: 'source3', title: sourceTitle });
@@ -5625,6 +6557,7 @@ describe('mutation-driven persistence', () => {
         global.document.querySelectorAll = jest.fn((selector) => (
             mod.DEPS.row.includes(selector) ? [sourceRow.row] : []
         ));
+        mountManagerForDebouncedSourceSync(mod);
 
         mod._debouncedScanAndSyncForTest();
 
@@ -5647,6 +6580,7 @@ describe('mutation-driven persistence', () => {
         ));
         mod.scanAndSyncSources({}, true);
         global.chrome.runtime.sendMessage.mockClear();
+        mountManagerForDebouncedSourceSync(mod);
 
         mod._debouncedScanAndSyncForTest();
         mod.flushPendingStateSave();
@@ -5672,6 +6606,7 @@ describe('mutation-driven persistence', () => {
         global.document.querySelectorAll = jest.fn((selector) => (
             mod.DEPS.row.includes(selector) ? [sourceRow.row] : []
         ));
+        mountManagerForDebouncedSourceSync(mod);
         mod._debouncedScanAndSyncForTest();
         mod.flushPendingStateSave();
 
@@ -5817,6 +6752,7 @@ describe('mutation-driven persistence', () => {
         ));
         mod.scanAndSyncSources(null, true);
         global.chrome.runtime.sendMessage.mockClear();
+        mountManagerForDebouncedSourceSync(mod);
 
         statusValue = 'importing';
         mod._handleDomChangesForTest([{
@@ -5911,6 +6847,7 @@ describe('mutation-driven persistence', () => {
         mod.scanAndSyncSources({}, true);
         const descriptor = mod.createSourceDescriptor(sourceRow.row, new Map(), new Map());
         global.chrome.runtime.sendMessage.mockClear();
+        mountManagerForDebouncedSourceSync(mod);
 
         sourceRow.titleEl.textContent = 'Renamed Source';
         mod._debouncedScanAndSyncForTest({ critical: true });

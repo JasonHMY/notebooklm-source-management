@@ -1162,6 +1162,174 @@ describe('saveState', () => {
         mod._hideActiveToastForTest(false);
     });
 
+    it('keeps a newer primary placement when an older backup has more grouped sources', () => {
+        const newerPrimary = {
+            schemaVersion: 5,
+            _saveRevision: 9,
+            root: [{ type: 'group', id: 'folder' }],
+            groupsById: {
+                folder: { id: 'folder', title: 'Folder', children: [] }
+            },
+            ungrouped: ['source-a'],
+            sourceStateById: {
+                'source-a': { enabled: true, title: 'Source A' }
+            },
+            tagsById: {},
+            tagOrder: [],
+            sourceTagsById: {}
+        };
+        const olderBackup = {
+            ...newerPrimary,
+            _saveRevision: 8,
+            groupsById: {
+                folder: {
+                    id: 'folder',
+                    title: 'Folder',
+                    children: [{ type: 'source', key: 'source-a' }]
+                }
+            },
+            ungrouped: []
+        };
+
+        const callback = jest.fn();
+        mod._setProjectId('newer-primary-placement');
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'LOAD_STATE') {
+                cb({
+                    success: true,
+                    primaryState: newerPrimary,
+                    backupState: olderBackup,
+                    history: []
+                });
+            }
+        });
+
+        mod.loadState(callback);
+
+        const selected = callback.mock.calls[0][0];
+        expect(selected.groupsById.folder.children).toEqual([]);
+        expect(selected.ungrouped).toEqual(['source-a']);
+        expect(mod.restorePersistedSnapshotWithoutDom(olderBackup)).toBe(true);
+        expect(mod.groupsById.get('folder').children).toEqual([
+            { type: 'source', key: 'source-a' }
+        ]);
+    });
+
+    it('keeps a stale local base across retries until the newest state is loaded', async () => {
+        const projectId = seedPersistedState();
+        const loadedRevisionOne = {
+            ...expectedPersistableState,
+            _saveRevision: 1,
+            _savedAt: '2026-09-08T00:00:00.000Z'
+        };
+        let nextLoadedState = loadedRevisionOne;
+        let remoteState = null;
+        const saveMessages = [];
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (message?.type === 'LOAD_STATE') {
+                cb({
+                    success: true,
+                    primaryState: nextLoadedState,
+                    backupState: null,
+                    history: []
+                });
+                return;
+            }
+            if (message?.type === 'SAVE_STATE') {
+                saveMessages.push(message);
+                if (message.baseRevision < remoteState._saveRevision) {
+                    cb({
+                        success: false,
+                        errorCode: 'stale_revision',
+                        currentRevision: remoteState._saveRevision
+                    });
+                    return;
+                }
+                remoteState = {
+                    ...message.data,
+                    _saveRevision: remoteState._saveRevision + 1,
+                    _savedAt: '2026-09-08T00:02:00.000Z'
+                };
+                cb({
+                    success: true,
+                    saveRevision: remoteState._saveRevision,
+                    savedAt: remoteState._savedAt
+                });
+            }
+        });
+        mod.loadState(jest.fn());
+        mod.state.root = [{ type: 'group', id: 'local-folder' }];
+        mod.state.ungrouped = ['source2', 'source3'];
+        mod.groupsById.clear();
+        mod.groupsById.set('local-folder', {
+            id: 'local-folder',
+            title: 'Local changes',
+            children: [{ type: 'source', key: 'source1' }]
+        });
+
+        remoteState = {
+            ...expectedPersistableState,
+            _saveRevision: 2,
+            _savedAt: '2026-09-08T00:01:00.000Z',
+            root: [{ type: 'group', id: 'remote-folder' }],
+            groupsById: {
+                'remote-folder': {
+                    id: 'remote-folder',
+                    title: 'Remote changes',
+                    children: [{ type: 'source', key: 'source1' }]
+                }
+            },
+            ungrouped: ['source2', 'source3']
+        };
+        await expect(mod.saveState({ immediate: true, critical: true })).resolves.toMatchObject({
+            ok: false,
+            reason: 'stale_revision'
+        });
+        await expect(mod.saveState({ immediate: true, critical: true })).resolves.toMatchObject({
+            ok: false,
+            reason: 'stale_revision'
+        });
+
+        expect(saveMessages.map((message) => message.baseRevision)).toEqual([1, 1]);
+        expect(remoteState.groupsById['remote-folder'].title).toBe('Remote changes');
+        expect(mod.readRecoverySnapshot()).toMatchObject({
+            baseRevision: 1,
+            failed: true,
+            snapshot: {
+                groupsById: {
+                    'local-folder': expect.objectContaining({ title: 'Local changes' })
+                }
+            }
+        });
+
+        let loadedState = null;
+        nextLoadedState = remoteState;
+        mod.loadState((state) => {
+            loadedState = state;
+        });
+        expect(loadedState).toMatchObject({
+            groupsById: {
+                'remote-folder': expect.objectContaining({ title: 'Remote changes' })
+            }
+        });
+        expect(mod.restorePersistedSnapshotWithoutDom(loadedState)).toBe(true);
+        mod.groupsById.get('remote-folder').title = 'Remote changes after refresh';
+
+        await expect(mod.saveState({ immediate: true, critical: true })).resolves.toMatchObject({
+            ok: true
+        });
+        expect(saveMessages.map((message) => message.baseRevision)).toEqual([1, 1, 2]);
+        expect(remoteState).toMatchObject({
+            _saveRevision: 3,
+            groupsById: {
+                'remote-folder': expect.objectContaining({
+                    title: 'Remote changes after refresh'
+                })
+            }
+        });
+        mod._hideActiveToastForTest(false);
+    });
+
     it('keeps the pre-import snapshot as recovery when an import critical save fails', async () => {
         const projectId = seedPersistedState();
         const beforeImport = {
@@ -1805,7 +1973,7 @@ describe('saveState', () => {
         );
     });
 
-    it('renders stale save status with retry and refresh actions', () => {
+    it('offers refresh instead of unsafe retry when another tab has newer changes', () => {
         seedPersistedState();
         const statusContainer = global.document.createElement('div');
         const statusSection = global.document.createElement('section');
@@ -1828,12 +1996,10 @@ describe('saveState', () => {
         expect(statusContainer.setAttribute).toHaveBeenCalledWith('aria-live', 'assertive');
         expect(statusContainer.childNodes.map((node) => node.textContent)).toEqual([
             'ui_save_status_stale',
-            'ui_save_status_retry',
-            'ui_save_status_manage_storage',
             'ui_save_status_refresh'
         ]);
 
-        statusContainer.childNodes[3].dispatchEvent({
+        statusContainer.childNodes[1].dispatchEvent({
             type: 'click',
             preventDefault: jest.fn(),
             stopPropagation: jest.fn()
@@ -2615,6 +2781,60 @@ describe('saveState', () => {
         );
         expect(global.sessionStorage.removeItem).not.toHaveBeenCalledWith(recoveryKey);
         mod._hideActiveToastForTest(false);
+    });
+
+    it.each([
+        ['visibilitychange:hidden', { type: 'visibilitychange' }],
+        ['pagehide', { type: 'pagehide' }]
+    ])('keeps failed stale recovery through %s until a refresh can present it', async (label, event) => {
+        const projectId = seedPersistedState();
+        const recoveryKey = `sourcesPlusRecovery_${projectId}`;
+        const existingRecovery = {
+            snapshot: {
+                ...expectedPersistableState,
+                root: [{ type: 'group', id: 'losing-tab-group' }],
+                groupsById: {
+                    'losing-tab-group': {
+                        id: 'losing-tab-group',
+                        title: 'Unsaved losing tab work',
+                        children: []
+                    }
+                }
+            },
+            baseRevision: 1,
+            createdAt: '2026-09-08T00:20:00.000Z',
+            reason: 'stale_revision',
+            clientSaveId: 'test_project_id:stale-save',
+            failed: true
+        };
+        global.sessionStorage.setItem(recoveryKey, JSON.stringify(existingRecovery));
+        global.sessionStorage.setItem.mockClear();
+        global.sessionStorage.removeItem.mockClear();
+        global.document.visibilityState = 'hidden';
+
+        const lifecycleSave = await mod.handlePageLifecyclePersistence(event);
+
+        expect(lifecycleSave).toMatchObject({
+            ok: false,
+            reason: 'failed_recovery_owned',
+            skipped: true
+        });
+        expect(mod.readRecoverySnapshot()).toEqual(existingRecovery);
+        expect(global.chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+            expect.objectContaining({ type: 'SAVE_STATE' }),
+            expect.any(Function)
+        );
+        expect(global.sessionStorage.setItem).not.toHaveBeenCalledWith(
+            recoveryKey,
+            expect.any(String)
+        );
+        expect(global.sessionStorage.removeItem).not.toHaveBeenCalledWith(recoveryKey);
+        expect(mod.detectRecoverySnapshotAvailability({
+            ...expectedPersistableState,
+            _saveRevision: 2,
+            _savedAt: '2026-09-08T00:21:00.000Z'
+        })).toBe(true);
+        expect(mod.readRecoverySnapshot()).toEqual(existingRecovery);
     });
 
     it('queues lifecycle background saves behind an in-flight normal save', async () => {
@@ -3492,6 +3712,159 @@ describe('snapshot restore consumer wiring', () => {
         });
         await mod.loadStateHistory();
     };
+
+    it('does not let an older history response overwrite the active manager scope', async () => {
+        const projectA = 'history-scope-a';
+        const projectB = 'history-scope-b';
+        let resolveProjectAHistory;
+        const projectAEntry = {
+            id: 'history-a',
+            createdAt: '2026-09-08T00:00:00.000Z',
+            reason: 'manual',
+            snapshot: createSnapshot('history-a')
+        };
+        const projectBEntry = {
+            id: 'history-b',
+            createdAt: '2026-09-08T00:01:00.000Z',
+            reason: 'manual',
+            snapshot: createSnapshot('history-b')
+        };
+
+        mod._setProjectId(projectA);
+        global.chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+            if (message?.type !== 'LOAD_STATE_HISTORY') return;
+            if (String(message.key || '').includes(projectA)) {
+                resolveProjectAHistory = callback;
+                return;
+            }
+            if (String(message.key || '').includes(projectB)) {
+                callback({ success: true, history: [projectBEntry] });
+            }
+        });
+
+        const oldHistoryRequest = mod.loadStateHistory();
+        expect(resolveProjectAHistory).toEqual(expect.any(Function));
+
+        mod._resetState();
+        mod._setProjectId(projectB);
+        mod._setShadowRootForTest({
+            host: { isConnected: true },
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => []),
+            getElementById: jest.fn(() => null),
+            appendChild: jest.fn()
+        });
+        await expect(mod.loadStateHistory()).resolves.toEqual([
+            expect.objectContaining({ id: 'history-b' })
+        ]);
+        mod._showToastForTest('B context stays visible', { variant: 'info' });
+
+        resolveProjectAHistory({ success: true, history: [projectAEntry] });
+        await expect(oldHistoryRequest).resolves.toEqual([
+            expect.objectContaining({ id: 'history-b' })
+        ]);
+
+        expect(mod.getStateHistoryEntries()).toEqual([
+            expect.objectContaining({ id: 'history-b' })
+        ]);
+        expect(mod._getActiveToastItemForTest()).toMatchObject({
+            message: 'B context stays visible',
+            variant: 'info'
+        });
+    });
+
+    it('keeps the new notebook history, state, and toast when Source Repair changes route during history refresh', async () => {
+        const projectA = 'source-repair-route-a';
+        const projectB = 'source-repair-route-b';
+        const projectBHistory = {
+            id: 'history-b',
+            createdAt: '2026-09-08T01:00:00.000Z',
+            reason: 'manual',
+            snapshot: createSnapshot('project-b-history')
+        };
+        let resolveProjectAHistory;
+        let saveCount = 0;
+
+        mod._setProjectId(projectA);
+        setRuntimeState('project-a-current', 'legacy-source');
+        mod.sourcesByKey.set('current-source', {
+            key: 'current-source',
+            enabled: true,
+            title: 'current-source',
+            normalizedTitle: 'current-source',
+            stableToken: 'token-current-source',
+            fingerprint: 'current-source||article',
+            identityType: 'stable-token'
+        });
+        mod.state.ungrouped.push('current-source');
+        global.chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+            if (message?.type === 'APPEND_STATE_HISTORY') {
+                callback({ success: true, history: [] });
+                return;
+            }
+            if (message?.type === 'SAVE_STATE') {
+                saveCount += 1;
+                callback({
+                    success: true,
+                    saveRevision: saveCount,
+                    savedAt: '2026-09-08T00:59:00.000Z'
+                });
+                return;
+            }
+            if (message?.type !== 'LOAD_STATE_HISTORY') return;
+            if (String(message.key || '').includes(projectA)) {
+                resolveProjectAHistory = callback;
+                return;
+            }
+            if (String(message.key || '').includes(projectB)) {
+                callback({ success: true, history: [projectBHistory] });
+            }
+        });
+
+        const sourceRepair = mod.applySourceRepairRemaps({
+            'legacy-source': 'current-source'
+        });
+        for (let index = 0; index < 16 && !resolveProjectAHistory; index += 1) {
+            await Promise.resolve();
+        }
+        expect(resolveProjectAHistory).toEqual(expect.any(Function));
+
+        mod._resetState();
+        mod._setProjectId(projectB);
+        mod._setShadowRootForTest({
+            host: { isConnected: true },
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => []),
+            getElementById: jest.fn(() => null),
+            appendChild: jest.fn()
+        });
+        setRuntimeState('project-b-current', 'b-source');
+        await expect(mod.loadStateHistory()).resolves.toEqual([
+            expect.objectContaining({ id: 'history-b' })
+        ]);
+        mod._showToastForTest('B context stays visible', { variant: 'info' });
+
+        resolveProjectAHistory({
+            success: true,
+            history: [{
+                id: 'history-a',
+                createdAt: '2026-09-08T00:58:00.000Z',
+                reason: 'manual',
+                snapshot: createSnapshot('project-a-history')
+            }]
+        });
+        await expect(sourceRepair).resolves.toBe(false);
+
+        expect(saveCount).toBe(1);
+        expect(mod.state.root).toEqual([{ type: 'group', id: 'project-b-current' }]);
+        expect(mod.getStateHistoryEntries()).toEqual([
+            expect.objectContaining({ id: 'history-b' })
+        ]);
+        expect(mod._getActiveToastItemForTest()).toMatchObject({
+            message: 'B context stays visible',
+            variant: 'info'
+        });
+    });
 
     it('restores a History snapshot through the shared critical transaction', async () => {
         setRuntimeState('current');
@@ -4418,7 +4791,7 @@ describe('loadState', () => {
         expect(callback).toHaveBeenCalledWith(storedState);
     });
 
-    it('repairs empty folder source children from a compatible history snapshot during load', () => {
+    it('keeps current empty folder placement when older history has more grouped sources', () => {
         const callback = jest.fn();
         const currentState = {
             schemaVersion: 5,
@@ -4480,14 +4853,14 @@ describe('loadState', () => {
         expect(callback).toHaveBeenCalledWith(expect.objectContaining({
             root: [{ type: 'group', id: 'group-00' }, { type: 'group', id: 'group-02' }],
             groupsById: {
-                'group-00': { id: 'group-00', title: '00', children: [{ type: 'source', key: 'source-a' }] },
+                'group-00': { id: 'group-00', title: '00', children: [] },
                 'group-02': { id: 'group-02', title: '02', children: [{ type: 'group', id: 'group-a' }] },
-                'group-a': { id: 'group-a', title: 'A', children: [{ type: 'source', key: 'source-b' }] }
+                'group-a': { id: 'group-a', title: 'A', children: [] }
             },
-            ungrouped: ['source-c'],
+            ungrouped: ['source-a', 'source-b', 'source-c'],
             customHeight: 704
         }));
-        expect(mod._getPendingStorageUpgrade()).toBe(true);
+        expect(mod._getPendingStorageUpgrade()).toBe(false);
     });
 
     it('restores v2 state and custom height', () => {

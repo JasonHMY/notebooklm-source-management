@@ -29,6 +29,9 @@
      */
     function createContentSourceSync(deps = {}) {
         const runtime = deps.runtime && typeof deps.runtime === 'object' ? deps.runtime : deps;
+        const getSourceSyncContextToken = typeof deps.getSourceSyncContextToken === 'function'
+            ? deps.getSourceSyncContextToken
+            : () => undefined;
 
         const getDocument = typeof deps.getDocument === 'function'
             ? deps.getDocument
@@ -1819,6 +1822,7 @@
             }
 
             if (!sourceData.fingerprint) return false;
+            if (!sourceData.element || cacheEntry.row !== sourceData.element) return false;
             return rowIdentity.fingerprint === sourceData.fingerprint;
         }
 
@@ -2215,6 +2219,37 @@
                 panel,
                 rows: sourceEntries.map((entry) => entry.row).filter(Boolean)
             };
+        }
+
+        function getLiveSourceRepairTargets() {
+            const sourcePanel = findSourcePanel();
+            const sourceRoot = sourcePanel || getDocument();
+            const sourceEntries = getSourceEntries(sourceRoot);
+            const seenSourceIds = new Map();
+            const seenLegacyKeys = new Map();
+            const targets = [];
+
+            sourceEntries.forEach((entry) => {
+                const descriptor = createSourceDescriptor(
+                    entry?.row,
+                    seenSourceIds,
+                    seenLegacyKeys
+                );
+                if (!descriptor?.element) return;
+                targets.push({
+                    key: descriptor.key,
+                    title: String(descriptor.title || ''),
+                    normalizedTitle: String(descriptor.normalizedTitle || ''),
+                    stableToken: String(descriptor.stableToken || ''),
+                    fingerprint: String(descriptor.fingerprint || ''),
+                    ariaLabel: String(descriptor.ariaLabel || ''),
+                    iconName: String(descriptor.iconName || ''),
+                    nativeOrder: targets.length + 1,
+                    element: descriptor.element
+                });
+            });
+
+            return targets;
         }
 
         function shouldPreserveExistingSourcesDuringPartialSync(
@@ -2770,7 +2805,7 @@
                     sourceRecordsByKey: previousSourceRecordsByKey,
                     sourceTagsById: oldSourceTags
                 });
-                if (shouldPreserveExistingTreeDuringUnsafeRemap(
+                if (remappedState.unresolvedWeakIdentityKeys?.size > 0 || shouldPreserveExistingTreeDuringUnsafeRemap(
                     remappedState,
                     previousSourceRecordsByKey,
                     sourceLookup,
@@ -2896,7 +2931,10 @@
 
             buildParentMap();
             const currentSourceViewKind = getCurrentSourceViewKind();
-            if (currentSourceViewKind !== SOURCE_VIEW_KIND_LABEL) {
+            if (
+                options.syncNativeSelection !== false &&
+                currentSourceViewKind !== SOURCE_VIEW_KIND_LABEL
+            ) {
                 sourcesByKey.forEach((source) => {
                     if (source.isPreservedPartialSource) return;
                     syncSourceToPage(source, isSourceEffectivelyEnabled(source), {
@@ -2932,7 +2970,8 @@
                 return wrapped;
             });
 
-        const debouncedScanAndSync = createDebounced((syncOptions = {}) => {
+        const queuedScanAndSync = createDebounced((syncOptions = {}, contextToken) => {
+            if (contextToken === null || contextToken !== getSourceSyncContextToken()) return;
             // Memoize source-view detection for the whole pass (panel-state probe + scan +
             // render + view-state bar + native-label preview all detect the same view).
             beginSourceViewPass();
@@ -2988,6 +3027,15 @@
                 endSourceViewPass();
             }
         }, 500);
+
+        function debouncedScanAndSync(syncOptions = {}) {
+            const contextToken = getSourceSyncContextToken();
+            if (contextToken === null) return;
+            return queuedScanAndSync(syncOptions, contextToken);
+        }
+        ['cancel', 'flush', 'isPending'].forEach((method) => {
+            debouncedScanAndSync[method] = (...args) => queuedScanAndSync[method]?.(...args);
+        });
 
         function isElementInsideExtensionRoot(element) {
             if (!element || element.nodeType !== 1) return false;
@@ -3201,6 +3249,7 @@
             isSourcePanelManageable,
             isSourceDetailViewPanel,
             getNativeSourceInventorySnapshot,
+            getLiveSourceRepairTargets,
             scanAndSyncSources,
             handleDomChanges,
             debouncedScanAndSync,

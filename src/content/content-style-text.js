@@ -283,10 +283,10 @@
             
             /* Sticky Header */
             .sp-controls {
-                display: flex;
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) auto;
                 align-items: center;
                 gap: 8px;
-                flex-wrap: wrap;
                 min-width: 0;
                 flex-shrink: 0;
                 padding: 10px 0 8px;
@@ -349,16 +349,7 @@
                 background: var(--sp-tag-active-bg);
             }
             .sp-controls.is-search-expanded .sp-toolbar-actions {
-                flex-basis: 0;
-                max-width: 0;
-                overflow: hidden;
-                opacity: 0;
-                transform: translateX(12px) scale(0.96);
-                pointer-events: none;
-            }
-            .sp-controls.is-search-expanded .sp-toolbar-actions > button {
-                opacity: 0;
-                transform: translateX(10px) scale(0.94);
+                grid-column: 1 / -1;
             }
             .sp-toolbar-actions > button:nth-child(1) {
                 transition-delay: 0s;
@@ -542,7 +533,8 @@
                 transition: flex-basis var(--sp-motion-slow) var(--sp-ease-emphasized);
             }
             .sp-controls.is-search-expanded .sp-search-cluster {
-                flex: 1 1 auto;
+                grid-column: 1 / -1;
+                width: 100%;
             }
             .sp-search-trigger.sp-icon-button,
             .sp-search-close.sp-icon-button {
@@ -3321,6 +3313,7 @@
                 padding: 12px 16px;
                 margin-top: 8px;
                 max-width: 100%;
+                max-height: calc(100% - 16px);
                 box-sizing: border-box;
                 position: sticky;
                 bottom: 8px;
@@ -3334,7 +3327,8 @@
                     inset 0 0 0 1px rgba(0, 122, 255, 0.08),
                     0 0 18px var(--sp-batch-glow);
                 z-index: 5;
-                overflow: hidden;
+                overflow-x: hidden;
+                overflow-y: auto;
                 isolation: isolate;
                 animation: sp-batch-bar-enter var(--sp-motion-medium) var(--sp-ease-emphasized) both;
                 transition:

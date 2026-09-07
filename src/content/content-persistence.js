@@ -164,22 +164,6 @@
             return record[key];
         };
 
-        const createStateRepairFactory = globalThis.NSM_CREATE_CONTENT_STATE_REPAIR;
-        if (typeof createStateRepairFactory !== 'function') {
-            throw new Error('GeminiNotebook-Source-Management: createContentPersistence requires NSM_CREATE_CONTENT_STATE_REPAIR to be loaded first.');
-        }
-        const {
-            collectSnapshotGroupedSourceKeys,
-            createStructurallyRepairedState,
-            findStructuralRepairCandidate
-        } = createStateRepairFactory({
-            cloneSerializableData,
-            hasRestorableStateSnapshot,
-            getMapLikeEntries,
-            normalizeStateHistoryEntries,
-            getSnapshotSaveRevision
-        });
-
         const normalizeSourceViewDisplayKind = (value) => (
             value === 'label' || value === 'list' ? value : ''
         );
@@ -208,6 +192,8 @@
         ensureStorageState();
         let saveQueueTail = null;
         let nextClientSaveId = 1;
+        let nextHistoryLoadRequestId = 1;
+        let activeHistoryLoadRequestId = null;
         const saveRevisionByStateKey = new Map();
         let futureSchemaWriteBlocked = false;
         let schemaWriteScopeProjectId = '';
@@ -338,6 +324,16 @@
                     'import_rollback_required'
                 ].includes(recovery.reason)
             );
+        }
+
+        function getPageLifecycleRecoveryOwnershipReason(recovery) {
+            if (isImportOwnedRecovery(recovery)) return 'import_recovery_owned';
+            // A failed recovery is the user's only copy of a rejected or
+            // unacknowledged critical change. A lifecycle checkpoint must not
+            // replace it with a fresh failed:false snapshot before a refresh can
+            // offer that change back to the user.
+            if (recovery?.failed === true) return 'failed_recovery_owned';
+            return '';
         }
 
         function writeRecoverySnapshot(rawSnapshot, options = {}) {
@@ -593,27 +589,51 @@
         }
 
         function loadStateHistory(projectId = ctx.projectId) {
-            const key = historyKeyForProject(projectId);
+            const requestScope = {
+                projectId: String(projectId || ''),
+                instanceToken: ctx.activeManagerInstanceToken,
+                requestId: nextHistoryLoadRequestId++
+            };
+            activeHistoryLoadRequestId = requestScope.requestId;
+            const isCurrentHistoryRequest = () => Boolean(
+                ctx.projectId === requestScope.projectId
+                && ctx.activeManagerInstanceToken === requestScope.instanceToken
+                && activeHistoryLoadRequestId === requestScope.requestId
+            );
+            const resolveHistoryEntries = (entries) => (
+                isCurrentHistoryRequest()
+                    ? setStateHistoryEntries(entries)
+                    : getStateHistoryEntries()
+            );
+            const key = historyKeyForProject(requestScope.projectId);
             if (!key) {
-                return Promise.resolve(setStateHistoryEntries([]));
+                return Promise.resolve(resolveHistoryEntries([]));
             }
 
             const readLocalHistory = () => new Promise((resolve) => {
+                if (!isCurrentHistoryRequest()) {
+                    resolve(getStateHistoryEntries());
+                    return;
+                }
                 if (!chromeApi?.storage?.local?.get) {
-                    resolve(setStateHistoryEntries([]));
+                    resolve(resolveHistoryEntries([]));
                     return;
                 }
 
                 try {
                     chromeApi.storage.local.get([key], (data) => {
-                        if (chromeApi.runtime?.lastError) {
-                            resolve(setStateHistoryEntries([]));
+                        if (!isCurrentHistoryRequest()) {
+                            resolve(getStateHistoryEntries());
                             return;
                         }
-                        resolve(setStateHistoryEntries(data?.[key] || []));
+                        if (chromeApi.runtime?.lastError) {
+                            resolve(resolveHistoryEntries([]));
+                            return;
+                        }
+                        resolve(resolveHistoryEntries(data?.[key] || []));
                     });
                 } catch (error) {
-                    resolve(setStateHistoryEntries([]));
+                    resolve(resolveHistoryEntries([]));
                 }
             });
 
@@ -624,11 +644,15 @@
             return new Promise((resolve) => {
                 try {
                     chromeApi.runtime.sendMessage({ type: 'LOAD_STATE_HISTORY', key }, (response) => {
+                        if (!isCurrentHistoryRequest()) {
+                            resolve(getStateHistoryEntries());
+                            return;
+                        }
                         if (chromeApi.runtime.lastError || !response || response.success === false) {
                             readLocalHistory().then(resolve);
                             return;
                         }
-                        resolve(setStateHistoryEntries(response.history || []));
+                        resolve(resolveHistoryEntries(response.history || []));
                     });
                 } catch (error) {
                     readLocalHistory().then(resolve);
@@ -751,6 +775,8 @@
 
         function pickPreferredStoredState(primaryState, backupState, historyEntries = []) {
             ctx.pendingStructuralStateRepair = null;
+            // Backup and history remain available for an explicit restore, but a normal
+            // load must preserve the newest raw placement exactly as it was saved.
             const authorityComparison = compareRawStateAuthority(primaryState, backupState);
             let selectedState = null;
             if (authorityComparison < 0) {
@@ -775,25 +801,6 @@
             } else {
                 selectedState = primaryState ?? null;
             }
-
-            const repairCandidate = findStructuralRepairCandidate(selectedState, backupState, historyEntries);
-            if (repairCandidate) {
-                const repairedState = createStructurallyRepairedState(selectedState, repairCandidate);
-                const beforeCount = collectSnapshotGroupedSourceKeys(selectedState).size;
-                const afterCount = collectSnapshotGroupedSourceKeys(repairedState).size;
-                ctx.pendingStructuralStateRepair = {
-                    repairedAt: new Date().toISOString(),
-                    beforeGroupedSourceCount: beforeCount,
-                    afterGroupedSourceCount: afterCount,
-                    candidateRevision: getSnapshotSaveRevision(repairCandidate),
-                    currentRevision: getSnapshotSaveRevision(selectedState),
-                    reason: 'empty_group_children_repaired'
-                };
-                ctx.lastStructuralStateRepair = cloneSerializableData(ctx.pendingStructuralStateRepair);
-                rememberSnapshotSaveRevision(repairedState);
-                return repairedState;
-            }
-
             return selectedState;
         }
 
@@ -1042,11 +1049,11 @@
             });
             const operationOptions = Object.freeze({ ...options });
             const requestedScopeGeneration = schemaWriteScopeGeneration;
+            const lifecycleRecoveryOwnershipReason = operationOptions.reason === 'page_lifecycle'
+                ? getPageLifecycleRecoveryOwnershipReason(readRecoverySnapshot(operation.recoveryKey))
+                : '';
             const preserveExistingRecovery = Boolean(operationOptions.preserveRecoverySnapshot)
-                || (
-                    operationOptions.reason === 'page_lifecycle'
-                    && isImportOwnedRecovery(readRecoverySnapshot(operation.recoveryKey))
-                );
+                || Boolean(lifecycleRecoveryOwnershipReason);
             const counts = getPersistableStateCounts(operation.saveSnapshot);
             developerLog('debug', 'persistence', 'state_save_requested', {
                 clientSaveId,
@@ -1093,13 +1100,13 @@
                 };
             };
             const runSave = () => {
-                if (
-                    operationOptions.reason === 'page_lifecycle'
-                    && isImportOwnedRecovery(readRecoverySnapshot(operation.recoveryKey))
-                ) {
+                const currentLifecycleRecoveryOwnershipReason = operationOptions.reason === 'page_lifecycle'
+                    ? getPageLifecycleRecoveryOwnershipReason(readRecoverySnapshot(operation.recoveryKey))
+                    : '';
+                if (currentLifecycleRecoveryOwnershipReason) {
                     return Promise.resolve({
                         ok: false,
-                        reason: 'import_recovery_owned',
+                        reason: currentLifecycleRecoveryOwnershipReason,
                         skipped: true
                     });
                 }
@@ -1193,16 +1200,13 @@
                                 storageQuotaBytes: storageMetadata.storageQuotaBytes
                             });
                         } else {
+                            // A stale response reports the remote revision but does not
+                            // rebase this local snapshot. Only a subsequent load may do
+                            // that after it has replaced the user's runtime state.
                             const staleRemoteRevision = result.reason === 'stale_revision'
                                 ? Number(result.runtimeResult?.currentRevision)
                                     || getSaveRevisionForStateKey(operation.stateKey)
                                 : currentStatus.lastStaleRemoteRevision || 0;
-                            if (
-                                result.reason === 'stale_revision'
-                                && staleRemoteRevision > getSaveRevisionForStateKey(operation.stateKey)
-                            ) {
-                                setSaveRevisionForStateKey(operation.stateKey, staleRemoteRevision);
-                            }
                             const lastStorageError = result.reason === 'storage_quota_exceeded'
                                 ? 'storage_quota_exceeded'
                                 : currentStatus.lastStorageError || '';
@@ -1932,7 +1936,7 @@
             };
         }
 
-        function flushPendingInitialLoadedState() {
+        function flushPendingInitialLoadedState(options = {}) {
             if (!ctx.pendingInitialLoadedState) {
                 return { restored: false, deferred: false, shouldUpgradeStorage: false };
             }
@@ -1941,7 +1945,12 @@
                 return { restored: false, deferred: true, shouldUpgradeStorage: false };
             }
 
-            const rawSyncResult = scanAndSyncSources(ctx.pendingInitialLoadedState, true);
+            const syncOptions = options && typeof options === 'object' ? options : {};
+            const rawSyncResult = scanAndSyncSources(
+                ctx.pendingInitialLoadedState,
+                true,
+                syncOptions
+            );
             const syncResult = rawSyncResult && typeof rawSyncResult === 'object'
                 ? rawSyncResult
                 : { ok: true, shouldUpgradeStorage: Boolean(rawSyncResult) };
@@ -1951,6 +1960,7 @@
                     && restorePersistedSnapshotWithoutDom(ctx.pendingInitialLoadedState)
                 ) {
                     const mergeResult = scanAndSyncSources({}, false, {
+                        ...syncOptions,
                         preserveMissingExistingSources: true
                     });
                     if (mergeResult?.ok) {

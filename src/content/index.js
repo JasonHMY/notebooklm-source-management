@@ -195,8 +195,19 @@
     let activeManagerInstanceToken = 0;
     let activeLoadStateRequestId = null;
     let nextLoadStateRequestId = 1;
+    const explicitSourceRepairElementBindings = new Map();
+    const sourceRepairLiveTargetsByKey = new Map();
+    const sourceRepairLiveTargetStoredKeys = new Set();
+    let sourceRepairLiveTargetContext = null;
     let activeIsolationGroupId = null;
     let isSearchExpanded = false;
+    let pendingSourceDeleteConfirmation = null;
+    let nativeSourceViewClickTimeout = null;
+    let nativeSelectionProgressTimeout = null;
+    let nativeSelectionProgressVisible = false;
+    let pendingNativeSourceViewHandoff = null;
+    let nextNativeSourceViewHandoffId = 1;
+    let activeSourceViewSwitchRequestId = 0;
     let pendingInitialLoadedState = null;
     let isAwaitingInitialStateLoad = false;
     let sourceDetailViewRequested = false;
@@ -470,11 +481,66 @@
         getGroupsById: () => groupsById
     });
 
+    function getSourceRepairActionContext() {
+        return {
+            projectId,
+            managerInstanceToken: activeManagerInstanceToken,
+            locationHref: getCurrentLocationHref(),
+            liveToken: getLiveSourceSyncContextToken()
+        };
+    }
+
+    function isSourceRepairActionContextCurrent(context) {
+        if (!context) return false;
+        const currentContext = getSourceRepairActionContext();
+        return (
+            context.projectId === currentContext.projectId
+            && context.managerInstanceToken === currentContext.managerInstanceToken
+            && context.locationHref === currentContext.locationHref
+            && context.liveToken === currentContext.liveToken
+        );
+    }
+
+    function getSourceRepairBindingContext() {
+        const context = getSourceRepairActionContext();
+        return context.liveToken === null ? null : context;
+    }
+
+    function areSourceRepairBindingContextsEqual(left, right) {
+        return Boolean(
+            left &&
+            right &&
+            left.projectId === right.projectId &&
+            left.managerInstanceToken === right.managerInstanceToken &&
+            left.locationHref === right.locationHref &&
+            left.liveToken === right.liveToken
+        );
+    }
+
+    function clearExplicitSourceRepairBindings() {
+        explicitSourceRepairElementBindings.clear();
+        sourceRepairLiveTargetsByKey.clear();
+        sourceRepairLiveTargetStoredKeys.clear();
+        sourceRepairLiveTargetContext = null;
+    }
+
+    function getExplicitSourceElementBinding(storedKey) {
+        const binding = explicitSourceRepairElementBindings.get(storedKey);
+        if (!binding || !areSourceRepairBindingContextsEqual(
+            binding.context,
+            getSourceRepairBindingContext()
+        )) {
+            return null;
+        }
+        return binding;
+    }
+
     const stateReconcileModule = createContentStateReconcile({
         runtime: runtimeContext,
         normalizeSourceText,
         normalizeTagLabel,
         normalizeTagColor,
+        getExplicitSourceElementBinding,
         treePlacement: _treePlacementModule
     });
     const {
@@ -591,6 +657,7 @@
         getSourceElements: () => getSourceElements(findSourcePanel() || document),
         renderTagModal: (...args) => renderTagModal(...args),
         renderMoveToFolderModal: (...args) => renderMoveToFolderModal(...args),
+        requestSingleSourceDeleteConfirmation: (...args) => requestSingleSourceDeleteConfirmation(...args),
         canMoveSourceToUngrouped: (...args) => canMoveSourceToUngrouped(...args),
         moveSourceToUngrouped: (...args) => moveSourceToUngrouped(...args),
         resolveDirectionalTarget: (...args) => _treePlacementModule.resolveDirectionalTarget(...args),
@@ -761,7 +828,6 @@
         areAllAncestorsEnabled,
         isSourceEffectivelyEnabled,
         isGroupWithinActiveIsolation,
-        isSourceWithinActiveIsolation,
         sourceMatchesCurrentFilters,
         hasActiveRenderFilters,
         groupHasRenderableDescendant,
@@ -890,6 +956,7 @@
 
     const sourceSyncModule = createContentSourceSync({
         runtime: runtimeContext,
+        getSourceSyncContextToken: () => getLiveSourceSyncContextToken(),
         getDocument: () => document,
         getWindow: () => window,
         getDEPS: () => DEPS,
@@ -951,6 +1018,7 @@
         getSourcePanelState,
         isSourcePanelManageable,
         getNativeSourceInventorySnapshot,
+        getLiveSourceRepairTargets,
         scanAndSyncSources,
         handleDomChanges,
         debouncedScanAndSync,
@@ -1287,7 +1355,6 @@
         hasActiveRenderFilters: (...args) => hasActiveRenderFilters(...args),
         sourceMatchesCurrentFilters: (...args) => sourceMatchesCurrentFilters(...args),
         areAllAncestorsEnabled: (...args) => areAllAncestorsEnabled(...args),
-        isSourceWithinActiveIsolation: (...args) => isSourceWithinActiveIsolation(...args),
         isGroupWithinActiveIsolation: (...args) => isGroupWithinActiveIsolation(...args),
         isSourceEffectivelyEnabled: (...args) => isSourceEffectivelyEnabled(...args),
         shouldRenderGroup: (...args) => shouldRenderGroup(...args),
@@ -1320,7 +1387,9 @@
         ),
         getNativeLabelImportPreview: (...args) => getNativeLabelImportPreview(...args),
         getLastNativeLabelImportSummary: () => lastNativeLabelImportSummary,
-        getNativeSelectionSyncFailure: () => lastNativeSelectionSyncFailure,
+        getNativeSelectionSyncFailure: () => lastNativeSelectionSyncFailure?.reason === 'context_changed'
+            ? null
+            : lastNativeSelectionSyncFailure,
         retryNativeSelectionSync: (...args) => retryNativeSelectionSync(...args),
         onBeforeRowsPatch: () => {
             if (
@@ -1637,17 +1706,26 @@
         ? globalThis.NSM_CREATE_CONTENT_DRAG_REFLOW({})
         : null;
 
+    function refreshNativeSelectionFailureStatus() {
+        if (getLiveSourceSyncContextToken() === null || typeof shadowRoot?.getElementById !== 'function') return;
+        renderModule.renderViewStateBar();
+    }
+
     function recordNativeSelectionSyncFailure(details) {
         if (!details) {
+            const hadFailure = Boolean(lastNativeSelectionSyncFailure);
             nativeSelectionSyncFailuresBySourceKey.clear();
             lastNativeSelectionSyncFailure = null;
+            if (hadFailure) refreshNativeSelectionFailureStatus();
             return;
         }
+        if (details.reason === 'manager_destroyed') return;
         const sourceKey = String(details?.sourceKey || '');
         if (details?.resolved === true) {
-            if (sourceKey) nativeSelectionSyncFailuresBySourceKey.delete(sourceKey);
+            const removed = sourceKey ? nativeSelectionSyncFailuresBySourceKey.delete(sourceKey) : false;
             const remaining = Array.from(nativeSelectionSyncFailuresBySourceKey.values());
             lastNativeSelectionSyncFailure = remaining[remaining.length - 1] || null;
+            if (removed) refreshNativeSelectionFailureStatus();
             return;
         }
         const failure = Object.assign({
@@ -1658,6 +1736,7 @@
             nativeSelectionSyncFailuresBySourceKey.set(sourceKey, failure);
         }
         lastNativeSelectionSyncFailure = failure;
+        if (details.reason !== 'context_changed') refreshNativeSelectionFailureStatus();
     }
 
     const treeInteractionsModule = createContentTreeInteractions({
@@ -1734,13 +1813,16 @@
         invalidateDerivedGroupEffectiveStateCache: () => (
             renderModule.invalidateDerivedGroupEffectiveStateCache()
         ),
-        recordNativeSelectionSyncFailure
+        recordNativeSelectionSyncFailure,
+        onNativeSelectionSyncProgress: () => renderNativeSelectionSyncProgress()
     });
     const {
         handleAddNewGroup,
         syncSourceToPage,
         syncSourceToPageWithResult,
         processClickQueue,
+        getNativeSelectionSyncProgress,
+        cancelNativeSelectionSync,
         executeBatchMoveToUngrouped,
         canMoveSourceToUngrouped,
         moveSourceToUngrouped,
@@ -1753,6 +1835,42 @@
         handleDragEnd,
         clearDragFeedback
     } = treeInteractionsModule;
+
+    function renderNativeSelectionSyncProgress() {
+        const progress = getNativeSelectionSyncProgress();
+        const contextToken = getLiveSourceSyncContextToken();
+        const section = shadowRoot?.getElementById?.('sp-native-selection-sync-section');
+        const label = shadowRoot?.getElementById?.('sp-native-selection-sync-progress');
+        const list = shadowRoot?.getElementById?.('sources-list');
+        list?.setAttribute?.('aria-busy', progress.pending > 0 ? 'true' : 'false');
+        if (progress.pending === 0 || contextToken === null) {
+            if (nativeSelectionProgressTimeout) clearTimeout(nativeSelectionProgressTimeout);
+            nativeSelectionProgressTimeout = null;
+            nativeSelectionProgressVisible = false;
+            if (section) section.hidden = true;
+            if (label) label.textContent = '';
+            return;
+        }
+        if (progress.total < 2) return;
+        if (!nativeSelectionProgressVisible) {
+            if (!nativeSelectionProgressTimeout) {
+                nativeSelectionProgressTimeout = setTimeout(() => {
+                    nativeSelectionProgressTimeout = null;
+                    if (contextToken !== getLiveSourceSyncContextToken()) return;
+                    nativeSelectionProgressVisible = true;
+                    renderNativeSelectionSyncProgress();
+                }, 150);
+            }
+            return;
+        }
+        if (section) section.hidden = false;
+        if (label) {
+            label.textContent = getMessage('ui_native_selection_sync_progress', [
+                String(progress.completed),
+                String(progress.total)
+            ]);
+        }
+    }
 
     const nativeLabelImportModule = createContentNativeLabelImport({
         getComparableNativeImportLabelTitle
@@ -2336,7 +2454,7 @@
             label.textContent = getMessage(messageKey);
             container.appendChild(label);
 
-            if (stateName === 'failed' || stateName === 'stale') {
+            if (stateName === 'failed') {
                 appendSaveStatusAction(container, 'ui_save_status_retry', retryCurrentSave);
                 appendSaveStatusAction(
                     container,
@@ -3430,7 +3548,22 @@
         return getSourceViewInfo(sourcePanel)?.kind === SOURCE_VIEW_LABEL;
     }
 
+    function getLiveSourceSyncContextToken() {
+        if (
+            !isExtensionEnabled
+            || !projectId
+            || getProjectId() !== projectId
+            || !extensionHost
+            || !shadowRoot
+            || extensionHost.isConnected === false
+        ) {
+            return null;
+        }
+        return `${projectId}:${activeManagerInstanceToken}`;
+    }
+
     function syncNativeLabelSelectionsFromCurrentPanel(options = {}) {
+        if (getLiveSourceSyncContextToken() === null) return false;
         const sourcePanel = findSourcePanel();
         if (!sourcePanel || getSourceViewInfo(sourcePanel)?.kind !== SOURCE_VIEW_LABEL) {
             return false;
@@ -3462,6 +3595,7 @@
     }
 
     function handleNativeCheckboxChange(event) {
+        if (getLiveSourceSyncContextToken() === null) return;
         handleOriginalCheckboxChange(event);
 
         const sourcePanel = findSourcePanel();
@@ -3540,6 +3674,8 @@
     }
 
     function handleNativeSourceViewSwitchClick(event) {
+        const contextToken = getLiveSourceSyncContextToken();
+        if (contextToken === null) return;
         const sourcePanel = findSourcePanel();
         const targetViewKind = getClickedNativeSourceViewKind(event?.target, sourcePanel);
         if (!targetViewKind) return;
@@ -3550,10 +3686,71 @@
 
         if (viewSwitchInProgress) return;
 
-        getSourceViewInfo(sourcePanel);
+        const locationObject = window?.location || {};
+        const requestId = beginSourceViewSwitchRequest();
+        const switchMeta = {
+            contextToken,
+            requestId,
+            projectId: String(projectId || ''),
+            pathname: String(locationObject.pathname || ''),
+            search: String(locationObject.search || ''),
+            managerHost: extensionHost || null,
+            handoffId: null
+        };
+        const startedAtMs = Date.now();
+        const currentInfo = getSourceViewInfo(sourcePanel);
+        cancelPendingNativeSourceViewHandoff();
+        prepareNativeSourceViewHandoff(targetViewKind, switchMeta, startedAtMs);
+        watchForNativeSourceViewHandoff(
+            targetViewKind,
+            sourcePanel,
+            currentInfo,
+            switchMeta,
+            {
+                startedAtMs,
+                nativeClicked: true,
+                nativeSwitchReason: 'native_direct_click',
+                nativeAlreadyActive: false
+            }
+        );
 
-        setTimeout(() => {
-            const refreshedSourcePanel = findSourcePanel() || sourcePanel;
+        if (nativeSourceViewClickTimeout) clearTimeout(nativeSourceViewClickTimeout);
+        nativeSourceViewClickTimeout = setTimeout(() => {
+            nativeSourceViewClickTimeout = null;
+            if (!isSourceViewSwitchRequestCurrent(switchMeta)) {
+                clearNativeSourceViewHandoff(switchMeta.handoffId);
+                return;
+            }
+            if (contextToken !== getLiveSourceSyncContextToken()) {
+                const handoff = pendingNativeSourceViewHandoff;
+                if (
+                    handoff
+                    && handoff.id === switchMeta.handoffId
+                    && handoff.targetViewKind === targetViewKind
+                    && isNativeSourceViewHandoffCurrent(handoff)
+                ) {
+                    void waitForNativeSourceViewHandoff(
+                        targetViewKind,
+                        sourcePanel,
+                        currentInfo,
+                        switchMeta,
+                        {
+                            startedAtMs,
+                            nativeClicked: true,
+                            nativeSwitchReason: 'native_direct_click',
+                            nativeAlreadyActive: false
+                        }
+                    );
+                    return;
+                }
+                clearNativeSourceViewHandoff(switchMeta.handoffId);
+                return;
+            }
+            const refreshedSourcePanel = findSourcePanel();
+            if (refreshedSourcePanel !== sourcePanel) {
+                clearNativeSourceViewHandoff(switchMeta.handoffId);
+                return;
+            }
             const refreshedInfo = getSourceViewInfo(refreshedSourcePanel);
             const displayInfo = applySourceViewDisplayMode(targetViewKind, refreshedSourcePanel, refreshedInfo);
             const shouldPreserveSyncedLabelSelections = targetViewKind === SOURCE_VIEW_LIST;
@@ -3568,6 +3765,9 @@
             persistSourceViewDisplayKind(displayInfo.displayKind, {
                 persistSourceViewDisplayKind: true
             });
+            if (refreshedInfo?.kind === targetViewKind) {
+                clearNativeSourceViewHandoff(switchMeta.handoffId);
+            }
         }, SOURCE_VIEW_SWITCH_CONFIRM_INTERVAL_MS);
     }
 
@@ -3764,11 +3964,19 @@
         )) || null;
     }
 
-    function waitForNativeLabelReturnToListMenuItem() {
+    function waitForNativeLabelReturnToListMenuItem(contextToken, requestId) {
         const maxAttempts = Math.max(1, Math.ceil(NATIVE_LABEL_MENU_RETURN_TIMEOUT_MS / SOURCE_VIEW_SWITCH_CONFIRM_INTERVAL_MS));
         let attempts = 0;
         return new Promise((resolve) => {
             const check = () => {
+                if (requestId != null && requestId !== activeSourceViewSwitchRequestId) {
+                    resolve(null);
+                    return;
+                }
+                if (contextToken !== getLiveSourceSyncContextToken()) {
+                    resolve(null);
+                    return;
+                }
                 attempts += 1;
                 const menuItem = findNativeLabelReturnToListMenuItem();
                 if (menuItem || attempts >= maxAttempts) {
@@ -3794,7 +4002,7 @@
         }
     }
 
-    function clickNativeLabelActionMenuReturnToList(sourcePanel) {
+    function clickNativeLabelActionMenuReturnToList(sourcePanel, contextToken, requestId, onBeforeReturnClick) {
         const trigger = findNativeLabelActionMenuTrigger(sourcePanel);
         if (!trigger) return null;
         if (!clickNativeSourceViewSwitchButton(trigger)) {
@@ -3803,13 +4011,22 @@
                 nativeSwitchReason: 'native_label_menu_open_failed'
             });
         }
-        return waitForNativeLabelReturnToListMenuItem().then((menuItem) => {
+        return waitForNativeLabelReturnToListMenuItem(contextToken, requestId).then((menuItem) => {
+            if (requestId != null && requestId !== activeSourceViewSwitchRequestId) {
+                return { nativeClicked: false, nativeSwitchReason: 'source_view_context_changed' };
+            }
+            if (contextToken !== getLiveSourceSyncContextToken()) {
+                return { nativeClicked: false, nativeSwitchReason: 'source_view_context_changed' };
+            }
             if (!menuItem) {
                 dismissNativeTransientMenu();
                 return {
                     nativeClicked: false,
                     nativeSwitchReason: 'native_label_menu_return_item_missing'
                 };
+            }
+            if (typeof onBeforeReturnClick === 'function') {
+                onBeforeReturnClick();
             }
             const nativeClicked = clickNativeSourceViewSwitchButton(menuItem);
             return {
@@ -3834,12 +4051,269 @@
         return false;
     }
 
+    function clearNativeSourceViewHandoff(handoffId = null) {
+        if (!pendingNativeSourceViewHandoff) return null;
+        if (handoffId != null && pendingNativeSourceViewHandoff.id !== handoffId) return null;
+        const handoff = pendingNativeSourceViewHandoff;
+        pendingNativeSourceViewHandoff = null;
+        return handoff;
+    }
+
+    function beginSourceViewSwitchRequest() {
+        activeSourceViewSwitchRequestId += 1;
+        return activeSourceViewSwitchRequestId;
+    }
+
+    function isSourceViewSwitchRequestCurrent(meta) {
+        return Number(meta?.requestId) === activeSourceViewSwitchRequestId;
+    }
+
+    function invalidateSourceViewSwitchRequests() {
+        activeSourceViewSwitchRequestId += 1;
+        cancelPendingNativeSourceViewHandoff();
+    }
+
+    function cancelPendingNativeSourceViewHandoff() {
+        const handoff = clearNativeSourceViewHandoff();
+        if (!handoff?.resolve) return Boolean(handoff);
+        const resolve = handoff.resolve;
+        handoff.resolve = null;
+        resolve(cancelledSourceViewSwitchResult());
+        return true;
+    }
+
+    function beginNativeSourceViewHandoff(nextViewKind, switchMeta, startedAtMs) {
+        const locationObject = window?.location || {};
+        const normalizedStartedAtMs = Number(startedAtMs) || Date.now();
+        const handoff = {
+            id: nextNativeSourceViewHandoffId,
+            targetViewKind: nextViewKind,
+            projectId: String(switchMeta?.projectId || projectId || ''),
+            pathname: String(switchMeta?.pathname || locationObject.pathname || ''),
+            search: String(switchMeta?.search || locationObject.search || ''),
+            managerHost: switchMeta?.managerHost || extensionHost || null,
+            requestId: Number(switchMeta?.requestId) || 0,
+            startedAtMs: normalizedStartedAtMs,
+            deadlineAtMs: normalizedStartedAtMs + SOURCE_VIEW_SWITCH_CONFIRM_TIMEOUT_MS,
+            resolve: null,
+            promise: null,
+            watcherScheduled: false
+        };
+        nextNativeSourceViewHandoffId += 1;
+        pendingNativeSourceViewHandoff = handoff;
+        return handoff;
+    }
+
+    function prepareNativeSourceViewHandoff(nextViewKind, switchMeta, startedAtMs) {
+        sourceViewDisplayKind = nextViewKind;
+        if (switchMeta?.handoffId != null) return switchMeta.handoffId;
+        const handoff = beginNativeSourceViewHandoff(nextViewKind, switchMeta, startedAtMs);
+        if (switchMeta && typeof switchMeta === 'object') {
+            switchMeta.handoffId = handoff.id;
+        }
+        return handoff.id;
+    }
+
+    function isNativeSourceViewHandoffContextCurrent(handoff) {
+        if (!handoff || pendingNativeSourceViewHandoff !== handoff) return false;
+        if (handoff.requestId !== activeSourceViewSwitchRequestId) return false;
+        if (!isExtensionEnabled || !handoff.projectId || projectId !== handoff.projectId) return false;
+        if (getProjectId() !== handoff.projectId) return false;
+        const locationObject = window?.location || {};
+        if (
+            String(locationObject.pathname || '') !== handoff.pathname
+            || String(locationObject.search || '') !== handoff.search
+        ) {
+            return false;
+        }
+        return true;
+    }
+
+    function isNativeSourceViewHandoffCurrent(handoff) {
+        if (!isNativeSourceViewHandoffContextCurrent(handoff)) return false;
+        return Boolean(
+            handoff.managerHost
+            && 'isConnected' in handoff.managerHost
+            && handoff.managerHost.isConnected === false
+        );
+    }
+
+    function settleNativeSourceViewHandoff(handoff, resolve, result) {
+        if (!handoff || handoff.resolve !== resolve) return;
+        handoff.resolve = null;
+        clearNativeSourceViewHandoff(handoff.id);
+        resolve(result);
+    }
+
+    function finishNativeSourceViewHandoffTimeout(handoff, nextViewKind, sourcePanel, currentInfo, switchMeta, meta = {}) {
+        const liveContextToken = getLiveSourceSyncContextToken();
+        const refreshedSourcePanel = findSourcePanel() || sourcePanel;
+        const refreshedInfo = getSourceViewInfo(refreshedSourcePanel);
+        const handoffMeta = Object.assign({}, switchMeta, {
+            contextToken: liveContextToken,
+            handoffId: handoff.id,
+            startedAtMs: meta.startedAtMs || handoff.startedAtMs || Date.now(),
+            currentInfo,
+            nativeClicked: true,
+            nativeAlreadyActive: false,
+            nativeSwitchReason: meta.nativeSwitchReason || ''
+        });
+        if (liveContextToken !== null && !isAwaitingInitialStateLoad && refreshedSourcePanel) {
+            return finalizeSourceViewSwitchFailure(
+                nextViewKind,
+                refreshedSourcePanel,
+                refreshedInfo,
+                Object.assign({}, handoffMeta, {
+                    reason: 'native_view_switch_not_confirmed'
+                })
+            );
+        }
+        return finishViewSwitchAttempt({
+            success: false,
+            viewKind: nextViewKind,
+            nativeClicked: true,
+            nativeSwitchReason: meta.nativeSwitchReason || '',
+            reason: 'native_view_switch_not_confirmed',
+            errorMessageKey: 'popup_source_view_switch_failed'
+        }, handoffMeta.startedAtMs, { handoffId: handoff.id });
+    }
+
+    function watchForNativeSourceViewHandoff(nextViewKind, sourcePanel, currentInfo, switchMeta, meta = {}) {
+        const handoff = pendingNativeSourceViewHandoff;
+        if (
+            !handoff
+            || handoff.id !== switchMeta?.handoffId
+            || handoff.targetViewKind !== nextViewKind
+            || handoff.watcherScheduled
+        ) {
+            return;
+        }
+        handoff.watcherScheduled = true;
+        const check = () => {
+            if (!isNativeSourceViewHandoffContextCurrent(handoff)) {
+                cancelPendingNativeSourceViewHandoff();
+                return;
+            }
+            if (isNativeSourceViewHandoffCurrent(handoff)) {
+                handoff.watcherScheduled = false;
+                void waitForNativeSourceViewHandoff(
+                    nextViewKind,
+                    sourcePanel,
+                    currentInfo,
+                    switchMeta,
+                    meta
+                );
+                return;
+            }
+            const remainingMs = Number(handoff.deadlineAtMs) - Date.now();
+            if (remainingMs <= 0) {
+                handoff.watcherScheduled = false;
+                const result = finishNativeSourceViewHandoffTimeout(
+                    handoff,
+                    nextViewKind,
+                    sourcePanel,
+                    currentInfo,
+                    switchMeta,
+                    meta
+                );
+                if (handoff.resolve) {
+                    settleNativeSourceViewHandoff(handoff, handoff.resolve, result);
+                }
+                return;
+            }
+            setTimeout(check, Math.min(
+                SOURCE_VIEW_SWITCH_CONFIRM_INTERVAL_MS,
+                Math.max(0, remainingMs)
+            ));
+        };
+        setTimeout(check, SOURCE_VIEW_SWITCH_CONFIRM_INTERVAL_MS);
+    }
+
+    function waitForNativeSourceViewHandoff(nextViewKind, sourcePanel, currentInfo, switchMeta, meta = {}) {
+        const handoff = pendingNativeSourceViewHandoff;
+        if (
+            !handoff
+            || handoff.id !== switchMeta?.handoffId
+            || handoff.targetViewKind !== nextViewKind
+            || !isNativeSourceViewHandoffCurrent(handoff)
+        ) {
+            return cancelledSourceViewSwitchResult();
+        }
+        if (handoff.promise) return handoff.promise;
+
+        const startedAtMs = meta.startedAtMs || handoff.startedAtMs || Date.now();
+        const maxAttempts = Math.max(1, Math.ceil(
+            SOURCE_VIEW_SWITCH_CONFIRM_TIMEOUT_MS / SOURCE_VIEW_SWITCH_CONFIRM_INTERVAL_MS
+        ));
+        let attempts = 0;
+        handoff.promise = new Promise((resolve) => {
+            handoff.resolve = resolve;
+            const check = () => {
+                if (!isNativeSourceViewHandoffCurrent(handoff)) {
+                    settleNativeSourceViewHandoff(handoff, resolve, cancelledSourceViewSwitchResult());
+                    return;
+                }
+
+                const liveContextToken = getLiveSourceSyncContextToken();
+                const refreshedSourcePanel = findSourcePanel() || sourcePanel;
+                const refreshedInfo = getSourceViewInfo(refreshedSourcePanel);
+                const handoffMeta = Object.assign({}, switchMeta, {
+                    contextToken: liveContextToken,
+                    handoffId: handoff.id,
+                    startedAtMs,
+                    currentInfo,
+                    nativeClicked: true,
+                    nativeAlreadyActive: false,
+                    nativeSwitchReason: meta.nativeSwitchReason || ''
+                });
+                const remainingMs = Number(handoff.deadlineAtMs) - Date.now();
+                attempts += 1;
+                if (remainingMs <= 0 || attempts > maxAttempts) {
+                    const result = finishNativeSourceViewHandoffTimeout(
+                        handoff,
+                        nextViewKind,
+                        sourcePanel,
+                        currentInfo,
+                        switchMeta,
+                        Object.assign({}, meta, { startedAtMs })
+                    );
+                    settleNativeSourceViewHandoff(handoff, resolve, result);
+                    return;
+                }
+                if (
+                    liveContextToken !== null
+                    && !isAwaitingInitialStateLoad
+                    && refreshedSourcePanel
+                    && refreshedInfo?.kind === nextViewKind
+                ) {
+                    const result = finalizeSourceViewSwitchSuccess(
+                        nextViewKind,
+                        refreshedSourcePanel,
+                        refreshedInfo,
+                        handoffMeta
+                    );
+                    settleNativeSourceViewHandoff(handoff, resolve, result);
+                    return;
+                }
+
+                setTimeout(check, Math.min(
+                    SOURCE_VIEW_SWITCH_CONFIRM_INTERVAL_MS,
+                    Math.max(0, remainingMs)
+                ));
+            };
+
+            setTimeout(check, SOURCE_VIEW_SWITCH_CONFIRM_INTERVAL_MS);
+        });
+        return handoff.promise;
+    }
+
     function updateLastViewSwitchAttempt(details) {
         lastViewSwitchAttempt = createLastViewSwitchAttempt(details);
         return lastViewSwitchAttempt;
     }
 
-    function finishViewSwitchAttempt(result, startedAtMs) {
+    function finishViewSwitchAttempt(result, startedAtMs, meta = {}) {
+        clearNativeSourceViewHandoff(meta?.handoffId);
         viewSwitchInProgress = false;
         lastViewSwitchAttempt = finishViewSwitchAttemptRecord(lastViewSwitchAttempt, Object.assign({
             sourceViewDisplayKind: normalizeSourceViewSwitchTarget(sourceViewDisplayKind)
@@ -3858,6 +4332,8 @@
     }
 
     function persistSourceViewDisplayKind(displayKind, options = {}) {
+        if (options.requestId != null && !isSourceViewSwitchRequestCurrent(options)) return;
+        if (options.contextToken != null && !isSourceViewSwitchContextCurrent(options)) return;
         if (options.persistSourceViewDisplayKind === false) return;
         if (displayKind !== SOURCE_VIEW_LIST && displayKind !== SOURCE_VIEW_LABEL) return;
         try {
@@ -3867,7 +4343,21 @@
         }
     }
 
+    function isSourceViewSwitchContextCurrent(meta) {
+        return meta?.contextToken != null && meta.contextToken === getLiveSourceSyncContextToken();
+    }
+
+    function cancelledSourceViewSwitchResult() {
+        return {
+            success: false,
+            reason: 'source_view_context_changed',
+            errorMessageKey: 'popup_source_view_switch_failed'
+        };
+    }
+
     function finalizeSourceViewSwitchSuccess(nextViewKind, sourcePanel, confirmedInfo, meta = {}) {
+        if (!isSourceViewSwitchRequestCurrent(meta)) return cancelledSourceViewSwitchResult();
+        if (!isSourceViewSwitchContextCurrent(meta)) return cancelledSourceViewSwitchResult();
         attachScrollObserverToPanel(sourcePanel);
         const displayInfo = applySourceViewDisplayMode(nextViewKind, sourcePanel, confirmedInfo);
         if (getSourcePanelState(sourcePanel).state === 'ready') {
@@ -3877,6 +4367,8 @@
         persistSourceViewDisplayKind(displayInfo.displayKind, meta);
 
         setTimeout(() => {
+            if (!isSourceViewSwitchRequestCurrent(meta)) return;
+            if (!isSourceViewSwitchContextCurrent(meta)) return;
             try {
                 syncManagerWithPanelLifecycle();
             } catch (error) {
@@ -3894,10 +4386,12 @@
             detectedSourceViewKind: confirmedInfo?.kind || 'unknown',
             confirmedSourceViewKind: confirmedInfo?.kind || 'unknown',
             sourceViewDisplayKind: displayInfo.displayKind
-        }, meta.startedAtMs || Date.now());
+        }, meta.startedAtMs || Date.now(), meta);
     }
 
     function finalizeSourceViewSwitchFailure(nextViewKind, sourcePanel, detectedInfo, meta = {}) {
+        if (!isSourceViewSwitchRequestCurrent(meta)) return cancelledSourceViewSwitchResult();
+        if (!isSourceViewSwitchContextCurrent(meta)) return cancelledSourceViewSwitchResult();
         const fallbackDisplayKind = getFallbackSourceViewDisplayKind(detectedInfo || meta.currentInfo, sourceViewDisplayKind);
         const displayInfo = applySourceViewDisplayMode(fallbackDisplayKind, sourcePanel, detectedInfo || meta.currentInfo);
         render();
@@ -3914,10 +4408,12 @@
             sourceViewDisplayKind: displayInfo.displayKind,
             reason,
             errorMessageKey: meta.errorMessageKey || 'popup_source_view_switch_failed'
-        }, meta.startedAtMs || Date.now());
+        }, meta.startedAtMs || Date.now(), meta);
     }
 
     function finalizeSourceViewSwitchDisplayOverride(nextViewKind, sourcePanel, detectedInfo, meta = {}) {
+        if (!isSourceViewSwitchRequestCurrent(meta)) return cancelledSourceViewSwitchResult();
+        if (!isSourceViewSwitchContextCurrent(meta)) return cancelledSourceViewSwitchResult();
         let expansionResult = null;
         if (
             nextViewKind === SOURCE_VIEW_LIST &&
@@ -3932,6 +4428,8 @@
         persistSourceViewDisplayKind(displayInfo.displayKind, meta);
         if (expansionResult?.clickedCount > 0) {
             setTimeout(() => {
+                if (!isSourceViewSwitchRequestCurrent(meta)) return;
+                if (!isSourceViewSwitchContextCurrent(meta)) return;
                 try {
                     freshRowCache = null;
                     if (!isAwaitingInitialStateLoad && getSourcePanelState(sourcePanel).state === 'ready') {
@@ -3956,7 +4454,7 @@
             sourceViewDisplayKind: displayInfo.displayKind,
             displayOverride: true,
             expandedNativeLabelGroups: Number(expansionResult?.clickedCount) || 0
-        }, meta.startedAtMs || Date.now());
+        }, meta.startedAtMs || Date.now(), meta);
     }
 
     function waitForConfirmedSourceView(nextViewKind, sourcePanel, currentInfo, meta = {}) {
@@ -3966,6 +4464,30 @@
 
         return new Promise((resolve) => {
             const check = () => {
+                if (!isSourceViewSwitchRequestCurrent(meta)) {
+                    resolve(cancelledSourceViewSwitchResult());
+                    return;
+                }
+                if (!isSourceViewSwitchContextCurrent(meta)) {
+                    const handoff = pendingNativeSourceViewHandoff;
+                    if (
+                        handoff
+                        && handoff.id === meta?.handoffId
+                        && handoff.targetViewKind === nextViewKind
+                        && isNativeSourceViewHandoffCurrent(handoff)
+                    ) {
+                        resolve(waitForNativeSourceViewHandoff(
+                            nextViewKind,
+                            sourcePanel,
+                            currentInfo,
+                            meta,
+                            Object.assign({}, meta, { startedAtMs })
+                        ));
+                        return;
+                    }
+                    resolve(cancelledSourceViewSwitchResult());
+                    return;
+                }
                 attempts += 1;
                 const refreshedSourcePanel = findSourcePanel() || sourcePanel;
                 const refreshedInfo = getSourceViewInfo(refreshedSourcePanel);
@@ -4002,6 +4524,25 @@
     }
 
     function completeSourceViewSwitchAfterNativeAttempt(nextViewKind, sourcePanel, currentInfo, switchMeta, meta = {}) {
+        if (!isSourceViewSwitchRequestCurrent(switchMeta)) return cancelledSourceViewSwitchResult();
+        if (!isSourceViewSwitchContextCurrent(switchMeta)) {
+            const handoff = pendingNativeSourceViewHandoff;
+            if (
+                handoff
+                && handoff.id === switchMeta?.handoffId
+                && handoff.targetViewKind === nextViewKind
+                && isNativeSourceViewHandoffCurrent(handoff)
+            ) {
+                return waitForNativeSourceViewHandoff(
+                    nextViewKind,
+                    sourcePanel,
+                    currentInfo,
+                    switchMeta,
+                    meta
+                );
+            }
+            return cancelledSourceViewSwitchResult();
+        }
         const startedAtMs = meta.startedAtMs || Date.now();
         const nativeClicked = Boolean(meta.nativeClicked);
         const nativeAlreadyActive = Boolean(meta.nativeAlreadyActive);
@@ -4058,16 +4599,31 @@
             nativeAlreadyActive
         }));
         if (nativeClicked && nextViewKind === SOURCE_VIEW_LABEL && !nativeAlreadyActive) {
-            return waitForNativeLabelExpansionDelay(180).then(() => switchResult);
+            return waitForNativeLabelExpansionDelay(180).then(() => (
+                isSourceViewSwitchRequestCurrent(switchMeta)
+                && isSourceViewSwitchContextCurrent(switchMeta)
+                    ? switchResult
+                    : cancelledSourceViewSwitchResult()
+            ));
         }
         return switchResult;
     }
 
     function switchNativeSourceView(targetViewKind, options = {}) {
+        const requestId = beginSourceViewSwitchRequest();
+        cancelPendingNativeSourceViewHandoff();
         const startedAtMs = Date.now();
         const nextViewKind = normalizeSourceViewSwitchTarget(targetViewKind);
+        const locationObject = window?.location || {};
         const switchMeta = {
-            persistSourceViewDisplayKind: options.persistSourceViewDisplayKind !== false
+            persistSourceViewDisplayKind: options.persistSourceViewDisplayKind !== false,
+            contextToken: getLiveSourceSyncContextToken(),
+            requestId,
+            projectId: String(projectId || ''),
+            pathname: String(locationObject.pathname || ''),
+            search: String(locationObject.search || ''),
+            managerHost: extensionHost || null,
+            handoffId: null
         };
         if (!isExtensionEnabled) {
             return {
@@ -4083,6 +4639,13 @@
                 success: false,
                 reason: 'source_panel_missing',
                 errorMessageKey: 'popup_reason_source_panel_missing'
+            };
+        }
+        if (switchMeta.contextToken === null) {
+            return {
+                success: false,
+                reason: 'manager_not_ready',
+                errorMessageKey: 'popup_reason_manager_not_ready'
             };
         }
 
@@ -4101,6 +4664,7 @@
         const nativeAlreadyActive = currentInfo?.kind === nextViewKind;
         let nativeClicked = false;
         let nativeSwitchReason = nativeAlreadyActive ? 'already_active' : '';
+        const previousDisplayKind = sourceViewDisplayKind;
         if (!nativeAlreadyActive) {
             let switchButton = findNativeSourceViewSwitchButton(nextViewKind);
             let usedHiddenSwitchFallback = false;
@@ -4117,29 +4681,48 @@
             }
             if (switchButton) {
                 viewSwitchInProgress = true;
+                prepareNativeSourceViewHandoff(nextViewKind, switchMeta, startedAtMs);
                 nativeClicked = clickNativeSourceViewSwitchButton(switchButton);
                 if (!nativeClicked) {
                     viewSwitchInProgress = false;
+                    clearNativeSourceViewHandoff(switchMeta.handoffId);
+                    sourceViewDisplayKind = previousDisplayKind;
                 }
                 nativeSwitchReason = nativeClicked
                     ? (usedHiddenSwitchFallback ? 'clicked_hidden' : 'clicked')
                     : 'source_view_switch_click_failed';
             } else if (nextViewKind === SOURCE_VIEW_LIST && currentInfo?.kind === SOURCE_VIEW_LABEL) {
-                const labelMenuSwitch = clickNativeLabelActionMenuReturnToList(sourcePanel);
+                const labelMenuSwitch = clickNativeLabelActionMenuReturnToList(
+                    sourcePanel,
+                    switchMeta.contextToken,
+                    switchMeta.requestId,
+                    () => prepareNativeSourceViewHandoff(
+                        nextViewKind,
+                        switchMeta,
+                        startedAtMs
+                    )
+                );
                 if (labelMenuSwitch) {
                     viewSwitchInProgress = true;
-                    return labelMenuSwitch.then((result) => completeSourceViewSwitchAfterNativeAttempt(
-                        nextViewKind,
-                        sourcePanel,
-                        currentInfo,
-                        switchMeta,
-                        {
-                            startedAtMs,
-                            nativeClicked: Boolean(result?.nativeClicked),
-                            nativeSwitchReason: result?.nativeSwitchReason || 'native_label_menu_switch_failed',
-                            nativeAlreadyActive: false
+                    return labelMenuSwitch.then((result) => {
+                        const menuNativeClicked = Boolean(result?.nativeClicked);
+                        if (!menuNativeClicked && switchMeta.handoffId != null) {
+                            clearNativeSourceViewHandoff(switchMeta.handoffId);
+                            sourceViewDisplayKind = previousDisplayKind;
                         }
-                    ));
+                        return completeSourceViewSwitchAfterNativeAttempt(
+                            nextViewKind,
+                            sourcePanel,
+                            currentInfo,
+                            switchMeta,
+                            {
+                                startedAtMs,
+                                nativeClicked: menuNativeClicked,
+                                nativeSwitchReason: result?.nativeSwitchReason || 'native_label_menu_switch_failed',
+                                nativeAlreadyActive: false
+                            }
+                        );
+                    });
                 }
                 nativeSwitchReason = 'source_view_switch_control_missing';
             } else {
@@ -4684,6 +5267,11 @@
     }
 
     function closeBatchDeleteConfirmModal(options = {}) {
+        if (pendingSourceDeleteConfirmation) {
+            const confirmation = pendingSourceDeleteConfirmation;
+            pendingSourceDeleteConfirmation = null;
+            confirmation.resolve(false);
+        }
         return closeManagedModal(
             'sp-batch-delete-confirm-modal',
             'sp-batch-delete-confirm-backdrop',
@@ -4691,10 +5279,34 @@
         );
     }
 
-    function requestBatchDeleteConfirmation() {
-        if (!shadowRoot || pendingBatchKeys.size === 0 || isDeletingSources) return false;
+    function requestSingleSourceDeleteConfirmation(sourceKey) {
+        if (!shadowRoot || !isExtensionEnabled || !sourcesByKey.has(sourceKey)) {
+            return Promise.resolve(false);
+        }
+        closeBatchDeleteConfirmModal({ immediate: true, restoreFocus: false });
+        return new Promise((resolve) => {
+            const confirmation = {
+                resolve,
+                projectId,
+                managerInstanceToken: activeManagerInstanceToken
+            };
+            pendingSourceDeleteConfirmation = confirmation;
+            if (!requestBatchDeleteConfirmation({ sourceKeys: [sourceKey], confirmation })) {
+                pendingSourceDeleteConfirmation = null;
+                resolve(false);
+            }
+        });
+    }
 
-        const selectedKeys = Array.from(pendingBatchKeys)
+    function requestBatchDeleteConfirmation(options = {}) {
+        const confirmation = options.confirmation || null;
+        const sourceKeys = options.sourceKeys || pendingBatchKeys;
+        if (!shadowRoot || sourceKeys.size === 0 || isDeletingSources) return false;
+        if (!confirmation && pendingSourceDeleteConfirmation) {
+            closeBatchDeleteConfirmModal({ immediate: true, restoreFocus: false });
+        }
+
+        const selectedKeys = Array.from(sourceKeys)
             .filter((key) => sourcesByKey.has(key));
         const keysToDelete = selectedKeys.filter((key) => (
             canUseNativeSourceActions(sourcesByKey.get(key))
@@ -4717,7 +5329,9 @@
                 .map((checkbox) => checkbox?.dataset?.sourceKey)
                 .filter((key) => key && keysToDeleteSet.has(key))
         );
-        const hiddenSelectedCount = Math.max(0, keysToDelete.length - visibleSelectedKeys.size);
+        const hiddenSelectedCount = confirmation
+            ? 0
+            : Math.max(0, keysToDelete.length - visibleSelectedKeys.size);
 
         prepareModalOpen('sp-batch-delete-confirm-modal', 'sp-batch-delete-confirm-backdrop');
         const backdrop = el('div', {
@@ -4756,17 +5370,17 @@
         const confirmButton = el('button', {
             type: 'button',
             className: 'sp-button sp-batch-delete-confirm-final-btn sp-glare-hover'
-        }, [getMessage('ui_batch_delete_confirm_action', [String(keysToDelete.length)])]);
+        }, [getMessage(confirmation ? 'ui_single_delete_confirm_action' : 'ui_batch_delete_confirm_action', [String(keysToDelete.length)])]);
 
         modal.appendChild(el('div', { className: 'sp-folder-modal-header' }, [
             el('h3', {
                 className: 'sp-folder-modal-title',
                 id: 'sp-batch-delete-confirm-title'
-            }, [getMessage('ui_batch_delete_confirm_title')])
+            }, [getMessage(confirmation ? 'ui_single_delete_confirm_title' : 'ui_batch_delete_confirm_title')])
         ]));
         modal.appendChild(el('div', { className: 'sp-folder-modal-content' }, [
             el('p', { className: 'sp-batch-delete-confirm-summary' }, [
-                getMessage('ui_batch_delete_confirm_summary', [String(keysToDelete.length)])
+                getMessage(confirmation ? 'ui_single_delete_confirm_summary' : 'ui_batch_delete_confirm_summary', [String(keysToDelete.length)])
             ]),
             hiddenSelectedCount > 0
                 ? el('p', { className: 'sp-batch-delete-confirm-hidden' }, [
@@ -4796,6 +5410,18 @@
 
         cancelButton.addEventListener('click', () => closeBatchDeleteConfirmModal());
         confirmButton.addEventListener('click', () => {
+            if (confirmation) {
+                const isCurrent = pendingSourceDeleteConfirmation === confirmation
+                    && isExtensionEnabled
+                    && projectId === confirmation.projectId
+                    && activeManagerInstanceToken === confirmation.managerInstanceToken;
+                if (pendingSourceDeleteConfirmation === confirmation) {
+                    pendingSourceDeleteConfirmation = null;
+                }
+                closeBatchDeleteConfirmModal({ immediate: true, restoreFocus: false });
+                confirmation.resolve(isCurrent);
+                return;
+            }
             closeBatchDeleteConfirmModal({ immediate: true, restoreFocus: false });
             Promise.resolve(executeBatchDelete({ targetKeys: keysToDelete })).catch((error) => {
                 console.error('GeminiNotebook-Source-Management: Confirmed batch delete failed.', error);
@@ -5078,35 +5704,398 @@
         };
     }
 
-    function getSourceRepairReport(snapshot = buildPersistableState()) {
-        const sourceLookup = buildSourceLookup(Array.from(sourcesByKey.values()));
-        return buildSourceMatchReport(snapshot, sourceLookup);
+    function getSourceRepairSnapshot() {
+        if (pendingInitialLoadedState && hasPersistableManagerState(pendingInitialLoadedState)) {
+            return cloneSerializableData(pendingInitialLoadedState);
+        }
+        return cloneSerializableData(buildPersistableState());
+    }
+
+    function createRuntimeSourceRepairSnapshot(snapshot) {
+        const reportSnapshot = cloneSerializableData(snapshot);
+        const sourceStateById = reportSnapshot?.sourceStateById;
+        if (!sourceStateById || typeof sourceStateById !== 'object') return reportSnapshot;
+
+        Object.entries(sourceStateById).forEach(([sourceKey, sourceRecord]) => {
+            const liveSource = sourcesByKey.get(sourceKey);
+            if (!liveSource?.element || !sourceRecord || typeof sourceRecord !== 'object') return;
+            sourceStateById[sourceKey] = {
+                ...sourceRecord,
+                element: liveSource.element
+            };
+        });
+        return reportSnapshot;
+    }
+
+    function getCurrentLiveSourceRepairTargets() {
+        const context = getSourceRepairBindingContext();
+        if (!context || typeof getLiveSourceRepairTargets !== 'function') {
+            return { context: null, targets: [] };
+        }
+        const targets = getLiveSourceRepairTargets()
+            .filter((target) => target?.key && target?.element);
+        return { context, targets };
+    }
+
+    function refreshSourceRepairLiveTargets() {
+        const { context, targets } = getCurrentLiveSourceRepairTargets();
+        sourceRepairLiveTargetsByKey.clear();
+        sourceRepairLiveTargetContext = context;
+        targets.forEach((target) => {
+            sourceRepairLiveTargetsByKey.set(target.key, {
+                ...target,
+                identity: {
+                    title: String(target.title || ''),
+                    normalizedTitle: String(target.normalizedTitle || ''),
+                    ariaLabel: String(target.ariaLabel || ''),
+                    stableToken: String(target.stableToken || ''),
+                    fingerprint: String(target.fingerprint || ''),
+                    iconName: String(target.iconName || '')
+                },
+                context
+            });
+        });
+        return targets;
+    }
+
+    function areSourceRepairTargetIdentitiesEqual(left, right) {
+        if (!left || !right) return false;
+        return (
+            String(left.title || '') === String(right.title || '') &&
+            String(left.normalizedTitle || '') === String(right.normalizedTitle || '') &&
+            String(left.ariaLabel || '') === String(right.ariaLabel || '') &&
+            String(left.stableToken || '') === String(right.stableToken || '') &&
+            String(left.fingerprint || '') === String(right.fingerprint || '') &&
+            String(left.iconName || '') === String(right.iconName || '')
+        );
+    }
+
+    function getCurrentSourceRepairTarget(targetKey, expectedContext, currentTargetsByElement) {
+        const capturedTarget = sourceRepairLiveTargetsByKey.get(targetKey);
+        if (!capturedTarget || !areSourceRepairBindingContextsEqual(capturedTarget.context, expectedContext)) {
+            return null;
+        }
+        const currentTarget = currentTargetsByElement.get(capturedTarget.element);
+        if (!currentTarget || !areSourceRepairTargetIdentitiesEqual(capturedTarget.identity, currentTarget)) {
+            return null;
+        }
+        return {
+            element: currentTarget.element,
+            identity: { ...capturedTarget.identity },
+            context: expectedContext
+        };
+    }
+
+    function getSnapshotSourceRecord(snapshot, sourceKey) {
+        const sourceStateById = snapshot?.sourceStateById;
+        if (
+            !sourceStateById ||
+            typeof sourceStateById !== 'object' ||
+            !Object.prototype.hasOwnProperty.call(sourceStateById, sourceKey)
+        ) {
+            return null;
+        }
+        return sourceStateById[sourceKey];
+    }
+
+    function createExplicitSourceRepairBindingPlan(sourceRemaps) {
+        const context = getSourceRepairBindingContext();
+        const liveTargets = getCurrentLiveSourceRepairTargets();
+        const currentTargetsByElement = new Map(
+            liveTargets.targets.map((target) => [target.element, target])
+        );
+        const sessionStoredKeys = Array.from(sourceRepairLiveTargetStoredKeys);
+        if (sessionStoredKeys.length === 0 || !sourceRepairLiveTargetContext) {
+            return { plan: null, normalRemaps: sourceRemaps, reason: '' };
+        }
+        if (!context || !areSourceRepairBindingContextsEqual(sourceRepairLiveTargetContext, context)) {
+            return { plan: null, normalRemaps: null, reason: 'source_repair_context_changed' };
+        }
+        const remapEntries = Array.from(sourceRemaps.entries());
+        const explicitEntries = remapEntries.filter(([sourceKey]) => (
+            sourceRepairLiveTargetStoredKeys.has(sourceKey)
+        ));
+        const bindableEntries = remapEntries.filter(([, targetKey]) => (
+            sourceRepairLiveTargetsByKey.has(targetKey)
+        ));
+        const normalRemapEntries = remapEntries.filter(([, targetKey]) => (
+            !sourceRepairLiveTargetsByKey.has(targetKey)
+        ));
+        const hasExplicitSelection = explicitEntries.length > 0;
+        if (!hasExplicitSelection) {
+            return { plan: null, normalRemaps: sourceRemaps, reason: '' };
+        }
+        const hasLiveTargetsForExplicitSelection = explicitEntries.every(([, targetKey]) => (
+            sourceRepairLiveTargetsByKey.has(targetKey)
+        ));
+        if (!hasLiveTargetsForExplicitSelection) {
+            return { plan: null, normalRemaps: null, reason: 'source_repair_binding_stale' };
+        }
+        if (
+            explicitEntries.length !== sessionStoredKeys.length ||
+            !sessionStoredKeys.every((sourceKey) => sourceRemaps.has(sourceKey))
+        ) {
+            return { plan: null, normalRemaps: null, reason: 'source_repair_binding_incomplete' };
+        }
+
+        const usedTargetKeys = new Set();
+        const usedElements = new Set();
+        const plan = new Map();
+        for (const [, targetKey] of remapEntries) {
+            if (usedTargetKeys.has(targetKey)) {
+                return { plan: null, normalRemaps: null, reason: 'source_repair_binding_stale' };
+            }
+            usedTargetKeys.add(targetKey);
+        }
+        for (const [sourceKey, targetKey] of bindableEntries) {
+            const binding = getCurrentSourceRepairTarget(targetKey, context, currentTargetsByElement);
+            if (!binding || usedElements.has(binding.element)) {
+                return { plan: null, normalRemaps: null, reason: 'source_repair_binding_stale' };
+            }
+            usedElements.add(binding.element);
+            plan.set(sourceKey, binding);
+        }
+        return {
+            plan,
+            normalRemaps: new Map(normalRemapEntries),
+            reason: ''
+        };
+    }
+
+    function applyExplicitSourceRepairBindingPlan(plan) {
+        explicitSourceRepairElementBindings.clear();
+        plan.forEach((binding, sourceKey) => {
+            explicitSourceRepairElementBindings.set(sourceKey, binding);
+        });
+    }
+
+    function restoreExplicitSourceRepairBindingPlan(plan) {
+        explicitSourceRepairElementBindings.clear();
+        plan.forEach((binding, sourceKey) => {
+            explicitSourceRepairElementBindings.set(sourceKey, binding);
+        });
+    }
+
+    function buildSourceRepairSavedLocationIndex(snapshot) {
+        const locations = new Map();
+        const groupsById = snapshot?.groupsById && typeof snapshot.groupsById === 'object'
+            ? snapshot.groupsById
+            : {};
+        const rootEntries = Array.isArray(snapshot?.root)
+            ? snapshot.root
+            : (Array.isArray(snapshot?.groups)
+                ? snapshot.groups.map((id) => ({ type: 'group', id }))
+                : []);
+        const rootLocation = getMessage('ui_source_repair_root_location');
+        const visitedGroupIds = new Set();
+        const pendingEntries = rootEntries
+            .slice()
+            .reverse()
+            .map((entry) => ({ entry, path: [] }));
+        const registerLocation = (sourceKey, path) => {
+            if (!sourceKey || locations.has(sourceKey)) return;
+            locations.set(sourceKey, path.length > 0 ? path.join(' / ') : rootLocation);
+        };
+
+        while (pendingEntries.length > 0) {
+            const { entry, path } = pendingEntries.pop();
+            if (!entry || typeof entry !== 'object') continue;
+            if (entry.type === 'source') {
+                registerLocation(entry.key, path);
+                continue;
+            }
+            if (
+                entry.type !== 'group' ||
+                !entry.id ||
+                visitedGroupIds.has(entry.id) ||
+                !Object.prototype.hasOwnProperty.call(groupsById, entry.id)
+            ) {
+                continue;
+            }
+            visitedGroupIds.add(entry.id);
+            const group = groupsById[entry.id];
+            const groupTitle = String(group?.title || getMessage('ui_group_untitled'));
+            const children = Array.isArray(group?.children) ? group.children : [];
+            for (let index = children.length - 1; index >= 0; index -= 1) {
+                pendingEntries.push({
+                    entry: children[index],
+                    path: [...path, groupTitle]
+                });
+            }
+        }
+
+        (Array.isArray(snapshot?.ungrouped) ? snapshot.ungrouped : []).forEach((sourceKey) => {
+            registerLocation(sourceKey, [getMessage('ui_ungrouped')]);
+        });
+        const sourceStateById = snapshot?.sourceStateById;
+        if (sourceStateById && typeof sourceStateById === 'object') {
+            Object.keys(sourceStateById).forEach((sourceKey) => {
+                registerLocation(sourceKey, []);
+            });
+        }
+        const sourceTagsById = snapshot?.sourceTagsById;
+        if (sourceTagsById && typeof sourceTagsById === 'object') {
+            Object.keys(sourceTagsById).forEach((sourceKey) => {
+                registerLocation(sourceKey, []);
+            });
+        }
+        return locations;
+    }
+
+    function getSourceRepairReport(snapshot = getSourceRepairSnapshot()) {
+        const { targets: liveTargets } = getCurrentLiveSourceRepairTargets();
+        const sourceLookup = buildSourceLookup(
+            liveTargets.length > 0 ? liveTargets : Array.from(sourcesByKey.values())
+        );
+        const reportSnapshot = createRuntimeSourceRepairSnapshot(snapshot);
+        const savedLocations = buildSourceRepairSavedLocationIndex(snapshot);
+        const report = buildSourceMatchReport(reportSnapshot, sourceLookup);
+        const withSavedLocation = (items) => (Array.isArray(items) ? items.map((item) => ({
+            ...item,
+            savedLocation: savedLocations.get(item.storedKey) || getMessage('ui_source_repair_root_location')
+        })) : []);
+        return {
+            ...report,
+            matched: withSavedLocation(report.matched),
+            unmatched: withSavedLocation(report.unmatched),
+            ambiguous: withSavedLocation(report.ambiguous)
+        };
     }
 
     function getSourceRepairOptions() {
+        const liveTargets = refreshSourceRepairLiveTargets();
+        if (liveTargets.length > 0) {
+            const snapshot = createRuntimeSourceRepairSnapshot(getSourceRepairSnapshot());
+            const sourceLookup = buildSourceLookup(liveTargets);
+            sourceRepairLiveTargetStoredKeys.clear();
+            collectPersistedSourceRefs(snapshot).forEach((sourceKey) => {
+                if (resolveStoredSourceKeyWithReason(
+                    sourceKey,
+                    sourceLookup,
+                    getSnapshotSourceRecord(snapshot, sourceKey)
+                ).reason === 'ambiguous_weak_identity') {
+                    sourceRepairLiveTargetStoredKeys.add(sourceKey);
+                }
+            });
+            return liveTargets.map((target) => {
+                const fullTitle = target.title || target.normalizedTitle || target.key;
+                return {
+                    key: target.key,
+                    title: getMessage('ui_source_repair_target_option', [
+                        fullTitle,
+                        String(target.nativeOrder)
+                    ]),
+                    fullTitle,
+                    nativeOrder: target.nativeOrder
+                };
+            });
+        }
+        sourceRepairLiveTargetStoredKeys.clear();
         return Array.from(sourcesByKey.values()).map((source) => ({
             key: source.key,
-            title: source.title || source.normalizedTitle || source.key
+            title: source.title || source.normalizedTitle || source.key,
+            fullTitle: source.title || source.normalizedTitle || source.key,
+            nativeOrder: null
         }));
     }
 
     async function applySourceRepairRemaps(remaps) {
         const sourceRemaps = remaps instanceof Map
-            ? remaps
+            ? new Map(Array.from(remaps.entries()).filter(([, value]) => Boolean(value)))
             : new Map(Object.entries(remaps || {}).filter(([, value]) => Boolean(value)));
         if (sourceRemaps.size === 0) {
             showToast(getMessage('ui_source_repair_no_selection'), { variant: 'info' });
             return false;
         }
 
-        const currentSnapshot = cloneSerializableData(buildPersistableState());
-        const repairedSnapshot = applySourceRemapsToSnapshot(currentSnapshot, sourceRemaps);
+        const requestContext = getSourceRepairActionContext();
+        const currentSnapshot = getSourceRepairSnapshot();
+        const bindingResult = createExplicitSourceRepairBindingPlan(sourceRemaps);
+        if (bindingResult.reason) {
+            const bindingMessageKeys = new Set([
+                'source_repair_binding_incomplete',
+                'source_repair_binding_stale',
+                'source_repair_context_changed'
+            ]);
+            const messageKey = bindingMessageKeys.has(bindingResult.reason)
+                ? `ui_${bindingResult.reason}`
+                : 'ui_source_repair_failed';
+            showToast(getMessage(messageKey), { variant: 'error' });
+            return false;
+        }
+
+        const explicitBindingPlan = bindingResult.plan;
+        const repairedSnapshot = explicitBindingPlan
+            ? applySourceRemapsToSnapshot(currentSnapshot, bindingResult.normalRemaps)
+            : applySourceRemapsToSnapshot(currentSnapshot, sourceRemaps);
+        const previousBindings = new Map(explicitSourceRepairElementBindings);
+        const previousPendingInitialLoadedState = pendingInitialLoadedState;
         const result = await runSnapshotTransaction({
             snapshot: repairedSnapshot,
             reason: 'source_repair',
             checkpointReason: 'before_source_repair',
-            afterSuccess: () => loadStateHistory()
+            beforePersist: async () => {
+                if (!explicitBindingPlan) {
+                    return true;
+                }
+                const revalidatedPlan = createExplicitSourceRepairBindingPlan(sourceRemaps);
+                if (!revalidatedPlan.plan || revalidatedPlan.reason) {
+                    return { ok: false, reason: revalidatedPlan.reason || 'source_repair_binding_stale' };
+                }
+                applyExplicitSourceRepairBindingPlan(revalidatedPlan.plan);
+                pendingInitialLoadedState = cloneSerializableData(repairedSnapshot);
+                const hydration = flushPendingInitialLoadedState({
+                    syncNativeSelection: false
+                });
+                if (!hydration?.restored || hydration.deferred) {
+                    return { ok: false, reason: 'source_repair_hydration_failed' };
+                }
+                explicitSourceRepairElementBindings.clear();
+                return true;
+            },
+            beforeRollback: () => {
+                if (!explicitBindingPlan) return true;
+                if (!areSourceRepairBindingContextsEqual(
+                    getSourceRepairBindingContext(),
+                    sourceRepairLiveTargetContext
+                )) {
+                    return { ok: false, reason: 'source_repair_context_changed' };
+                }
+                if (
+                    previousPendingInitialLoadedState
+                    && !restorePersistedSnapshotWithoutDom(previousPendingInitialLoadedState)
+                ) {
+                    return { ok: false, reason: 'source_repair_rollback_restore_failed' };
+                }
+                restoreExplicitSourceRepairBindingPlan(previousBindings);
+                pendingInitialLoadedState = previousPendingInitialLoadedState;
+                return true;
+            },
+            afterSuccess: async () => {
+                if (explicitBindingPlan) {
+                    sourceRepairLiveTargetStoredKeys.clear();
+                    const hydrationSync = scanAndSyncSources({}, false);
+                    if (!hydrationSync?.ok) {
+                        return { ok: false, reason: 'source_repair_hydration_sync_failed' };
+                    }
+                }
+                return loadStateHistory();
+            },
+            afterFailure: () => {
+                if (!explicitBindingPlan) return;
+                if (!areSourceRepairBindingContextsEqual(
+                    getSourceRepairBindingContext(),
+                    sourceRepairLiveTargetContext
+                )) {
+                    return;
+                }
+                restoreExplicitSourceRepairBindingPlan(previousBindings);
+                pendingInitialLoadedState = previousPendingInitialLoadedState;
+            }
         });
+        if (!isSourceRepairActionContextCurrent(requestContext)) {
+            return false;
+        }
         if (!result.ok) {
             showToast(getMessage('ui_source_repair_failed'), { variant: 'error' });
             return false;
@@ -5249,6 +6238,7 @@
     }
 
     function resetManagerRuntimeState() {
+        clearExplicitSourceRepairBindings();
         groupsById.clear();
         sourcesByKey.clear();
         tagsById.clear();
@@ -5306,6 +6296,19 @@
     }
 
     function cleanupManagerResources() {
+        debouncedScanAndSync.cancel();
+        cancelNativeSelectionSync('manager_destroyed');
+        clearExplicitSourceRepairBindings();
+        if (nativeSelectionProgressTimeout) clearTimeout(nativeSelectionProgressTimeout);
+        nativeSelectionProgressTimeout = null;
+        nativeSelectionProgressVisible = false;
+        if (nativeSourceViewClickTimeout) {
+            clearTimeout(nativeSourceViewClickTimeout);
+            nativeSourceViewClickTimeout = null;
+        }
+        if (pendingSourceDeleteConfirmation) {
+            closeBatchDeleteConfirmModal({ immediate: true, restoreFocus: false });
+        }
         bindPanelLifecycleHooks(null);
         clearScheduledPanelLifecycleSync();
         clearNativeRenameWatcher(false);
@@ -5353,6 +6356,9 @@
         preserveReattach = false,
         reason = 'teardown'
     } = {}) {
+        if (reason !== 'panel_collapsed') {
+            invalidateSourceViewSwitchRequests();
+        }
         if (
             treeInteractionsModule
             && typeof treeInteractionsModule.teardownDragInteractions === 'function'
@@ -5554,7 +6560,9 @@
         }
 
         const sourcePanel = findSourcePanel();
-        return !sourcePanel || !isSourcePanelRenderable(sourcePanel);
+        // A present but collapsed/loading panel is user- or host-controlled. Its
+        // lifecycle hooks will attach the manager when it becomes renderable.
+        return !sourcePanel;
     }
 
     function recoverManagerForRoute(targetProjectId, attempt = 0, recoveryToken = activeRouteRecoveryToken) {
@@ -6445,8 +7453,10 @@
             _handleSearchButtonClick: handleSearchButtonClick,
             _handleSearchOutsideClick: handleSearchOutsideClick,
             _resetState: () => {
+                invalidateSourceViewSwitchRequests();
                 clearScheduledPanelLifecycleSync();
                 invalidateManagerInstance();
+                clearExplicitSourceRepairBindings();
                 nextLoadStateRequestId = 1;
                 state.root = [];
                 state.ungrouped = [];
@@ -6509,6 +7519,9 @@
                 nativeSelectionSyncFailuresBySourceKey.clear();
                 lastViewSwitchAttempt = null;
                 viewSwitchInProgress = false;
+                pendingNativeSourceViewHandoff = null;
+                nextNativeSourceViewHandoffId = 1;
+                activeSourceViewSwitchRequestId = 0;
                 isExtensionEnabled = true;
                 setNativeSourceListHidden(false);
                 if (panelResizeObserver) {

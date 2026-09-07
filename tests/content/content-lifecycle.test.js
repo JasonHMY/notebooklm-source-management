@@ -105,6 +105,261 @@ describe('manager launcher messaging', () => {
         return { appendedNodes, shadowRoot };
     }
 
+    function installNativeLabelPanelFixture() {
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        const first = createMockSourceRow({ title: 'First Paper', stableToken: 'doc-1', checked: true });
+        const second = createMockSourceRow({ title: 'Second Paper', stableToken: 'doc-2', checked: true });
+        first.row.__nativeLabelTitle = 'AI Group';
+        second.row.__nativeLabelTitle = 'AI Group';
+
+        const groupCheckbox = {
+            tagName: 'INPUT',
+            type: 'checkbox',
+            checked: false,
+            parentElement: null,
+            parentNode: null,
+            style: {},
+            getAttribute: jest.fn((attr) => (attr === 'type' ? 'checkbox' : null)),
+            matches: jest.fn((selector) => String(selector).includes('checkbox')),
+            closest: jest.fn(() => null)
+        };
+        const labelButton = {
+            tagName: 'BUTTON',
+            textContent: 'label_auto',
+            parentElement: panel,
+            parentNode: panel,
+            style: {},
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return 'Label view';
+                if (attr === 'data-testid') return 'source-view-label-button';
+                return null;
+            }),
+            matches: jest.fn((selector) => selector === 'button'),
+            closest: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const labelGroup = {
+            textContent: 'AI Group',
+            parentElement: panel,
+            parentNode: panel,
+            style: {},
+            __computedStyle: {},
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return 'AI Group label';
+                if (attr === 'data-testid') return 'source-label-group';
+                return null;
+            }),
+            matches: jest.fn((selector) => selector.includes('source-label') || selector.includes('label-group')),
+            querySelector: jest.fn((selector) => (String(selector).includes('checkbox') ? groupCheckbox : null)),
+            querySelectorAll: jest.fn((selector) => (String(selector).includes('checkbox') ? [groupCheckbox] : []))
+        };
+        groupCheckbox.parentElement = labelGroup;
+        groupCheckbox.parentNode = labelGroup;
+        first.row.parentElement = labelGroup;
+        first.row.parentNode = labelGroup;
+        second.row.parentElement = labelGroup;
+        second.row.parentNode = labelGroup;
+
+        panel.querySelectorAll = jest.fn((selector) => {
+            const value = String(selector);
+            if (value.includes('source-label') || value.includes('label-group')) return [labelGroup];
+            if (value.includes('button') || value.includes('[role="button"]')) return [labelButton];
+            if (
+                mod.DEPS.row.includes(selector) ||
+                value.includes('source-row') ||
+                value.includes('source-item') ||
+                value.includes('data-source-id')
+            ) {
+                return [first.row, second.row];
+            }
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+        global.document.querySelectorAll = jest.fn((selector) => panel.querySelectorAll(selector));
+
+        return { panel, first, second, groupCheckbox, labelButton, labelGroup };
+    }
+
+    function mountManagerForNativeSync() {
+        const host = {
+            isConnected: true,
+            remove: jest.fn()
+        };
+        const shadowRoot = {
+            host,
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => []),
+            getElementById: jest.fn(() => null)
+        };
+        mod._setManagerRuntimeForTest({ extensionHost: host, shadowRoot });
+        return { host, shadowRoot };
+    }
+
+    function handleMountedSourceViewSwitch(viewKind, sendResponse) {
+        if (!mod.getDiagnosticsInfo().notebookId) {
+            mod._setProjectId('testproject');
+        }
+        mountManagerForNativeSync();
+        return mod.handleManagerMessage(
+            { type: 'SWITCH_SOURCE_VIEW', viewKind },
+            {},
+            sendResponse
+        );
+    }
+
+    function createWholeBodySourceViewReplacementFixture({ replacementDelayMs = 0 } = {}) {
+        let phase = 'list';
+        let currentPanel = null;
+        let oldHost = null;
+        const timers = [];
+        let elapsedMs = 0;
+        let timerSequence = 0;
+        const listSource = createMockSourceRow({
+            title: 'Replacement List Source',
+            stableToken: 'replacement-list-source',
+            checked: true
+        });
+        const labelGroup = {
+            textContent: 'Replacement label',
+            parentElement: null,
+            parentNode: null,
+            style: {},
+            __computedStyle: {},
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return 'Replacement label';
+                if (attr === 'data-testid') return 'source-label-group';
+                return null;
+            }),
+            matches: jest.fn((selector) => String(selector).includes('source-label') || String(selector).includes('label-group')),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const { panel: initialPanel } = createMockPanel({ visible: true, contentVisible: true });
+        const { panel: replacementPanel } = createMockPanel({ visible: true, contentVisible: true });
+        const replaceNativePanel = () => {
+            phase = 'label';
+            if (oldHost) oldHost.isConnected = false;
+            currentPanel = replacementPanel;
+            labelGroup.parentElement = replacementPanel;
+            labelGroup.parentNode = replacementPanel;
+        };
+        const labelButton = {
+            tagName: 'BUTTON',
+            textContent: 'Label view',
+            disabled: false,
+            style: {},
+            click: jest.fn(() => {
+                if (replacementDelayMs > 0) {
+                    setTimeout(replaceNativePanel, replacementDelayMs);
+                    return;
+                }
+                replaceNativePanel();
+            }),
+            getAttribute: jest.fn((attr) => (attr === 'aria-label' ? 'Label view' : null)),
+            matches: jest.fn(() => false),
+            closest: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const listButton = {
+            tagName: 'BUTTON',
+            textContent: 'List view',
+            disabled: false,
+            style: {},
+            click: jest.fn(),
+            getAttribute: jest.fn((attr) => (attr === 'aria-label' ? 'List view' : null)),
+            matches: jest.fn(() => false),
+            closest: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const configurePanel = (panel) => {
+            panel.querySelectorAll = jest.fn((selector) => {
+                const value = String(selector);
+                if (value.includes('button') || value.includes('[role="button"]')) {
+                    return [labelButton, listButton];
+                }
+                if (value.includes('source-label') || value.includes('label-group')) {
+                    return phase === 'label' ? [labelGroup] : [];
+                }
+                if (mod.DEPS.row.includes(selector) || value.includes('source-item')) {
+                    return phase === 'list' ? [listSource.row] : [];
+                }
+                return [];
+            });
+        };
+        configurePanel(initialPanel);
+        configurePanel(replacementPanel);
+        currentPanel = initialPanel;
+        listSource.row.parentElement = initialPanel;
+        listSource.row.parentNode = initialPanel;
+        labelButton.parentElement = initialPanel;
+        labelButton.parentNode = initialPanel;
+        listButton.parentElement = initialPanel;
+        listButton.parentNode = initialPanel;
+
+        const createMountedManager = () => {
+            const host = { isConnected: true, remove: jest.fn() };
+            const shadowRoot = {
+                host,
+                querySelector: jest.fn(() => null),
+                querySelectorAll: jest.fn(() => []),
+                getElementById: jest.fn(() => null)
+            };
+            return { host, shadowRoot };
+        };
+        const initialManager = createMountedManager();
+        oldHost = initialManager.host;
+
+        global.setTimeout = jest.fn((callback, delay = 0) => {
+            timerSequence += 1;
+            timers.push({
+                callback,
+                delay,
+                dueAt: elapsedMs + Math.max(Number(delay) || 0, 0),
+                sequence: timerSequence
+            });
+            return timers.length;
+        });
+        global.window.setTimeout = global.setTimeout;
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel'
+                ? currentPanel
+                : null
+        ));
+        global.document.querySelectorAll = jest.fn((selector) => currentPanel.querySelectorAll(selector));
+        global.document.body.contains = jest.fn(() => true);
+
+        return {
+            initialPanel,
+            replacementPanel,
+            initialManager,
+            labelButton,
+            timers,
+            mountReplacementManager() {
+                mod.beginManagerCleanup({
+                    preserveReattach: true,
+                    reason: 'panel_collapsed'
+                });
+                const manager = createMountedManager();
+                mod._setManagerRuntimeForTest({
+                    extensionHost: manager.host,
+                    shadowRoot: manager.shadowRoot
+                });
+                mod._setAttachedSourcePanelForTest(replacementPanel);
+                return manager;
+            },
+            runNextTimer() {
+                timers.sort((left, right) => left.dueAt - right.dueAt || left.sequence - right.sequence);
+                const next = timers.shift();
+                if (next) {
+                    elapsedMs = next.dueAt;
+                    next.callback();
+                }
+            }
+        };
+    }
+
     it('reports source_panel_missing when the notebook UI is unavailable', () => {
         mod._setProjectId('testproject');
         global.document.querySelector = jest.fn(() => null);
@@ -487,7 +742,7 @@ describe('manager launcher messaging', () => {
             selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
         ));
 
-        mod.handleManagerMessage({ type: 'SWITCH_SOURCE_VIEW', viewKind: 'label' }, {}, sendResponse);
+        handleMountedSourceViewSwitch('label', sendResponse);
         await flushAsyncMessageResponse();
 
         expect(labelButton.click).toHaveBeenCalledTimes(1);
@@ -496,6 +751,339 @@ describe('manager launcher messaging', () => {
             viewKind: 'label',
             clicked: true
         }));
+    });
+
+    it('hands an explicitly clicked native source-view switch to a reattached manager on the same notebook', async () => {
+        const sendResponse = jest.fn();
+        const fixture = createWholeBodySourceViewReplacementFixture();
+        mod._setProjectId('handoff-notebook');
+        mod._setManagerRuntimeForTest({
+            extensionHost: fixture.initialManager.host,
+            shadowRoot: fixture.initialManager.shadowRoot
+        });
+        mod._setAttachedSourcePanelForTest(fixture.initialPanel);
+
+        const responsePending = mod.handleManagerMessage(
+            { type: 'SWITCH_SOURCE_VIEW', viewKind: 'label' },
+            {},
+            sendResponse
+        );
+
+        expect(responsePending).toBe(true);
+        expect(sendResponse).not.toHaveBeenCalled();
+        expect(mod.getDiagnosticsInfo()).toMatchObject({ sourceViewDisplayKind: 'label' });
+
+        fixture.mountReplacementManager();
+        for (let index = 0; index < 8 && sendResponse.mock.calls.length === 0; index += 1) {
+            fixture.runNextTimer();
+            await Promise.resolve();
+        }
+
+        expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: true,
+            viewKind: 'label',
+            nativeClicked: true,
+            confirmedSourceViewKind: 'label',
+            sourceViewDisplayKind: 'label'
+        }));
+    });
+
+    it('hands a delayed native source-view DOM replacement to the reattached manager within the original confirmation window', async () => {
+        const sendResponse = jest.fn();
+        const fixture = createWholeBodySourceViewReplacementFixture({ replacementDelayMs: 240 });
+        mod._setProjectId('handoff-notebook');
+        mod._setManagerRuntimeForTest({
+            extensionHost: fixture.initialManager.host,
+            shadowRoot: fixture.initialManager.shadowRoot
+        });
+        mod._setAttachedSourcePanelForTest(fixture.initialPanel);
+
+        expect(mod.handleManagerMessage(
+            { type: 'SWITCH_SOURCE_VIEW', viewKind: 'label' },
+            {},
+            sendResponse
+        )).toBe(true);
+        fixture.runNextTimer();
+        fixture.runNextTimer();
+        fixture.runNextTimer();
+        fixture.mountReplacementManager();
+        for (let index = 0; index < 8 && sendResponse.mock.calls.length === 0; index += 1) {
+            fixture.runNextTimer();
+            await Promise.resolve();
+        }
+
+        expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: true,
+            viewKind: 'label',
+            nativeClicked: true,
+            confirmedSourceViewKind: 'label'
+        }));
+    });
+
+    it('keeps a direct native source-view click within the same-notebook handoff boundary', async () => {
+        const fixture = createWholeBodySourceViewReplacementFixture();
+        mod._setProjectId('handoff-notebook');
+        mod._setManagerRuntimeForTest({
+            extensionHost: fixture.initialManager.host,
+            shadowRoot: fixture.initialManager.shadowRoot
+        });
+        mod._setAttachedSourcePanelForTest(fixture.initialPanel);
+
+        mod._handleNativeSourceViewSwitchClickForTest({ target: fixture.labelButton });
+        fixture.labelButton.click();
+        fixture.mountReplacementManager();
+        for (
+            let index = 0;
+            index < 8 && !mod.getDiagnosticsInfo().lastViewSwitchAttempt;
+            index += 1
+        ) {
+            fixture.runNextTimer();
+            await Promise.resolve();
+        }
+
+        expect(mod.getDiagnosticsInfo()).toMatchObject({
+            sourceViewDisplayKind: 'label',
+            lastViewSwitchAttempt: expect.objectContaining({
+                success: true,
+                targetViewKind: 'label',
+                sourceViewDisplayKind: 'label'
+            })
+        });
+    });
+
+    it('cancels a detached native source-view handoff when the notebook route changes', async () => {
+        const sendResponse = jest.fn();
+        const fixture = createWholeBodySourceViewReplacementFixture();
+        mod._setProjectId('handoff-notebook');
+        mod._setManagerRuntimeForTest({
+            extensionHost: fixture.initialManager.host,
+            shadowRoot: fixture.initialManager.shadowRoot
+        });
+        mod._setAttachedSourcePanelForTest(fixture.initialPanel);
+
+        expect(mod.handleManagerMessage(
+            { type: 'SWITCH_SOURCE_VIEW', viewKind: 'label' },
+            {},
+            sendResponse
+        )).toBe(true);
+        mod._setProjectId('other-notebook');
+        fixture.runNextTimer();
+        await flushAsyncMessageResponse();
+
+        expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: false,
+            reason: 'source_view_context_changed'
+        }));
+        expect(global.chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+            expect.objectContaining({
+                type: 'SAVE_STATE',
+                key: 'sourcesPlusState_other-notebook'
+            }),
+            expect.any(Function)
+        );
+    });
+
+    it('cancels a detached native source-view handoff when the manager is disabled', async () => {
+        const sendResponse = jest.fn();
+        const fixture = createWholeBodySourceViewReplacementFixture();
+        mod._setProjectId('handoff-notebook');
+        mod._setManagerRuntimeForTest({
+            extensionHost: fixture.initialManager.host,
+            shadowRoot: fixture.initialManager.shadowRoot
+        });
+        mod._setAttachedSourcePanelForTest(fixture.initialPanel);
+
+        expect(mod.handleManagerMessage(
+            { type: 'SWITCH_SOURCE_VIEW', viewKind: 'label' },
+            {},
+            sendResponse
+        )).toBe(true);
+        mod._setExtensionEnabledForTest(false);
+        fixture.runNextTimer();
+        await flushAsyncMessageResponse();
+
+        expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: false,
+            reason: 'source_view_context_changed'
+        }));
+        expect(global.chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+            expect.objectContaining({ type: 'SAVE_STATE' }),
+            expect.any(Function)
+        );
+    });
+
+    it('reports an unconfirmed failure when an explicitly clicked native handoff never reattaches', async () => {
+        const sendResponse = jest.fn();
+        const fixture = createWholeBodySourceViewReplacementFixture();
+        mod._setProjectId('handoff-notebook');
+        mod._setManagerRuntimeForTest({
+            extensionHost: fixture.initialManager.host,
+            shadowRoot: fixture.initialManager.shadowRoot
+        });
+        mod._setAttachedSourcePanelForTest(fixture.initialPanel);
+
+        expect(mod.handleManagerMessage(
+            { type: 'SWITCH_SOURCE_VIEW', viewKind: 'label' },
+            {},
+            sendResponse
+        )).toBe(true);
+        for (let index = 0; index < 24 && sendResponse.mock.calls.length === 0; index += 1) {
+            fixture.runNextTimer();
+            await Promise.resolve();
+        }
+
+        expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: false,
+            reason: 'native_view_switch_not_confirmed'
+        }));
+        expect(global.chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+            expect.objectContaining({ type: 'SAVE_STATE' }),
+            expect.any(Function)
+        );
+    });
+
+    it('settles an older detached native source-view handoff when a new request arrives', async () => {
+        const firstResponse = jest.fn();
+        const secondResponse = jest.fn();
+        const fixture = createWholeBodySourceViewReplacementFixture();
+        mod._setProjectId('handoff-notebook');
+        mod._setManagerRuntimeForTest({
+            extensionHost: fixture.initialManager.host,
+            shadowRoot: fixture.initialManager.shadowRoot
+        });
+        mod._setAttachedSourcePanelForTest(fixture.initialPanel);
+
+        expect(mod.handleManagerMessage(
+            { type: 'SWITCH_SOURCE_VIEW', viewKind: 'label' },
+            {},
+            firstResponse
+        )).toBe(true);
+        mod.handleManagerMessage(
+            { type: 'SWITCH_SOURCE_VIEW', viewKind: 'list' },
+            {},
+            secondResponse
+        );
+        await flushAsyncMessageResponse();
+
+        expect(firstResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: false,
+            reason: 'source_view_context_changed'
+        }));
+        expect(secondResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: false,
+            reason: 'manager_not_ready'
+        }));
+    });
+
+    it('prevents an older same-instance confirmation poll from finalizing after a newer request', async () => {
+        const firstResponse = jest.fn();
+        const secondResponse = jest.fn();
+        const timers = [];
+        global.setTimeout = jest.fn((callback, delay = 0) => {
+            timers.push({ callback, delay });
+            return timers.length;
+        });
+        global.window.setTimeout = global.setTimeout;
+        let phase = 'list';
+        const listSource = createMockSourceRow({
+            title: 'Same Instance Source',
+            stableToken: 'same-instance-source',
+            checked: true
+        });
+        const labelGroup = {
+            textContent: 'Same instance label',
+            parentElement: null,
+            parentNode: null,
+            style: {},
+            __computedStyle: {},
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return 'Same instance label';
+                if (attr === 'data-testid') return 'source-label-group';
+                return null;
+            }),
+            matches: jest.fn((selector) => String(selector).includes('source-label') || String(selector).includes('label-group')),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const labelButton = {
+            tagName: 'BUTTON',
+            textContent: 'Label view',
+            disabled: false,
+            style: {},
+            click: jest.fn(() => {
+                global.setTimeout(() => {
+                    phase = 'label';
+                }, 160);
+            }),
+            getAttribute: jest.fn((attr) => (attr === 'aria-label' ? 'Label view' : null)),
+            matches: jest.fn(() => false),
+            closest: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const listButton = {
+            tagName: 'BUTTON',
+            textContent: 'List view',
+            disabled: false,
+            style: {},
+            click: jest.fn(),
+            getAttribute: jest.fn((attr) => (attr === 'aria-label' ? 'List view' : null)),
+            matches: jest.fn(() => false),
+            closest: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => [])
+        };
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        labelGroup.parentElement = panel;
+        labelGroup.parentNode = panel;
+        listSource.row.parentElement = panel;
+        listSource.row.parentNode = panel;
+        panel.querySelectorAll = jest.fn((selector) => {
+            const value = String(selector);
+            if (value.includes('button') || value.includes('[role="button"]')) return [labelButton, listButton];
+            if (value.includes('source-label') || value.includes('label-group')) {
+                return phase === 'label' ? [labelGroup] : [];
+            }
+            if (mod.DEPS.row.includes(selector) || value.includes('source-item')) {
+                return phase === 'list' ? [listSource.row] : [];
+            }
+            return [];
+        });
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+        global.document.querySelectorAll = jest.fn((selector) => panel.querySelectorAll(selector));
+        const { host, shadowRoot } = mountManagerForNativeSync();
+        panel.contains = jest.fn((element) => element === host);
+        mod._setProjectId('same-instance-notebook');
+        mod._setAttachedSourcePanelForTest(panel);
+        mod._setManagerRuntimeForTest({ extensionHost: host, shadowRoot });
+
+        expect(mod.handleManagerMessage(
+            { type: 'SWITCH_SOURCE_VIEW', viewKind: 'label' },
+            {},
+            firstResponse
+        )).toBe(true);
+        mod.handleManagerMessage(
+            { type: 'SWITCH_SOURCE_VIEW', viewKind: 'list' },
+            {},
+            secondResponse
+        );
+        while (timers.length > 0) {
+            timers.shift().callback();
+            await Promise.resolve();
+        }
+
+        expect(firstResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: false,
+            reason: 'source_view_context_changed'
+        }));
+        expect(secondResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: true,
+            viewKind: 'list'
+        }));
+        expect(mod.getDiagnosticsInfo().lastViewSwitchAttempt).toMatchObject({
+            success: true,
+            targetViewKind: 'list'
+        });
     });
 
     it('restores the persisted source view display kind after initial state load', () => {
@@ -660,7 +1248,7 @@ describe('manager launcher messaging', () => {
             selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
         ));
 
-        mod.handleManagerMessage({ type: 'SWITCH_SOURCE_VIEW', viewKind: 'label' }, {}, sendResponse);
+        handleMountedSourceViewSwitch('label', sendResponse);
         await flushAsyncMessageResponse();
 
         expect(labelButton.click).toHaveBeenCalledTimes(1);
@@ -720,7 +1308,7 @@ describe('manager launcher messaging', () => {
             selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
         ));
 
-        mod.handleManagerMessage({ type: 'SWITCH_SOURCE_VIEW', viewKind: 'label' }, {}, sendResponse);
+        handleMountedSourceViewSwitch('label', sendResponse);
         await flushAsyncMessageResponse();
 
         expect(labelButton.click).toHaveBeenCalledTimes(1);
@@ -816,7 +1404,7 @@ describe('manager launcher messaging', () => {
             selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
         ));
 
-        mod.handleManagerMessage({ type: 'SWITCH_SOURCE_VIEW', viewKind: 'label' }, {}, sendResponse);
+        handleMountedSourceViewSwitch('label', sendResponse);
         await flushAsyncMessageResponse();
 
         expect(labelButton.click).toHaveBeenCalledTimes(1);
@@ -839,7 +1427,7 @@ describe('manager launcher messaging', () => {
         ));
         global.document.documentElement.classList.remove.mockClear();
 
-        mod.handleManagerMessage({ type: 'SWITCH_SOURCE_VIEW', viewKind: 'label' }, {}, sendResponse);
+        handleMountedSourceViewSwitch('label', sendResponse);
 
         expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({
             success: false,
@@ -896,7 +1484,7 @@ describe('manager launcher messaging', () => {
             selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
         ));
 
-        mod.handleManagerMessage({ type: 'SWITCH_SOURCE_VIEW', viewKind: 'label' }, {}, sendResponse);
+        handleMountedSourceViewSwitch('label', sendResponse);
 
         expect(sourceTitleButton.click).not.toHaveBeenCalled();
         expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({
@@ -952,7 +1540,7 @@ describe('manager launcher messaging', () => {
             selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
         ));
 
-        mod.handleManagerMessage({ type: 'SWITCH_SOURCE_VIEW', viewKind: 'list' }, {}, sendResponse);
+        handleMountedSourceViewSwitch('list', sendResponse);
         await Promise.resolve();
 
         expect(listButton.click).toHaveBeenCalledTimes(1);
@@ -1008,7 +1596,7 @@ describe('manager launcher messaging', () => {
             selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
         ));
 
-        mod.handleManagerMessage({ type: 'SWITCH_SOURCE_VIEW', viewKind: 'list' }, {}, sendResponse);
+        handleMountedSourceViewSwitch('list', sendResponse);
 
         expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({
             success: true,
@@ -1085,7 +1673,7 @@ describe('manager launcher messaging', () => {
             selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
         ));
 
-        mod.handleManagerMessage({ type: 'SWITCH_SOURCE_VIEW', viewKind: 'list' }, {}, sendResponse);
+        handleMountedSourceViewSwitch('list', sendResponse);
 
         expect(returnToListMenuItem.click).not.toHaveBeenCalled();
         expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({
@@ -1151,7 +1739,7 @@ describe('manager launcher messaging', () => {
             selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
         ));
 
-        mod.handleManagerMessage({ type: 'SWITCH_SOURCE_VIEW', viewKind: 'list' }, {}, sendResponse);
+        handleMountedSourceViewSwitch('list', sendResponse);
 
         expect(menuLauncher.click).not.toHaveBeenCalled();
         expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({
@@ -1294,7 +1882,7 @@ describe('manager launcher messaging', () => {
         ));
         global.document.querySelectorAll = jest.fn(() => (menuOpen ? [returnToListMenuItem] : []));
 
-        mod.handleManagerMessage({ type: 'SWITCH_SOURCE_VIEW', viewKind: 'list' }, {}, sendResponse);
+        handleMountedSourceViewSwitch('list', sendResponse);
         await flushAsyncMessageResponse();
 
         expect(labelActionButton.click).toHaveBeenCalledTimes(1);
@@ -1371,7 +1959,7 @@ describe('manager launcher messaging', () => {
             selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
         ));
 
-        const result = mod.handleManagerMessage({ type: 'SWITCH_SOURCE_VIEW', viewKind: 'list' }, {}, sendResponse);
+        const result = handleMountedSourceViewSwitch('list', sendResponse);
 
         expect(result).toBe(true);
         expect(sendResponse).not.toHaveBeenCalled();
@@ -1513,7 +2101,7 @@ describe('manager launcher messaging', () => {
             selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
         ));
 
-        mod.handleManagerMessage({ type: 'SWITCH_SOURCE_VIEW', viewKind: 'list' }, {}, sendResponse);
+        handleMountedSourceViewSwitch('list', sendResponse);
 
         expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({
             success: true,
@@ -1584,7 +2172,7 @@ describe('manager launcher messaging', () => {
         const [sourceKey] = Array.from(mod.sourcesByKey.keys());
         expect(sourceKey).toBeTruthy();
 
-        mod.handleManagerMessage({ type: 'SWITCH_SOURCE_VIEW', viewKind: 'list' }, {}, sendResponse);
+        handleMountedSourceViewSwitch('list', sendResponse);
 
         expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({
             success: true,
@@ -1700,6 +2288,8 @@ describe('manager launcher messaging', () => {
             selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
         ));
 
+        mod._setProjectId('test-project');
+        mountManagerForNativeSync();
         mod.scanAndSyncSources({}, true);
         const sourceKeys = Array.from(mod.sourcesByKey.keys());
         expect(sourceKeys).toHaveLength(2);
@@ -1820,6 +2410,8 @@ describe('manager launcher messaging', () => {
             return [];
         });
 
+        mod._setProjectId('test-project');
+        mountManagerForNativeSync();
         mod.scanAndSyncSources({}, true);
         const sourceKeys = Array.from(mod.sourcesByKey.keys());
         sourceKeys.forEach((sourceKey) => {
@@ -1936,6 +2528,8 @@ describe('manager launcher messaging', () => {
         ));
         global.document.querySelectorAll = jest.fn((selector) => panel.querySelectorAll(selector));
 
+        mod._setProjectId('test-project');
+        mountManagerForNativeSync();
         expect(mod.restoreInitialLoadedState(loadedState)).toEqual({
             deferred: true,
             shouldUpgradeStorage: false
@@ -2037,6 +2631,7 @@ describe('manager launcher messaging', () => {
         second.row.parentNode = expandedLabelGroup;
 
         mod._setProjectId('test-project');
+        mountManagerForNativeSync();
         global.document.querySelector = jest.fn((selector) => (
             selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
         ));
@@ -2117,6 +2712,111 @@ describe('manager launcher messaging', () => {
         );
     });
 
+    it('does not scan or save when a native label checkbox change arrives after disable', async () => {
+        const { groupCheckbox } = installNativeLabelPanelFixture();
+        mod._setProjectId('disable-label-sync');
+        mod.scanAndSyncSources({}, true);
+        global.chrome.runtime.sendMessage.mockClear();
+
+        mod.handleManagerMessage({ type: 'DISABLE_MANAGER' }, {}, jest.fn());
+        global.chrome.runtime.sendMessage.mockClear();
+        mod._handleNativeCheckboxChangeForTest({ target: groupCheckbox });
+        await mod.waitForPendingStateSave();
+
+        expect(mod.sourcesByKey.size).toBe(0);
+        expect(global.chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+            expect.objectContaining({ type: 'SAVE_STATE' }),
+            expect.any(Function)
+        );
+    });
+
+    it('does not let a delayed native view-switch callback scan or save after route cleanup', async () => {
+        const { labelButton } = installNativeLabelPanelFixture();
+        const scheduledCallbacks = [];
+        global.setTimeout = jest.fn((callback, delay) => {
+            scheduledCallbacks.push({ callback, delay });
+            return scheduledCallbacks.length;
+        });
+        mod._setProjectId('notebook-a');
+        mountManagerForNativeSync();
+        mod._handleNativeSourceViewSwitchClickForTest({ target: labelButton });
+        const delayedSwitch = scheduledCallbacks.find(({ delay }) => delay === 80)?.callback;
+        expect(delayedSwitch).toEqual(expect.any(Function));
+
+        mod._setProjectId('notebook-b');
+        mod.beginManagerCleanup({ reason: 'route_switch' });
+        global.chrome.runtime.sendMessage.mockClear();
+        delayedSwitch();
+        await mod.waitForPendingStateSave();
+
+        expect(mod.sourcesByKey.size).toBe(0);
+        expect(global.chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+            expect.objectContaining({
+                type: 'SAVE_STATE',
+                key: 'sourcesPlusState_notebook-b'
+            }),
+            expect.any(Function)
+        );
+    });
+
+    it('does not finalize or save a popup view switch after route cleanup during confirmation polling', async () => {
+        const { panel, labelGroup } = installNativeLabelPanelFixture();
+        const listButton = {
+            tagName: 'BUTTON',
+            textContent: 'view_list',
+            disabled: false,
+            parentElement: panel,
+            parentNode: panel,
+            style: {},
+            getAttribute: jest.fn((attr) => {
+                if (attr === 'aria-label') return 'List view';
+                if (attr === 'data-testid') return 'source-view-list-button';
+                return null;
+            }),
+            matches: jest.fn((selector) => selector === 'button'),
+            closest: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => []),
+            click: jest.fn()
+        };
+        panel.querySelectorAll = jest.fn((selector) => {
+            const value = String(selector);
+            if (value.includes('button') || value.includes('[role="button"]')) return [listButton];
+            if (value.includes('source-label') || value.includes('label-group')) return [labelGroup];
+            return [];
+        });
+        const scheduledCallbacks = [];
+        global.setTimeout = jest.fn((callback, delay) => {
+            scheduledCallbacks.push({ callback, delay });
+            return scheduledCallbacks.length;
+        });
+        const sendResponse = jest.fn();
+        mod._setProjectId('notebook-a');
+        handleMountedSourceViewSwitch('list', sendResponse);
+        expect(listButton.click).toHaveBeenCalledTimes(1);
+
+        mod._setProjectId('notebook-b');
+        mod.beginManagerCleanup({ reason: 'route_switch' });
+        global.chrome.runtime.sendMessage.mockClear();
+        for (let index = 0; index < 10 && scheduledCallbacks.length > 0; index += 1) {
+            const nextTimer = scheduledCallbacks.shift();
+            nextTimer.callback();
+            await Promise.resolve();
+        }
+
+        expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            success: false,
+            reason: 'source_view_context_changed'
+        }));
+        expect(mod.sourcesByKey.size).toBe(0);
+        expect(global.chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+            expect.objectContaining({
+                type: 'SAVE_STATE',
+                key: 'sourcesPlusState_notebook-b'
+            }),
+            expect.any(Function)
+        );
+    });
+
     it('syncs list row native checkbox changes from ARIA checkbox state', async () => {
         const { panel } = createMockPanel({ visible: true, contentVisible: true });
         const source = createMockSourceRow({ title: 'ARIA Native Source', stableToken: 'aria-native-doc', checked: true });
@@ -2139,11 +2839,10 @@ describe('manager launcher messaging', () => {
         mod.scanAndSyncSources({}, true);
         const [sourceKey] = Array.from(mod.sourcesByKey.keys());
         const virtualCheckbox = { checked: true };
-        mod._setShadowRootForTest({
-            querySelector: jest.fn((selector) => (
-                String(selector).includes(sourceKey) ? virtualCheckbox : null
-            ))
-        });
+        const { shadowRoot } = mountManagerForNativeSync();
+        shadowRoot.querySelector.mockImplementation((selector) => (
+            String(selector).includes(sourceKey) ? virtualCheckbox : null
+        ));
         global.chrome.runtime.sendMessage.mockClear();
 
         source.checkbox.checked = undefined;
@@ -3364,6 +4063,24 @@ describe('manager launcher messaging', () => {
         expect(global.window.location.reload).toHaveBeenCalledTimes(1);
         expect(timeoutDelays.length).toBeGreaterThan(0);
         expect(timeoutDelays.every((delay) => delay === 400)).toBe(true);
+    });
+
+    it('waits without reloading when the destination notebook panel is collapsed', async () => {
+        const { panel } = createMockPanel({ visible: true, contentVisible: false });
+        global.setTimeout = jest.fn((callback) => {
+            callback();
+            return 1;
+        });
+        mod._setProjectId('old-project');
+        global.document.querySelector = jest.fn(() => panel);
+        global.window.location.pathname = '/notebook/collapsed-project';
+        global.document.visibilityState = 'visible';
+
+        mod.handleRouteChanged();
+        for (let index = 0; index < 12; index += 1) await Promise.resolve();
+
+        expect(global.window.location.reload).not.toHaveBeenCalled();
+        expect(mod.getManagerStatus()).toMatchObject({ ready: false, reason: 'manager_not_ready' });
     });
 
     it('tears down without reloading when the user leaves a notebook route', () => {

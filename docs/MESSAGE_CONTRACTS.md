@@ -112,7 +112,7 @@ Unauthorized notebook senders return:
 
 ## State save/load responses
 
-`SAVE_STATE` writes are serialized per storage key in the background worker and guarded by save revision metadata. A same-notebook `LOAD_STATE` waits for an already pending `SAVE_STATE` on that key before issuing its storage read, so it returns the persisted revision after the save settles. Loads for different notebook keys remain independent and can proceed in parallel.
+`SAVE_STATE` writes are serialized per storage key in the background worker and guarded by save revision metadata. A `stale_revision.currentRevision` is informational: content must not use it as a new base for the same unmerged local snapshot. Conflict UI offers Refresh; failed-save Retry remains for ordinary storage failures. A same-notebook `LOAD_STATE` waits for an already pending `SAVE_STATE` on that key before issuing its storage read, so it returns the persisted revision after the save settles. Loads for different notebook keys remain independent and can proceed in parallel.
 
 Successful saves return:
 
@@ -178,7 +178,7 @@ Popup/background -> content
 
 `GET_MANAGER_STATUS` should report whether the manager is ready, the current reason when it is not ready, notebook/project context, and source view controls.
 
-`SWITCH_SOURCE_VIEW` must preserve label-view selection state before clicking Gemini Notebook native view controls.
+`SWITCH_SOURCE_VIEW` requires a ready, mounted manager, matching the popup control availability. It preserves label-view selection state before clicking Gemini Notebook native view controls. The operation and every polling/finalization continuation are bound to the current notebook, route, request generation and manager instance. A normal native view control may replace its own host DOM: only that explicitly clicked, same-notebook request may hand off within the original confirmation deadline to a newly mounted manager, after reattachment and native target-view confirmation. Old callbacks never scan or save through a new token directly. Disable, route change, a newer request or an unconfirmed target cancels the old operation without applying state to a later context.
 
 The popup treats an action as complete only when the content response contains `success: true`. A missing response, `null`, or an object without explicit success is a retryable failure: the popup remains open and must not display the requested state as completed.
 

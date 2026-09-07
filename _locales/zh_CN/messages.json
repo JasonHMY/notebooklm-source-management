@@ -1024,7 +1024,7 @@
         "message": "仅看此分组"
     },
     "ui_isolation_active": {
-        "message": "当前仅看 \"$1\"",
+        "message": "仅显示「$1」（不改变回答来源）",
         "placeholders": {
             "1": {
                 "content": "$1"
@@ -1780,5 +1780,65 @@
     },
     "ui_import_backup_discard_failed": {
         "message": "无法丢弃导入备份"
+    },
+    "ui_single_delete_confirm_title": {
+        "message": "删除这份来源？"
+    },
+    "ui_single_delete_confirm_summary": {
+        "message": "以下来源将从 Gemini Notebook 中永久删除。"
+    },
+    "ui_single_delete_confirm_action": {
+        "message": "删除来源"
+    },
+    "ui_native_selection_sync_progress": {
+        "message": "正在更新回答来源：已确认 $1/$2，请等待完成。",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            },
+            "2": {
+                "content": "$2"
+            }
+        }
+    },
+    "ui_source_repair_target_option": {
+        "message": "第 $2 项 · $1",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            },
+            "2": {
+                "content": "$2"
+            }
+        }
+    },
+    "ui_source_repair_binding_incomplete": {
+        "message": "请为每一份待匹配来源选择一个当前来源。"
+    },
+    "ui_source_repair_binding_stale": {
+        "message": "来源列表已变化，请重新打开匹配修复并选择对应来源。"
+    },
+    "ui_source_repair_context_changed": {
+        "message": "已切换笔记本，请在当前笔记本重新打开匹配修复。"
+    },
+    "ui_source_repair_saved_location": {
+        "message": "原位置：$1",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            }
+        }
+    },
+    "ui_source_repair_root_location": {
+        "message": "来源列表顶层"
+    },
+    "ui_source_repair_ambiguous_help": {
+        "message": "存在同名来源，请按当前原生来源列表的顺序逐一匹配。难以区分时，可先在 Notebook 中给来源使用不同名称。"
+    },
+    "ui_source_repair_ambiguous_status": {
+        "message": "同名来源，需要确认对应关系"
+    },
+    "ui_source_repair_unmatched_status": {
+        "message": "尚未自动找到对应的当前来源"
     }
 }

@@ -1024,7 +1024,7 @@
         "message": "Aislar este grupo"
     },
     "ui_isolation_active": {
-        "message": "Aislando \"$1\"",
+        "message": "Mostrando solo \"$1\" (sin cambiar las fuentes de respuesta)",
         "placeholders": {
             "1": {
                 "content": "$1"
@@ -1780,5 +1780,65 @@
     },
     "ui_import_backup_discard_failed": {
         "message": "No se pudo descartar la copia de importación"
+    },
+    "ui_single_delete_confirm_title": {
+        "message": "¿Eliminar esta fuente?"
+    },
+    "ui_single_delete_confirm_summary": {
+        "message": "La siguiente fuente se eliminará permanentemente de Gemini Notebook."
+    },
+    "ui_single_delete_confirm_action": {
+        "message": "Eliminar fuente"
+    },
+    "ui_native_selection_sync_progress": {
+        "message": "Actualizando fuentes de respuesta: $1 de $2 confirmadas. Espera a que termine.",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            },
+            "2": {
+                "content": "$2"
+            }
+        }
+    },
+    "ui_source_repair_target_option": {
+        "message": "Fuente $2 · $1",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            },
+            "2": {
+                "content": "$2"
+            }
+        }
+    },
+    "ui_source_repair_binding_incomplete": {
+        "message": "Elige una fuente actual para cada fuente que necesite vincularse."
+    },
+    "ui_source_repair_binding_stale": {
+        "message": "La lista de fuentes cambió. Vuelve a abrir la vinculación y elige las fuentes de nuevo."
+    },
+    "ui_source_repair_context_changed": {
+        "message": "El cuaderno cambió. Vuelve a abrir la vinculación en el cuaderno actual."
+    },
+    "ui_source_repair_saved_location": {
+        "message": "Ubicación guardada: $1",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            }
+        }
+    },
+    "ui_source_repair_root_location": {
+        "message": "Nivel superior de la lista de fuentes"
+    },
+    "ui_source_repair_ambiguous_help": {
+        "message": "Algunas fuentes tienen el mismo nombre. Vincúlalas por su posición actual en la lista original. Si no puedes distinguirlas, asígnales nombres diferentes en Notebook primero."
+    },
+    "ui_source_repair_ambiguous_status": {
+        "message": "Las fuentes con el mismo nombre necesitan confirmación"
+    },
+    "ui_source_repair_unmatched_status": {
+        "message": "No se encontró automáticamente una fuente actual"
     }
 }

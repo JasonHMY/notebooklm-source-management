@@ -24,7 +24,8 @@
      *   canMoveSourceToUngrouped / moveSourceToUngrouped),
      *   batch 操作 (collectSourceKeysInTreeOrder / executeBatchMoveToUngrouped /
      *   isBatchOperableSource),交互入口 (handleInteraction /
-     *   handleOriginalCheckboxChange / triggerRename / processClickQueue),
+     *   handleOriginalCheckboxChange / triggerRename / processClickQueue /
+     *   getNativeSelectionSyncProgress / cancelNativeSelectionSync),
      *   完整拖拽生命周期 (handleDragStart / handleDragOver / handleDragLeave /
      *   handleDrop / handleDragEnd / clearDragFeedback / computeDropIntent /
      *   applyReflowAfterRender),以及树形位置 (getGroupAncestorChain /
@@ -35,6 +36,8 @@
         const NATIVE_SELECTION_SYNC_CHECK_INTERVAL_MS = 75;
         const NATIVE_SELECTION_SYNC_CHECK_LIMIT = 10;
         const NATIVE_SELECTION_SYNC_CLICK_LIMIT = 2;
+        const NATIVE_SELECTION_SYNC_IMMEDIATE_BATCH_LIMIT = 16;
+        const NATIVE_SELECTION_SYNC_YIELD_DELAY_MS = 0;
         const TREE_ORDER_STATUS_KEYS = {
             up: 'ui_tree_order_moved_up_status',
             down: 'ui_tree_order_moved_down_status',
@@ -45,6 +48,22 @@
         const nativeSelectionGenerationBySourceKey = new Map();
         const nativeSelectionWaitersBySourceKey = new Map();
         let activeNativeSelectionItem = null;
+        let nativeSelectionQueueEpoch = 0;
+        let nativeSelectionScheduledToken = null;
+        let nativeSelectionScheduleSequence = 0;
+        let isProcessingNativeSelectionTurn = false;
+        let nativeSelectionProcessRequested = false;
+        let nativeSelectionBatchWindowOpen = false;
+        let nativeSelectionBatchWindowToken = null;
+        let nativeSelectionBatchWindowSequence = 0;
+        let nativeSelectionProgressRunOpen = false;
+        let nativeSelectionProgressCloseToken = null;
+        let nativeSelectionProgressCloseSequence = 0;
+        let nativeSelectionSyncProgress = {
+            pending: 0,
+            completed: 0,
+            total: 0
+        };
 
         const getState = typeof deps.getState === 'function'
             ? deps.getState
@@ -270,6 +289,11 @@
         const recordNativeSelectionSyncFailure = typeof deps.recordNativeSelectionSyncFailure === 'function'
             ? deps.recordNativeSelectionSyncFailure
             : () => {};
+        const onNativeSelectionSyncProgress = typeof deps.onNativeSelectionSyncProgress === 'function'
+            ? deps.onNativeSelectionSyncProgress
+            : (typeof runtime.onNativeSelectionSyncProgress === 'function'
+                ? runtime.onNativeSelectionSyncProgress
+                : () => {});
         const developerLog = typeof deps.developerLog === 'function'
             ? deps.developerLog
             : (typeof runtime.developerLog === 'function' ? runtime.developerLog : () => false);
@@ -2088,6 +2112,86 @@
             });
         }
 
+        function getNativeSelectionSyncProgress() {
+            return {
+                pending: nativeSelectionSyncProgress.pending,
+                completed: nativeSelectionSyncProgress.completed,
+                total: nativeSelectionSyncProgress.total
+            };
+        }
+
+        function emitNativeSelectionSyncProgress() {
+            const progress = getNativeSelectionSyncProgress();
+            try {
+                onNativeSelectionSyncProgress(progress);
+            } catch (_) {
+                // Progress reporting must not interrupt native-state reconciliation.
+            }
+            return progress;
+        }
+
+        function startNativeSelectionProgressTarget(replacesPendingTarget) {
+            if (replacesPendingTarget) return;
+            if (!nativeSelectionProgressRunOpen) {
+                nativeSelectionSyncProgress = {
+                    pending: 0,
+                    completed: 0,
+                    total: 0
+                };
+                nativeSelectionProgressRunOpen = true;
+            }
+            nativeSelectionSyncProgress.pending += 1;
+            nativeSelectionSyncProgress.total += 1;
+            emitNativeSelectionSyncProgress();
+        }
+
+        function scheduleNativeSelectionProgressClose() {
+            if (
+                !nativeSelectionProgressRunOpen
+                || nativeSelectionSyncProgress.pending > 0
+                || nativeSelectionProgressCloseToken != null
+            ) {
+                return;
+            }
+            const setTimeoutFn = getSetTimeout();
+            if (typeof setTimeoutFn !== 'function') {
+                nativeSelectionProgressRunOpen = false;
+                return;
+            }
+            const closeToken = nativeSelectionProgressCloseSequence + 1;
+            nativeSelectionProgressCloseSequence = closeToken;
+            nativeSelectionProgressCloseToken = closeToken;
+            const closeProgressRun = () => {
+                if (nativeSelectionProgressCloseToken !== closeToken) return;
+                nativeSelectionProgressCloseToken = null;
+                if (nativeSelectionSyncProgress.pending === 0) {
+                    nativeSelectionProgressRunOpen = false;
+                }
+            };
+            try {
+                setTimeoutFn(closeProgressRun, NATIVE_SELECTION_SYNC_YIELD_DELAY_MS);
+            } catch (_) {
+                nativeSelectionProgressCloseToken = null;
+                nativeSelectionProgressRunOpen = false;
+            }
+        }
+
+        function settleNativeSelectionProgressTarget(item, confirmed) {
+            if (!item?.tracksProgress) return;
+            item.tracksProgress = false;
+            nativeSelectionSyncProgress.pending = Math.max(
+                0,
+                nativeSelectionSyncProgress.pending - 1
+            );
+            if (confirmed) {
+                nativeSelectionSyncProgress.completed += 1;
+            }
+            emitNativeSelectionSyncProgress();
+            if (nativeSelectionSyncProgress.pending === 0) {
+                scheduleNativeSelectionProgressClose();
+            }
+        }
+
         function removeQueuedNativeSelectionTarget(sourceKey) {
             const clickQueue = getClickQueue();
             for (let index = clickQueue.length - 1; index >= 0; index -= 1) {
@@ -2106,6 +2210,7 @@
             const sourceKey = String(source?.key || '');
             if (!sourceKey) return null;
 
+            const replacesPendingTarget = hasPendingNativeSelectionTarget(sourceKey);
             const supersedesClickedTarget = Boolean(
                 activeNativeSelectionItem?.sourceKey === sourceKey
                 && activeNativeSelectionItem.clickAttempts > 0
@@ -2125,9 +2230,11 @@
                 checksAfterClick: 0,
                 clickAttempts: 0,
                 confirmationChecks: 0,
-                minimumConfirmationChecks: supersedesClickedTarget ? 2 : 0
+                minimumConfirmationChecks: supersedesClickedTarget ? 2 : 0,
+                tracksProgress: true
             };
             getClickQueue().push(item);
+            startNativeSelectionProgressTarget(replacesPendingTarget);
 
             if (typeof options.resultResolver === 'function') {
                 nativeSelectionWaitersBySourceKey.set(sourceKey, {
@@ -2135,7 +2242,11 @@
                     resolve: options.resultResolver
                 });
             }
-            if (!getIsProcessingQueue()) processClickQueue();
+            // The first immediate control stays responsive; a short window lets a
+            // same-turn bulk transition add later sources before the next batch runs.
+            if (!getIsProcessingQueue() && !nativeSelectionBatchWindowOpen) {
+                processClickQueue();
+            }
             return item;
         }
 
@@ -2146,6 +2257,7 @@
                 clickAttempts: item.clickAttempts,
                 checksAfterClick: item.checksAfterClick
             }, extra);
+            settleNativeSelectionProgressTarget(item, false);
             recordNativeSelectionSyncFailure(Object.assign({
                 sourceKey: item.sourceKey || '',
                 detectedSourceViewKind: getCurrentSourceViewKind() || 'unknown'
@@ -2154,6 +2266,7 @@
         }
 
         function completeNativeSelectionItem(item) {
+            settleNativeSelectionProgressTarget(item, true);
             recordNativeSelectionSyncFailure({
                 sourceKey: item.sourceKey,
                 resolved: true
@@ -2167,13 +2280,180 @@
             });
         }
 
-        function scheduleNextNativeSelectionStep() {
+        function scheduleNextNativeSelectionStep(delay = NATIVE_SELECTION_SYNC_CHECK_INTERVAL_MS) {
+            if (nativeSelectionScheduledToken != null) return false;
             const setTimeoutFn = getSetTimeout();
+            const scheduledEpoch = nativeSelectionQueueEpoch;
+            const scheduledToken = nativeSelectionScheduleSequence + 1;
+            nativeSelectionScheduleSequence = scheduledToken;
+            nativeSelectionScheduledToken = scheduledToken;
+            const resumeQueue = () => {
+                const isCurrentSchedule = nativeSelectionScheduledToken === scheduledToken;
+                if (isCurrentSchedule) nativeSelectionScheduledToken = null;
+                if (!isCurrentSchedule || scheduledEpoch !== nativeSelectionQueueEpoch) return;
+                processClickQueue();
+            };
             if (typeof setTimeoutFn === 'function') {
-                setTimeoutFn(processClickQueue, NATIVE_SELECTION_SYNC_CHECK_INTERVAL_MS);
-                return;
+                try {
+                    setTimeoutFn(resumeQueue, delay);
+                    return true;
+                } catch (_) {
+                    nativeSelectionScheduledToken = null;
+                }
             }
-            processClickQueue();
+            nativeSelectionProcessRequested = true;
+            return false;
+        }
+
+        function scheduleNativeSelectionBatchWindow() {
+            if (nativeSelectionBatchWindowOpen) return false;
+            const setTimeoutFn = getSetTimeout();
+            if (typeof setTimeoutFn !== 'function') return false;
+            const scheduledEpoch = nativeSelectionQueueEpoch;
+            const windowToken = nativeSelectionBatchWindowSequence + 1;
+            nativeSelectionBatchWindowSequence = windowToken;
+            nativeSelectionBatchWindowOpen = true;
+            nativeSelectionBatchWindowToken = windowToken;
+            const closeBatchWindow = () => {
+                const isCurrentWindow = nativeSelectionBatchWindowToken === windowToken;
+                if (isCurrentWindow) {
+                    nativeSelectionBatchWindowToken = null;
+                    nativeSelectionBatchWindowOpen = false;
+                }
+                if (!isCurrentWindow || scheduledEpoch !== nativeSelectionQueueEpoch) return;
+                if (activeNativeSelectionItem || getClickQueue().length > 0) {
+                    processClickQueue();
+                }
+            };
+            try {
+                setTimeoutFn(closeBatchWindow, NATIVE_SELECTION_SYNC_YIELD_DELAY_MS);
+                return true;
+            } catch (_) {
+                nativeSelectionBatchWindowToken = null;
+                nativeSelectionBatchWindowOpen = false;
+                return false;
+            }
+        }
+
+        function cancelNativeSelectionSync(reason = 'cancelled') {
+            const cancellationReason = typeof reason === 'string' && reason
+                ? reason
+                : 'cancelled';
+            const clickQueue = getClickQueue();
+            const queuedItems = Array.isArray(clickQueue) ? clickQueue.splice(0) : [];
+            const activeItem = activeNativeSelectionItem;
+            const latestItemsBySourceKey = new Map();
+            [activeItem, ...queuedItems].forEach((item) => {
+                if (
+                    item?.sourceKey
+                    && nativeSelectionGenerationBySourceKey.get(item.sourceKey) === item.generation
+                ) {
+                    latestItemsBySourceKey.set(item.sourceKey, item);
+                }
+            });
+
+            nativeSelectionQueueEpoch += 1;
+            nativeSelectionScheduledToken = null;
+            nativeSelectionProcessRequested = false;
+            nativeSelectionBatchWindowOpen = false;
+            nativeSelectionBatchWindowToken = null;
+            nativeSelectionProgressRunOpen = false;
+            nativeSelectionProgressCloseToken = null;
+            activeNativeSelectionItem = null;
+
+            latestItemsBySourceKey.forEach((item) => {
+                failNativeSelectionItem(item, cancellationReason);
+            });
+            nativeSelectionWaitersBySourceKey.forEach((waiter, sourceKey) => {
+                waiter.resolve({
+                    ok: false,
+                    sourceKey,
+                    generation: waiter.generation,
+                    reason: cancellationReason
+                });
+            });
+            nativeSelectionWaitersBySourceKey.clear();
+            setIsProcessingQueue(false);
+            setIsSyncingState(false);
+            return getNativeSelectionSyncProgress();
+        }
+
+        function getNativeSelectionItemConfirmationResult(item, checkbox, countConfirmation) {
+            if (shouldToggleNativeCheckbox(checkbox, item.desiredState)) return null;
+            if (item.confirmationChecks < item.minimumConfirmationChecks) {
+                if (countConfirmation) item.confirmationChecks += 1;
+                return { wait: true };
+            }
+            completeNativeSelectionItem(item);
+            return { settled: true };
+        }
+
+        function processActiveNativeSelectionItem(item, documentObj) {
+            if (nativeSelectionGenerationBySourceKey.get(item.sourceKey) !== item.generation) {
+                // A newer request owns this source's progress target and waiter.
+                item.tracksProgress = false;
+                settleNativeSelectionWaiter(item.sourceKey, item.generation, {
+                    reason: 'superseded'
+                });
+                return { settled: true };
+            }
+
+            if (item.contextToken !== getNativeSelectionContextToken()) {
+                return { cancelAll: true, reason: 'context_changed' };
+            }
+
+            let checkbox = item.checkbox;
+            if (!checkbox || !documentObj?.body?.contains?.(checkbox)) {
+                checkbox = findFreshCheckbox(item.sourceKey);
+                item.checkbox = checkbox || null;
+            }
+
+            if (!checkbox) {
+                item.checksAfterClick += 1;
+                if (item.retryOnMissing && item.checksAfterClick < NATIVE_SELECTION_SYNC_CHECK_LIMIT) {
+                    return { wait: true };
+                }
+                failNativeSelectionItem(item, 'native_checkbox_missing_during_queue');
+                return { settled: true };
+            }
+
+            const alreadyConfirmed = getNativeSelectionItemConfirmationResult(item, checkbox, true);
+            if (alreadyConfirmed) return alreadyConfirmed;
+
+            const canRetryClick = item.clickAttempts === 0
+                || item.checksAfterClick >= NATIVE_SELECTION_SYNC_CHECK_LIMIT;
+            if (!canRetryClick) {
+                item.checksAfterClick += 1;
+                return { wait: true };
+            }
+
+            // Each click receives its own full confirmation window. Do not turn the
+            // second click limit into a one-poll timeout for a slow host update.
+            if (item.clickAttempts >= NATIVE_SELECTION_SYNC_CLICK_LIMIT) {
+                failNativeSelectionItem(item, 'native_checkbox_timeout', {
+                    currentState: getNativeCheckboxState(checkbox)
+                });
+                return { settled: true };
+            }
+
+            if (typeof checkbox.click !== 'function') {
+                failNativeSelectionItem(item, 'native_checkbox_click_unavailable');
+                return { settled: true };
+            }
+
+            item.checksAfterClick = 0;
+            item.clickAttempts += 1;
+            try {
+                checkbox.click();
+            } catch (_) {
+                failNativeSelectionItem(item, 'native_checkbox_click_failed');
+                return { settled: true };
+            }
+
+            const confirmedAfterClick = getNativeSelectionItemConfirmationResult(item, checkbox, false);
+            if (confirmedAfterClick) return confirmedAfterClick;
+            item.checksAfterClick = 1;
+            return { wait: true };
         }
 
         function syncSourceToPage(source, desiredState, options = {}) {
@@ -2273,98 +2553,64 @@
         }
 
         function processClickQueue() {
+            if (isProcessingNativeSelectionTurn) {
+                nativeSelectionProcessRequested = true;
+                return;
+            }
+            isProcessingNativeSelectionTurn = true;
             const clickQueue = getClickQueue();
             const documentObj = getDocument();
 
-            if (!activeNativeSelectionItem && clickQueue.length === 0) {
-                setIsProcessingQueue(false);
-                setIsSyncingState(false);
-                return;
-            }
-
-            setIsProcessingQueue(true);
-            setIsSyncingState(true);
-
-            if (!activeNativeSelectionItem) {
-                activeNativeSelectionItem = clickQueue.shift() || null;
-            }
-            const item = activeNativeSelectionItem;
-            if (!item) {
-                scheduleNextNativeSelectionStep();
-                return;
-            }
-
-            if (nativeSelectionGenerationBySourceKey.get(item.sourceKey) !== item.generation) {
-                settleNativeSelectionWaiter(item.sourceKey, item.generation, {
-                    reason: 'superseded'
-                });
-                activeNativeSelectionItem = null;
-                scheduleNextNativeSelectionStep();
-                return;
-            }
-
-            if (item.contextToken !== getNativeSelectionContextToken()) {
-                failNativeSelectionItem(item, 'context_changed');
-                activeNativeSelectionItem = null;
-                scheduleNextNativeSelectionStep();
-                return;
-            }
-
-            let checkbox = item.checkbox;
-            if (!checkbox || !documentObj?.body?.contains?.(checkbox)) {
-                checkbox = findFreshCheckbox(item.sourceKey);
-                item.checkbox = checkbox || null;
-            }
-
-            if (!checkbox) {
-                item.checksAfterClick += 1;
-                if (item.retryOnMissing && item.checksAfterClick < NATIVE_SELECTION_SYNC_CHECK_LIMIT) {
-                    scheduleNextNativeSelectionStep();
+            try {
+                if (!activeNativeSelectionItem && clickQueue.length === 0) {
+                    setIsProcessingQueue(false);
+                    setIsSyncingState(false);
                     return;
                 }
-                failNativeSelectionItem(item, 'native_checkbox_missing_during_queue');
-                activeNativeSelectionItem = null;
-                scheduleNextNativeSelectionStep();
-                return;
-            }
 
-            if (!shouldToggleNativeCheckbox(checkbox, item.desiredState)) {
-                if (item.confirmationChecks < item.minimumConfirmationChecks) {
-                    item.confirmationChecks += 1;
-                    scheduleNextNativeSelectionStep();
-                    return;
-                }
-                completeNativeSelectionItem(item);
-                activeNativeSelectionItem = null;
-                scheduleNextNativeSelectionStep();
-                return;
-            }
+                setIsProcessingQueue(true);
+                setIsSyncingState(true);
+                let immediateSteps = 0;
+                while (immediateSteps < NATIVE_SELECTION_SYNC_IMMEDIATE_BATCH_LIMIT) {
+                    if (!activeNativeSelectionItem) {
+                        activeNativeSelectionItem = clickQueue.shift() || null;
+                    }
+                    const item = activeNativeSelectionItem;
+                    if (!item) break;
 
-            if (item.clickAttempts >= NATIVE_SELECTION_SYNC_CLICK_LIMIT) {
-                failNativeSelectionItem(item, 'native_checkbox_timeout', {
-                    currentState: getNativeCheckboxState(checkbox)
-                });
-                activeNativeSelectionItem = null;
-                scheduleNextNativeSelectionStep();
-                return;
-            }
+                    const result = processActiveNativeSelectionItem(item, documentObj);
+                    if (result.cancelAll) {
+                        cancelNativeSelectionSync(result.reason);
+                        return;
+                    }
+                    if (result.wait) {
+                        scheduleNextNativeSelectionStep(result.delay);
+                        return;
+                    }
 
-            if (item.checksAfterClick === 0) {
-                if (typeof checkbox.click !== 'function') {
-                    failNativeSelectionItem(item, 'native_checkbox_click_unavailable');
                     activeNativeSelectionItem = null;
-                    scheduleNextNativeSelectionStep();
+                    immediateSteps += 1;
+                }
+
+                if (!activeNativeSelectionItem && clickQueue.length === 0) {
+                    setIsProcessingQueue(false);
+                    setIsSyncingState(false);
+                    if (immediateSteps > 0) {
+                        // Let the next same-turn source sync join a bounded batch without
+                        // leaving native event handlers blocked by isSyncingState.
+                        scheduleNativeSelectionBatchWindow();
+                    }
                     return;
                 }
-                item.clickAttempts += 1;
-                checkbox.click();
-            }
-            item.checksAfterClick += 1;
 
-            if (item.checksAfterClick >= NATIVE_SELECTION_SYNC_CHECK_LIMIT) {
-                item.checksAfterClick = 0;
+                scheduleNextNativeSelectionStep(NATIVE_SELECTION_SYNC_YIELD_DELAY_MS);
+            } finally {
+                isProcessingNativeSelectionTurn = false;
+                if (nativeSelectionProcessRequested) {
+                    nativeSelectionProcessRequested = false;
+                    processClickQueue();
+                }
             }
-            scheduleNextNativeSelectionStep();
         }
 
         function findParentGroupOfSource(key) {
@@ -6185,6 +6431,8 @@
             syncSourceToPage,
             syncSourceToPageWithResult,
             processClickQueue,
+            getNativeSelectionSyncProgress,
+            cancelNativeSelectionSync,
             findParentGroupOfSource,
             isBatchOperableSource,
             isBatchSelectionElementVisible,

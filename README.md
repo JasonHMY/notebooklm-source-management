@@ -12,17 +12,18 @@ The extension supports the current `https://notebook.google.com/` site and keeps
 ## What It Does
 
 - Group sources into custom folders.
-- Create nested folders, move sources into subfolders, and isolate one folder when you want to focus.
+- Create nested folders, move sources into subfolders, and visually isolate one folder without changing the sources used in Notebook answers.
 - Reorder sources or whole groups with drag and drop.
 - Choose your drag mode in Settings → Appearance: **classic** (default — a blue insertion line, loose sources land in folders or the bottom "Ungrouped" bin) or **reflow (Beta)** — other sources move aside as you drag and you can drop a source anywhere at the root level, including between two folders.
-- Search by source title, tag, or folder, with simple `tag:` and `folder:` filters.
+- Search by source title, tag, or folder, with simple `tag:` and `folder:` filters. The organization toolbar remains available, so you can search first and then move the results in a batch.
 - Automatically expand folders that contain search results, then restore the previous collapsed state when search is cleared.
 - Add color-coded custom tags, search the tag picker, filter by tag, and batch add or remove tags.
 - Move sources into folders one at a time or in batches, create the destination folder without leaving the move dialog, and move selected sources back to ungrouped.
 - Select every currently visible, operable source or clear the selection from the batch action bar.
 - Delete multiple sources only after an extension confirmation and Gemini Notebook's native confirmation; sources without native actions stay selected for local organization, and local state is updated only after a complete source-panel scan proves that the native row is gone.
-- Open source details, rename sources, and delete sources from the plugin menu when Gemini Notebook exposes those native actions for the row; custom-tag, folder, and ordering actions remain available independently.
+- Open source details, rename sources, and delete sources from the plugin menu when Gemini Notebook exposes those native actions for the row. Single-source deletion asks for confirmation with the complete title before touching native controls; custom-tag, folder, and ordering actions remain available independently.
 - Undo and redo recent plugin-side organization changes from the toolbar, command palette, or keyboard. Undo uses `Command+Z` on macOS or `Ctrl+Z` on Windows/Linux; redo uses `Command+Shift+Z`, `Ctrl+Shift+Z`, or `Ctrl+Y`.
+- See progress when a multi-source answer-selection update takes time; confirmed source states are counted, and pending work is cancelled when the manager is removed.
 - See save status only when attention is required: failed saves, stale state, or available recovery stay visible with the relevant retry, refresh, restore, or dismiss action.
 - Get distinct guidance for an empty notebook, a search with no matches, a filtered view with no matches, or an isolated folder with nothing to show.
 - Show a one-time welcome panel with a feedback shortcut the first time the in-page manager loads.
@@ -49,7 +50,7 @@ After installation:
 - If you already have a notebook open in Gemini Notebook, clicking the toolbar icon will try to bring you straight to the in-page source manager.
 - If you are not inside a notebook yet, it will open Gemini Notebook first so you can choose one.
 
-Gemini Notebook is a single-page app, so switching notebooks does not always trigger a full reload. This extension tries to tear down and rebuild itself in place. A full page refresh is only used as a fallback when the source panel cannot be reattached after repeated retries.
+Gemini Notebook is a single-page app, so switching notebooks does not always trigger a full reload. This extension tries to tear down and rebuild itself in place. An intentionally collapsed source panel waits for expansion. A full page refresh is only used as a fallback when the source panel is actually missing after repeated retries.
 
 ## Automated Checks
 
@@ -93,8 +94,9 @@ See [PRIVACY.md](PRIVACY.md) for the full privacy note.
 - **Batch actions are disabled.** Make sure the source list has finished loading. Controls stay disabled while Gemini Notebook is still rendering placeholders.
 - **Undo or redo reports that it could not be saved.** The manager restores the state from before that history action and leaves the history entry available. Resolve the persistent save-status warning, then try again.
 - **The popup still says a refresh is needed, or it cannot find the source panel.** Refresh the page, then open the launcher again so the extension can rebuild its state.
-- **A source loses its saved enabled state.** The extension prefers stable DOM identifiers when it can find them. If Gemini Notebook does not expose one, it falls back to a normalized fingerprint based on `title + aria-label + icon`. That works most of the time, but duplicate or unnamed sources can still be matched imperfectly after a major UI change.
+- **A source loses its saved enabled state.** The extension prefers stable DOM identifiers when it can find them. If Gemini Notebook does not expose one, it falls back to a normalized fingerprint based on `title + aria-label + icon`. Reordering the same DOM rows preserves their bindings. If replacement rows have ambiguous duplicate fingerprints, automatic migration stops and keeps the previous organization available for repair instead of guessing from row order.
 - **Import preview reports unmatched sources.** The imported folders and tags can still be applied, but unmatched sources cannot inherit source-specific state until Gemini Notebook exposes matching source identities in the current notebook.
+- **Another tab has newer changes.** Refresh to load its current organization before editing again. Repeated writes from the old snapshot remain rejected; the unsaved local recovery snapshot is preserved.
 - **Undo does not restore a source deleted from Gemini Notebook.** Undo covers plugin-side organization changes. Native Gemini Notebook deletion still removes the real source through Gemini Notebook's own confirmation flow.
 
 ## Development Smoke Checklist
