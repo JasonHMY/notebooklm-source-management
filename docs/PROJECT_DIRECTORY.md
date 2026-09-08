@@ -64,7 +64,7 @@ GeminiNotebook-Source-Management
 │   │   ├── content-modal-welcome.js
 │   │   │   └── 首次欢迎 modal 渲染、按钮和反馈入口 helper
 │   │   ├── content-modal-whats-new.js
-│   │   │   └── 更新介绍 modal 渲染、变更亮点和反馈入口 helper
+│   │   │   └── 更新介绍 modal 渲染、变更亮点和反馈入口 helper；版本从 manifest 读取，当前发布文案由 _locales 三语消息提供
 │   │   ├── content-modal-tag-filter.js
 │   │   │   └── tag filter modal：标签搜索、结果计数、无匹配状态、aria-pressed 选中状态和过滤回调 helper
 │   │   ├── content-modal-move.js
@@ -898,6 +898,8 @@ CI: .github/workflows/ci.yml
 ├── CHANGELOG.md
 └── release/gemininotebook-source-management-<version>.zip
 ```
+
+启用「更新介绍」的版本还需同步 `_locales/{en,es,zh_CN}/messages.json` 的 `ui_whats_new_*` 文案，并核对 `src/content/content-modal-whats-new.js` 的亮点行。`src/content/index.js` 从 manifest 读取版本，比较 `whatsNewSeenVersion` 后决定是否展示；本地打包不代表已提交 Chrome Web Store。
 
 ## 7. Agent 快速定位树
 

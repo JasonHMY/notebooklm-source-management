@@ -96,7 +96,7 @@
             ]);
             const content = el('div', { className: 'sp-folder-modal-content sp-welcome-content' }, [
                 el('div', { className: 'sp-welcome-feature-list' }, [
-                    featureRow('notifications_off', 'ui_whats_new_transaction_title', 'ui_whats_new_transaction_body'),
+                    featureRow('save', 'ui_whats_new_transaction_title', 'ui_whats_new_transaction_body'),
                     featureRow('rule', 'ui_whats_new_native_safety_title', 'ui_whats_new_native_safety_body'),
                     featureRow('checklist', 'ui_whats_new_batch_storage_title', 'ui_whats_new_batch_storage_body'),
                     featureRow('manage_search', 'ui_whats_new_accessibility_scale_title', 'ui_whats_new_accessibility_scale_body')

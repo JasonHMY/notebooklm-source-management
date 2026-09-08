@@ -615,31 +615,31 @@
         "message": "What's new"
     },
     "ui_whats_new_subtitle": {
-        "message": "Clearer source actions, quieter status feedback, and a cleaner batch workflow."
+        "message": "26.9.8: Keep your organization, confirm deletions, and get faster batch feedback."
     },
     "ui_whats_new_transaction_title": {
-        "message": "Quieter save feedback"
+        "message": "Keep your organization"
     },
     "ui_whats_new_transaction_body": {
-        "message": "Routine Saving and Saved messages stay out of the way. Failed, stale, and recovery states remain visible with the actions needed to resolve them."
+        "message": "Older backups no longer put sources back into folders you emptied. Save conflicts prompt a refresh so retries cannot overwrite another tab's newer work. Ambiguous duplicate sources can be matched manually in Source Repair."
     },
     "ui_whats_new_native_safety_title": {
-        "message": "Actions that match each source"
+        "message": "Clearer deletion and view controls"
     },
     "ui_whats_new_native_safety_body": {
-        "message": "Sources without a native action menu keep custom-tag, folder, and ordering actions without showing unavailable Details, Rename, or Delete commands. Batch delete skips them and keeps them selected."
+        "message": "Deleting one source now shows its full title and asks for confirmation. Show only this folder filters the view without changing the sources used for answers. Words like error or failure in a title no longer mark a healthy source as failed."
     },
     "ui_whats_new_batch_storage_title": {
-        "message": "Cleaner batch mode"
+        "message": "Faster batch selection feedback"
     },
     "ui_whats_new_batch_storage_body": {
-        "message": "Before a source is selected, the batch bar shows only Cancel, the selection count, and Select visible. Clear and batch actions appear once there is something to act on."
+        "message": "Large enable or disable operations confirm responsive checkboxes sooner, show progress during longer waits, and keep a retry action on failure. Disabling the extension or switching notebooks cancels queued work from the previous page."
     },
     "ui_whats_new_accessibility_scale_title": {
-        "message": "Clearer labels and search counts"
+        "message": "Keep organizing while searching"
     },
     "ui_whats_new_accessibility_scale_body": {
-        "message": "Manage Custom Tags now differs clearly from Gemini Notebook labels. Search counts have more room and expose their full text when truncated, while Sort sources no longer looks like a label view."
+        "message": "Batch actions, New folder, and Undo remain available above search results and wrap in narrow panels. A collapsed source panel waits to be expanded instead of triggering a full-page reload."
     },
     "ui_whats_new_drag_title": {
         "message": "Smoother, more reliable reflow drag (Beta)"

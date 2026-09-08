@@ -111,7 +111,7 @@ describe('content modal whats-new', () => {
         expect(customRow).toHaveBeenCalledTimes(4);
         expect(customRow).toHaveBeenNthCalledWith(
             1,
-            'notifications_off',
+            'save',
             'ui_whats_new_transaction_title',
             'ui_whats_new_transaction_body'
         );

@@ -615,31 +615,31 @@
         "message": "更新介绍"
     },
     "ui_whats_new_subtitle": {
-        "message": "来源操作更准确，保存提示更安静，批量整理也更简洁。"
+        "message": "26.9.8：保留整理结果，删除先确认，批量操作更及时。"
     },
     "ui_whats_new_transaction_title": {
-        "message": "更安静的保存提示"
+        "message": "保留你的整理结果"
     },
     "ui_whats_new_transaction_body": {
-        "message": "日常的“正在保存”和“已保存”不再占用界面；保存失败、版本过期和可恢复状态仍会显示，并保留解决问题所需的操作。"
+        "message": "移出文件夹的来源不再被旧备份放回；遇到其他标签页的保存冲突，会提示刷新，避免重试覆盖新整理。无法区分的重复来源可在来源修复中手动匹配。"
     },
     "ui_whats_new_native_safety_title": {
-        "message": "操作与来源能力一致"
+        "message": "删除与仅看范围更清楚"
     },
     "ui_whats_new_native_safety_body": {
-        "message": "没有原生操作菜单的来源仍可使用自定义标签、文件夹和排序，但不再显示无法执行的详情、重命名或删除。批量删除会跳过这些来源并保持选中。"
+        "message": "删除单条来源前会显示完整标题并等待确认；“仅看此分组”只筛选界面，不改变回答使用的来源。标题中的“错误”或“失败”不再被误判为来源故障。"
     },
     "ui_whats_new_batch_storage_title": {
-        "message": "更简洁的批量模式"
+        "message": "批量勾选及时反馈"
     },
     "ui_whats_new_batch_storage_body": {
-        "message": "尚未选择来源时，批量栏只显示取消、选择计数和选择当前可见；选中来源后，才显示清除选择和各项批量操作。"
+        "message": "大量启用或停用来源时，更快确认已生效的勾选；等待较久会显示进度，失败时保留重试入口。关闭扩展或切换笔记本会取消旧页面的排队操作。"
     },
     "ui_whats_new_accessibility_scale_title": {
-        "message": "更清楚的标签与搜索计数"
+        "message": "搜索时继续整理"
     },
     "ui_whats_new_accessibility_scale_body": {
-        "message": "“管理自定义标签”与 Gemini Notebook 原生标签区分得更清楚；搜索计数有更多显示空间，截断时可查看全文，“来源排序”也不再被识别成标签视图。"
+        "message": "搜索结果上保留批量操作、新建分组和撤销入口，窄面板也可换行显示；来源面板折叠时等待展开，不再因此自动刷新整个页面。"
     },
     "ui_whats_new_drag_title": {
         "message": "更顺滑可靠的避让拖拽(Beta)"
