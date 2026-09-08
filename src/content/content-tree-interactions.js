@@ -1645,6 +1645,23 @@
             }
             dragReflow.foldDraggedItems({ session, rootElement });
             invalidateDragGeometry('drag_items_folded');
+            if (rootElement?.dataset?.sourceWindowingActive === 'true') {
+                // Folding can put a spacer under a stationary viewport without
+                // changing scrollTop. Reproject now, while retaining the same
+                // mounted origins that the dragstart timer marks for pinning.
+                if (session.draggedType === 'source' && session.mountedItemStates instanceof Map) {
+                    session.mountedItemStates.forEach((state, key) => {
+                        const element = state?.element;
+                        if (element?.dataset?.sourceKey === key && rootElement.contains(element)) {
+                            element.classList.add('dragging');
+                        }
+                    });
+                }
+                render();
+            }
+            if (session.requiresMountedRefresh === true) {
+                applyReflowAfterRender();
+            }
         }
 
         function scheduleDeferredDragFold(session, rootElement) {
@@ -5120,19 +5137,21 @@
         }
         function handleDragOver(e) {
             e.preventDefault();
-            const dropEffect = resolveSynchronousDropEffect({
-                clientX: e.clientX,
-                clientY: e.clientY,
-                geometrySnapshot: runtime.dragGeometrySnapshot,
-                geometryDirty: runtime.dragGeometryDirty,
-                state: getState(),
-                groupsById: getGroupsById(),
-                activeDragContext: runtime.activeDragContext,
-                parentMap: getParentMap(),
-                prevIntent: runtime.dragReflowSession
-                    ? runtime.dragReflowSession.currentIntent
-                    : null
-            });
+            const dropEffect = runtime.dragReflowSession?.mountedRefreshComplete === false
+                ? 'none'
+                : resolveSynchronousDropEffect({
+                    clientX: e.clientX,
+                    clientY: e.clientY,
+                    geometrySnapshot: runtime.dragGeometrySnapshot,
+                    geometryDirty: runtime.dragGeometryDirty,
+                    state: getState(),
+                    groupsById: getGroupsById(),
+                    activeDragContext: runtime.activeDragContext,
+                    parentMap: getParentMap(),
+                    prevIntent: runtime.dragReflowSession
+                        ? runtime.dragReflowSession.currentIntent
+                        : null
+                });
             if (e.dataTransfer) {
                 try { e.dataTransfer.dropEffect = dropEffect; } catch (_) {}
             }
@@ -5154,6 +5173,7 @@
         // any reflow transform) — we want what the user visually sees under the cursor.
         // Returns null when the pointer isn't over a collapsed, non-empty folder header.
         function _processDragOver(args) {
+            if (runtime.dragReflowSession?.mountedRefreshComplete === false) return null;
             const sourceListEl = getSourceListContainer();
             const geometrySnapshot = readDragGeometry({
                 rootElement: sourceListEl,
@@ -5711,6 +5731,8 @@
                 });
             }
             let reflowClearedForMutation = false;
+            const previousDropInProgress = runtime.dragDropInProgress === true;
+            runtime.dragDropInProgress = true;
             const clearReflowBeforeMutation = () => {
                 if (reflowClearedForMutation) return;
                 if (dragReflow && runtime.dragReflowSession && typeof dragReflow.clearReflow === 'function') {
@@ -5741,6 +5763,10 @@
             try {
                 cancelAllHoverTimers();
                 e.preventDefault();
+                if (runtime.dragReflowSession?.mountedRefreshComplete === false) {
+                    clearDragFeedback();
+                    return;
+                }
                 const dragPayload = readTrustedDropPayload(e.dataTransfer);
                 if (!dragPayload) {
                     clearDragFeedback();
@@ -5967,7 +5993,11 @@
                     }
                 }
             } finally {
-                finalizeReflow();
+                try {
+                    finalizeReflow();
+                } finally {
+                    runtime.dragDropInProgress = previousDropInProgress;
+                }
             }
         }
 
@@ -6314,6 +6344,7 @@
         // visually-shifted positions across the render. Idempotent: if shifts
         // already match (prev === delta) applyReflow skips per-element work.
         function applyReflowAfterRender() {
+            if (runtime.dragDropInProgress === true) return;
             if (!runtime.activeDragContext && !runtime.dragReflowSession) return;
             const rootElement = getSourceListContainer();
             if (!rootElement) return;
@@ -6339,6 +6370,47 @@
                     }
                 }
             }
+            const session = runtime.dragReflowSession;
+            let refreshResult = null;
+            if (
+                runtime.activeDragContext
+                && session?.foldedActive === true
+                && typeof dragReflow?.refreshMountedDragSession === 'function'
+            ) {
+                try {
+                    refreshResult = dragReflow.refreshMountedDragSession({
+                        session,
+                        rootElement,
+                        sourceElements,
+                        groupElements
+                    });
+                } catch (_) {
+                    refreshResult = { complete: false };
+                }
+                session.mountedRefreshComplete = refreshResult?.complete === true;
+                if (!session.mountedRefreshComplete) {
+                    session.currentIntent = null;
+                    clearAppliedDragFeedback();
+                    dragReflow.clearReflow({ session, rootElement });
+                    cancelAllHoverTimers();
+                    _setUngroupDropzoneVisible(false);
+                    if (autoScrollController) autoScrollController.stop();
+                    invalidateDragGeometry('drag_mounted_rows_unconfirmed', { schedule: false });
+                    return;
+                }
+            }
+            const refreshGeometryAfterReplay = () => {
+                if (!refreshResult || (!refreshResult.changed && !refreshResult.needsGeometryRebuild)) return;
+                invalidateDragGeometry('drag_mounted_rows_refreshed', { schedule: false });
+                // Replayed transforms must match the session maps before reading
+                // transform-neutral geometry for the new mounted footprint. Reuse
+                // an already queued input frame to consume the invalidated
+                // snapshot. Only a stationary pointer with
+                // no queued frame needs the synchronous render continuation.
+                if (_pendingDragOverRafId == null) {
+                    flushDragFrameNow({ reason: 'drag_mounted_rows_refreshed' });
+                }
+            };
             const cachedSnapshot = runtime.dragGeometrySnapshot;
             const lifecycleTargetSizes = new Map();
             if (
@@ -6430,10 +6502,14 @@
                     sourceElements,
                     groupElements
                 });
+                refreshGeometryAfterReplay();
                 return;
             }
             const live = runtime.dragReflowSession.shiftedItems;
-            if (!(live instanceof Map) || live.size === 0) return;
+            if (!(live instanceof Map) || live.size === 0) {
+                refreshGeometryAfterReplay();
+                return;
+            }
             // render() rebuilt the rows, so the fresh nodes carry no inline
             // transform — but session.shiftedItems still records the shift values.
             // Snapshot those values, then CLEAR the live Map so applyReflow's
@@ -6449,6 +6525,7 @@
                 shifts: snapshot,
                 rootElement
             });
+            refreshGeometryAfterReplay();
         }
 
         // Classic mode cannot represent positioned root sources, so switching to classic

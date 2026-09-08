@@ -11,12 +11,14 @@ const {
     waitForExtensionId
 } = require('./helpers/extension-context');
 const { installNotebookFixture } = require('./helpers/notebooklm-fixture');
+const createContentDragMulti = require('../../src/content/content-drag-multi.js');
 
 const repoRoot = path.resolve(__dirname, '../..');
 const WARMUP_SESSIONS = 5;
 const MEASURED_SESSIONS = 20;
 const WARMUP_FRAMES = 10;
 const MEASURED_FRAMES = 50;
+const autoScrollEdgePx = createContentDragMulti({}).EDGE_PX;
 const rowCounts = [100, 500];
 
 test.skip(process.env.DRAG_BENCHMARK !== '1', 'Set DRAG_BENCHMARK=1 to run the opt-in drag benchmark.');
@@ -346,7 +348,7 @@ test.describe.serial('drag performance baseline', () => {
                 await page.goto(`https://notebooklm.google.com/notebook/drag-benchmark-${rowCount}`);
                 await expect(page.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
 
-                const results = await page.evaluate(async ({ nextRowCount, sources, warmupSessions, measuredSessions, warmupFrames, measuredFrames }) => {
+                const results = await page.evaluate(async ({ nextRowCount, sources, warmupSessions, measuredSessions, warmupFrames, measuredFrames, dragEdgePx }) => {
                     const getRoot = () => document.querySelector('#sources-plus-root')?.shadowRoot || null;
                     const benchmarkBridge = (command, capture = null, callbackId = null) => {
                         const host = document.querySelector('#sources-plus-root');
@@ -446,9 +448,11 @@ test.describe.serial('drag performance baseline', () => {
                         updateSourceWindowRowHeight(list);
                         return list;
                     };
-                    const materializeSource = async (key) => {
+                    const materializeSource = async (key, { forceScroll = false } = {}) => {
                         const existing = rowFor(key);
-                        if (existing) return existing;
+                        const shouldForceScroll = forceScroll
+                            && getSourcesList()?.dataset?.sourceWindowingActive === 'true';
+                        if (existing && !shouldForceScroll) return existing;
                         const ordinal = sourceWindowOrdinalByKey.get(key);
                         if (!Number.isSafeInteger(ordinal) || ordinal < 0) {
                             throw new Error(`No logical source-window ordinal is available for ${key}.`);
@@ -507,6 +511,13 @@ test.describe.serial('drag performance baseline', () => {
                         });
                         row.dispatchEvent(event);
                         return event.dataTransfer;
+                    };
+                    const dispatchCurrentDragEnd = (dataTransfer, label) => {
+                        const currentList = getSourcesList();
+                        if (!currentList?.isConnected) {
+                            throw new Error(`Benchmark ${label} dragend target is disconnected.`);
+                        }
+                        dispatchDrag(currentList, 'dragend', { dataTransfer });
                     };
                     const normalizePrepareState = () => {
                         const sourcesList = getRoot()?.querySelector('#sources-list');
@@ -615,13 +626,13 @@ test.describe.serial('drag performance baseline', () => {
                             clientX: Math.floor(rect.left + rect.width * 0.75),
                             clientY: Math.floor(rect.top + rect.height / 2)
                         });
-                        dispatchDrag(origin, 'dragend', { dataTransfer });
+                        dispatchCurrentDragEnd(dataTransfer, 'distribution');
                         await wait(30);
                         await nextFrame();
                         await disableBatch();
                     };
                     const runPrepare = async (originKey, selectionCount, record) => {
-                        const origin = await materializeSource(originKey);
+                        const origin = await materializeSource(originKey, { forceScroll: true });
                         if (!origin) throw new Error(`Benchmark origin ${originKey} missing.`);
                         const materializedSelectionCount = selectionCount > 1
                             ? getRoot()?.querySelectorAll('.source-item.selected-for-batch').length || 0
@@ -672,7 +683,7 @@ test.describe.serial('drag performance baseline', () => {
                         }
                         await waitForCallbackIds(foldCallbackIds, 'Deferred dragstart fold did not complete');
                         const beforeDragEnd = benchmarkBridge('snapshot');
-                        dispatchDrag(origin, 'dragend', { dataTransfer });
+                        dispatchCurrentDragEnd(dataTransfer, 'prepare');
                         const afterDragEnd = benchmarkBridge('snapshot');
                         await waitForCallbackIds(
                             newCallbackIds(beforeDragEnd.scheduledCallbackIds, afterDragEnd.scheduledCallbackIds),
@@ -692,7 +703,7 @@ test.describe.serial('drag performance baseline', () => {
                         for (const targetKey of targetKeys) {
                             await materializeSource(targetKey);
                         }
-                        const origin = await materializeSource(originKey);
+                        const origin = await materializeSource(originKey, { forceScroll: true });
                         return {
                             origin,
                             targetKeys
@@ -713,31 +724,51 @@ test.describe.serial('drag performance baseline', () => {
                         }
                         await waitForCallbackIds(foldCallbackIds, 'Frame benchmark fold callback did not complete');
                         benchmarkBridge('reset-frames');
-                        const listRect = getRoot()?.querySelector('#sources-list')?.getBoundingClientRect();
-                        const visibleCandidates = Array.from(getRoot()?.querySelectorAll('.source-item:not(.selected-for-batch)') || [])
-                            .filter((candidate) => {
-                                const rect = candidate.getBoundingClientRect();
-                                return listRect && rect.bottom > listRect.top && rect.top < listRect.bottom;
+                        const root = getRoot();
+                        const initialListRect = getSourcesList()?.getBoundingClientRect();
+                        const inputPoints = Array.from(new Set([
+                            ...Array.from(root?.querySelectorAll('.source-item:not(.selected-for-batch)') || [])
+                        ])).flatMap((candidate) => {
+                            if (!candidate.isConnected || !root.contains(candidate)
+                                || candidate.classList.contains('selected-for-batch')) return [];
+                            const rect = candidate.getBoundingClientRect();
+                            const point = {
+                                sourceKey: candidate.dataset.sourceKey,
+                                clientX: Math.floor(rect.left + rect.width / 2),
+                                clientY: Math.floor(rect.top + rect.height / 2)
+                            };
+                            return rect.height > 1 && initialListRect
+                                && point.clientY >= initialListRect.top + dragEdgePx
+                                && point.clientY <= initialListRect.bottom - dragEdgePx
+                                ? [point] : [];
+                        }).slice(0, 12);
+                        if (inputPoints.length < 2) {
+                            const list = getSourcesList();
+                            const rows = Array.from(root?.querySelectorAll('.source-item') || []).map((row) => {
+                                const rect = row.getBoundingClientRect();
+                                return { key: row.dataset.sourceKey, selected: row.classList.contains('selected-for-batch'), folded: row.classList.contains('sp-drag-folded'), top: rect.top, height: rect.height };
                             });
-                        const materializedTargets = targetKeys.map((targetKey) => rowFor(targetKey));
-                        const missingMaterializedTargetKeys = materializedTargets.filter((target) => !target).length;
-                        const candidates = Array.from(new Set([
-                            ...materializedTargets.filter(Boolean),
-                            ...visibleCandidates
-                        ])).slice(0, 12);
-                        if (candidates.length < 2 || missingMaterializedTargetKeys > 0) {
-                            throw new Error(`Not enough materialized non-selected benchmark drag targets; candidates ${candidates.length}, targets missing ${missingMaterializedTargetKeys}.`);
+                            throw new Error(`Only ${inputPoints.length} connected non-edge benchmark input points: ${JSON.stringify({ rowCount: nextRowCount, selectionCount, frameCount, scrollTop: list?.scrollTop, windowStart: list?.dataset.sourceWindowStart, windowEnd: list?.dataset.sourceWindowEnd, listRect: initialListRect, rows })}.`);
                         }
                         benchmarkBridge('capture-frames', true);
                         const targetCallbackIds = [];
                         for (let index = 0; index < frameCount; index += 1) {
-                            const target = candidates[(index * 17 + 7) % candidates.length];
-                            const rect = target.getBoundingClientRect();
+                            // Keep input fixed instead of chasing the animated output
+                            // rows. A pointer over an opened slot targets the current
+                            // list, even when the original row has moved or unmounted.
+                            const point = inputPoints[(index * 17 + 7) % inputPoints.length];
+                            const target = getSourcesList();
+                            const listRect = target?.getBoundingClientRect();
+                            if (!target?.isConnected || !listRect
+                                || point.clientY < listRect.top + dragEdgePx
+                                || point.clientY > listRect.bottom - dragEdgePx) {
+                                throw new Error('Benchmark input left the connected list non-edge region.');
+                            }
                             const beforeDragOver = benchmarkBridge('snapshot');
                             dispatchDrag(target, 'dragover', {
                                 dataTransfer,
-                                clientX: Math.floor(rect.left + rect.width / 2),
-                                clientY: Math.floor(rect.top + rect.height / 2)
+                                clientX: point.clientX,
+                                clientY: point.clientY
                             });
                             const afterDragOver = benchmarkBridge('snapshot');
                             const scheduledForDragOver = newCallbackIds(
@@ -745,7 +776,7 @@ test.describe.serial('drag performance baseline', () => {
                                 afterDragOver.scheduledCallbackIds
                             );
                             if (scheduledForDragOver.length !== 1) {
-                                throw new Error(`Dragover ${index + 1}/${frameCount} scheduled ${scheduledForDragOver.length} callbacks instead of exactly one.`);
+                                throw new Error(`Dragover ${index + 1}/${frameCount} scheduled ${scheduledForDragOver.length} callbacks instead of exactly one; input ${point.sourceKey}, connected=${target.isConnected}, window=${target.dataset?.sourceWindowStart}:${target.dataset?.sourceWindowEnd}.`);
                             }
                             const callbackId = scheduledForDragOver[0];
                             targetCallbackIds.push(callbackId);
@@ -778,13 +809,13 @@ test.describe.serial('drag performance baseline', () => {
                             }
                         });
                         const beforeDragEnd = benchmarkBridge('snapshot');
-                        dispatchDrag(origin, 'dragend', { dataTransfer });
+                        dispatchCurrentDragEnd(dataTransfer, 'callback');
                         const afterDragEnd = benchmarkBridge('snapshot');
                         await waitForCallbackIds(
                             newCallbackIds(beforeDragEnd.scheduledCallbackIds, afterDragEnd.scheduledCallbackIds),
                             'Frame benchmark dragend cleanup callback did not complete'
                         );
-                        return { frames, targetCallbackIds };
+                        return { frames, targetCallbackIds, inputPoints };
                     };
                     const benchmarkSelection = async ({ selectionCount, originKey, selectedKeys }) => {
                         if (selectionCount === 50) {
@@ -828,6 +859,7 @@ test.describe.serial('drag performance baseline', () => {
                             warmupFrames,
                             measuredFrames,
                             logicalSelectionCount: selectionCount,
+                            callbackInputPoints: measured.inputPoints,
                             materializedSelectionCount: {
                                 p50: percentile(prepare.materializedSelectionCounts, 0.5),
                                 p95: percentile(prepare.materializedSelectionCounts, 0.95)
@@ -911,6 +943,7 @@ test.describe.serial('drag performance baseline', () => {
                         results: [single, multi]
                     };
                 }, {
+                    dragEdgePx: autoScrollEdgePx,
                     nextRowCount: rowCount,
                     sources: createSyntheticSources(rowCount),
                     warmupSessions: WARMUP_SESSIONS,

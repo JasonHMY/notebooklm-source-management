@@ -537,13 +537,13 @@
         "message": "Could not update hover spotlight"
     },
     "ui_settings_drag_mode_title": {
-        "message": "Enable reflow drag (Beta)"
+        "message": "Enable reflow drag"
     },
     "ui_settings_drag_mode_body": {
-        "message": "Beta: while dragging, other sources move aside to open a slot, and you can drop a source between folders. Off (default) uses the classic blue insertion line. Switching back to classic moves any sources placed between folders to the bottom Ungrouped bin."
+        "message": "while dragging, other sources move aside to open a slot, and you can drop a source between folders. Off (default) uses the classic blue insertion line. Switching back to classic moves any sources placed between folders to the bottom Ungrouped bin."
     },
     "ui_settings_drag_mode_enabled": {
-        "message": "Reflow drag (Beta) enabled"
+        "message": "Reflow drag enabled"
     },
     "ui_settings_drag_mode_disabled": {
         "message": "Classic drag restored"
@@ -642,10 +642,10 @@
         "message": "Batch actions, New folder, and Undo remain available above search results and wrap in narrow panels. A collapsed source panel waits to be expanded instead of triggering a full-page reload."
     },
     "ui_whats_new_drag_title": {
-        "message": "Smoother, more reliable reflow drag (Beta)"
+        "message": "Reflow drag is ready"
     },
     "ui_whats_new_drag_body": {
-        "message": "Reflow drag now opens accurate gaps across mixed and nested rows, keeps the drop target current during auto-scroll, and restores the original layout after Escape or cancellation. It remains opt-in; enable it below or in Settings."
+        "message": "Selected sources stay folded as you scroll through large lists, and drop positions follow the visible rows and folders. Enable it in Settings to place sources between folders; Classic remains the default."
     },
     "ui_whats_new_stability_title": {
         "message": "Precise ordering and safer recovery"
@@ -657,13 +657,13 @@
         "message": "Got it"
     },
     "ui_whats_new_enable_beta": {
-        "message": "Enable reflow drag (Beta)"
+        "message": "Enable reflow drag"
     },
     "ui_whats_new_drag_enabled": {
-        "message": "Reflow drag (Beta) is on"
+        "message": "Reflow drag is on"
     },
     "ui_whats_new_drag_switched_toast": {
-        "message": "Reflow drag (Beta) enabled"
+        "message": "Reflow drag enabled"
     },
     "ui_source_repair_title": {
         "message": "Source Repair"

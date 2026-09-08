@@ -537,13 +537,13 @@
         "message": "无法更新悬浮光晕设置"
     },
     "ui_settings_drag_mode_title": {
-        "message": "启用避让拖拽(Beta)"
+        "message": "启用避让拖拽"
     },
     "ui_settings_drag_mode_body": {
-        "message": "Beta:拖动时其它来源会避让让出空位,并且可以把来源拖到文件夹之间。关闭(默认)使用经典蓝色插入线。切回经典时,已放在文件夹之间的来源会移动到底部「未分组」桶。"
+        "message": "拖动时其它来源会避让让出空位,并且可以把来源拖到文件夹之间。关闭(默认)使用经典蓝色插入线。切回经典时,已放在文件夹之间的来源会移动到底部「未分组」桶。"
     },
     "ui_settings_drag_mode_enabled": {
-        "message": "已启用避让拖拽(Beta)"
+        "message": "已启用避让拖拽"
     },
     "ui_settings_drag_mode_disabled": {
         "message": "已恢复经典拖拽"
@@ -642,10 +642,10 @@
         "message": "搜索结果上保留批量操作、新建分组和撤销入口，窄面板也可换行显示；来源面板折叠时等待展开，不再因此自动刷新整个页面。"
     },
     "ui_whats_new_drag_title": {
-        "message": "更顺滑可靠的避让拖拽(Beta)"
+        "message": "避让拖拽正式可用"
     },
     "ui_whats_new_drag_body": {
-        "message": "避让拖拽现在会按混合与嵌套列表的真实位置准确开槽,自动滚动时持续更新落点,按 Esc 或取消后完整恢复原布局。该模式仍为可选 Beta,可在下方或设置中开启。"
+        "message": "跨窗口拖动多选来源时，预览会随列表更新；混合高度和多层文件夹按实际位置确定落点，取消后恢复原布局。可在设置中开启，默认仍为经典拖拽。"
     },
     "ui_whats_new_stability_title": {
         "message": "精准排序与更安全的恢复"
@@ -657,13 +657,13 @@
         "message": "知道了"
     },
     "ui_whats_new_enable_beta": {
-        "message": "启用避让拖拽(Beta)"
+        "message": "启用避让拖拽"
     },
     "ui_whats_new_drag_enabled": {
-        "message": "避让拖拽(Beta)已开启"
+        "message": "避让拖拽已开启"
     },
     "ui_whats_new_drag_switched_toast": {
-        "message": "已启用避让拖拽(Beta)"
+        "message": "已启用避让拖拽"
     },
     "ui_source_repair_title": {
         "message": "来源修复"

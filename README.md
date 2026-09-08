@@ -14,7 +14,7 @@ The extension supports the current `https://notebook.google.com/` site and keeps
 - Group sources into custom folders.
 - Create nested folders, move sources into subfolders, and visually isolate one folder without changing the sources used in Notebook answers.
 - Reorder sources or whole groups with drag and drop.
-- Choose your drag mode in Settings → Appearance: **classic** (default — a blue insertion line, loose sources land in folders or the bottom "Ungrouped" bin) or **reflow (Beta)** — other sources move aside as you drag and you can drop a source anywhere at the root level, including between two folders.
+- Choose your drag mode in Settings → Appearance: **classic** (default — a blue insertion line, loose sources land in folders or the bottom "Ungrouped" bin) or **reflow** — other sources move aside as you drag and you can drop a source anywhere at the root level, including between two folders.
 - Search by source title, tag, or folder, with simple `tag:` and `folder:` filters. The organization toolbar remains available, so you can search first and then move the results in a batch.
 - Automatically expand folders that contain search results, then restore the previous collapsed state when search is cleared.
 - Add color-coded custom tags, search the tag picker, filter by tag, and batch add or remove tags.

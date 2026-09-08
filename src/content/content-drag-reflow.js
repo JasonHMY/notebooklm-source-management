@@ -15,10 +15,12 @@
      *
      * @param {Object} deps Optional;当前实现是 pure DOM 操作,deps 仅 future-proof reserved。
      * @returns {{ TRANSITION_MS, createDragSession, prepareDragSession,
-     *   foldDraggedItems, unfoldDraggedItems, computeReflow, applyReflow,
-     *   clearReflow, extractInlineTranslateY }}
-     *   session 维护 draggedKeys + itemHeights + shiftedItems;computeReflow 基于 dropIntent
-     *   返回 shift map,applyReflow/clearReflow 落实到 inline style.transform。
+     *   foldDraggedItems, unfoldDraggedItems, refreshMountedDragSession,
+     *   computeReflow, applyReflow, clearReflow, extractInlineTranslateY }}
+     *   session 维护逻辑 draggedKeys、当前挂载的折叠基线与 shift 状态；
+     *   refreshMountedDragSession 在虚拟窗口替换节点后重新验证物理 footprint，
+     *   未确认时返回 complete:false。computeReflow 基于 dropIntent 返回 shift map，
+     *   applyReflow/clearReflow 落实到 inline style.transform。
      */
     function createContentDragReflow(deps = {}) {
         const _ctx = deps && typeof deps === 'object' ? deps : {};
@@ -50,10 +52,17 @@
                 draggedType: null,
                 draggedKeys: new Set(),
                 preparedElements: new Map(),
+                preparedElementBaselines: new Map(),
+                preparedMountedKeys: new Set(),
                 itemMetrics: new Map(),
                 itemHeights: new Map(),
                 totalDraggedHeight: 0,
                 draggedRuns: [],
+                foldedActive: false,
+                hasFolded: false,
+                mountedItemStates: new Map(),
+                preparedFootprintComplete: false,
+                requiresMountedRefresh: false,
                 probeMetrics: {
                     forcedLayoutReadPhases: 0,
                     prepareCpuMs: 0
@@ -1094,6 +1103,478 @@
                 : null;
         }
 
+        function getMountedItemStates(session) {
+            if (!(session?.mountedItemStates instanceof Map)) {
+                session.mountedItemStates = new Map();
+            }
+            return session.mountedItemStates;
+        }
+
+        function isElementAttachedToRoot(rootElement, element) {
+            if (!element) return false;
+            if (!rootElement || typeof rootElement.contains !== 'function') return true;
+            return rootElement.contains(element);
+        }
+
+        function getElementIdentityValue(element, type) {
+            if (!element) return '';
+            const attribute = type === 'group' ? 'data-group-id' : 'data-source-key';
+            const datasetKey = type === 'group' ? 'groupId' : 'sourceKey';
+            if (typeof element.getAttribute === 'function') {
+                return String(element.getAttribute(attribute) || '');
+            }
+            return String(element.dataset?.[datasetKey] || '');
+        }
+
+        function getElementDraggedIdentityType(element, key, draggedType = null) {
+            if (!element || typeof key !== 'string' || !key) return null;
+            if (draggedType === 'source') {
+                return getElementIdentityValue(element, 'source') === key ? 'source' : null;
+            }
+            if (draggedType === 'group') {
+                return getElementIdentityValue(element, 'group') === key ? 'group' : null;
+            }
+            if (getElementIdentityValue(element, 'source') === key) return 'source';
+            if (getElementIdentityValue(element, 'group') === key) return 'group';
+            return null;
+        }
+
+        function isMountedStateCurrent(rootElement, state, key, draggedType) {
+            return Boolean(
+                state
+                && state.element
+                && isElementAttachedToRoot(rootElement, state.element)
+                && getElementDraggedIdentityType(
+                    state.element,
+                    key,
+                    state.identityType || draggedType
+                )
+            );
+        }
+
+        function collectMountedDraggedEntries({
+            session,
+            rootElement,
+            sourceElements,
+            groupElements
+        }) {
+            const entries = [];
+            if (!session?.draggedKeys || !(session.draggedKeys instanceof Set)) return entries;
+            for (const key of session.draggedKeys) {
+                if (typeof key !== 'string' || !key) continue;
+                const resolveCandidate = (type, elements) => (
+                    elements instanceof Map
+                        ? elements.get(key) || null
+                        : findTypedItemElement(rootElement, type, key, null)
+                );
+                const candidateTypes = session.draggedType === 'group'
+                    ? ['group']
+                    : (
+                        session.draggedType === 'source'
+                            ? ['source']
+                            : ['source', 'group']
+                    );
+                let element = null;
+                let identityType = null;
+                for (const type of candidateTypes) {
+                    const candidate = resolveCandidate(
+                        type,
+                        type === 'group' ? groupElements : sourceElements
+                    );
+                    const resolvedType = getElementDraggedIdentityType(candidate, key, type);
+                    if (!candidate || !resolvedType) continue;
+                    element = candidate;
+                    identityType = resolvedType;
+                    break;
+                }
+                if (
+                    !element
+                    || !isElementAttachedToRoot(rootElement, element)
+                    || !identityType
+                ) {
+                    continue;
+                }
+                entries.push({ key, element, identityType });
+            }
+            return entries;
+        }
+
+        function isActivelyFolded(element) {
+            if (!element || !element.style || !element.classList) return false;
+            const hasFoldedClass = typeof element.classList.contains === 'function'
+                && element.classList.contains('sp-drag-folded');
+            const height = readInlineStyleProperty(element.style, 'height').value;
+            const opacity = readInlineStyleProperty(element.style, 'opacity').value;
+            return hasFoldedClass && height === '0px' && opacity === '0';
+        }
+
+        function restoreMountedItemBaseline(state) {
+            const element = state?.element;
+            const metrics = state?.metrics;
+            if (!element || !element.style || !metrics) return false;
+            restoreInlineStyleProperty(element.style, 'height', {
+                value: metrics.originalInlineHeight,
+                priority: metrics.originalInlineHeightPriority
+            });
+            restoreInlineStyleProperty(element.style, 'opacity', {
+                value: metrics.originalInlineOpacity,
+                priority: metrics.originalInlineOpacityPriority
+            });
+            setClassMembership(element, 'sp-drag-folded', Boolean(metrics.originalFoldedClass));
+            setClassMembership(element, 'sp-drag-unfolding', Boolean(metrics.originalUnfoldingClass));
+            return true;
+        }
+
+        function captureMountedItemMetrics(entries, getComputedStyleFn) {
+            const metricsByKey = new Map();
+            for (const entry of Array.isArray(entries) ? entries : []) {
+                if (!entry?.element?.style || typeof entry.key !== 'string' || !entry.key) {
+                    throw new Error('Unable to capture a mounted dragged item baseline.');
+                }
+                const metrics = measureVerticalMetrics(entry.element, getComputedStyleFn);
+                if (!metrics) {
+                    throw new Error('Unable to measure a mounted dragged item baseline.');
+                }
+                metricsByKey.set(entry.key, metrics);
+            }
+            return metricsByKey;
+        }
+
+        function restoreMountedItemBaselines({
+            rootElement,
+            entries,
+            entryMetrics,
+            states,
+            draggedType
+        }) {
+            const restoredElements = new Set();
+            const restore = (element, metrics, key, identityType = null) => {
+                if (
+                    !element
+                    || !metrics
+                    || typeof key !== 'string'
+                    || !key
+                    || restoredElements.has(element)
+                    || !isElementAttachedToRoot(rootElement, element)
+                    || !getElementDraggedIdentityType(
+                        element,
+                        key,
+                        identityType || draggedType
+                    )
+                ) {
+                    return;
+                }
+                restoredElements.add(element);
+                try {
+                    restoreMountedItemBaseline({ element, metrics });
+                } catch (error) {
+                    // A detached or replaced virtual row cannot block cleanup of
+                    // the other current rows. The caller fails closed afterward.
+                }
+            };
+            (Array.isArray(entries) ? entries : []).forEach((entry) => {
+                restore(
+                    entry?.element,
+                    entryMetrics instanceof Map ? entryMetrics.get(entry.key) : null,
+                    entry?.key,
+                    entry?.identityType
+                );
+            });
+            if (states instanceof Map) {
+                states.forEach((state, key) => restore(
+                    state?.element,
+                    state?.metrics,
+                    key,
+                    state?.identityType
+                ));
+            }
+        }
+
+        function clearMountedDragSessionState(session, states) {
+            if (!session) return;
+            if (states instanceof Map) states.clear();
+            if (session.itemMetrics instanceof Map) session.itemMetrics.clear();
+            if (session.itemHeights instanceof Map) session.itemHeights.clear();
+            session.totalDraggedHeight = 0;
+            session.draggedRuns = [];
+            // The drag is still logically active, so a later window render can
+            // retry a complete mounted measurement. It just has no physical fold
+            // or slot until that retry succeeds.
+            session.foldedActive = true;
+            session.hasFolded = false;
+            session.requiresMountedRefresh = true;
+            session.mountedRefreshComplete = false;
+        }
+
+        function applyMountedItemFold(element) {
+            if (!element || !element.style) return false;
+            invalidatePendingUnfoldRestore(element);
+            setInlineStyleProperty(element.style, 'height', '0px');
+            setInlineStyleProperty(element.style, 'opacity', '0');
+            setClassMembership(element, 'sp-drag-folded', true);
+            return true;
+        }
+
+        function captureDragScrollPositions(rootElement, entries, states) {
+            const positions = [];
+            const seen = new Set();
+            const addElementAndAncestors = (element) => {
+                let cursor = element;
+                while (cursor && !seen.has(cursor)) {
+                    seen.add(cursor);
+                    if (typeof cursor.scrollTop === 'number' || typeof cursor.scrollLeft === 'number') {
+                        positions.push({
+                            element: cursor,
+                            scrollTop: Number(cursor.scrollTop) || 0,
+                            scrollLeft: Number(cursor.scrollLeft) || 0
+                        });
+                    }
+                    if (cursor === rootElement) break;
+                    cursor = cursor.parentElement || null;
+                }
+            };
+            addElementAndAncestors(rootElement);
+            (Array.isArray(entries) ? entries : []).forEach((entry) => {
+                addElementAndAncestors(entry?.element);
+            });
+            if (states instanceof Map) {
+                states.forEach((state) => addElementAndAncestors(state?.element));
+            }
+            return positions;
+        }
+
+        function restoreDragScrollPositions(positions) {
+            (Array.isArray(positions) ? positions : []).forEach((position) => {
+                const element = position?.element;
+                if (!element) return;
+                try {
+                    if (typeof element.scrollTop === 'number') element.scrollTop = position.scrollTop;
+                    if (typeof element.scrollLeft === 'number') element.scrollLeft = position.scrollLeft;
+                } catch (error) {
+                    // Detached or non-scrollable hosts safely ignore restoration.
+                }
+            });
+        }
+
+        function hideMountedEntriesForProbe(entries) {
+            const styles = [];
+            try {
+                (Array.isArray(entries) ? entries : []).forEach((entry) => {
+                    const element = entry?.element;
+                    if (!element?.style) return;
+                    styles.push({
+                        element,
+                        transition: readInlineStyleProperty(element.style, 'transition'),
+                        animation: readInlineStyleProperty(element.style, 'animation'),
+                        visibility: readInlineStyleProperty(element.style, 'visibility')
+                    });
+                    setInlineStyleProperty(element.style, 'transition', 'none', 'important');
+                    setInlineStyleProperty(element.style, 'animation', 'none', 'important');
+                    setInlineStyleProperty(element.style, 'visibility', 'hidden', 'important');
+                });
+            } catch (error) {
+                restoreMountedProbeStyles(styles);
+                throw error;
+            }
+            return styles;
+        }
+
+        function restoreMountedProbeStyles(styles) {
+            (Array.isArray(styles) ? styles : []).forEach((styleState) => {
+                if (!styleState?.element?.style) return;
+                ['transition', 'animation', 'visibility'].forEach((property) => {
+                    try {
+                        restoreInlineStyleProperty(
+                            styleState.element.style,
+                            property,
+                            styleState[property]
+                        );
+                    } catch (error) {
+                        // Cleanup is deliberately best effort for a row replaced
+                        // while a virtual-window refresh is in progress.
+                    }
+                });
+            });
+        }
+
+        function refreshMountedDragSession({
+            session,
+            rootElement,
+            sourceElements,
+            groupElements
+        } = {}) {
+            const states = getMountedItemStates(session || {});
+            const emptyResult = {
+                changed: false,
+                complete: true,
+                mountedKeys: new Set(),
+                foldedKeys: new Set(),
+                totalDraggedHeight: Number(session?.totalDraggedHeight) || 0,
+                slotHeightChanged: false,
+                needsGeometryRebuild: false
+            };
+            if (!session || !rootElement || session.foldedActive !== true) return emptyResult;
+
+            const priorTotal = Number(session.totalDraggedHeight) || 0;
+            let entries = [];
+            let mountedKeys = new Set();
+            let scrollPositions = [];
+            let probeStyles = [];
+            let probeResult = null;
+            let entryMetrics = new Map();
+            let nextStates = new Map();
+            let refreshFailed = false;
+            try {
+                entries = collectMountedDraggedEntries({
+                    session,
+                    rootElement,
+                    sourceElements,
+                    groupElements
+                });
+                const entriesByKey = new Map(entries.map((entry) => [entry.key, entry]));
+                mountedKeys = new Set(entriesByKey.keys());
+                if (entriesByKey.size === 0 && states.size === 0) {
+                    clearMountedDragSessionState(session, states);
+                    return {
+                        changed: true,
+                        complete: false,
+                        mountedKeys,
+                        foldedKeys: new Set(),
+                        totalDraggedHeight: 0,
+                        slotHeightChanged: priorTotal !== 0,
+                        needsGeometryRebuild: true
+                    };
+                }
+
+                let changed = session.requiresMountedRefresh === true
+                    || states.size !== entriesByKey.size;
+                entriesByKey.forEach((entry, key) => {
+                    const priorState = states.get(key);
+                    if (!priorState || priorState.element !== entry.element || !isActivelyFolded(entry.element)) {
+                        changed = true;
+                    }
+                });
+                if (!changed) {
+                    return Object.assign(emptyResult, {
+                        mountedKeys,
+                        foldedKeys: new Set(mountedKeys)
+                    });
+                }
+
+                scrollPositions = captureDragScrollPositions(rootElement, entries, states);
+                states.forEach((state, key) => {
+                    if (isMountedStateCurrent(rootElement, state, key, session.draggedType)) {
+                        if (!restoreMountedItemBaseline(state)) {
+                            throw new Error('Unable to restore a mounted dragged item baseline.');
+                        }
+                    }
+                });
+                entries.forEach((entry) => settlePendingUnfoldRestore(entry.element));
+                entryMetrics = captureMountedItemMetrics(entries, resolveGetComputedStyle());
+                probeStyles = hideMountedEntriesForProbe(entries);
+                const runStructure = buildDraggedRuns(entries);
+                probeResult = measureBatchedFoldProbe({
+                    rootElement,
+                    runs: runStructure.runs,
+                    hostChildren: runStructure.hostChildren,
+                    selectedElements: entries,
+                    getComputedStyleFn: resolveGetComputedStyle(),
+                    originKey: null
+                });
+                const nextMetrics = probeResult?.itemMetrics instanceof Map
+                    ? probeResult.itemMetrics
+                    : entryMetrics;
+                entries.forEach((entry) => {
+                    const metrics = nextMetrics.get(entry.key);
+                    if (!metrics || !applyMountedItemFold(entry.element)) {
+                        throw new Error('Unable to fold a mounted dragged item.');
+                    }
+                    nextStates.set(entry.key, {
+                        element: entry.element,
+                        metrics,
+                        identityType: entry.identityType
+                    });
+                });
+            } catch (error) {
+                refreshFailed = true;
+            } finally {
+                restoreMountedProbeStyles(probeStyles);
+                restoreDragScrollPositions(scrollPositions);
+            }
+
+            if (refreshFailed) {
+                restoreMountedItemBaselines({
+                    rootElement,
+                    entries,
+                    entryMetrics,
+                    states,
+                    draggedType: session.draggedType
+                });
+                restoreDragScrollPositions(scrollPositions);
+                clearMountedDragSessionState(session, states);
+                return {
+                    changed: true,
+                    complete: false,
+                    mountedKeys,
+                    foldedKeys: new Set(),
+                    totalDraggedHeight: 0,
+                    slotHeightChanged: priorTotal !== 0,
+                    needsGeometryRebuild: true
+                };
+            }
+
+            try {
+                states.clear();
+                nextStates.forEach((state, key) => states.set(key, state));
+                session.itemMetrics.clear();
+                session.itemHeights.clear();
+                nextStates.forEach((state, key) => {
+                    session.itemMetrics.set(key, state.metrics);
+                    session.itemHeights.set(key, Number(state.metrics.borderBoxHeight) || 0);
+                });
+                session.totalDraggedHeight = probeResult
+                    ? Number(probeResult.total) || 0
+                    : Array.from(nextStates.values()).reduce((total, state) => (
+                        total + (Number(state.metrics.borderBoxHeight) || 0)
+                    ), 0);
+                session.draggedRuns = probeResult?.runs || [];
+                session.hasFolded = nextStates.size > 0;
+                session.requiresMountedRefresh = !probeResult;
+                session.mountedRefreshComplete = Boolean(probeResult);
+                restoreDragScrollPositions(scrollPositions);
+            } catch (error) {
+                restoreMountedItemBaselines({
+                    rootElement,
+                    entries,
+                    entryMetrics,
+                    states,
+                    draggedType: session.draggedType
+                });
+                restoreDragScrollPositions(scrollPositions);
+                clearMountedDragSessionState(session, states);
+                return {
+                    changed: true,
+                    complete: false,
+                    mountedKeys,
+                    foldedKeys: new Set(),
+                    totalDraggedHeight: 0,
+                    slotHeightChanged: priorTotal !== 0,
+                    needsGeometryRebuild: true
+                };
+            }
+
+            const totalDraggedHeight = Number(session.totalDraggedHeight) || 0;
+            return {
+                changed: true,
+                complete: Boolean(probeResult),
+                mountedKeys,
+                foldedKeys: new Set(nextStates.keys()),
+                totalDraggedHeight,
+                slotHeightChanged: totalDraggedHeight !== priorTotal,
+                needsGeometryRebuild: true
+            };
+        }
+
         function prepareDragSession({
             draggedKeys,
             originKey,
@@ -1151,6 +1632,7 @@
                 requestedEntries.push(entry);
                 if (el) selectedElements.push(entry);
             }
+            session.preparedMountedKeys = new Set(selectedElements.map((entry) => entry.key));
             const runStructure = buildDraggedRuns(selectedElements);
             const runs = runStructure.runs;
             const probeResult = measureBatchedFoldProbe({
@@ -1162,6 +1644,7 @@
                 originKey: effectiveOriginKey
             });
             let fallbackTotal = 0;
+            const preparedElementBaselines = new Map();
             for (const entry of requestedEntries) {
                 const metrics = probeResult?.itemMetrics.get(entry.key)
                     || measureVerticalMetrics(
@@ -1174,10 +1657,18 @@
                     );
                 session.itemMetrics.set(entry.key, metrics);
                 session.itemHeights.set(entry.key, metrics.borderBoxHeight);
+                if (entry.element) {
+                    preparedElementBaselines.set(entry.key, {
+                        element: entry.element,
+                        metrics
+                    });
+                }
                 fallbackTotal += metrics.borderBoxHeight;
             }
+            session.preparedElementBaselines = preparedElementBaselines;
             session.totalDraggedHeight = probeResult ? probeResult.total : fallbackTotal;
             session.draggedRuns = probeResult ? probeResult.runs : [];
+            session.preparedFootprintComplete = Boolean(probeResult);
             session.probeMetrics.forcedLayoutReadPhases = probeResult
                 ? probeResult.forcedLayoutReadPhases
                 : 0;
@@ -1187,18 +1678,88 @@
 
         function foldDraggedItems({ session, rootElement }) {
             if (!session || !rootElement) return;
+            const mountedItemStates = getMountedItemStates(session);
+            const nextMountedItemStates = new Map();
+            const nextMetricsByKey = new Map();
+            const nextHeightsByKey = new Map();
+            const preparedElementBaselines = session.preparedElementBaselines instanceof Map
+                ? session.preparedElementBaselines
+                : new Map();
+            const preparedMountedKeys = session.preparedMountedKeys instanceof Set
+                ? session.preparedMountedKeys
+                : new Set();
+            const foldEntries = [];
+            let requiresMountedRefresh = session.preparedFootprintComplete !== true;
             for (const key of session.draggedKeys) {
                 const el = findItemElement(rootElement, key, session.draggedType);
                 if (!el || !el.style) continue;
-                // A prior cancelled drag may still have its animated unfold cleanup
-                // queued. Folding this element again makes that old cleanup stale.
-                invalidatePendingUnfoldRestore(el);
-                setInlineStyleProperty(el.style, 'height', '0px');
-                setInlineStyleProperty(el.style, 'opacity', '0');
-                if (el.classList && typeof el.classList.add === 'function') {
-                    el.classList.add('sp-drag-folded');
-                }
+                const identityType = getElementDraggedIdentityType(el, key, session.draggedType);
+                if (!identityType) continue;
+                foldEntries.push({
+                    key,
+                    element: el,
+                    baseline: preparedElementBaselines.get(key) || null,
+                    identityType
+                });
             }
+            const currentMountedKeys = new Set(foldEntries.map((entry) => entry.key));
+            if (
+                currentMountedKeys.size !== preparedMountedKeys.size
+                || Array.from(currentMountedKeys).some((key) => !preparedMountedKeys.has(key))
+            ) {
+                requiresMountedRefresh = true;
+            }
+
+            // First settle every pending restore, then measure only identities that
+            // differ from the prepare-time baseline. This preserves the normal
+            // prepare → fold three-phase layout budget while still making a newly
+            // mounted replacement own its current inline baseline.
+            foldEntries.forEach((entry) => {
+                settlePendingUnfoldRestore(entry.element);
+            });
+            foldEntries.forEach((entry) => {
+                const baseline = entry.baseline;
+                const isPreparedIdentity = baseline
+                    && baseline.element === entry.element
+                    && baseline.metrics;
+                if (!isPreparedIdentity) {
+                    requiresMountedRefresh = true;
+                }
+                entry.metrics = isPreparedIdentity
+                    ? baseline.metrics
+                    : measureVerticalMetrics(entry.element, resolveGetComputedStyle());
+            });
+            foldEntries.forEach((entry) => {
+                if (!applyMountedItemFold(entry.element)) return;
+                nextMountedItemStates.set(entry.key, {
+                    element: entry.element,
+                    metrics: entry.metrics,
+                    identityType: entry.identityType
+                });
+                nextMetricsByKey.set(entry.key, entry.metrics);
+                nextHeightsByKey.set(entry.key, Number(entry.metrics.borderBoxHeight) || 0);
+            });
+            if (nextMountedItemStates.size !== currentMountedKeys.size) {
+                requiresMountedRefresh = true;
+            }
+            mountedItemStates.clear();
+            nextMountedItemStates.forEach((state, key) => mountedItemStates.set(key, state));
+            if (session.itemMetrics instanceof Map) {
+                session.itemMetrics.clear();
+                nextMetricsByKey.forEach((metrics, key) => session.itemMetrics.set(key, metrics));
+            }
+            if (session.itemHeights instanceof Map) {
+                session.itemHeights.clear();
+                nextHeightsByKey.forEach((height, key) => session.itemHeights.set(key, height));
+            }
+            if (requiresMountedRefresh) {
+                session.totalDraggedHeight = 0;
+                session.draggedRuns = [];
+            }
+            session.foldedActive = true;
+            session.hasFolded = nextMountedItemStates.size > 0;
+            session.requiresMountedRefresh = requiresMountedRefresh;
+            session.mountedRefreshComplete = !requiresMountedRefresh;
         }
 
         // animated=true smoothly unfolds the dragged item from height 0 back to its cached
@@ -1211,14 +1772,18 @@
             const win = (typeof globalThis !== 'undefined' && typeof globalThis.setTimeout === 'function')
                 ? globalThis
                 : null;
+            const mountedItemStates = getMountedItemStates(session);
             for (const key of session.draggedKeys) {
                 const el = findItemElement(rootElement, key, session.draggedType);
                 if (!el || !el.style) continue;
+                const mountedState = mountedItemStates.get(key) || null;
+                if (!isMountedStateCurrent(rootElement, mountedState, key, session.draggedType)
+                    || mountedState.element !== el) {
+                    continue;
+                }
                 const isFolded = el.classList && typeof el.classList.contains === 'function'
                     && el.classList.contains('sp-drag-folded');
-                const metrics = session.itemMetrics && typeof session.itemMetrics.get === 'function'
-                    ? session.itemMetrics.get(key)
-                    : null;
+                const metrics = mountedState.metrics || null;
                 const unfoldHeight = metrics && typeof metrics.unfoldHeight === 'number'
                     ? metrics.unfoldHeight
                     : null;
@@ -1287,6 +1852,15 @@
                     restoreInlineStyleProperty(el.style, 'transition', transition);
                     restoreInlineStyleProperty(el.style, 'animation', animation);
                 }
+            }
+            session.foldedActive = false;
+            session.hasFolded = false;
+            mountedItemStates.clear();
+            if (session.preparedElementBaselines instanceof Map) {
+                session.preparedElementBaselines.clear();
+            }
+            if (session.preparedMountedKeys instanceof Set) {
+                session.preparedMountedKeys.clear();
             }
         }
 
@@ -1741,6 +2315,7 @@
             prepareDragSession,
             foldDraggedItems,
             unfoldDraggedItems,
+            refreshMountedDragSession,
             computeReflow,
             applyReflow,
             clearReflow,

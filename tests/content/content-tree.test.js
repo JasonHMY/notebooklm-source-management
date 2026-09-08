@@ -10336,7 +10336,7 @@ describe('applyReflowAfterRender hook', () => {
         };
     }
 
-    function buildInteractions({ runtime, dragReflow }) {
+    function buildInteractions({ runtime, dragReflow, getState = () => ({ ungrouped: [], groups: [] }) }) {
         const sourcesListEl = { id: 'sources-list' };
         const shadowRoot = {
             querySelector: () => null,
@@ -10345,7 +10345,7 @@ describe('applyReflowAfterRender hook', () => {
         };
         return createContentTreeInteractions({
             runtime,
-            getState: () => ({ ungrouped: [], groups: [] }),
+            getState,
             getGroupsById: () => new Map(),
             getParentMap: () => new Map(),
             getShadowRoot: () => shadowRoot,
@@ -10388,6 +10388,119 @@ describe('applyReflowAfterRender hook', () => {
         interactions.applyReflowAfterRender();
 
         expect(dragReflow.applyReflow).not.toHaveBeenCalled();
+    });
+
+    it('refreshes a folded mounted selection and invalidates geometry before another drop', () => {
+        const dragReflow = makeReflowMock();
+        dragReflow.refreshMountedDragSession = jest.fn(() => ({
+            changed: true,
+            complete: true,
+            needsGeometryRebuild: true,
+            slotHeightChanged: true
+        }));
+        const runtime = {
+            activeDragContext: { kind: 'source-multi', keys: ['A', 'B'] },
+            dragGeometryDirty: false,
+            dragReflowSession: {
+                foldedActive: true,
+                shiftedItems: new Map([['C', 40]])
+            }
+        };
+        const interactions = buildInteractions({ runtime, dragReflow });
+
+        interactions.applyReflowAfterRender();
+
+        expect(dragReflow.refreshMountedDragSession).toHaveBeenCalledTimes(1);
+        expect(runtime.dragReflowSession.mountedRefreshComplete).toBe(true);
+        expect(runtime.dragGeometryDirty).toBe(true);
+        expect(runtime.dragGeometryLastInvalidation).toBe('drag_mounted_rows_refreshed');
+        expect(dragReflow.applyReflow).toHaveBeenCalledTimes(1);
+    });
+
+    it('lets an already queued drag frame consume refreshed geometry instead of cancelling it', () => {
+        const previousRaf = global.requestAnimationFrame;
+        const previousCancelRaf = global.cancelAnimationFrame;
+        const callbacks = [];
+        global.requestAnimationFrame = jest.fn((callback) => {
+            callbacks.push(callback);
+            return callbacks.length;
+        });
+        global.cancelAnimationFrame = jest.fn();
+        try {
+            const dragReflow = makeReflowMock();
+            dragReflow.refreshMountedDragSession = jest.fn(() => ({
+                changed: true,
+                complete: true,
+                needsGeometryRebuild: true
+            }));
+            const runtime = {
+                activeDragContext: { kind: 'source-single', keys: ['A'] },
+                dragReflowSession: { foldedActive: true, shiftedItems: new Map() }
+            };
+            const interactions = buildInteractions({ runtime, dragReflow });
+            interactions.handleDragOver({
+                clientX: 20,
+                clientY: 40,
+                preventDefault: jest.fn(),
+                dataTransfer: { dropEffect: 'none' }
+            });
+            expect(callbacks).toHaveLength(1);
+
+            interactions.applyReflowAfterRender();
+
+            expect(runtime.dragGeometryDirty).toBe(true);
+            expect(global.cancelAnimationFrame).not.toHaveBeenCalled();
+            expect(callbacks).toHaveLength(1);
+            callbacks[0]();
+        } finally {
+            global.requestAnimationFrame = previousRaf;
+            global.cancelAnimationFrame = previousCancelRaf;
+        }
+    });
+
+    it('does not refold rows while the native drag image is being captured or a drop is committing', () => {
+        const dragReflow = makeReflowMock();
+        dragReflow.refreshMountedDragSession = jest.fn();
+        const runtime = {
+            activeDragContext: { kind: 'source-single', keys: ['A'] },
+            dragReflowSession: { foldedActive: false, shiftedItems: new Map() }
+        };
+        const interactions = buildInteractions({ runtime, dragReflow });
+        interactions.applyReflowAfterRender();
+        runtime.dragReflowSession.foldedActive = true;
+        runtime.dragDropInProgress = true;
+        interactions.applyReflowAfterRender();
+
+        expect(dragReflow.refreshMountedDragSession).not.toHaveBeenCalled();
+        expect(dragReflow.applyReflow).not.toHaveBeenCalled();
+    });
+
+    it('clears an unconfirmed mounted footprint and rejects drop without reading mutable tree state', () => {
+        const dragReflow = makeReflowMock();
+        dragReflow.refreshMountedDragSession = jest.fn(() => ({ changed: true, complete: false }));
+        const getState = jest.fn(() => ({ ungrouped: ['A'], groups: [] }));
+        const runtime = {
+            activeDragContext: { kind: 'source-single', keys: ['A'] },
+            dragReflowSession: {
+                foldedActive: true,
+                currentIntent: { kind: 'after-source', slotKey: 'B' },
+                shiftedItems: new Map([['B', 40]])
+            }
+        };
+        const interactions = buildInteractions({ runtime, dragReflow, getState });
+        interactions.applyReflowAfterRender();
+
+        expect(runtime.dragReflowSession.mountedRefreshComplete).toBe(false);
+        expect(runtime.dragReflowSession.currentIntent).toBeNull();
+        expect(dragReflow.applyReflow).not.toHaveBeenCalled();
+        expect(dragReflow.clearReflow).toHaveBeenCalled();
+        getState.mockClear();
+        interactions.handleDrop({
+            preventDefault: jest.fn(),
+            dataTransfer: { getData: (type) => type === 'application/source-key' ? 'A' : '' }
+        });
+        expect(getState).not.toHaveBeenCalled();
+        expect(runtime.dragDropInProgress).toBe(false);
     });
 
     it('skips when drag session exists but no shifts are tracked (early dragover, empty shiftedItems)', () => {
@@ -12390,6 +12503,97 @@ describe('single-frame drag geometry snapshot budgets', () => {
             global.requestAnimationFrame = previousRequestAnimationFrame;
         }
     );
+
+    it('reprojects a source window after the deferred fold changes its physical flow', () => {
+        const fixture = createGeometryFixture(1);
+        fixture.root.dataset = { sourceWindowingActive: 'true' };
+        const runtime = {};
+        let foldFrame;
+        const previousRaf = global.requestAnimationFrame;
+        global.requestAnimationFrame = jest.fn((callback) => {
+            foldFrame = callback;
+            return 1;
+        });
+        try {
+            const session = { draggedKeys: new Set(['source-0']), shiftedItems: new Map() };
+            const calls = [];
+            const render = jest.fn(() => calls.push('render'));
+            const tree = buildTree({
+                fixture,
+                runtime,
+                dragReflow: {
+                    prepareDragSession: () => session,
+                    foldDraggedItems: () => calls.push('fold')
+                },
+                extraDeps: { render }
+            });
+            tree.handleDragStart({
+                target: {
+                    closest: (selector) => selector === '.source-item' ? fixture.sources[0] : null
+                },
+                dataTransfer: { setData: jest.fn(), effectAllowed: '' }
+            });
+            expect(render).not.toHaveBeenCalled();
+            foldFrame();
+            expect(calls).toEqual(['fold', 'render']);
+        } finally {
+            global.requestAnimationFrame = previousRaf;
+        }
+    });
+
+    it('reconciles a changed mounted footprint before accepting the deferred fold geometry', () => {
+        const fixture = createGeometryFixture(1);
+        const runtime = {};
+        let foldFrame = null;
+        const previousRequestAnimationFrame = global.requestAnimationFrame;
+        global.requestAnimationFrame = jest.fn((callback) => {
+            foldFrame = callback;
+            return 1;
+        });
+        try {
+            const session = {
+                draggedKeys: new Set(['source-0']),
+                totalDraggedHeight: 40,
+                shiftedItems: new Map(),
+                shiftedSourceItems: new Map(),
+                shiftedGroupItems: new Map()
+            };
+            const dragReflow = {
+                prepareDragSession: jest.fn(() => session),
+                foldDraggedItems: jest.fn(() => {
+                    session.foldedActive = true;
+                    session.requiresMountedRefresh = true;
+                    session.mountedRefreshComplete = false;
+                }),
+                refreshMountedDragSession: jest.fn(() => {
+                    session.requiresMountedRefresh = false;
+                    session.totalDraggedHeight = 72;
+                    return { changed: true, complete: true, needsGeometryRebuild: true };
+                }),
+                clearReflow: jest.fn()
+            };
+            const tree = buildTree({
+                fixture,
+                runtime,
+                dragReflow,
+                state: { root: [], ungrouped: ['source-0'] }
+            });
+            tree.handleDragStart({
+                target: {
+                    closest: (selector) => selector === '.source-item' ? fixture.sources[0] : null
+                },
+                dataTransfer: { setData: jest.fn(), effectAllowed: '' }
+            });
+            foldFrame();
+
+            expect(dragReflow.refreshMountedDragSession).toHaveBeenCalledTimes(1);
+            expect(session.mountedRefreshComplete).toBe(true);
+            expect(session.totalDraggedHeight).toBe(72);
+            expect(runtime.dragGeometryDirty).toBe(true);
+        } finally {
+            global.requestAnimationFrame = previousRequestAnimationFrame;
+        }
+    });
 
     it('ignores a deferred fold callback after dragend cancels its session', () => {
         const fixture = createGeometryFixture(1);

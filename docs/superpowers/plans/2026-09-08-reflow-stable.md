@@ -18,6 +18,10 @@
 - 保留用户原有 AGENTS、CHANGELOG Agent 条目和目录入口改动；本地提交，不推送。
 - 本轮不新建日期发布段；新变更记录在现有 Unreleased，安装包沿用当前本地 `26.9.8`。
 
+## Initial audit
+
+此阶段的保留 Beta 结论属于修复前记录。后续当前结果以 Task 6 和 `docs/DRAG_REFLOW_STABILITY.md` 为准。
+
 ### Task 1: Independent readiness review
 
 **Files:** `content-tree-interactions.js`、`content-tree-placement.js`、`content-drag-reflow.js`、`content-drag-multi.js`、preferences/settings 及对应测试。
@@ -45,3 +49,35 @@
 - [x] 在稳定性报告记录审查结论、测试范围、真实 benchmark 数字、设备/浏览器和限制。
 - [x] 完成 lint、52 suites / 1830 unit、40 smoke、3 个真实拖放场景重复三轮 9/9、最终四组合 drag benchmark、package、ZIP/source 一致性与 diff 检查。5000 manager gate 的失败单独保留，不算通过。
 - [x] 独立复核两项修复与验收测试，精确暂存本轮文件；本地提交结果以本计划所在 commit 为准，不推送。
+
+## Follow-up: Repair the remaining blockers
+
+用户在上述审查之后明确要求修复剩余问题。继续原有转正目标，门槛不变；只有问题修复且验收通过后才移除 Beta。
+
+### Task 4: Keep virtualized drag presentation coherent
+
+**Files:** `src/content/content-drag-reflow.js`、`src/content/content-tree-interactions.js`、`src/content/content-render.js`、必要的 `src/content/index.js` 接线和对应 unit/smoke。
+
+**Interface:** helper 提供 `refreshMountedDragSession({ session, rootElement, sourceElements, groupElements })`，返回 changed/complete、当前挂载及折叠 keys、totalDraggedHeight/slotHeightChanged/needsGeometryRebuild；session 保存独立的元素基线与正式 fold 状态。
+
+- [x] 红回归覆盖远端选中行重挂载、元素替换和滚动中的槽位变化。
+- [x] 仅对当前 mounted subset 同步恢复基线、实测占位、重新 fold；未挂载来源保留完整逻辑 payload 与 virtual spacer，不强制全量挂载。
+- [x] 保持 deferred initial fold 和滚动位置；drop 提交/取消阶段不重新 fold，几何失效后的落下同步刷新并重新验证。
+- [x] 验证跨窗口 2 项/50 项选择、成功拖放与取消、精确顺序/唯一性/存储刷新；核对大量分组/混合高度窗口边界。
+
+### Task 5: Fix the 5000-source slow tail
+
+**Files:** `src/content/source-descriptor-helpers.js`、来源扫描/同步模块及对应测试；必要的诊断仅输出计数和耗时。
+
+- [x] 对照 source replacement、search 分项耗时与整样本 DOM 计数，定位重复状态检查和稳定身份查询；不把总样本计数误当单次搜索成本。
+- [x] 实施最小运行时优化，保持故障识别、可见性与来源身份语义；不靠增加测量前等待或提高阈值变绿。
+- [x] 运行完整 5 warm-up + 20 measured、100/500/1000/5000 全矩阵，保留分项输出并按原门槛逐项判定。
+
+### Task 6: Verify and reconsider promotion
+
+- [x] 更新 CHANGELOG、目录、UI 合同和审查报告的当前结果；保留 before/after 依据。
+- [x] 完成 lint、unit、smoke、完整 drag/manager benchmarks、package/ZIP/source 对照和独立复核。
+- [x] 若全部转正条件满足，同步三语 Beta 文案及活跃说明，保留 Classic 默认与现有用户选择；否则明确记录还未达标的证据，不假报转正。
+- [x] 仅本地提交本次修复，保留用户原有未提交改动，不 push。
+
+最终验收：52 suites / 1867 unit、43 smoke，完整 drag/manager 四档矩阵均通过原门槛；三语正式文案及本地26.9.8安装包一致。完整数字与控制器方法说明见 `docs/DRAG_REFLOW_STABILITY.md`。本地提交以本计划所在 commit 为准，未推送。

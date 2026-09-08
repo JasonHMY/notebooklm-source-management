@@ -333,7 +333,67 @@
             return estimatedSourceWindowRowHeight;
         }
 
-        function resolveSourceWindowRange(listContainer, logicalSourceCount) {
+        function readMountedSourceWindowRange(listContainer, count, viewportHeight) {
+            if (
+                !count
+                || typeof listContainer?.getBoundingClientRect !== 'function'
+                || typeof listContainer?.querySelectorAll !== 'function'
+            ) return null;
+            try {
+                const listRect = listContainer.getBoundingClientRect();
+                if (!Number.isFinite(listRect?.top) || !(listRect.bottom > listRect.top)) return null;
+                const viewportTop = listRect.top + (Number(listContainer.clientTop) || 0);
+                const viewportBottom = viewportTop + viewportHeight;
+                let topAnchor = null;
+                let bottomAnchor = null;
+                const chooseAnchor = (current, entry, y) => {
+                    const distance = Math.max(entry.top - y, y - entry.bottom, 0);
+                    return !current || distance < current.distance
+                        ? { ...entry, distance }
+                        : current;
+                };
+                const entries = listContainer.querySelectorAll(
+                    '.source-item[data-source-window-ordinal], .sp-source-window-spacer'
+                );
+                for (const element of entries) {
+                    if (typeof element?.getBoundingClientRect !== 'function') continue;
+                    if (element.closest?.('.group-container.sp-drag-folded')) continue;
+                    const dataset = element.dataset || {};
+                    const isSpacer = elementHasClass(element, 'sp-source-window-spacer');
+                    const rawStart = isSpacer
+                        ? dataset.sourceWindowStart
+                        : dataset.sourceWindowOrdinal;
+                    if (rawStart === undefined || String(rawStart).trim() === '') continue;
+                    const start = Number(rawStart);
+                    const end = isSpacer ? Number(dataset.sourceWindowEnd) : start + 1;
+                    if (
+                        !Number.isInteger(start) || !Number.isInteger(end)
+                        || start < 0 || end <= start || end > count
+                    ) continue;
+                    const rect = element.getBoundingClientRect();
+                    // A folded pin has an ordinal but occupies no physical flow.
+                    if (!Number.isFinite(rect?.top) || !(rect.bottom - rect.top > 1)) continue;
+                    const entry = { start, end, top: rect.top, bottom: rect.bottom };
+                    topAnchor = chooseAnchor(topAnchor, entry, viewportTop);
+                    bottomAnchor = chooseAnchor(bottomAnchor, entry, viewportBottom);
+                }
+                if (!topAnchor || !bottomAnchor) return null;
+                const interpolate = (entry, y) => {
+                    const fraction = Math.max(0, Math.min(1,
+                        (y - entry.top) / (entry.bottom - entry.top)
+                    ));
+                    return entry.start + (entry.end - entry.start) * fraction;
+                };
+                return {
+                    first: Math.floor(interpolate(topAnchor, viewportTop)),
+                    end: Math.ceil(interpolate(bottomAnchor, viewportBottom))
+                };
+            } catch (_) {
+                return null;
+            }
+        }
+
+        function resolveSourceWindowRange(listContainer, logicalSourceCount, { useMountedGeometry = true } = {}) {
             const count = Math.max(0, Number(logicalSourceCount) || 0);
             const overscan = getSourceWindowOverscan();
             const active = count >= getSourceWindowThreshold();
@@ -353,12 +413,18 @@
                 rowHeight,
                 Number(listContainer?.clientHeight) || DEFAULT_SOURCE_WINDOW_VIEWPORT_HEIGHT
             );
-            const firstViewportIndex = Math.floor(scrollTop / rowHeight);
+            const mountedRange = useMountedGeometry
+                ? readMountedSourceWindowRange(listContainer, count, viewportHeight)
+                : null;
+            const firstViewportIndex = Math.max(0, Math.min(
+                Math.max(0, count - 1),
+                mountedRange ? mountedRange.first : Math.floor(scrollTop / rowHeight)
+            ));
             const viewportRowCount = Math.max(1, Math.ceil(viewportHeight / rowHeight));
             const start = Math.max(0, firstViewportIndex - overscan);
             const end = Math.min(
                 count,
-                firstViewportIndex + viewportRowCount + overscan
+                Math.max(firstViewportIndex + viewportRowCount, mountedRange?.end || 0) + overscan
             );
 
             return {
@@ -2071,7 +2137,13 @@
             const projectionCompletedAt = performanceNow();
             const sourceWindowRange = resolveSourceWindowRange(
                 listContainer,
-                visibleSourceKeysForWindow.length
+                visibleSourceKeysForWindow.length,
+                {
+                    // Old DOM ordinals only describe the same logical projection.
+                    // Search, grouping, and source replacement must start afresh.
+                    useMountedGeometry: visibleSourceKeysForWindow.length === lastVisibleLogicalSourceKeys.length
+                        && visibleSourceKeysForWindow.every((key, index) => key === lastVisibleLogicalSourceKeys[index])
+                }
             );
             const sourceWindowPinnedKeys = new Set(
                 Array.from(collectSourceWindowPinnedKeys(listContainer))
@@ -2943,8 +3015,10 @@
             // during reconciliation. The session.shiftedItems Map still tracks the
             // correct shifts by key, but the DOM no longer reflects them — siblings
             // visually snap back to their layout positions one frame. The hook lets
-            // tree-interactions re-apply current shifts to the freshly-patched DOM
-            // (idempotent: applyReflow skips entries whose prev === delta).
+            // tree-interactions reconcile the current mounted selection's fold
+            // and physical footprint, replay shifts, then rebuild dirty geometry.
+            // Drop commits suppress that reconciliation so fresh landed rows are
+            // not folded again. Unchanged mounted rows take the cheap path.
             // Non-drag callers can leave deps.onAfterRender undefined → cheap no-op.
             if (typeof deps.onAfterRender === 'function') {
                 try { deps.onAfterRender(); } catch (_) { /* ignore hook errors */ }

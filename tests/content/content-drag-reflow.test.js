@@ -24,6 +24,12 @@ function makeRoot(items) {
         const classes = new Set();
         byKey[key] = {
             attr,
+            dataset: attr === 'data-group-id'
+                ? { groupId: key }
+                : { sourceKey: key },
+            getAttribute(name) {
+                return name === attr ? key : null;
+            },
             offsetHeight: typeof height === 'number' ? height : 0,
             computedStyle,
             style: {
@@ -51,6 +57,20 @@ function makeRoot(items) {
     };
 
     return { root, items: byKey };
+}
+
+function makeRefreshRoot(entries) {
+    const { root, items } = makeRoot(entries);
+    const values = Object.values(items);
+    root.children = values;
+    root.contains = (element) => values.includes(element);
+    values.forEach((element) => {
+        element.parentElement = root;
+        element.getAttribute = (name) => (element.attr === name
+            ? Object.keys(items).find((key) => items[key] === element) || null
+            : null);
+    });
+    return { root, items };
 }
 
 function makeProbeLayoutRoot({
@@ -1314,6 +1334,63 @@ describe('foldDraggedItems / unfoldDraggedItems', () => {
         expect(items.k1.classList.contains('sp-drag-folded')).toBe(true);
     });
 
+    test('reuses retained prepare baselines for a normal multi-row fold without a read-write loop', () => {
+        const probe = makeProbeLayoutRoot({ selectedKeys: ['drag', 'next'] });
+        const probeApi = createContentDragReflow({
+            getComputedStyle: (element) => element.computedStyle
+        });
+        const session = probeApi.prepareDragSession({
+            draggedKeys: ['drag', 'next'],
+            draggedType: 'source',
+            rootElement: probe.root
+        });
+
+        // handleDragStart releases this public ghost-only map before its RAF
+        // callback. The retained baseline map must preserve identity safely.
+        session.preparedElements.clear();
+        session.preparedElements = null;
+        probe.operationLog.length = 0;
+        probe.layoutState.pendingWrite = false;
+        probe.layoutState.forcedLayoutReadPhases = 0;
+        probe.layoutState.sawFoldedEndState = false;
+
+        probeApi.foldDraggedItems({ session, rootElement: probe.root });
+
+        expect(session.requiresMountedRefresh).toBe(false);
+        expect(session.mountedRefreshComplete).toBe(true);
+        expect(probe.layoutState.forcedLayoutReadPhases).toBe(0);
+        expect(probe.drag.classList.contains('sp-drag-folded')).toBe(true);
+        expect(probe.next.classList.contains('sp-drag-folded')).toBe(true);
+    });
+
+    test('accepts the same prepared mounted subset when logical selection also has offscreen keys', () => {
+        const fixture = makeRefreshRoot([{
+            key: 'A',
+            attr: 'data-source-key',
+            height: 48
+        }]);
+        const session = api.prepareDragSession({
+            draggedKeys: ['A', 'B'],
+            draggedType: 'source',
+            rootElement: fixture.root
+        });
+        // The mock cannot build a real probe, but this models its exact physical
+        // A-only footprint while B remains a logical, offscreen selected source.
+        session.preparedFootprintComplete = true;
+        session.preparedElements.clear();
+        session.preparedElements = null;
+
+        api.foldDraggedItems({ session, rootElement: fixture.root });
+
+        expect(session.draggedKeys).toEqual(new Set(['A', 'B']));
+        expect(session.mountedItemStates).toEqual(new Map([
+            ['A', expect.objectContaining({ element: fixture.items.A })]
+        ]));
+        expect(session.requiresMountedRefresh).toBe(false);
+        expect(session.mountedRefreshComplete).toBe(true);
+        expect(session.totalDraggedHeight).toBe(48);
+    });
+
     test('unfoldDraggedItems restores height/opacity and removes class', () => {
         const { root, items } = makeRoot([
             { key: 'k1', attr: 'data-source-key', height: 48 }
@@ -1324,6 +1401,41 @@ describe('foldDraggedItems / unfoldDraggedItems', () => {
         expect(items.k1.style.height).toBe('');
         expect(items.k1.style.opacity).toBe('');
         expect(items.k1.classList.contains('sp-drag-folded')).toBe(false);
+        expect(session.preparedElementBaselines).toEqual(new Map());
+        expect(session.preparedMountedKeys).toEqual(new Set());
+    });
+
+    test('restores owned source and group rows when an untyped mixed session unfolds', () => {
+        const { root, items } = makeRoot([
+            {
+                key: 'source-a',
+                attr: 'data-source-key',
+                height: 48,
+                inlineStyle: { height: '17px', opacity: '0.65' }
+            },
+            {
+                key: 'group-a',
+                attr: 'data-group-id',
+                height: 96,
+                inlineStyle: { height: '29px', opacity: '0.4' }
+            }
+        ]);
+        const session = api.prepareDragSession({
+            draggedKeys: ['source-a', 'group-a'],
+            rootElement: root
+        });
+
+        api.foldDraggedItems({ session, rootElement: root });
+        expect(items['source-a'].classList.contains('sp-drag-folded')).toBe(true);
+        expect(items['group-a'].classList.contains('sp-drag-folded')).toBe(true);
+
+        api.unfoldDraggedItems({ session, rootElement: root, animated: false });
+
+        expect(items['source-a'].style.height).toBe('17px');
+        expect(items['source-a'].style.opacity).toBe('0.65');
+        expect(items['group-a'].style.height).toBe('29px');
+        expect(items['group-a'].style.opacity).toBe('0.4');
+        expect(items['group-a'].classList.contains('sp-drag-folded')).toBe(false);
     });
 
     test('animated cancel restores original inline height/opacity after its timeout', () => {
@@ -1447,6 +1559,436 @@ describe('foldDraggedItems / unfoldDraggedItems', () => {
         expect(items.k1.style.opacity).toBe('0.65');
         expect(items.k1.classList.contains('sp-drag-folded')).toBe(false);
         expect(items.k1.classList.contains('sp-drag-unfolding')).toBe(false);
+    });
+
+    test('does not restore prepare metrics onto a same-key replacement when dragend arrives before fold', () => {
+        const prepared = makeRefreshRoot([{
+            key: 'A',
+            attr: 'data-source-key',
+            height: 48,
+            inlineStyle: { height: '17px', opacity: '0.65' }
+        }]);
+        const session = api.prepareDragSession({
+            draggedKeys: ['A'],
+            draggedType: 'source',
+            rootElement: prepared.root
+        });
+        const replacement = makeRefreshRoot([{
+            key: 'A',
+            attr: 'data-source-key',
+            height: 56,
+            inlineStyle: { height: '29px', opacity: '0.4' }
+        }]);
+
+        api.unfoldDraggedItems({ session, rootElement: replacement.root, animated: false });
+
+        expect(replacement.items.A.style.height).toBe('29px');
+        expect(replacement.items.A.style.opacity).toBe('0.4');
+        expect(replacement.items.A.classList.contains('sp-drag-folded')).toBe(false);
+    });
+});
+
+describe('refreshMountedDragSession', () => {
+    let api;
+
+    beforeEach(() => {
+        api = createContentDragReflow();
+    });
+
+    test('measures a same-key replacement before the deferred fold instead of adopting old metrics', () => {
+        const prepared = makeRefreshRoot([{
+            key: 'A',
+            attr: 'data-source-key',
+            height: 48,
+            inlineStyle: { height: '17px', opacity: '0.65' }
+        }]);
+        const session = api.prepareDragSession({
+            draggedKeys: ['A'],
+            draggedType: 'source',
+            rootElement: prepared.root
+        });
+        const replacement = makeRefreshRoot([{
+            key: 'A',
+            attr: 'data-source-key',
+            height: 56,
+            inlineStyle: { height: '29px', opacity: '0.4' }
+        }]);
+
+        api.foldDraggedItems({ session, rootElement: replacement.root });
+
+        expect(session.mountedItemStates.get('A')).toEqual(expect.objectContaining({
+            element: replacement.items.A,
+            metrics: expect.objectContaining({
+                borderBoxHeight: 56,
+                originalInlineHeight: '29px',
+                originalInlineOpacity: '0.4'
+            })
+        }));
+        expect(session.itemMetrics.get('A')).toEqual(expect.objectContaining({
+            borderBoxHeight: 56,
+            originalInlineHeight: '29px',
+            originalInlineOpacity: '0.4'
+        }));
+        expect(session.mountedRefreshComplete).toBe(false);
+        expect(session.requiresMountedRefresh).toBe(true);
+
+        api.unfoldDraggedItems({ session, rootElement: replacement.root, animated: false });
+        expect(replacement.items.A.style.height).toBe('29px');
+        expect(replacement.items.A.style.opacity).toBe('0.4');
+    });
+
+    test('captures the current inline baseline before folding when a prepared metric is missing', () => {
+        const fixture = makeRefreshRoot([{
+            key: 'A',
+            attr: 'data-source-key',
+            height: 52,
+            inlineStyle: { height: '23px', opacity: '0.55' }
+        }]);
+        const session = api.prepareDragSession({
+            draggedKeys: ['A'],
+            draggedType: 'source',
+            rootElement: fixture.root
+        });
+        session.itemMetrics.delete('A');
+        session.itemHeights.delete('A');
+        session.preparedElementBaselines.get('A').metrics = null;
+
+        api.foldDraggedItems({ session, rootElement: fixture.root });
+
+        expect(session.mountedItemStates.get('A')?.metrics).toEqual(expect.objectContaining({
+            borderBoxHeight: 52,
+            originalInlineHeight: '23px',
+            originalInlineOpacity: '0.55'
+        }));
+        api.unfoldDraggedItems({ session, rootElement: fixture.root, animated: false });
+        expect(fixture.items.A.style.height).toBe('23px');
+        expect(fixture.items.A.style.opacity).toBe('0.55');
+    });
+
+    test('fails closed when no selected item is mounted and no fold footprint exists', () => {
+        const prepared = makeRefreshRoot([{
+            key: 'A',
+            attr: 'data-source-key',
+            height: 48
+        }]);
+        const session = api.prepareDragSession({
+            draggedKeys: ['A'],
+            draggedType: 'source',
+            rootElement: prepared.root
+        });
+        session.foldedActive = true;
+        const empty = makeRefreshRoot([]);
+
+        const result = api.refreshMountedDragSession({
+            session,
+            rootElement: empty.root,
+            sourceElements: new Map(),
+            groupElements: new Map()
+        });
+
+        expect(result).toEqual(expect.objectContaining({
+            changed: true,
+            complete: false,
+            mountedKeys: new Set(),
+            foldedKeys: new Set(),
+            totalDraggedHeight: 0,
+            needsGeometryRebuild: true
+        }));
+        expect(session.totalDraggedHeight).toBe(0);
+        expect(session.mountedItemStates).toEqual(new Map());
+        expect(session.mountedRefreshComplete).toBe(false);
+        expect(session.requiresMountedRefresh).toBe(true);
+    });
+
+    test('does not restore an old baseline onto a mounted DOM node reused for another key', () => {
+        const fixture = makeRefreshRoot([{
+            key: 'A',
+            attr: 'data-source-key',
+            height: 48,
+            inlineStyle: { height: '17px', opacity: '0.65' }
+        }]);
+        const session = api.prepareDragSession({
+            draggedKeys: ['A'],
+            draggedType: 'source',
+            rootElement: fixture.root
+        });
+        session.preparedFootprintComplete = true;
+        api.foldDraggedItems({ session, rootElement: fixture.root });
+
+        const reused = fixture.items.A;
+        reused.getAttribute = (name) => (name === 'data-source-key' ? 'B' : null);
+        reused.style.height = '31px';
+        reused.style.opacity = '0.5';
+        reused.classList.remove('sp-drag-folded');
+
+        const result = api.refreshMountedDragSession({
+            session,
+            rootElement: fixture.root,
+            sourceElements: new Map([['B', reused]]),
+            groupElements: new Map()
+        });
+
+        expect(result.complete).toBe(false);
+        expect(reused.style.height).toBe('31px');
+        expect(reused.style.opacity).toBe('0.5');
+        expect(reused.classList.contains('sp-drag-folded')).toBe(false);
+    });
+
+    test('folds a newly mounted selected source without materializing other logical selections', () => {
+        const initial = makeRefreshRoot([{
+            key: 'A',
+            attr: 'data-source-key',
+            height: 48
+        }]);
+        const session = api.prepareDragSession({
+            draggedKeys: ['A', 'B'],
+            draggedType: 'source',
+            rootElement: initial.root
+        });
+        api.foldDraggedItems({ session, rootElement: initial.root });
+
+        const refreshed = makeRefreshRoot([{
+            key: 'B',
+            attr: 'data-source-key',
+            height: 52,
+            inlineStyle: { height: '19px', opacity: '0.7' }
+        }]);
+        refreshed.items.B.style.transition = 'height 120ms linear';
+        refreshed.items.B.style.animation = 'fade 200ms linear';
+        let scrollTop = 120;
+        Object.defineProperty(refreshed.root, 'scrollTop', {
+            configurable: true,
+            get() {
+                return scrollTop;
+            },
+            set(value) {
+                scrollTop = Number(value);
+            }
+        });
+        let visibility = 'visible';
+        Object.defineProperty(refreshed.items.B.style, 'visibility', {
+            configurable: true,
+            get() {
+                return visibility;
+            },
+            set(value) {
+                visibility = String(value);
+                if (visibility === 'hidden') scrollTop = 24;
+            }
+        });
+        const result = api.refreshMountedDragSession({
+            session,
+            rootElement: refreshed.root,
+            sourceElements: new Map([['B', refreshed.items.B]]),
+            groupElements: new Map()
+        });
+
+        expect(result).toEqual(expect.objectContaining({
+            changed: true,
+            complete: false,
+            mountedKeys: new Set(['B']),
+            foldedKeys: new Set(['B']),
+            totalDraggedHeight: 52,
+            needsGeometryRebuild: true
+        }));
+        expect(refreshed.items.B.classList.contains('sp-drag-folded')).toBe(true);
+        expect(refreshed.items.B.style.height).toBe('0px');
+        expect(refreshed.items.B.style.opacity).toBe('0');
+        expect(refreshed.items.B.style.transition).toBe('height 120ms linear');
+        expect(refreshed.items.B.style.animation).toBe('fade 200ms linear');
+        expect(refreshed.items.B.style.visibility).toBe('visible');
+        expect(scrollTop).toBe(120);
+        expect(session.draggedKeys).toEqual(new Set(['A', 'B']));
+
+        api.unfoldDraggedItems({ session, rootElement: refreshed.root, animated: false });
+        expect(refreshed.items.B.style.height).toBe('19px');
+        expect(refreshed.items.B.style.opacity).toBe('0.7');
+    });
+
+    test('uses a replacement element baseline rather than stale metrics for the same key', () => {
+        const initial = makeRefreshRoot([{
+            key: 'A',
+            attr: 'data-source-key',
+            height: 48,
+            inlineStyle: { height: '17px', opacity: '0.65' }
+        }]);
+        const session = api.prepareDragSession({
+            draggedKeys: ['A'],
+            draggedType: 'source',
+            rootElement: initial.root
+        });
+        api.foldDraggedItems({ session, rootElement: initial.root });
+
+        const replacement = makeRefreshRoot([{
+            key: 'A',
+            attr: 'data-source-key',
+            height: 56,
+            inlineStyle: { height: '29px', opacity: '0.4' }
+        }]);
+        api.refreshMountedDragSession({
+            session,
+            rootElement: replacement.root,
+            sourceElements: new Map([['A', replacement.items.A]]),
+            groupElements: new Map()
+        });
+        api.unfoldDraggedItems({ session, rootElement: replacement.root, animated: false });
+
+        expect(replacement.items.A.style.height).toBe('29px');
+        expect(replacement.items.A.style.opacity).toBe('0.4');
+        expect(initial.items.A.style.height).toBe('0px');
+        expect(initial.items.A.style.opacity).toBe('0');
+    });
+
+    test('does not probe or rewrite unchanged mounted folded identities', () => {
+        const fixture = makeRefreshRoot([{
+            key: 'A',
+            attr: 'data-source-key',
+            height: 48
+        }]);
+        const session = api.prepareDragSession({
+            draggedKeys: ['A'],
+            draggedType: 'source',
+            rootElement: fixture.root
+        });
+        // This unit fixture intentionally has no ownerDocument, so its prepare
+        // probe cannot run. Model the already-confirmed browser-path footprint
+        // to exercise the genuinely unchanged cheap path below.
+        session.preparedFootprintComplete = true;
+        api.foldDraggedItems({ session, rootElement: fixture.root });
+
+        const result = api.refreshMountedDragSession({
+            session,
+            rootElement: fixture.root,
+            sourceElements: new Map([['A', fixture.items.A]]),
+            groupElements: new Map()
+        });
+
+        expect(result).toEqual(expect.objectContaining({
+            changed: false,
+            needsGeometryRebuild: false,
+            mountedKeys: new Set(['A']),
+            foldedKeys: new Set(['A'])
+        }));
+        expect(fixture.items.A.style.height).toBe('0px');
+        expect(fixture.items.A.style.opacity).toBe('0');
+    });
+
+    test('preserves the folded-layout scroll position while refreshing a changed mounted row', () => {
+        const probe = makeProbeLayoutRoot({ placement: 'last' });
+        let scrollTop = 120;
+        Object.defineProperty(probe.root, 'scrollTop', {
+            configurable: true,
+            get() {
+                return scrollTop;
+            },
+            set(value) {
+                scrollTop = Number(value);
+            }
+        });
+        const originalRootRect = probe.root.getBoundingClientRect.bind(probe.root);
+        probe.root.getBoundingClientRect = () => {
+            const rect = originalRootRect();
+            if (!probe.drag.classList.contains('sp-drag-folded')) {
+                scrollTop = 24;
+            }
+            return rect;
+        };
+        const probeApi = createContentDragReflow({
+            getComputedStyle: (element) => element.computedStyle
+        });
+        const session = probeApi.prepareDragSession({
+            draggedKeys: ['drag'],
+            draggedType: 'source',
+            rootElement: probe.root
+        });
+        probeApi.foldDraggedItems({ session, rootElement: probe.root });
+        probe.drag.classList.remove('sp-drag-folded');
+
+        const result = probeApi.refreshMountedDragSession({
+            session,
+            rootElement: probe.root,
+            sourceElements: new Map([['drag', probe.drag]]),
+            groupElements: new Map()
+        });
+
+        expect(result).toEqual(expect.objectContaining({
+            changed: true,
+            complete: true,
+            needsGeometryRebuild: true
+        }));
+        expect(scrollTop).toBe(120);
+        expect(probe.drag.classList.contains('sp-drag-folded')).toBe(true);
+        expect(probe.drag.style.height).toBe('0px');
+        expect(probe.drag.style.opacity).toBe('0');
+    });
+
+    test('rolls back staged refresh styles after an exception instead of leaving a partial fold', () => {
+        const initial = makeRefreshRoot([{
+            key: 'A',
+            attr: 'data-source-key',
+            height: 48
+        }]);
+        const session = api.prepareDragSession({
+            draggedKeys: ['A', 'B'],
+            draggedType: 'source',
+            rootElement: initial.root
+        });
+        api.foldDraggedItems({ session, rootElement: initial.root });
+
+        const refreshed = makeRefreshRoot([{
+            key: 'B',
+            attr: 'data-source-key',
+            height: 52,
+            inlineStyle: { height: '19px', opacity: '0.7' }
+        }]);
+        const style = refreshed.items.B.style;
+        let visibility = 'visible';
+        style.transition = 'height 120ms linear';
+        style.animation = 'fade 200ms linear';
+        Object.defineProperty(style, 'visibility', {
+            configurable: true,
+            get() {
+                return visibility;
+            },
+            set(value) {
+                if (value === 'hidden') {
+                    throw new Error('probe visibility write failed');
+                }
+                visibility = String(value);
+            }
+        });
+
+        let result = null;
+        expect(() => {
+            result = api.refreshMountedDragSession({
+                session,
+                rootElement: refreshed.root,
+                sourceElements: new Map([['B', refreshed.items.B]]),
+                groupElements: new Map()
+            });
+        }).not.toThrow();
+
+        expect(result).toEqual(expect.objectContaining({
+            changed: true,
+            complete: false,
+            mountedKeys: new Set(['B']),
+            foldedKeys: new Set(),
+            totalDraggedHeight: 0,
+            needsGeometryRebuild: true
+        }));
+        expect(refreshed.items.B.style.height).toBe('19px');
+        expect(refreshed.items.B.style.opacity).toBe('0.7');
+        expect(refreshed.items.B.style.transition).toBe('height 120ms linear');
+        expect(refreshed.items.B.style.animation).toBe('fade 200ms linear');
+        expect(refreshed.items.B.style.visibility).toBe('visible');
+        expect(refreshed.items.B.classList.contains('sp-drag-folded')).toBe(false);
+        expect(session.mountedItemStates).toEqual(new Map());
+        expect(session.foldedActive).toBe(true);
+        expect(session.hasFolded).toBe(false);
+
+        api.unfoldDraggedItems({ session, rootElement: refreshed.root, animated: false });
+        expect(refreshed.items.B.style.height).toBe('19px');
+        expect(refreshed.items.B.style.opacity).toBe('0.7');
     });
 });
 

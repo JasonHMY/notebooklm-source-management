@@ -1,89 +1,81 @@
-# 避让拖拽转正审查（2026-09-08）
+# 避让拖拽稳定性验收（2026-09-08）
 
 ## 当前结论
 
-当前仍保留 **Beta**。常规真实鼠标拖放与 100/500 来源拖拽性能验证通过，但大数据量验收尚未全部通过，不能据此宣称已满足转正条件。`classic` 默认值、用户已保存的 `reflow` 偏好及 storage schema 均保持不变。
+**已满足本轮转正条件，避让拖拽在本地版本中转为正式功能。** 跨窗口预览、初始折叠后的空窗和大列表搜索慢尾已修复；完整功能回归及两组性能基准均按原门槛通过。
 
-本次按用户要求评估是否可以去掉 Beta；先修复审查中有明确复现、可以独立验证的小范围缺陷。窗口化几何变更需要专门验收，不能以改标签替代。
+保留 `dragMode: classic | reflow`、Classic 默认值和用户原有选择。中英西三语的设置、启用反馈、更新介绍及活跃文档同步移除 Beta 标识，内部既有翻译 key 保持兼容。本报告描述本地 `26.9.8` 修订，不代表 Chrome Web Store 发布。
 
-## 代码审查与修复
+## 修复结果
 
-### 拖放身份校验：已修复
+### 跨窗口拖拽预览与窗口定位
 
-此前 multi-source drop 比对完整拖动集合，但 single-source/group drop 直接接受 `DataTransfer` 的对象身份。已用回归复现：当前拖动 A，落下的 payload 是 B，会实际移动 B 并保存。
+修复前，260 个来源中选择第 2 和第 178 个来源，拖动后滚到远端，远端已选行重新挂载却没有折叠。更大的 50 项多选还暴露出固定行高估算的漂移：metadata 窗口约为 209–256，而实际视口已到 244–256，偶尔只见占位区。
 
-现在在读取树状态或几何前要求 payload 与当前本地 `activeDragContext` 的类型、身份和顺序完全匹配；不存在本地会话、跨类型、混合类型、不同来源/分组的 payload 均拒绝，并走原有清理路径。合法 single、group、multi 的落点行为不变。
+现在 [Reflow helper](../src/content/content-drag-reflow.js) 为每个实际元素保存原始样式与身份；窗口重建时实测当前挂载选择的占位、重新折叠并更新落点。未挂载来源保留在完整逻辑选择中，不强制全量挂载。初始折叠仍延后一帧，保留原生拖拽图像；折叠后立即重投影窗口，即使 scrollTop 未变化也会补齐可见来源；测量未完成时清除旧预览并拒绝落下。
 
-证据：[交互实现](../src/content/content-tree-interactions.js)、[287 项 tree 单元测试](../tests/content/content-tree.test.js)。新增拒绝回归先出现 5 项失败，修复后全部通过。
+[窗口定位](../src/content/content-render.js) 使用正高度来源行及 spacer 的真实矩形映射逻辑位置，排除零高折叠行。只有逻辑来源顺序未变化时才使用旧 DOM 锚点；筛选或顺序改变后重新估算并限制合法边界。这同时覆盖大量展开文件夹和混合高度行。
 
-### 取消后快速重拖：已修复
+取消恢复绑定具体元素和 source/group 身份，保留滚动位置和原始 inline 值；同键换节点、同节点换身份、prepare 到下一帧之间的替换、测量失败后取消、快速重拖及既有混合 source/group helper 用法均有回归覆盖。提交后的新行不会被 render hook 再次折叠。
 
-旧拖动取消后会在 240ms 后恢复元素；此时若同一元素已开始新拖动，旧回调仍会清掉新会话的折叠 class、高度和透明度。新增 A 取消 → B 立即重拖 → A 旧回调执行的回归，修复前失败。
+### 5000 来源搜索慢尾
 
-现在为每个元素保存恢复令牌，新拖动在测量前同步结清旧动画并恢复原始样式，新折叠或立即恢复也会使旧令牌失效。另有参数化回归覆盖空值/自定义 inline 的 A 取消 → B prepare → A 旧 timer → B 下一帧 fold/unfold，防止旧动画高度成为新会话基线。[Reflow helper](../src/content/content-drag-reflow.js) 的 [44 项单元测试](../tests/content/content-drag-reflow.test.js) 全部通过。
+[来源描述提取](../src/content/source-descriptor-helpers.js) 去掉了普通来源中的重复工作：复用标题和操作控件；先匹配状态候选，再检查可见性；来源本身已有稳定标识时直接使用，只在需要时按原优先级查询后代；无 processing/image 候选时跳过多次全量选择器枚举。
 
-### 窗口化拖动：已复现，尚未修复
+稳定标识的属性、selector、候选顺序和每 selector 8 项上限保持不变。失败识别仍排除正常标题，保留隐藏首候选后的可见状态、24 个图标上限，以及超过 48 个后代时的原图标查询路径。普通来源描述的单元回归要求 0 次 `querySelectorAll`，没有通过放宽识别条件换取速度。
 
-独立临时 Chromium fixture 从首次加载即包含 260 个来源。启用 Reflow、多选第 2 与第 178 个来源，回到首个来源启动拖动，再滚动到远端窗口。此探针用浏览器 DOM 和生产 handler，但 dragstart/scroll 是脚本触发，不能称为真实鼠标自动滚动验收。
+### 已保留的审查修复
 
-- 滚动前：拖放 payload 有 2 个 key；起点已折叠；远端未挂载；当前挂载的选中项=1。
-- 滚动后：payload 仍是相同的 2 个 key；远端已挂载且选中，但 `sp-drag-folded=false`，高度约 31.52px；当前挂载选中项=2，已折叠项=0。
-- 截图前重新读取当前 DOM：远端来源 top=251.55、bottom=283.07，完整处在列表视口 195..473 内；可见的选中来源正常显示，而它仍在正在拖动的 payload 中。这证明活动拖动经过窗口重渲染后丢失折叠状态，不能把它解释成只跳过不可见行的性能取舍。
+[拖放入口](../src/content/content-tree-interactions.js) 仍在读取树状态前核对当前拖动类型和完整身份，拒绝不匹配、混合或缺少本地会话的 payload。旧取消定时器不再清除新拖动的折叠状态。
 
-本机运行证据为生成文件，不进入扩展 ZIP 或 Git：[观察数据](../output/reflow-readiness/reflow-window-observation.json)、[截图](../output/reflow-readiness/reflow-window-mid-drag.png)、[可运行探针](../output/reflow-readiness/repro-reflow-windowing.js)。探针命令为 `node output/reflow-readiness/repro-reflow-windowing.js`，它只操作独立临时 fixture。
+## 真实浏览器验收
 
-代码链：[windowing 重新渲染](../src/content/content-render.js) 只生成普通选中行；[applyReflowAfterRender](../src/content/content-tree-interactions.js) 重放位移却不恢复选中行的折叠。初始 session 仅测量已挂载行；如何更新跨窗口的占位和几何应与折叠一起设计，不能只隐藏一行就宣称修复。
+[reflow-stable.smoke.spec.js](../tests/smoke/reflow-stable.smoke.spec.js) 使用独立临时 profile 和合成 Notebook。操作由真实 mouse/wheel 产生可信拖拽事件；没有人工填入 DataTransfer、添加反馈 class 或直接赋值 scrollTop。起点核对实际 `elementFromPoint`，落点先滚进真实视口，避免点击被工具栏遮挡或已滚出视口的坐标。
 
-## 已通过的真实鼠标路径
-
-[reflow-stable.smoke.spec.js](../tests/smoke/reflow-stable.smoke.spec.js) 在独立临时浏览器 profile 和合成 Notebook 上运行。拖动使用 Playwright mouse 产生的可信 `dragstart/drop/dragend`；不人工填入 MIME payload，也不预先添加落点 class。
-
-- 单条来源从未分组插到两个折叠文件夹之间：校验精确根层顺序、Undo、Redo、独立 storage 读回和刷新恢复。
-- 第 1、3 条分别预先放在两个文件夹，第 5 条仍在未分组；跨三处非连续多选拖入目标文件夹：校验完整顺序、原文件夹腾空、每条恰好出现一次、退出批量模式与刷新恢复；使用深色模式。
-- 240px 窄面板、reduced-motion 下拖动再按 Escape：确认折叠/位移清理、存储不变、刷新后仍有全部来源。
-
-原有 smoke 另外覆盖混合/fixed box model、嵌套选择、50 项布局占位、滚动恢复、真实 Chromium Escape 与 Classic 路径。
+| 场景 | 验收 |
+| --- | --- |
+| 单来源插到两个折叠文件夹之间 | 精确根顺序、Undo、Redo、保存与刷新 |
+| 两个文件夹及未分组三处的非连续选择 | 全部来源有序移动、原组腾空、唯一性和刷新 |
+| 240px / reduced motion 取消 | 样式清理、原始保存状态不变 |
+| 260 来源中跨窗口选择 2 项 | 远端折叠、取消恢复、滚动跳变限制、再次可信拖动和目标保存 |
+| 260 来源中跨窗口选择 50 项 | 同一次拖动跨窗再回顶落下，精确 50 项顺序、全局 260 项唯一性与刷新 |
+| 32 个展开根文件夹 + 1 个嵌套文件夹 | 224 来源入组、长换行标题、240px 面板；首部、嵌套 ordinal 24、中部和最后 ordinal 259 都由真实来源占据视口 |
 
 ## 拖拽性能
 
-测量对象：基于 `b3eb68b`、包含本轮两项修复的最终工作树；平台：macOS、Apple M3 Max（14 逻辑处理器）、HeadlessChrome 145.0.0.0。每组合 5 次预热 + 20 次 prepare，10 次预热 + 50 次 dragover 回调；计时方法与门槛见 [DRAG_PERFORMANCE_BASELINE.md](DRAG_PERFORMANCE_BASELINE.md)。因取消恢复的修复涉及 prepare，本轮在最终代码上重新执行了完整四组合基准。
+平台：macOS、Apple M3 Max（14 逻辑处理器）、HeadlessChrome 145。每组 5 + 20 次 prepare、10 + 50 个目标 callback。
 
-| 来源数 / 选择数 | prepare p50 / p95 (ms) | callback p50 / p95 (ms) | 强制布局阶段 max | geometry/query 调用 |
-| --- | ---: | ---: | ---: | ---: |
-| 100 / 1 | 2.5 / 2.6 | 0.5 / 0.8 | 3 | 439 |
-| 100 / 50 | 14.7 / 16.2 | 0.8 / 1.5 | 3 | 699 |
-| 500 / 1 | 2.0 / 2.2 | 0.9 / 1.5 | 3 | 660 |
-| 500 / 50 | 12.7 / 14.8 | 0.4 / 2.4 | 3 | 1200 |
+| 来源 / 逻辑选择 | prepare 挂载选择 p50 / p95 | prepare CPU p50 / p95 (ms) | callback CPU p50 / p95 (ms) | 强制布局 max | geometry/query 总数 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 100 / 1 | 1 / 1 | 2.3 / 3.8 | 0.5 / 1.9 | 3 | 439 |
+| 100 / 50 | 50 / 50 | 15.9 / 24.4 | 0.3 / 2.3 | 3 | 699 |
+| 500 / 1 | 1 / 1 | 1.6 / 1.8 | 0.7 / 1.1 | 3 | 1066 |
+| 500 / 50 | 28 / 28 | 3.1 / 9.4 | 0.3 / 1.5 | 3 | 1219 |
 
-既有门槛全部满足：500/50 prepare p95 ≤18.59ms，500/1 callback p95 ≤2.64ms，500/50 callback p95 ≤5.83ms，强制布局阶段 ≤3；四组 geometry/query 总数均低于各自门槛。500/50 保持全部 50 个逻辑选择，当前窗口挂载 40 个选中项；这只证明数据集合和已有基准通过，不能证明跨窗口滚动预览正确。
+窗口化的 500/50 保留完整 50 项逻辑选择，prepare 的实际挂载选择为 28。控制器固定真实可见区域的输入坐标，并向当前列表派发事件；完整帧数和精确 ID 采样均通过。由于输入控制器修复了追逐动画节点的旧行为，不用此表与旧轨迹直接计算加速百分比。
 
-## Manager 全量基准：未通过
+判定沿用 [DRAG_PERFORMANCE_BASELINE.md](DRAG_PERFORMANCE_BASELINE.md)：500/50 prepare p95 ≤18.59ms，500/1 callback p95 ≤2.64ms，500/50 callback p95 ≤5.83ms，强制布局阶段 ≤3，四组 geometry/query 总数分别严格低于 1872/1490/1906/1890。时延和调用数均独立核对，不能仅用 benchmark 进程成功代替门槛。
 
-完整执行 `npm run benchmark:manager`，每档 5 次预热 + 20 次测量，没有放宽原门槛。
+## Manager 全矩阵性能
 
-| 来源数 | 搜索 p50 / p95 (ms) | 搜索门槛 p95 (ms) | 结果 |
-| --- | ---: | ---: | --- |
-| 100 | 19.8 / 23.7 | 100 | 通过 |
-| 500 | 24.3 / 47.6 | 100 | 通过 |
-| 1000 | 23.4 / 93.7 | 100 | 通过 |
-| 5000 | 47.4 / 735.3 | 250 | 未通过 |
+| 来源数 | 搜索 p50 / p95 / max (ms) | 搜索 p95 门槛 (ms) | 同步输入 p95 (ms) | Quick View / Tag / 批量 p95 (ms) | 实际挂载行 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 100 | 19.3 / 21.3 / 21.3 | 100 | 0.2 | 1.3 / 1.5 / 11.3 | 100 |
+| 500 | 20.8 / 41.9 / 51.9 | 100 | 1.3 | 1.4 / 1.6 / 7.1 | 38 |
+| 1000 | 20.3 / 23 / 33.3 | 100 | 1.6 | 1.8 / 7.2 / 8 | 38 |
+| 5000 | 24.2 / 162.7 / 246.5 | 250 | 1.7 | 11.4 / 8.9 / 15.3 | 38 |
 
-5000 档的输入同步 p95=1.9ms，Quick View=23.0ms，Tag filter=8.7ms，批量选择=24.1ms；这些项通过。窗口化仍生效，500/1000/5000 档均挂载 36 个来源。15 个监测 API 安装/恢复正常。
 
-搜索慢尾包含 source replacement 后的来源扫描、调度和渲染。5000 档 `searchSchedulingMs` p95=290ms，`searchRenderTotalMs` p95=176.4ms，单靠当前日志不能把原因确定为 Reflow 或独立搜索算法。下一步应分别测量“来源同步已完成后的搜索”和“替换来源同时搜索”，为每阶段单独计数，确认原因后再优化；不得把失败改成通过或提高门槛。
+各档均为原 5 次预热 + 20 次测量；同步输入 p95 ≤16ms，100/500/1000 档搜索、Quick View、Tag 筛选和批量选择 p95 ≤100ms，5000 档对应门槛 ≤250ms。15 个 DOM 监测 API 安装、异常清理和恢复均核对；500 及以上来源仍采用窗口化，逻辑来源没有被裁掉。
 
-## 转正前剩余条件
+修复前 5000 来源搜索 p95 为 735.3ms。两个中间版本仍未通过（288.3ms、520.7ms），没有把它们当成绿色结果；减少候选查询后的聚焦复测为 164.6ms，最终完整矩阵以本节为准。DOM 调用数是整段样本的统计，不是单次搜索调用数，也不把慢尾全部归因于单一阶段。
 
-1. 完成跨窗口多选拖动的真实复现和修复验收，覆盖滚动中新挂载选中行、预览、最终顺序与取消。
-2. 保持本次快速取消后重新拖动的回归通过，确保旧任务不能改变当前拖动。
-3. 解释并解决 5000 来源基准失败，按原 5 + 20 全矩阵重新通过。
-4. 对大量展开分组、嵌套和不同高度来源补真实布局边界测试；静态分析提示窗口估算未计入全部分组头高度，目前属于待验证风险。
-5. 最后才同步三语 Beta 文案、README、UI/storage/message 合同和更新说明；保持默认模式与用户选择兼容。
+## 完整验证与本地交付
 
-浏览器验证仅代表上述环境和场景，不含用户真实 Notebook 内容的修改，也不等于 Chrome Web Store 发布。
+最终代码通过 lint、52 个单元套件 / 1867 项用例、43 项默认浏览器 smoke；2 项 opt-in 基准在默认 smoke 中跳过，并已分别完整运行通过。没有跳过失败样本或提高性能门槛。
 
-## 本轮修复验证
+本地 `26.9.8` ZIP 共 70 个文件，CRC 与全部包内文件/当前源码逐项比对通过；SHA-256：`e22688ba376cc3f8648b52f5ea360a80a9035125e7ad75a1a2cb7471e6efd58e`。本地提交包含修复和验收记录，未推送、未发布商店。
 
-最终代码通过 lint、52 个单元测试套件 / 1830 项用例和 `npm run test:smoke` 的 40 项默认 smoke；2 项 opt-in 性能用例按默认 smoke 规则跳过，二者的独立实际运行结果已在上文分别报告。真实拖放测试先等待折叠后的几何稳定，再使用 Playwright 原生 `dragTo`，避免把动画中预先测得的边缘坐标当成固定落点；三项用例另连续运行三轮，9/9 通过。以上绿色检查不覆盖或消除已经记录的窗口化未修复问题。
+本机生成证据：[完整验证日志](../output/reflow-readiness/graduation-verify.log)、[拖拽基准](../output/reflow-readiness/graduation-drag.log)、[Manager 基准](../output/reflow-readiness/graduation-manager.log)、[结构化结果](../output/reflow-readiness/graduation-summary.json)。这些生成文件保留在本地，不进入 Git 或扩展 ZIP；关键结果已写入本报告。
 
-本地 `26.9.8` ZIP 已重建，包含 70 个运行时文件；包内文件与本轮代码逐一核对，CRC 检查通过，三语 Beta 文案保持不变。
+复现使用 `npm run verify:full`、`npm run benchmark:drag`、`npm run benchmark:manager` 和 `npm run package`。全部浏览器写入仅发生在独立测试 fixture；验证不修改真实 Notebook 内容。结果限定于本报告记录的环境和场景。

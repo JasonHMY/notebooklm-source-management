@@ -400,6 +400,24 @@ const createMockSourceRow = ({
         getAttribute: jest.fn((attr) => (attr === 'href' ? href : null))
     } : null;
 
+    const findImageCandidate = (selector) => {
+        const selectorParts = String(selector || '').split(',').map((part) => part.trim());
+        return imageCandidates.find((candidate) => selectorParts.some((part) => {
+            if (part === 'img') return candidate.tagName === 'IMG';
+            if (part === '[style*="background-image"]') {
+                return Boolean(candidate.style?.backgroundImage || candidate.__computedStyle?.backgroundImage);
+            }
+            if (part === '[style*="background:"]') return Boolean(candidate.style?.background);
+            if (part === '[style*="mask-image"]') {
+                return Boolean(candidate.style?.maskImage || candidate.__computedStyle?.maskImage);
+            }
+            if (part === '[style*="webkit-mask-image"]') {
+                return Boolean(candidate.style?.webkitMaskImage || candidate.__computedStyle?.webkitMaskImage);
+            }
+            return false;
+        }));
+    };
+
     const row = {
         children: [...imageCandidates, ...descendantCandidates],
         textContent: [title, statusText].filter(Boolean).join(' '),
@@ -418,6 +436,8 @@ const createMockSourceRow = ({
             if (selector.includes('checkbox')) return hasCheckbox ? checkbox : null;
             if (selector.includes('mat-icon')) return iconEl;
             if (selector.includes('More options')) return nativeMoreButton;
+            const imageCandidate = findImageCandidate(selector);
+            if (imageCandidate) return imageCandidate;
             if (loading && selector.includes('[role="progressbar"]')) return { role: 'progressbar' };
             if (status === 'failed' && selector.includes('data-status="failed"')) return { status: 'failed' };
             return null;

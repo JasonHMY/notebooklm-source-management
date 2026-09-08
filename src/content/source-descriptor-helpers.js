@@ -59,6 +59,11 @@
         '[class*="loading" i]',
         '[class*="processing" i]'
     ];
+    const SOURCE_PROCESSING_DISCOVERY_SELECTORS = [
+        SOURCE_PROCESSING_SELECTOR,
+        ...SOURCE_PROCESSING_STATUS_SELECTORS
+    ];
+    const SOURCE_PROCESSING_DISCOVERY_SELECTOR = SOURCE_PROCESSING_DISCOVERY_SELECTORS.join(', ');
     const SOURCE_FAILURE_SELECTOR = [
         '[aria-invalid="true"]',
         '[data-state="failed"]',
@@ -111,6 +116,13 @@
         'aria-describedby',
         'aria-labelledby'
     ];
+    const STABLE_SOURCE_ATTRIBUTES = [
+        ...STABLE_SOURCE_TOKEN_ATTRIBUTES,
+        ...STABLE_SOURCE_REFERENCE_ATTRIBUTES
+    ];
+    const STABLE_SOURCE_SELECTORS = STABLE_SOURCE_ATTRIBUTES.map(
+        (attributeKey) => `[${attributeKey}]`
+    );
 
     function findElement(selectors, parent) {
         const root = parent || document;
@@ -308,13 +320,17 @@
 
     function queryVisibleProcessingElements(sourceElement) {
         if (!sourceElement || typeof sourceElement.querySelectorAll !== 'function') return [];
+        if (typeof sourceElement.querySelector === 'function') {
+            try {
+                if (!sourceElement.querySelector(SOURCE_PROCESSING_DISCOVERY_SELECTOR)) return [];
+            } catch (error) {
+                // Some NotebookLM DOM variants can reject a combined selector even
+                // though one of its individual selectors remains supported.
+            }
+        }
         const seen = new Set();
         const elements = [];
-        const selectors = [
-            SOURCE_PROCESSING_SELECTOR,
-            ...SOURCE_PROCESSING_STATUS_SELECTORS
-        ];
-        selectors.forEach((selector) => {
+        SOURCE_PROCESSING_DISCOVERY_SELECTORS.forEach((selector) => {
             try {
                 Array.from(sourceElement.querySelectorAll(selector)).forEach((element) => {
                     if (!element || seen.has(element) || !isElementVisibleForSignal(element)) return;
@@ -339,10 +355,18 @@
         return elements;
     }
 
-    function hasReadySourceActionSignal(sourceElement) {
+    function getSourceSignalControls(sourceElement, sourceControls) {
+        if (sourceControls) return sourceControls;
+        return {
+            titleEl: findElement(DEPS.title, sourceElement),
+            checkbox: findElement(DEPS.checkbox, sourceElement),
+            nativeMoreButton: findElement(DEPS.moreBtn, sourceElement)
+        };
+    }
+
+    function hasReadySourceActionSignal(sourceElement, sourceControls) {
         if (!sourceElement) return false;
-        const checkbox = findElement(DEPS.checkbox, sourceElement);
-        const nativeMoreButton = findElement(DEPS.moreBtn, sourceElement);
+        const { checkbox, nativeMoreButton } = getSourceSignalControls(sourceElement, sourceControls);
         return Boolean(
             nativeMoreButton ||
             (checkbox && checkbox.disabled !== true)
@@ -358,9 +382,8 @@
         });
     }
 
-    function removeKnownSourceTitleText(text, sourceElement) {
-        const titleElement = findElement(DEPS.title, sourceElement);
-        const titleText = String(titleElement?.textContent || '').replace(/\s+/g, ' ').trim();
+    function removeKnownSourceTitleText(text, titleEl) {
+        const titleText = String(titleEl?.textContent || '').replace(/\s+/g, ' ').trim();
         let remainingText = String(text || '').replace(/\s+/g, ' ').trim();
         if (!titleText || !remainingText) return remainingText;
 
@@ -371,13 +394,11 @@
             .trim();
     }
 
-    function isLikelyProcessingStatusTextElement(element, sourceElement) {
-        if (!element || element === sourceElement || !isElementVisibleForSignal(element)) return false;
+    function isLikelyProcessingStatusTextElement(element, sourceElement, sourceControls) {
+        if (!element || element === sourceElement) return false;
 
-        const titleElement = findElement(DEPS.title, sourceElement);
-        const checkbox = findElement(DEPS.checkbox, sourceElement);
-        const nativeMoreButton = findElement(DEPS.moreBtn, sourceElement);
-        if (element === titleElement || element === checkbox || element === nativeMoreButton) return false;
+        const { titleEl, checkbox, nativeMoreButton } = sourceControls;
+        if (element === titleEl || element === checkbox || element === nativeMoreButton) return false;
 
         const tagName = String(element.tagName || '').toLowerCase();
         const role = typeof element.getAttribute === 'function'
@@ -395,23 +416,61 @@
             return false;
         }
 
-        const signalText = removeKnownSourceTitleText(getElementOwnSignalText(element), sourceElement);
-        return SOURCE_PROCESSING_TEXT_PATTERN.test(signalText);
+        const signalText = removeKnownSourceTitleText(getElementOwnSignalText(element), titleEl);
+        return SOURCE_PROCESSING_TEXT_PATTERN.test(signalText) && isElementVisibleForSignal(element);
     }
 
-    function hasVisibleProcessingStatusText(sourceElement) {
-        if (!sourceElement || typeof sourceElement.querySelectorAll !== 'function') return false;
+    function getBoundedSourceDescendants(sourceElement) {
+        if (!sourceElement || !sourceElement.children) return null;
+        try {
+            const elements = [];
+            const pending = Array.from(sourceElement.children).reverse();
+            const maxElements = MAX_QUERY_RESULTS_PER_SELECTOR * 4;
+            while (pending.length > 0 && elements.length < maxElements) {
+                const element = pending.pop();
+                if (!element) continue;
+                elements.push(element);
+                if (element.children) {
+                    Array.from(element.children).reverse().forEach((child) => pending.push(child));
+                }
+            }
+            return {
+                elements,
+                truncated: pending.length > 0
+            };
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function hasVisibleProcessingStatusText(sourceElement, sourceControls) {
+        if (!sourceElement) return false;
+        const resolvedSourceControls = getSourceSignalControls(sourceElement, sourceControls);
+        const descendantResult = getBoundedSourceDescendants(sourceElement);
+        if (descendantResult) {
+            return descendantResult.elements.some((element) => isLikelyProcessingStatusTextElement(
+                element,
+                sourceElement,
+                resolvedSourceControls
+            ));
+        }
+        if (typeof sourceElement.querySelectorAll !== 'function') return false;
         try {
             return Array.from(sourceElement.querySelectorAll('*'))
                 .slice(0, MAX_QUERY_RESULTS_PER_SELECTOR * 4)
-                .some((element) => isLikelyProcessingStatusTextElement(element, sourceElement));
+                .some((element) => isLikelyProcessingStatusTextElement(
+                    element,
+                    sourceElement,
+                    resolvedSourceControls
+                ));
         } catch (error) {
             return false;
         }
     }
 
-    function hasSourceProcessingSignal(sourceElement) {
+    function hasSourceProcessingSignal(sourceElement, sourceControls) {
         if (!sourceElement) return false;
+        const resolvedSourceControls = getSourceSignalControls(sourceElement, sourceControls);
         if (typeof sourceElement.querySelector === 'function') {
             try {
                 const processingIndicator = sourceElement.querySelector(SOURCE_PROCESSING_SELECTOR);
@@ -441,14 +500,61 @@
             return true;
         }
 
-        if (hasVisibleProcessingStatusText(sourceElement)) {
+        if (hasVisibleProcessingStatusText(sourceElement, resolvedSourceControls)) {
             return true;
         }
 
-        if (!hasReadySourceActionSignal(sourceElement)) {
+        if (!hasReadySourceActionSignal(sourceElement, resolvedSourceControls)) {
             return SOURCE_PROCESSING_TEXT_PATTERN.test(getElementSignalText(sourceElement));
         }
         return false;
+    }
+
+    function isFailureIconCandidate(element) {
+        if (!element) return false;
+        if (String(element.tagName || '').toLowerCase() === 'mat-icon') return true;
+        const className = typeof element.getAttribute === 'function'
+            ? String(element.getAttribute('class') || '')
+            : String(element.className || '');
+        if (/(?:^|\s)(?:material-icons|google-symbols)(?:\s|$)/.test(className)) return true;
+        const role = typeof element.getAttribute === 'function'
+            ? String(element.getAttribute('role') || '').toLowerCase()
+            : '';
+        return role === 'img';
+    }
+
+    function hasVisibleFailureIconSignal(element) {
+        const iconSignal = String(
+            element?.textContent || element?.getAttribute?.('aria-label') || ''
+        ).trim();
+        return SOURCE_FAILURE_ICON_PATTERN.test(iconSignal) && isElementVisibleForSignal(element);
+    }
+
+    function hasVisibleFailureIconCandidate(candidates) {
+        let iconCount = 0;
+        const maxIcons = MAX_QUERY_RESULTS_PER_SELECTOR * 2;
+        for (const element of candidates) {
+            if (!isFailureIconCandidate(element)) continue;
+            iconCount += 1;
+            if (iconCount > maxIcons) break;
+            if (hasVisibleFailureIconSignal(element)) return true;
+        }
+        return false;
+    }
+
+    function hasVisibleSourceFailureIcon(sourceElement) {
+        const descendantResult = getBoundedSourceDescendants(sourceElement);
+        if (descendantResult && !descendantResult.truncated) {
+            return hasVisibleFailureIconCandidate(descendantResult.elements);
+        }
+        if (typeof sourceElement?.querySelectorAll !== 'function') return false;
+        try {
+            return Array.from(sourceElement.querySelectorAll('mat-icon, .material-icons, .google-symbols, [role="img"]'))
+                .slice(0, MAX_QUERY_RESULTS_PER_SELECTOR * 2)
+                .some((element) => hasVisibleFailureIconSignal(element));
+        } catch (error) {
+            return false;
+        }
     }
 
     function hasSourceFailureSignal(sourceElement) {
@@ -465,69 +571,61 @@
         const hasVisibleFailureElement = (element) => (
             element && isElementVisibleForSignal(element)
         );
-        if (hasVisibleFailureElement(sourceElement) && hasExplicitFailureStatusAttribute(sourceElement)) {
+        if (hasExplicitFailureStatusAttribute(sourceElement) && hasVisibleFailureElement(sourceElement)) {
             return true;
         }
-        if (typeof sourceElement.querySelectorAll === 'function') {
+        let firstFailureStatus = null;
+        let failureStatusQueryFailed = typeof sourceElement.querySelector !== 'function';
+        if (!failureStatusQueryFailed) {
+            try {
+                firstFailureStatus = sourceElement.querySelector(SOURCE_FAILURE_SELECTOR);
+            } catch (error) {
+                // Ignore selector support differences in NotebookLM's runtime DOM.
+                failureStatusQueryFailed = true;
+            }
+        }
+        if (hasVisibleFailureElement(firstFailureStatus)) return true;
+        // The normal path has no status candidate. Only scan every candidate when a
+        // first matching status exists but is hidden; a later visible status must still
+        // win over a stale hidden one.
+        if (
+            (firstFailureStatus || failureStatusQueryFailed)
+            && typeof sourceElement.querySelectorAll === 'function'
+        ) {
             try {
                 if (Array.from(sourceElement.querySelectorAll(SOURCE_FAILURE_SELECTOR))
-                    .some(hasVisibleFailureElement)) {
+                    .some((element) => (
+                        element !== firstFailureStatus && hasVisibleFailureElement(element)
+                    ))) {
                     return true;
                 }
             } catch (error) {
                 // Ignore selector support differences in NotebookLM's runtime DOM.
             }
         }
-        if (typeof sourceElement.querySelector === 'function') {
-            try {
-                if (hasVisibleFailureElement(sourceElement.querySelector(SOURCE_FAILURE_SELECTOR))) {
-                    return true;
-                }
-            } catch (error) {
-                // Ignore selector support differences in NotebookLM's runtime DOM.
-            }
-        }
-        if (typeof sourceElement.querySelectorAll !== 'function') return false;
-        try {
-            return Array.from(sourceElement.querySelectorAll('mat-icon, .material-icons, .google-symbols, [role="img"]'))
-                .slice(0, MAX_QUERY_RESULTS_PER_SELECTOR * 2)
-                .some((element) => {
-                    if (!hasVisibleFailureElement(element)) return false;
-                    return SOURCE_FAILURE_ICON_PATTERN.test(
-                        String(element.textContent || element.getAttribute?.('aria-label') || '').trim()
-                    );
-                });
-        } catch (error) {
-            return false;
-        }
+        return hasVisibleSourceFailureIcon(sourceElement);
     }
 
     function extractSourceStableToken(sourceRow) {
         if (!sourceRow) return null;
 
-        const selectors = [
-            ...STABLE_SOURCE_TOKEN_ATTRIBUTES.map((attributeKey) => `[${attributeKey}]`),
-            ...STABLE_SOURCE_REFERENCE_ATTRIBUTES.map((attributeKey) => `[${attributeKey}]`)
-        ];
-        const attributeKeys = [
-            ...STABLE_SOURCE_TOKEN_ATTRIBUTES,
-            ...STABLE_SOURCE_REFERENCE_ATTRIBUTES
-        ];
-        const candidates = [sourceRow];
-
-        for (const selector of selectors) {
-            const nodes = sourceRow.querySelectorAll
-                ? Array.from(sourceRow.querySelectorAll(selector)).slice(0, 8)
-                : [];
-            candidates.push(...nodes);
-        }
-
-        for (const candidate of candidates) {
-            if (!candidate || typeof candidate.getAttribute !== 'function') continue;
-
-            for (const attributeKey of attributeKeys) {
+        const extractCandidateToken = (candidate) => {
+            if (!candidate || typeof candidate.getAttribute !== 'function') return null;
+            for (const attributeKey of STABLE_SOURCE_ATTRIBUTES) {
                 const attributeValue = candidate.getAttribute(attributeKey);
                 const token = extractTokenFromReferenceValue(attributeKey, attributeValue);
+                if (token) return token;
+            }
+            return null;
+        };
+        const sourceToken = extractCandidateToken(sourceRow);
+        if (sourceToken) return sourceToken;
+        if (typeof sourceRow.querySelectorAll !== 'function') return null;
+
+        for (const selector of STABLE_SOURCE_SELECTORS) {
+            const candidates = Array.from(sourceRow.querySelectorAll(selector)).slice(0, 8);
+            for (const candidate of candidates) {
+                const token = extractCandidateToken(candidate);
                 if (token) return token;
             }
         }
@@ -647,6 +745,25 @@
         const candidates = [];
         const seenCandidates = new Set();
         const selectors = Array.isArray(DEPS.iconImage) ? DEPS.iconImage : [];
+
+        if (selectors.length === 0) return candidates;
+        let sourceMatchesConfiguredSelector = false;
+        if (typeof sourceElement.matches === 'function') {
+            try {
+                sourceMatchesConfiguredSelector = sourceElement.matches(selectors.join(', '));
+            } catch (error) {
+                sourceMatchesConfiguredSelector = true;
+            }
+        }
+        if (!sourceMatchesConfiguredSelector && typeof sourceElement.querySelector === 'function') {
+            try {
+                const hasDescendantCandidate = Boolean(sourceElement.querySelector(selectors.join(', ')));
+                if (!hasDescendantCandidate) return candidates;
+            } catch (error) {
+                // Preserve the individual-selector fallback for DOM variants that
+                // reject the combined image selector.
+            }
+        }
 
         for (const selector of selectors) {
             if (candidates.length >= MAX_EXPLICIT_ICON_CANDIDATES) break;
@@ -836,7 +953,7 @@
         }
 
         const stableToken = extractSourceStableToken(sourceElement);
-        const hasProcessingSignal = hasSourceProcessingSignal(sourceElement);
+        const hasProcessingSignal = hasSourceProcessingSignal(sourceElement, nativeIconContext);
         const hasFailureSignal = hasSourceFailureSignal(sourceElement);
         const normalizedTitle = normalizeSourceText(title);
         const normalizedAriaLabel = normalizeSourceText(ariaLabel);

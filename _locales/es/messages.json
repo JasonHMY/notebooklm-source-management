@@ -537,13 +537,13 @@
         "message": "No se pudo actualizar el resaltado"
     },
     "ui_settings_drag_mode_title": {
-        "message": "Activar arrastre con reflujo (Beta)"
+        "message": "Activar arrastre con reflujo"
     },
     "ui_settings_drag_mode_body": {
-        "message": "Beta: al arrastrar, las demás fuentes se apartan para abrir un hueco y puedes soltar una fuente entre carpetas. Desactivado (predeterminado) usa la línea azul de inserción clásica. Al volver al modo clásico, las fuentes colocadas entre carpetas pasan al contenedor «Sin agrupar» del final."
+        "message": "al arrastrar, las demás fuentes se apartan para abrir un hueco y puedes soltar una fuente entre carpetas. Desactivado (predeterminado) usa la línea azul de inserción clásica. Al volver al modo clásico, las fuentes colocadas entre carpetas pasan al contenedor «Sin agrupar» del final."
     },
     "ui_settings_drag_mode_enabled": {
-        "message": "Arrastre con reflujo (Beta) activado"
+        "message": "Arrastre con reflujo activado"
     },
     "ui_settings_drag_mode_disabled": {
         "message": "Arrastre clásico restaurado"
@@ -642,10 +642,10 @@
         "message": "Las acciones por lotes, Nueva carpeta y Deshacer siguen disponibles sobre los resultados y se ajustan a paneles estrechos. Si el panel de fuentes está contraído, se espera a que lo expandas sin recargar toda la página."
     },
     "ui_whats_new_drag_title": {
-        "message": "Arrastre con reflujo más fluido y fiable (Beta)"
+        "message": "Arrastre con reflujo disponible"
     },
     "ui_whats_new_drag_body": {
-        "message": "El arrastre con reflujo ahora abre huecos precisos en filas mixtas y anidadas, mantiene actualizado el destino durante el desplazamiento automático y restaura la disposición original al pulsar Esc o cancelar. Sigue siendo opcional; actívalo abajo o en Ajustes."
+        "message": "Al arrastrar varias fuentes por listas grandes, la vista previa se actualiza al desplazarte y el destino sigue la posición real de filas y carpetas. Actívalo en Ajustes; el modo clásico sigue siendo el predeterminado."
     },
     "ui_whats_new_stability_title": {
         "message": "Orden preciso y recuperación más segura"
@@ -657,13 +657,13 @@
         "message": "Entendido"
     },
     "ui_whats_new_enable_beta": {
-        "message": "Activar arrastre con reflujo (Beta)"
+        "message": "Activar arrastre con reflujo"
     },
     "ui_whats_new_drag_enabled": {
-        "message": "Arrastre con reflujo (Beta) activado"
+        "message": "Arrastre con reflujo activado"
     },
     "ui_whats_new_drag_switched_toast": {
-        "message": "Arrastre con reflujo (Beta) activado"
+        "message": "Arrastre con reflujo activado"
     },
     "ui_source_repair_title": {
         "message": "Reparar fuentes"

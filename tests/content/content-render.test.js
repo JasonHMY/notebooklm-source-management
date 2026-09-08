@@ -140,6 +140,108 @@ const createRenderTestFragment = () => ({
     }
 });
 
+const createWindowGeometryNode = ({
+    kind,
+    ordinal,
+    start,
+    end,
+    top,
+    bottom,
+    folded = false
+}) => {
+    const classNames = kind === 'source'
+        ? ['source-item', ...(folded ? ['sp-drag-folded'] : [])]
+        : ['sp-source-window-spacer'];
+    const height = Math.max(0, bottom - top);
+    const dataset = kind === 'source'
+        ? { sourceWindowOrdinal: String(ordinal) }
+        : {
+            sourceWindowStart: String(start),
+            sourceWindowEnd: String(end)
+        };
+    return {
+        nodeType: 1,
+        dataset,
+        children: [],
+        className: classNames.join(' '),
+        classList: {
+            contains: (className) => classNames.includes(className)
+        },
+        matches(selector) {
+            const value = String(selector);
+            return (
+                (kind === 'source' && (
+                    value.includes('source-item') || value.includes('source-window-ordinal')
+                )) ||
+                (kind === 'spacer' && (
+                    value.includes('sp-source-window-spacer')
+                    || value.includes('source-window-start')
+                    || value.includes('source-window-end')
+                ))
+            );
+        },
+        getAttribute(name) {
+            if (name === 'data-source-window-ordinal') return dataset.sourceWindowOrdinal || null;
+            if (name === 'data-source-window-start') return dataset.sourceWindowStart || null;
+            if (name === 'data-source-window-end') return dataset.sourceWindowEnd || null;
+            return null;
+        },
+        getBoundingClientRect: () => ({
+            top,
+            bottom,
+            height,
+            left: 0,
+            right: 320,
+            width: 320
+        })
+    };
+};
+
+const createWindowGeometryList = ({ scrollTop, clientHeight, nodes }) => {
+    const listRect = {
+        top: 100,
+        bottom: 100 + clientHeight,
+        height: clientHeight,
+        left: 0,
+        right: 320,
+        width: 320
+    };
+    const sourceNodes = nodes.filter((node) => node.classList.contains('source-item'));
+    const spacerNodes = nodes.filter((node) => node.classList.contains('sp-source-window-spacer'));
+    const list = {
+        scrollTop,
+        clientHeight,
+        children: nodes,
+        getBoundingClientRect: () => ({ ...listRect }),
+        querySelectorAll(selector) {
+            const value = String(selector);
+            if (
+                (value.includes('source-item') || value.includes('source-window-ordinal'))
+                && (value.includes('sp-source-window-spacer')
+                    || value.includes('source-window-start')
+                    || value.includes('source-window-end'))
+            ) {
+                return nodes;
+            }
+            if (
+                value.includes('sp-source-window-spacer')
+                || value.includes('source-window-start')
+                || value.includes('source-window-end')
+            ) {
+                return spacerNodes;
+            }
+            if (value.includes('source-item') || value.includes('source-window-ordinal')) {
+                return sourceNodes;
+            }
+            return [];
+        }
+    };
+    nodes.forEach((node) => {
+        node.parentElement = list;
+    });
+    return list;
+};
+
 const findRenderTestNodesByClass = (root, className) => {
     const matches = [];
     const visit = (node) => {
@@ -3261,6 +3363,277 @@ describe('batch count and source menu motion rendering', () => {
             overscan: 20,
             rowHeight: 44
         });
+    });
+
+    it('uses a mounted source rect when fixed scrollTop math would skip the actual viewport ordinal', () => {
+        const listContainer = createWindowGeometryList({
+            scrollTop: 229 * 44,
+            clientHeight: 250,
+            nodes: [
+                createWindowGeometryNode({
+                    kind: 'spacer',
+                    start: 0,
+                    end: 202,
+                    top: -8800,
+                    bottom: 100
+                }),
+                createWindowGeometryNode({
+                    kind: 'source',
+                    ordinal: 202,
+                    top: 100,
+                    bottom: 144
+                }),
+                createWindowGeometryNode({
+                    kind: 'spacer',
+                    start: 203,
+                    end: 260,
+                    top: 144,
+                    bottom: 2652
+                })
+            ]
+        });
+        const renderModule = createContentRender({
+            sourceWindowThreshold: 1,
+            sourceWindowRowHeight: 44,
+            sourceWindowOverscan: 20
+        });
+
+        const range = renderModule.resolveSourceWindowRange(
+            listContainer,
+            260,
+            { useMountedGeometry: true }
+        );
+
+        expect(range).toEqual(expect.objectContaining({ active: true }));
+        expect(range.start).toBeLessThanOrEqual(202);
+        expect(range.end).toBeGreaterThan(202);
+        expect(range.start).toBeLessThan(209);
+    });
+
+    it('uses a positive trailing spacer to keep the terminal ordinal materializable and clamped', () => {
+        const listContainer = createWindowGeometryList({
+            // Group headers can make native scrollTop much larger than the
+            // logical source-row footprint. The visible trailing spacer is the
+            // authoritative mapping in that case.
+            scrollTop: 50_000,
+            clientHeight: 250,
+            nodes: [
+                createWindowGeometryNode({
+                    kind: 'spacer',
+                    start: 240,
+                    end: 260,
+                    top: 80,
+                    bottom: 400
+                })
+            ]
+        });
+        const renderModule = createContentRender({
+            sourceWindowThreshold: 1,
+            sourceWindowRowHeight: 44,
+            sourceWindowOverscan: 20
+        });
+
+        const range = renderModule.resolveSourceWindowRange(
+            listContainer,
+            260,
+            { useMountedGeometry: true }
+        );
+
+        expect(range).toEqual(expect.objectContaining({ active: true, end: 260 }));
+        expect(range.start).toBeGreaterThanOrEqual(0);
+        expect(range.start).toBeLessThan(range.end);
+        expect(range.start).toBeLessThanOrEqual(259);
+    });
+
+    it('does not use a zero-height folded pin as the mounted-window anchor', () => {
+        const listContainer = createWindowGeometryList({
+            scrollTop: 229 * 44,
+            clientHeight: 250,
+            nodes: [
+                createWindowGeometryNode({
+                    kind: 'source',
+                    ordinal: 1,
+                    top: 100,
+                    bottom: 100,
+                    folded: true
+                }),
+                createWindowGeometryNode({
+                    kind: 'source',
+                    ordinal: 202,
+                    top: 100,
+                    bottom: 144
+                }),
+                createWindowGeometryNode({
+                    kind: 'spacer',
+                    start: 203,
+                    end: 260,
+                    top: 144,
+                    bottom: 2652
+                })
+            ]
+        });
+        const renderModule = createContentRender({
+            sourceWindowThreshold: 1,
+            sourceWindowRowHeight: 44,
+            sourceWindowOverscan: 20
+        });
+
+        const range = renderModule.resolveSourceWindowRange(
+            listContainer,
+            260,
+            { useMountedGeometry: true }
+        );
+
+        expect(range.start).toBeGreaterThan(1);
+        expect(range.start).toBeLessThanOrEqual(202);
+        expect(range.end).toBeGreaterThan(202);
+    });
+
+    it('ignores positive source and spacer rects clipped inside a folded group', () => {
+        const foldedGroup = {};
+        const clippedOrigin = createWindowGeometryNode({
+            kind: 'source',
+            ordinal: 1,
+            top: 100,
+            bottom: 144
+        });
+        const clippedSpacer = createWindowGeometryNode({
+            kind: 'spacer',
+            start: 2,
+            end: 202,
+            top: 144,
+            bottom: 350
+        });
+        [clippedOrigin, clippedSpacer].forEach((node) => {
+            node.closest = (selector) => (
+                selector === '.group-container.sp-drag-folded' ? foldedGroup : null
+            );
+        });
+        const listContainer = createWindowGeometryList({
+            scrollTop: 229 * 44,
+            clientHeight: 250,
+            nodes: [
+                clippedOrigin,
+                clippedSpacer,
+                createWindowGeometryNode({
+                    kind: 'source',
+                    ordinal: 202,
+                    top: 100,
+                    bottom: 144
+                }),
+                createWindowGeometryNode({
+                    kind: 'spacer',
+                    start: 203,
+                    end: 260,
+                    top: 144,
+                    bottom: 2652
+                })
+            ]
+        });
+        const renderModule = createContentRender({
+            sourceWindowThreshold: 1,
+            sourceWindowRowHeight: 44,
+            sourceWindowOverscan: 20
+        });
+
+        const range = renderModule.resolveSourceWindowRange(
+            listContainer,
+            260,
+            { useMountedGeometry: true }
+        );
+
+        expect(range.start).toBeGreaterThan(1);
+        expect(range.start).toBeLessThanOrEqual(202);
+        expect(range.end).toBeGreaterThan(202);
+    });
+
+    it('does not reuse old mounted ordinals after a filtered logical projection changes', () => {
+        const listContainer = createRenderTestElement('div', { id: 'sources-list' });
+        listContainer.scrollTop = 229 * 44;
+        listContainer.clientHeight = 250;
+        listContainer.getBoundingClientRect = () => ({
+            top: 100,
+            bottom: 350,
+            height: 250,
+            left: 0,
+            right: 320,
+            width: 320
+        });
+        const staleGeometry = createWindowGeometryNode({
+            kind: 'source',
+            ordinal: 100,
+            top: 100,
+            bottom: 144
+        });
+        const originalQuerySelectorAll = listContainer.querySelectorAll.bind(listContainer);
+        listContainer.querySelectorAll = jest.fn((selector) => {
+            const value = String(selector);
+            if (
+                value.includes('source-window-ordinal')
+                || value.includes('sp-source-window-spacer')
+            ) {
+                return [staleGeometry];
+            }
+            return originalQuerySelectorAll(selector);
+        });
+
+        const sources = Array.from({ length: 260 }, (_, index) => ({
+            key: `projection-source-${index}`,
+            title: `Projection source ${index}`,
+            enabled: true
+        }));
+        const sourcesByKey = new Map(sources.map((source) => [source.key, source]));
+        const state = {
+            root: sources.map((source) => ({ type: 'source', key: source.key })),
+            ungrouped: [],
+            filterQuery: '',
+            isBatchMode: false
+        };
+        let filterToEvenSources = false;
+        const renderModule = createContentRender({
+            el: createRenderTestElement,
+            sourceWindowThreshold: 1,
+            sourceWindowRowHeight: 44,
+            sourceWindowOverscan: 20,
+            getDocument: () => ({
+                createDocumentFragment: createRenderTestFragment,
+                createElement: (tag) => createRenderTestElement(tag)
+            }),
+            getShadowRoot: () => ({
+                activeElement: null,
+                querySelector: (selector) => (
+                    selector === '#sources-list' ? listContainer : null
+                ),
+                getElementById: (id) => (id === 'sources-list' ? listContainer : null),
+                appendChild: jest.fn()
+            }),
+            getState: () => state,
+            getSourcesByKey: () => sourcesByKey,
+            sourceMatchesCurrentFilters: (source) => (
+                !filterToEvenSources || Number(source.key.split('-').pop()) % 2 === 0
+            ),
+            getMessage: (key) => key
+        });
+
+        renderModule.render();
+        expect(listContainer.dataset.windowStart).toBe('209');
+
+        filterToEvenSources = true;
+        // The geometry query below represents stale pre-patch DOM. Clear the
+        // lightweight render fixture's children so patch reconciliation itself
+        // does not become part of this projection-guard unit test.
+        listContainer.childNodes = [];
+        listContainer.children = [];
+        listContainer.querySelectorAll.mockClear();
+        renderModule.render();
+
+        expect(listContainer.querySelectorAll).not.toHaveBeenCalledWith(
+            '.source-item[data-source-window-ordinal], .sp-source-window-spacer'
+        );
+        // 130 surviving sources clamp the fixed scrollTop mapping at ordinal 129;
+        // the stale ordinal 100 must not pull the next range back to 80.
+        expect(listContainer.dataset.windowStart).toBe('109');
+        expect(listContainer.dataset.windowEnd).toBe('130');
     });
 
     it('reconciles reversed stable-key rows with linear child-list access', () => {

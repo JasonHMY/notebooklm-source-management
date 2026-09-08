@@ -3621,6 +3621,87 @@ describe('scanAndSyncSources', () => {
         expect(firstDescriptor.key).toBe(secondDescriptor.key);
     });
 
+    it('uses a row stable token without querying descendant token selectors', () => {
+        const mock = createMockSourceRow({
+            title: 'Direct Token Source',
+            stableToken: 'direct-token-123456',
+            checked: true
+        });
+        mock.row.querySelectorAll = jest.fn(() => {
+            throw new Error('descendant scan should not run');
+        });
+
+        expect(globalThis.NSM_SOURCE_DESCRIPTOR_HELPERS.extractSourceStableToken(mock.row))
+            .toBe('data-source-id-direct-token-123456');
+        expect(mock.row.querySelectorAll).not.toHaveBeenCalled();
+    });
+
+    it('stops descendant token selector scanning at the first valid candidate', () => {
+        const mock = createMockSourceRow({ title: 'Nested Token Source', stableToken: null, checked: true });
+        const firstTokenNode = {
+            getAttribute: jest.fn((attributeKey) => (
+                attributeKey === 'data-source-id' ? 'nested-token-123456' : null
+            ))
+        };
+        mock.row.getAttribute = jest.fn(() => null);
+        mock.row.querySelectorAll = jest.fn((selector) => (
+            selector === '[data-source-id]' ? [firstTokenNode] : []
+        ));
+
+        expect(globalThis.NSM_SOURCE_DESCRIPTOR_HELPERS.extractSourceStableToken(mock.row))
+            .toBe('data-source-id-nested-token-123456');
+        expect(mock.row.querySelectorAll).toHaveBeenCalledTimes(1);
+        expect(mock.row.querySelectorAll).toHaveBeenCalledWith('[data-source-id]');
+    });
+
+    it('ignores a ninth candidate for one stable-token selector', () => {
+        const mock = createMockSourceRow({ title: 'Capped Token Source', stableToken: null, checked: true });
+        const ignoredNinthCandidate = {
+            getAttribute: jest.fn((attributeKey) => (
+                attributeKey === 'data-source-id' ? 'ninth-token-123456' : null
+            ))
+        };
+        const firstEightCandidates = Array.from({ length: 8 }, () => ({
+            getAttribute: jest.fn(() => null)
+        }));
+        mock.row.getAttribute = jest.fn(() => null);
+        mock.row.querySelectorAll = jest.fn((selector) => (
+            selector === '[data-source-id]'
+                ? [...firstEightCandidates, ignoredNinthCandidate]
+                : []
+        ));
+
+        expect(globalThis.NSM_SOURCE_DESCRIPTOR_HELPERS.extractSourceStableToken(mock.row)).toBeNull();
+        expect(ignoredNinthCandidate.getAttribute).not.toHaveBeenCalled();
+    });
+
+    it('keeps earlier selector candidates ahead of later cross-attribute tokens', () => {
+        const mock = createMockSourceRow({ title: 'Priority Token Source', stableToken: null, checked: true });
+        const earlierCandidate = {
+            getAttribute: jest.fn((attributeKey) => {
+                if (attributeKey === 'data-source-id') return '';
+                if (attributeKey === 'data-source-url') return 'first-cross-token';
+                return null;
+            })
+        };
+        const laterCandidate = {
+            getAttribute: jest.fn((attributeKey) => (
+                attributeKey === 'data-source-key' ? 'later-priority-token' : null
+            ))
+        };
+        mock.row.getAttribute = jest.fn(() => null);
+        mock.row.querySelectorAll = jest.fn((selector) => {
+            if (selector === '[data-source-id]') return [earlierCandidate];
+            if (selector === '[data-source-key]') return [laterCandidate];
+            return [];
+        });
+
+        expect(globalThis.NSM_SOURCE_DESCRIPTOR_HELPERS.extractSourceStableToken(mock.row))
+            .toBe('data-source-url-path-first-cross-token');
+        expect(mock.row.querySelectorAll).toHaveBeenCalledWith('[data-source-id]');
+        expect(mock.row.querySelectorAll).not.toHaveBeenCalledWith('[data-source-key]');
+    });
+
     it('uses Drive and file data attributes as stable source ids', () => {
         const mock = createMockSourceRow({ title: 'Drive Source', stableToken: null, checked: true });
         mock.row.getAttribute = jest.fn((attr) => {
@@ -3992,6 +4073,120 @@ describe('scanAndSyncSources', () => {
         });
     });
 
+    it('does not resolve styles for a ready row whose ordinary icon is not a failure signal', () => {
+        const mock = createMockSourceRow({
+            title: 'Ready source',
+            stableToken: 'ready-icon-doc',
+            checked: true
+        });
+        mock.iconEl.tagName = 'MAT-ICON';
+        mock.iconEl.parentElement = mock.row;
+        mock.row.children = [mock.iconEl];
+        const originalQuerySelectorAll = mock.row.querySelectorAll;
+        mock.row.querySelectorAll = jest.fn((selector) => {
+            if (String(selector).includes('mat-icon')) return [mock.iconEl];
+            return originalQuerySelectorAll(selector);
+        });
+        const beforeStyleReads = global.window.getComputedStyle.mock.calls.length;
+
+        expect(globalThis.NSM_SOURCE_DESCRIPTOR_HELPERS.hasSourceFailureSignal(mock.row)).toBe(false);
+        expect(global.window.getComputedStyle.mock.calls).toHaveLength(beforeStyleReads);
+        expect(mock.row.querySelectorAll).not.toHaveBeenCalledWith(
+            'mat-icon, .material-icons, .google-symbols, [role="img"]'
+        );
+    });
+
+    it('does not resolve styles for ready row children before ruling out processing text', () => {
+        const nativeMoreButton = {
+            tagName: 'BUTTON',
+            style: {},
+            getAttribute: jest.fn(() => null)
+        };
+        const mock = createMockSourceRow({
+            title: 'Ready source',
+            stableToken: 'ready-processing-doc',
+            checked: true,
+            nativeMoreButton
+        });
+        [mock.iconEl, mock.titleEl, mock.checkbox, nativeMoreButton].forEach((element) => {
+            element.parentElement = mock.row;
+        });
+        const originalQuerySelectorAll = mock.row.querySelectorAll;
+        mock.row.querySelectorAll = jest.fn((selector) => (
+            selector === '*'
+                ? [mock.iconEl, mock.titleEl, mock.checkbox, nativeMoreButton]
+                : originalQuerySelectorAll(selector)
+        ));
+        const beforeStyleReads = global.window.getComputedStyle.mock.calls.length;
+
+        expect(globalThis.NSM_SOURCE_DESCRIPTOR_HELPERS.hasSourceProcessingSignal(mock.row)).toBe(false);
+        expect(global.window.getComputedStyle.mock.calls).toHaveLength(beforeStyleReads);
+    });
+
+    it('skips the broad processing-text scan when the source has no processing signal', () => {
+        const mock = createMockSourceRow({
+            title: 'Ready source',
+            stableToken: 'ready-processing-scan-doc',
+            checked: true
+        });
+        const originalQuerySelectorAll = mock.row.querySelectorAll;
+        mock.row.querySelectorAll = jest.fn((selector) => originalQuerySelectorAll(selector));
+
+        expect(globalThis.NSM_SOURCE_DESCRIPTOR_HELPERS.hasSourceProcessingSignal(mock.row)).toBe(false);
+        expect(mock.row.querySelectorAll).not.toHaveBeenCalled();
+    });
+
+    it('does not enumerate icon image selectors for an ordinary direct-token source', () => {
+        const mock = createMockSourceRow({
+            title: 'Ready source',
+            stableToken: 'ready-image-scan-doc',
+            checked: true
+        });
+        const originalQuerySelectorAll = mock.row.querySelectorAll;
+        mock.row.querySelectorAll = jest.fn((selector) => originalQuerySelectorAll(selector));
+
+        expect(mod.createSourceDescriptor(mock.row, new Map(), new Map())).toMatchObject({
+            iconImageUrl: null,
+            stableToken: 'data-source-id-ready-image-scan-doc'
+        });
+        expect(mock.row.querySelectorAll).not.toHaveBeenCalled();
+    });
+
+    it('does not multiply layout reads across a large ready-source scan', () => {
+        const mocks = Array.from({ length: 128 }, (_, index) => {
+            const mock = createMockSourceRow({
+                title: `Ready source ${index + 1}`,
+                stableToken: `ready-source-${index + 1}`,
+                checked: true
+            });
+            [mock.iconEl, mock.titleEl, mock.checkbox].forEach((element) => {
+                element.parentElement = mock.row;
+            });
+            const originalQuerySelectorAll = mock.row.querySelectorAll;
+            mock.row.querySelectorAll = jest.fn((selector) => {
+                if (selector === '*') return [mock.iconEl, mock.titleEl, mock.checkbox];
+                if (String(selector).includes('mat-icon')) return [mock.iconEl];
+                return originalQuerySelectorAll(selector);
+            });
+            return mock;
+        });
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        panel.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? mocks.map((mock) => mock.row) : []
+        ));
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+        global.window.getComputedStyle.mockClear();
+
+        mod.scanAndSyncSources({}, true);
+
+        expect(mod.sourcesByKey.size).toBe(128);
+        // Source-view discovery may verify each row once. Descriptor status checks
+        // must not add a layout read for every ordinary child in that row.
+        expect(global.window.getComputedStyle.mock.calls.length).toBeLessThanOrEqual(132);
+    });
+
     it('ignores a hidden stale failure status while keeping a ready source enabled', () => {
         const mock = createMockSourceRow({
             title: 'Error handling guide',
@@ -4022,6 +4217,64 @@ describe('scanAndSyncSources', () => {
         });
     });
 
+    it('keeps scanning failure statuses when the first matching status is hidden', () => {
+        const mock = createMockSourceRow({
+            title: 'Ready source',
+            stableToken: 'visible-after-hidden-failure-doc',
+            checked: true
+        });
+        const hiddenStatus = {
+            hidden: true,
+            style: { display: 'none' },
+            parentElement: mock.row,
+            getAttribute: jest.fn((attr) => (attr === 'data-status' ? 'failed' : null))
+        };
+        const visibleStatus = {
+            style: {},
+            parentElement: mock.row,
+            getAttribute: jest.fn((attr) => (attr === 'data-status' ? 'error' : null))
+        };
+        const originalQuerySelector = mock.row.querySelector;
+        const originalQuerySelectorAll = mock.row.querySelectorAll;
+        mock.row.querySelector = jest.fn((selector) => (
+            String(selector).includes('[data-state="failed"]')
+                ? hiddenStatus
+                : originalQuerySelector(selector)
+        ));
+        mock.row.querySelectorAll = jest.fn((selector) => (
+            String(selector).includes('[data-state="failed"]')
+                ? [hiddenStatus, visibleStatus]
+                : originalQuerySelectorAll(selector)
+        ));
+
+        expect(mod.createSourceDescriptor(mock.row, new Map(), new Map())).toMatchObject({
+            isFailed: true,
+            isDisabled: true
+        });
+    });
+
+    it('falls back to failure status candidates when first-match lookup is unavailable', () => {
+        const mock = createMockSourceRow({
+            title: 'Ready source',
+            stableToken: 'failure-status-fallback-doc',
+            checked: true
+        });
+        const visibleStatus = {
+            style: {},
+            parentElement: mock.row,
+            getAttribute: jest.fn((attr) => (attr === 'data-status' ? 'error' : null))
+        };
+        const originalQuerySelectorAll = mock.row.querySelectorAll;
+        mock.row.querySelector = null;
+        mock.row.querySelectorAll = jest.fn((selector) => (
+            String(selector).includes('[data-state="failed"]')
+                ? [visibleStatus]
+                : originalQuerySelectorAll(selector)
+        ));
+
+        expect(globalThis.NSM_SOURCE_DESCRIPTOR_HELPERS.hasSourceFailureSignal(mock.row)).toBe(true);
+    });
+
     it('recognizes a visible independent failure icon without using source title text', () => {
         const mock = createMockSourceRow({
             title: 'Ready source',
@@ -4029,11 +4282,13 @@ describe('scanAndSyncSources', () => {
             checked: true
         });
         const failureIcon = {
+            tagName: 'MAT-ICON',
             textContent: 'error_outline',
             style: {},
             parentElement: mock.row,
             getAttribute: jest.fn(() => null)
         };
+        mock.row.children = [failureIcon];
         const originalQuerySelectorAll = mock.row.querySelectorAll;
         mock.row.querySelectorAll = jest.fn((selector) => {
             if (String(selector).includes('mat-icon')) return [failureIcon];
@@ -4046,6 +4301,73 @@ describe('scanAndSyncSources', () => {
             isFailed: true,
             isDisabled: true
         });
+    });
+
+    it('finds the first failure icon after more than 48 ordinary descendants', () => {
+        const mock = createMockSourceRow({
+            title: 'Ready source',
+            stableToken: 'late-failure-icon-doc',
+            checked: true
+        });
+        const ordinaryDescendants = Array.from({ length: 48 }, () => ({
+            tagName: 'DIV',
+            textContent: '',
+            style: {},
+            parentElement: mock.row,
+            children: [],
+            getAttribute: jest.fn(() => null)
+        }));
+        const failureIcon = {
+            tagName: 'MAT-ICON',
+            textContent: 'error_outline',
+            style: {},
+            parentElement: mock.row,
+            children: [],
+            getAttribute: jest.fn(() => null)
+        };
+        mock.row.children = [...ordinaryDescendants, failureIcon];
+        const originalQuerySelectorAll = mock.row.querySelectorAll;
+        mock.row.querySelectorAll = jest.fn((selector) => (
+            String(selector).includes('mat-icon') ? [failureIcon] : originalQuerySelectorAll(selector)
+        ));
+
+        expect(mod.createSourceDescriptor(mock.row, new Map(), new Map())).toMatchObject({
+            isFailed: true,
+            isDisabled: true
+        });
+        expect(mock.row.querySelectorAll).toHaveBeenCalledWith(
+            'mat-icon, .material-icons, .google-symbols, [role="img"]'
+        );
+    });
+
+    it('keeps failure-icon scanning to the first 24 icon candidates', () => {
+        const mock = createMockSourceRow({
+            title: 'Ready source',
+            stableToken: 'failure-icon-limit-doc',
+            checked: true
+        });
+        const ordinaryIcons = Array.from({ length: 24 }, () => ({
+            tagName: 'MAT-ICON',
+            textContent: 'article',
+            style: {},
+            parentElement: mock.row,
+            children: [],
+            getAttribute: jest.fn(() => null)
+        }));
+        const ignoredTwentyFifthIcon = {
+            tagName: 'MAT-ICON',
+            textContent: 'error_outline',
+            style: {},
+            parentElement: mock.row,
+            children: [],
+            getAttribute: jest.fn(() => null)
+        };
+        mock.row.children = [...ordinaryIcons, ignoredTwentyFifthIcon];
+
+        expect(globalThis.NSM_SOURCE_DESCRIPTOR_HELPERS.hasSourceFailureSignal(mock.row)).toBe(false);
+        expect(mock.row.querySelectorAll).not.toHaveBeenCalledWith(
+            'mat-icon, .material-icons, .google-symbols, [role="img"]'
+        );
     });
 
     it('recognizes an explicit failed status on the source row itself', () => {

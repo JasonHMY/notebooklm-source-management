@@ -190,7 +190,7 @@ GeminiNotebook-Source-Management
 │       │   └── 历史设计规格；不是 runtime，也不进入发布包
 │       └── plans/
 │           ├── 2026-09-08-reflow-stable.md
-│           │   └── 避让拖拽转正条件、独立审查、真实鼠标验收、性能门槛与保留 Beta 的判定依据
+│           │   └── 避让拖拽转正条件、独立审查、真实鼠标验收、性能门槛与转正的判定依据
 │           ├── 2026-09-08-top10-ux-repairs.md
 │           │   └── 十项来源身份、保存恢复、生命周期和UI问题的修复计划与验证状态
 │           ├── 2026-07-26-optimization-hardening-roadmap.md
@@ -405,8 +405,10 @@ manifest.json
 │   │   ├── 来源/分组拖拽排序
 │   │   ├── 批量模式多源拖拽与边缘自动滚动
 │   │   ├── 单来源/分组/多来源 drop payload 必须与本地 activeDragContext 类型及身份完全一致；在读取几何和提交树之前拒绝不匹配 payload
-│   │   ├── 两种拖拽模式（`content-preferences` 的全局 dragMode）：经典（默认，蓝色插入线 .drag-over-top/bottom + 散源落底部桶）/ 避让 Beta（按真实混合 box model/折叠位移形成空槽、折叠 + 让位 + 根层级定位、取消时精确恢复）；自定义 ghost = source-item 行克隆（单源单层 + 多源最多 3 层堆叠 + 右上角数字 badge）
+│   │   ├── 两种拖拽模式（`content-preferences` 的全局 dragMode）：经典（默认，蓝色插入线 .drag-over-top/bottom + 散源落底部桶）/ 避让（按真实混合 box model/折叠位移形成空槽、折叠 + 让位 + 根层级定位、取消时精确恢复）；自定义 ghost = source-item 行克隆（单源单层 + 多源最多 3 层堆叠 + 右上角数字 badge）
 │   │   ├── 避让 dragover 每帧只读一次 geometry snapshot 后纯计算并集中写入；纯滚动按 root/嵌套 children 精确 delta 修补，auto-scroll 无新 dragover 时仍按静止指针合并刷新，drop 前同步消费 dirty geometry，尺寸/render/混合失效时 fail closed 重建
+│   │   ├── refreshMountedDragSession 在窗口重建后按实际元素保存/恢复样式、重新实测挂载选择占位并 fold 新行；完整逻辑选择不变，不强制挂载离屏行，未确认几何拒绝 drop，初始fold后立即重投影窗口并保留origin，已有排队帧复用新几何、静止指针无排队帧时同步刷新，提交中的 render 不重新折叠落地来源
+│   │   ├── 窗口定位按真实正高度来源行/virtual spacer 的 rect 与 ordinal 区间映射，排除零高 fold pin；仅在 logical projection 不变时复用 DOM 锚点，过滤/顺序变化改用有界估计，避免50项拖拽及多分组时出现窗口漂移或空白
 │   │   ├── native dropEffect 只在原始 dragover 事件内由 clean snapshot 同步解析；dirty/missing snapshot 保守 move，未知 payload 为 none，异步 drag frame 不保留 DataTransfer
 │   │   ├── reflow transform 使用 source/group 类型化 map；仅可视区 + 一个真实行高 overscan 动画，离屏位移静态应用并在结束/下次 preflight 清理
 │   │   ├── 批量选择、Select visible（基于完整逻辑投影选择所有明确可见且 native-operable 的来源，不受 windowing 当前挂载行限制）、Clear selection、Clear hidden selection、可见/隐藏/真实选中数、加入文件夹、添加/移除标签；零选择时只显示取消/计数/Select visible，选中后再显示清除与批量操作；删除进行中冻结选择变更
@@ -681,7 +683,7 @@ manifest.json
 - 删除确认：`index.js` 的 `requestSingleSourceDeleteConfirmation` 复用批量alertdialog；`content-source-actions.js` 在确认前后核对上下文/身份，低层批量删除不重复确认。
 - 生命周期：`getLiveSourceSyncContextToken` 绑定启用状态、当前notebook与已挂载实例；`debouncedScanAndSync.cancel()`、视图click timer与 `cancelNativeSelectionSync()` 在cleanup收口。Popup `SWITCH_SOURCE_VIEW` 的poll/finalize也携带token与request generation；自身native click引发的同notebook DOM重建只允许在原有期限内交接到完成恢复的新实例，route/disable/新请求使旧操作失效。
 - 保存/恢复：`content-persistence.js` 保留最新原始布局，stale仅记录冲突信息；旧快照不能通过提升base后重试覆盖远端，界面提供刷新。
-- 身份/故障：`source-descriptor-helpers.js` 排除标题故障词；`content-state-reconcile.js` 先使用同DOM/稳定ID，传播 `ambiguous_weak_identity` 与 `unresolvedWeakIdentityKeys`，source-sync保留未决组织，不按顺序猜测；现有SourceRepair显示旧位置和当前原生顺序，经用户一对一选择后用会话私有element绑定、canonical保存与失败回滚完成恢复。
+- 身份/故障：`source-descriptor-helpers.js` 排除标题故障词，稳定标识先检查来源行本身，必要时才按原属性/候选优先级查询后代；`content-state-reconcile.js` 先使用同DOM/稳定ID，传播 `ambiguous_weak_identity` 与 `unresolvedWeakIdentityKeys`，source-sync保留未决组织，不按顺序猜测；现有SourceRepair显示旧位置和当前原生顺序，经用户一对一选择后用会话私有element绑定、canonical保存与失败回滚完成恢复。
 - 搜索/仅看：工具栏与展开搜索用grid分行，批量入口持续可用；仅看只影响渲染，不改变回答来源。
 - 勾选队列：`content-tree-interactions.js` 每轮最多16个即时确认，慢控件每次点击保留10×75ms确认窗口；`getNativeSelectionSyncProgress`/`onNativeSelectionSyncProgress` 输出 `{pending, completed, total}`，cleanup调用cancel结清待完成请求。
 - 回归：现有 `content-source-actions`、`content-lifecycle`、`content-persistence`、`content-source-sync`、`content-tree`、`content-view-state`/`content-render` 和 `tests/smoke/extension-smoke.spec.js` 承担对应验证；详见同日实施计划。
@@ -830,12 +832,13 @@ content runtime memory
 │   └── 文件: tests/manifest-loader-sync.test.js
 ├── 扩展真实上下文 smoke
 │   ├── 命令: npm run test:smoke
-│   ├── 文件: tests/smoke/extension-smoke.spec.js, tests/smoke/batch-drag.smoke.spec.js, tests/smoke/drag-reflow-layout.smoke.spec.js
+│   ├── 文件: tests/smoke/extension-smoke.spec.js, tests/smoke/batch-drag.smoke.spec.js, tests/smoke/drag-reflow-layout.smoke.spec.js, tests/smoke/reflow-stable.smoke.spec.js
+│   ├── 跨窗口拖拽: reflow-stable 使用可信 mouse/wheel 与独立 fixture，核对远端选中行折叠、取消恢复、完整逻辑选择及最终 storage/刷新结果；当前验收结论见 docs/DRAG_REFLOW_STABILITY.md
 │   └── 默认: headless，不应该弹出可见浏览器窗口；extension smoke 先验证零选择批量栏只保留基础选择控件，再选中来源并用长批量文案验证 240/320px 窄面板、高倍缩放与跨平台字体度量下无水平溢出
 ├── 拖拽性能基准（opt-in）
 │   ├── 命令: npm run benchmark:drag
 │   ├── 文件: tests/smoke/drag-performance.smoke.spec.js, docs/DRAG_PERFORMANCE_BASELINE.md
-│   └── 默认: 仅 DRAG_BENCHMARK=1 时执行；100/500 行 × 单项/50 项选择，500 行读取完整 logicalSourceCount/sourceWindowingActive 而非把未挂载行当丢失，按 source-window ordinal 临时挂载 origin 与 callback target；50 项选择同时校验 pendingSelected 和 DataTransfer 完整 50 keys，并单独记录 materialized selection subset。prepare 计时前在真实 pointerdown 后状态完成 settle/全量计数归零，以 isolated-world logical rAF callback ID 精确绑定目标帧；After 四组合及重复 500 行稳定性样本已记录，仍非默认 smoke/CI timing gate
+│   └── 默认: 仅 DRAG_BENCHMARK=1 时执行；100/500 行 × 单项/50 项选择，500 行读取完整 logicalSourceCount/sourceWindowingActive 而非把未挂载行当丢失，按 source-window ordinal 临时挂载 origin 与 callback target；50 项选择同时校验 pendingSelected 和 DataTransfer 完整 50 keys，并单独记录 materialized selection subset。prepare 计时前在真实 pointerdown 后状态完成 settle/全量计数归零，以 isolated-world logical rAF callback ID 精确绑定目标帧；callback采用当前可见来源生成的固定非edge坐标，并向当前连接列表派发事件，避免追逐动画/旧节点，输出保留input points；After 四组合及重复 500 行稳定性样本已记录，仍非默认 smoke/CI timing gate
 ├── Manager 大列表性能基准（opt-in）
 │   ├── 命令: npm run benchmark:manager
 │   ├── 文件: tests/smoke/manager-performance.smoke.spec.js
@@ -932,7 +935,7 @@ CI: .github/workflows/ci.yml
 │   ├── 先看: src/content/source-descriptor-helpers.js
 │   ├── 然后看: src/content/content-source-sync.js, src/content/content-render.js
 │   ├── 测试: content-source-sync.test.js, content-render.test.js
-│   └── 注意: raw URL 临时标题、spinner/progress/status 文案都可能是 loading signal
+│   └── 注意: raw URL 临时标题、spinner/progress/status 文案都可能是 loading signal；状态检测先匹配候选再检查可见性，复用标题/控件和有界后代遍历，复杂行保留原故障图标查询语义
 ├── 失败来源不显示或不能删
 │   ├── 先看: src/content/source-descriptor-helpers.js
 │   ├── 然后看: src/content/content-source-actions.js, src/content/content-render.js

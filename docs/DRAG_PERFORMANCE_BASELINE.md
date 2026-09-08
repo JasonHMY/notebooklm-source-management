@@ -33,6 +33,24 @@ counts; the established timing and geometry/query acceptance limits are unchange
 
 The isolated-world rAF wrapper assigns a monotonic logical ID to every callback. After the dragstart fold IDs are drained, each dragover must synchronously schedule exactly one new ID; that exact ID is registered before yielding and must complete with exactly one `{ callbackId, duration, callsDelta }` sample. The 10/50 sample ID sets must exactly match their target ID sets. DOM call totals include only measured synchronous prepare deltas plus the exact 50 measured target-callback deltas, excluding fixture setup, fold, dragend, bridge, and unrelated rAF work.
 
+### 2026-09-08 controller correction
+
+Virtual-window reconciliation can detach the source nodes previously cached by
+the callback driver. Following each row's animated rectangle also changes the
+input trajectory and can unintentionally start auto-scroll. The controller now
+derives at least two fixed integer client-coordinate points from connected,
+non-selected source centers after fold, outside the production auto-scroll edge
+zone. Each sample dispatches to the current connected source list at one of
+those fixed points; cleanup also uses the current list. It never scrolls after
+fold to conceal an empty viewport. Initial window reprojection after folding
+is production behavior, verified by the browser tests.
+
+The fixture, logical selections, 5/20 prepare sessions, 10/50 callbacks, exact ID
+sampling and acceptance ceilings are unchanged. Input points are included in
+the result. The historical timings below used the earlier controller; use the
+current results against the stated ceilings, not as a speedup percentage over
+that different pointer trajectory.
+
 ## Before Optimization
 
 | Rows | Selection | Prepare p50 / p95 (ms) | Prepare forced-layout phases max | Callback p50 / p95 (ms) | getBoundingClientRect | querySelector | querySelectorAll |
