@@ -1130,6 +1130,7 @@ describe('drag and drop ordering guards', () => {
         const render = jest.fn();
         const buildParentMap = jest.fn();
         const runtime = {
+            activeDragContext: { kind: 'source-single', keys: ['S'] },
             dragReflowSession: {
                 draggedKeys: new Set(['S']),
                 currentIntent: {
@@ -1208,6 +1209,7 @@ describe('drag and drop ordering guards', () => {
         const saveState = jest.fn();
         const render = jest.fn();
         const runtime = {
+            activeDragContext: { kind: 'source-single', keys: ['A'] },
             dragReflowSession: {
                 draggedKeys: new Set(['A']),
                 currentIntent: {
@@ -1266,6 +1268,7 @@ describe('drag and drop ordering guards', () => {
         const saveState = jest.fn();
         const render = jest.fn();
         const runtime = {
+            activeDragContext: { kind: 'source-single', keys: ['A'] },
             dragReflowSession: {
                 draggedKeys: new Set(['A']),
                 currentIntent: {
@@ -1326,6 +1329,7 @@ describe('drag and drop ordering guards', () => {
         const render = jest.fn();
         const syncSourcesToEffectiveState = jest.fn();
         const runtime = {
+            activeDragContext: { kind: 'source-single', keys: ['A'] },
             dragReflowSession: {
                 draggedKeys: new Set(['A']),
                 currentIntent: {
@@ -1385,6 +1389,7 @@ describe('drag and drop ordering guards', () => {
         const saveState = jest.fn();
         const render = jest.fn();
         const runtime = {
+            activeDragContext: { kind: 'source-single', keys: ['A'] },
             dragReflowSession: {
                 draggedKeys: new Set(['A']),
                 currentIntent: {
@@ -1450,6 +1455,7 @@ describe('drag and drop ordering guards', () => {
         const saveState = jest.fn();
         const render = jest.fn();
         const runtime = {
+            activeDragContext: { kind: 'source-single', keys: ['A'] },
             dragReflowSession: {
                 draggedKeys: new Set(['A']),
                 currentIntent: {
@@ -1505,6 +1511,7 @@ describe('drag and drop ordering guards', () => {
         const saveState = jest.fn();
         const render = jest.fn();
         const runtime = {
+            activeDragContext: { kind: 'source-multi', keys: ['A', 'B'] },
             dragReflowSession: {
                 draggedKeys: new Set(['A', 'B']),
                 currentIntent: {
@@ -1554,6 +1561,186 @@ describe('drag and drop ordering guards', () => {
         });
         expect(render).not.toHaveBeenCalled();
         expect(saveState).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        [
+            'a single-source payload that names a different source',
+            { kind: 'source-single', keys: ['A'] },
+            { sourceKey: 'B' }
+        ],
+        [
+            'a group payload that names a different group',
+            { kind: 'group', draggedGroupId: 'source-group' },
+            { groupId: 'other-group' }
+        ],
+        [
+            'a source payload without a local drag context',
+            null,
+            { sourceKey: 'A' }
+        ],
+        [
+            'a group payload during a source drag',
+            { kind: 'source-single', keys: ['A'] },
+            { groupId: 'source-group' }
+        ],
+        [
+            'a source payload during a group drag',
+            { kind: 'group', draggedGroupId: 'source-group' },
+            { sourceKey: 'A' }
+        ]
+    ])('fails closed for %s', (_label, activeDragContext, payload) => {
+        const targetGroup = { id: 'target-group', children: [] };
+        const sourceGroup = { id: 'source-group', children: [] };
+        const otherGroup = { id: 'other-group', children: [] };
+        const state = {
+            root: [
+                { type: 'group', id: targetGroup.id },
+                { type: 'group', id: sourceGroup.id },
+                { type: 'group', id: otherGroup.id }
+            ],
+            ungrouped: ['A', 'B']
+        };
+        const treePlacement = {
+            applyPlacement: jest.fn(),
+            applyBatchPlacement: jest.fn(),
+            rebuildParentMap: jest.fn()
+        };
+        const saveState = jest.fn();
+        const render = jest.fn();
+        const sourceList = { querySelectorAll: jest.fn(() => []) };
+        const runtime = {
+            activeDragContext,
+            dragReflowSession: {
+                draggedKeys: new Set(
+                    activeDragContext?.kind === 'group'
+                        ? [activeDragContext.draggedGroupId]
+                        : (activeDragContext?.keys || ['A'])
+                ),
+                currentIntent: {
+                    kind: 'into-group',
+                    targetList: targetGroup.children,
+                    insertIndex: 0,
+                    targetGroup,
+                    targetGroupId: targetGroup.id,
+                    target: {
+                        container: 'group',
+                        groupId: targetGroup.id,
+                        index: 0
+                    },
+                    slotKey: null
+                },
+                shiftedItems: new Map()
+            }
+        };
+        const interactions = createContentTreeInteractions({
+            runtime,
+            treePlacement,
+            getState: () => state,
+            getGroupsById: () => new Map([
+                [targetGroup.id, targetGroup],
+                [sourceGroup.id, sourceGroup],
+                [otherGroup.id, otherGroup]
+            ]),
+            getParentMap: () => new Map(),
+            getShadowRoot: () => ({
+                getElementById: () => sourceList,
+                querySelectorAll: jest.fn(() => [])
+            }),
+            saveState,
+            render
+        });
+
+        interactions.handleDrop(createDropEvent({ dropTarget: null, ...payload }));
+
+        expect(treePlacement.applyPlacement).not.toHaveBeenCalled();
+        expect(treePlacement.applyBatchPlacement).not.toHaveBeenCalled();
+        expect(treePlacement.rebuildParentMap).not.toHaveBeenCalled();
+        expect(sourceList.querySelectorAll).not.toHaveBeenCalled();
+        expect(state).toEqual({
+            root: [
+                { type: 'group', id: targetGroup.id },
+                { type: 'group', id: sourceGroup.id },
+                { type: 'group', id: otherGroup.id }
+            ],
+            ungrouped: ['A', 'B']
+        });
+        expect(saveState).not.toHaveBeenCalled();
+        expect(render).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        [
+            'a matching single-source payload',
+            { kind: 'source-single', keys: ['A'] },
+            { sourceKey: 'A' },
+            { kind: 'source', key: 'A' }
+        ],
+        [
+            'a matching group payload',
+            { kind: 'group', draggedGroupId: 'source-group' },
+            { groupId: 'source-group' },
+            { kind: 'group', id: 'source-group' }
+        ]
+    ])('continues to route %s', (_label, activeDragContext, payload, item) => {
+        const targetGroup = { id: 'target-group', children: [] };
+        const sourceGroup = { id: 'source-group', children: [] };
+        const state = {
+            root: [
+                { type: 'group', id: targetGroup.id },
+                { type: 'group', id: sourceGroup.id }
+            ],
+            ungrouped: ['A']
+        };
+        const treePlacement = {
+            applyPlacement: jest.fn(() => ({ ok: true, changed: false, reason: 'no_change' })),
+            applyBatchPlacement: jest.fn(),
+            rebuildParentMap: jest.fn()
+        };
+        const runtime = {
+            activeDragContext,
+            dragReflowSession: {
+                draggedKeys: new Set(
+                    activeDragContext.kind === 'group'
+                        ? [activeDragContext.draggedGroupId]
+                        : activeDragContext.keys
+                ),
+                currentIntent: {
+                    kind: 'into-group',
+                    targetList: targetGroup.children,
+                    insertIndex: 0,
+                    targetGroup,
+                    targetGroupId: targetGroup.id,
+                    target: {
+                        container: 'group',
+                        groupId: targetGroup.id,
+                        index: 0
+                    },
+                    slotKey: null
+                },
+                shiftedItems: new Map()
+            }
+        };
+        const interactions = createContentTreeInteractions({
+            runtime,
+            treePlacement,
+            getState: () => state,
+            getGroupsById: () => new Map([
+                [targetGroup.id, targetGroup],
+                [sourceGroup.id, sourceGroup]
+            ]),
+            getParentMap: () => new Map(),
+            getShadowRoot: () => ({ querySelectorAll: jest.fn(() => []) }),
+            saveState: jest.fn(),
+            render: jest.fn()
+        });
+
+        interactions.handleDrop(createDropEvent({ dropTarget: null, ...payload }));
+
+        expect(treePlacement.applyPlacement).toHaveBeenCalledWith({
+            item,
+            target: { container: 'group', groupId: targetGroup.id, index: 0 }
+        });
     });
 
     it('routes a multi-source drop through semantic batch placement and gates effects on change', () => {
@@ -2054,6 +2241,7 @@ describe('drag and drop ordering guards', () => {
         const render = jest.fn();
         const syncSourcesToEffectiveState = jest.fn();
         const runtime = {
+            activeDragContext: { kind: 'group', draggedGroupId: 'root' },
             dragReflowSession: {
                 draggedKeys: new Set(['root']),
                 currentIntent: {
@@ -2116,6 +2304,7 @@ describe('drag and drop ordering guards', () => {
             classList: createClassList(['source-item'])
         };
         const runtime = {
+            activeDragContext: { kind: 'source-single', keys: ['source-1'] },
             dragReflowSession: {
                 draggedKeys: new Set(['source-1']),
                 currentIntent: {
@@ -2162,6 +2351,7 @@ describe('drag and drop ordering guards', () => {
             classList: createClassList(['source-item'])
         };
         const runtime = {
+            activeDragContext: { kind: 'source-single', keys: ['source-1'] },
             dragReflowSession: {
                 draggedKeys: new Set(['source-1']),
                 currentIntent: {
@@ -2215,6 +2405,7 @@ describe('drag and drop ordering guards', () => {
         const render = jest.fn();
         const buildParentMap = jest.fn();
         const runtime = {
+            activeDragContext: { kind: 'source-single', keys: ['B'] },
             dragReflowSession: {
                 draggedKeys: new Set(['B']),
                 currentIntent: {
@@ -2280,6 +2471,7 @@ describe('drag and drop ordering guards', () => {
             classList: createClassList(['group-container'])
         };
         const runtime = {
+            activeDragContext: { kind: 'source-single', keys: ['mover'] },
             dragReflowSession: {
                 draggedKeys: new Set(['mover']),
                 currentIntent: {
@@ -2359,6 +2551,7 @@ describe('drag and drop ordering guards', () => {
         });
         const dropTarget = { dataset: { sourceKey: 'A' }, classList: createClassList(['source-item']) };
         const runtime = {
+            activeDragContext: { kind: 'group', draggedGroupId: 'mover' },
             dragReflowSession: {
                 draggedKeys: new Set(['mover']),
                 currentIntent: {
@@ -2420,6 +2613,7 @@ describe('drag and drop ordering guards', () => {
         const buildParentMap = jest.fn();
         const dropTarget = { dataset: { sourceKey: 'src-1' }, classList: createClassList(['source-item']) };
         const runtime = {
+            activeDragContext: { kind: 'source-single', keys: ['src-1'] },
             dragReflowSession: {
                 draggedKeys: new Set(['src-1']),
                 currentIntent: {
@@ -2474,6 +2668,7 @@ describe('drag and drop ordering guards', () => {
         const buildParentMap = jest.fn();
         const dropTarget = { dataset: { groupId: 'g2' }, classList: createClassList(['group-container']) };
         const runtime = {
+            activeDragContext: { kind: 'group', draggedGroupId: 'g2' },
             dragReflowSession: {
                 draggedKeys: new Set(['g2']),
                 currentIntent: {
@@ -2541,6 +2736,7 @@ describe('drag and drop ordering guards', () => {
             classList: createClassList(['group-container', 'drag-into'])
         };
         const runtime = {
+            activeDragContext: { kind: 'group', draggedGroupId: 'root' },
             dragReflowSession: {
                 draggedKeys: new Set(['root']),
                 currentIntent: {
@@ -4297,6 +4493,7 @@ describe('drop routes multi vs single source', () => {
             classList: createClassList(['source-item'])
         };
         const runtime = {
+            activeDragContext: { kind: 'source-single', keys: ['A1'] },
             dragReflowSession: {
                 draggedKeys: new Set(['A1']),
                 currentIntent: {
@@ -4373,6 +4570,7 @@ describe('drop routes multi vs single source', () => {
         };
         // Single-source drag intent (resolveDragSelection returned [C] only).
         const runtime = {
+            activeDragContext: { kind: 'source-single', keys: ['C'] },
             dragReflowSession: {
                 draggedKeys: new Set(['C']),
                 currentIntent: {
@@ -4445,6 +4643,7 @@ describe('drop routes multi vs single source', () => {
             classList: createClassList(['group-container', 'drag-into'])
         };
         const runtime = {
+            activeDragContext: { kind: 'source-single', keys: ['A'] },
             dragReflowSession: {
                 draggedKeys: new Set(['A']),
                 currentIntent: {
@@ -4504,6 +4703,7 @@ describe('drop routes multi vs single source', () => {
         const buildParentMap = jest.fn();
         const developerLog = jest.fn();
         const runtime = {
+            activeDragContext: { kind: 'source-single', keys: ['A'] },
             dragReflowSession: {
                 draggedKeys: new Set(['A']),
                 currentIntent: {
@@ -4656,6 +4856,7 @@ describe('drop routes multi vs single source', () => {
         };
         const runtime = {
             // Mimics the intent computed during dragover when cursor is on g1's header.
+            activeDragContext: { kind: 'source-single', keys: ['A'] },
             dragReflowSession: {
                 draggedKeys: new Set(['A']),
                 currentIntent: {
@@ -8754,6 +8955,7 @@ describe('handleDragOver hover-expand', () => {
             groups: { g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: true } },
             items: [{ kind: 'group', id: 'g1', top: 100, headerHeight: 40, childrenStart: 140, childrenEnd: 140 }]
         });
+        ctx.runtime.activeDragContext = { kind: 'source-single', keys: ['A'] };
         ctx.helpers.dragOverFor('g1');
         jest.advanceTimersByTime(300);
         ctx.tree.handleDrop(ctx.helpers.makeDropEvent({
@@ -9064,6 +9266,7 @@ describe('handleDragOver hover-expand', () => {
                 groups: { g1: { id: 'g1', children: [{ type: 'source', key: 'X' }], collapsed: false } },
                 items: [{ kind: 'group', id: 'g1', top: 100, headerHeight: 40, childrenStart: 140, childrenEnd: 200 }]
             });
+            ctx.runtime.activeDragContext = { kind: 'source-single', keys: ['A'] };
             ctx.runtime.hoverExpandedGroupIds.add('g1');
             // Pre-populate intent (mimics dragover preceding the drop).
             ctx.runtime.dragReflowSession = {
@@ -9113,6 +9316,7 @@ describe('handleDragOver hover-expand', () => {
                     { kind: 'group', id: 'g2', top: 220, headerHeight: 40, childrenStart: 260, childrenEnd: 260 }
                 ]
             });
+            ctx.runtime.activeDragContext = { kind: 'source-single', keys: ['A'] };
             ctx.runtime.hoverExpandedGroupIds.add('g1');
 
             // Drop into g2 (sibling, not in g1's chain).
@@ -9177,6 +9381,7 @@ describe('handleDragOver hover-expand', () => {
                     { kind: 'group', id: 'gD', top: 300, headerHeight: 40, childrenStart: 340, childrenEnd: 340 }
                 ]
             });
+            ctx.runtime.activeDragContext = { kind: 'group', draggedGroupId: 'gD' };
             ctx.runtime.hoverExpandedGroupIds.add('g1');
 
             // Drop intent: dropping gD above g3 (inside g1). targetGroup = g1.
@@ -9288,7 +9493,10 @@ describe('handleDrop reflow cleanup', () => {
             },
             shiftedItems: new Map()
         };
-        const runtime = { dragReflowSession: session };
+        const runtime = {
+            activeDragContext: { kind: 'source-single', keys: ['source-1'] },
+            dragReflowSession: session
+        };
         const dragReflow = makeDragReflowMock();
 
         // Track ordering: clearReflow MUST be called before saveState (the DOM mutation point).
@@ -9389,7 +9597,10 @@ describe('handleDrop reflow cleanup', () => {
             },
             shiftedItems: new Map()
         };
-        const runtime = { dragReflowSession: session };
+        const runtime = {
+            activeDragContext: { kind: 'source-single', keys: ['source-1'] },
+            dragReflowSession: session
+        };
         const dragReflow = makeDragReflowMock();
 
         const interactions = createContentTreeInteractions({
@@ -9533,7 +9744,10 @@ describe('handleDrop reflow cleanup', () => {
             rebuildParentMap: jest.fn()
         };
         const interactions = createContentTreeInteractions({
-            runtime: { dragReflowSession: session },
+            runtime: {
+                activeDragContext: { kind: 'source-single', keys: ['mover'] },
+                dragReflowSession: session
+            },
             treePlacement,
             getState: () => state,
             getGroupsById: () => new Map([['shared', group]]),
@@ -9672,7 +9886,10 @@ describe('handleDrop reflow cleanup', () => {
             },
             shiftedItems: new Map()
         };
-        const runtime = { dragReflowSession: session };
+        const runtime = {
+            activeDragContext: { kind: 'group', draggedGroupId: 'root' },
+            dragReflowSession: session
+        };
         const dragReflow = makeDragReflowMock();
 
         const interactions = createContentTreeInteractions({
@@ -9727,7 +9944,10 @@ describe('handleDrop reflow cleanup', () => {
             },
             shiftedItems: new Map()
         };
-        const runtime = { dragReflowSession: session };
+        const runtime = {
+            activeDragContext: { kind: 'source-single', keys: ['source-1'] },
+            dragReflowSession: session
+        };
         const dragReflow = makeDragReflowMock();
 
         const interactions = createContentTreeInteractions({
@@ -9784,7 +10004,10 @@ describe('handleDrop reflow cleanup', () => {
             },
             shiftedItems: new Map()
         };
-        const runtime = { dragReflowSession: session };
+        const runtime = {
+            activeDragContext: { kind: 'source-multi', keys: ['A', 'B', 'C'] },
+            dragReflowSession: session
+        };
         const dragReflow = makeDragReflowMock();
 
         const interactions = createContentTreeInteractions({

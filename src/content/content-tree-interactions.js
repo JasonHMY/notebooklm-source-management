@@ -4610,6 +4610,63 @@
             return true;
         }
 
+        function readTrustedDropPayload(dataTransfer) {
+            if (!dataTransfer || typeof dataTransfer.getData !== 'function') return null;
+            let sourceKey = '';
+            let sourceKeysRaw = '';
+            let draggedGroupId = '';
+            try {
+                const sourceKeyValue = dataTransfer.getData('application/source-key');
+                const sourceKeysValue = dataTransfer.getData('application/source-keys');
+                const groupIdValue = dataTransfer.getData('application/group-id');
+                sourceKey = typeof sourceKeyValue === 'string' ? sourceKeyValue : '';
+                sourceKeysRaw = typeof sourceKeysValue === 'string' ? sourceKeysValue : '';
+                draggedGroupId = typeof groupIdValue === 'string' ? groupIdValue : '';
+            } catch (_) {
+                return null;
+            }
+
+            if (draggedGroupId && (sourceKey || sourceKeysRaw)) return null;
+
+            const dragContext = runtime.activeDragContext;
+            if (!isSupportedDragContext(dragContext)) return null;
+
+            if (sourceKeysRaw) {
+                if (
+                    dragContext.kind !== 'source-multi'
+                    || sourceKeysRaw !== JSON.stringify(dragContext.keys)
+                ) {
+                    return null;
+                }
+                let keys = null;
+                try { keys = JSON.parse(sourceKeysRaw); } catch (_) { return null; }
+                if (!multiSourcePayloadMatchesDragContext(sourceKey, keys)) return null;
+                return { kind: 'source-multi', sourceKey, sourceKeysRaw, keys, draggedGroupId };
+            }
+
+            if (sourceKey) {
+                if (
+                    dragContext.kind !== 'source-single'
+                    || dragContext.keys[0] !== sourceKey
+                ) {
+                    return null;
+                }
+                return { kind: 'source-single', sourceKey, sourceKeysRaw, draggedGroupId };
+            }
+
+            if (draggedGroupId) {
+                if (
+                    dragContext.kind !== 'group'
+                    || dragContext.draggedGroupId !== draggedGroupId
+                ) {
+                    return null;
+                }
+                return { kind: 'group', sourceKey, sourceKeysRaw, draggedGroupId };
+            }
+
+            return null;
+        }
+
         function resolveSynchronousDropEffect({
             clientX,
             clientY,
@@ -5683,10 +5740,16 @@
             };
             try {
                 cancelAllHoverTimers();
+                e.preventDefault();
+                const dragPayload = readTrustedDropPayload(e.dataTransfer);
+                if (!dragPayload) {
+                    clearDragFeedback();
+                    return;
+                }
+                const { sourceKey, sourceKeysRaw, draggedGroupId } = dragPayload;
                 const state = getState();
                 const groupsById = getGroupsById();
                 const pendingBatchKeys = getPendingBatchKeys();
-                e.preventDefault();
 
                 // Snapshot every visible source-item / group-container's pre-drop
                 // visual top (reflects current inline transform shift from reflow).
@@ -5730,22 +5793,7 @@
                 }
                 const intentKind = intent.kind;
 
-                const sourceKey = e.dataTransfer.getData('application/source-key');
-                const sourceKeysRaw = e.dataTransfer.getData('application/source-keys');
-                const draggedGroupId = e.dataTransfer.getData('application/group-id');
-                if (draggedGroupId && (sourceKey || sourceKeysRaw)) {
-                    clearDragFeedback();
-                    return;
-                }
                 const semanticTarget = resolveSemanticDropTarget(intent);
-
-                if (
-                    runtime.activeDragContext?.kind === 'source-multi'
-                    && !sourceKeysRaw
-                ) {
-                    clearDragFeedback();
-                    return;
-                }
 
                 if (sourceKeysRaw) {
                     const dragContext = runtime.activeDragContext;
@@ -5757,8 +5805,7 @@
                         clearDragFeedback();
                         return;
                     }
-                    let keys = null;
-                    try { keys = JSON.parse(sourceKeysRaw); } catch (err) { keys = null; }
+                    const keys = dragPayload.keys;
                     if (!multiSourcePayloadMatchesDragContext(sourceKey, keys)) {
                         clearDragFeedback();
                         return;

@@ -1353,6 +1353,81 @@ describe('foldDraggedItems / unfoldDraggedItems', () => {
         }
     });
 
+    test('does not let a prior cancel restore unfold a newly folded drag session', () => {
+        jest.useFakeTimers();
+        try {
+            const { root, items } = makeRoot([{
+                key: 'k1',
+                attr: 'data-source-key',
+                height: 48
+            }]);
+            const firstSession = api.prepareDragSession({ draggedKeys: ['k1'], rootElement: root });
+            api.foldDraggedItems({ session: firstSession, rootElement: root });
+            api.unfoldDraggedItems({ session: firstSession, rootElement: root, animated: true });
+
+            // This mirrors handleDragStart's preflight before the user immediately
+            // starts a new drag of the same row.
+            items.k1.classList.remove('sp-drag-unfolding');
+            const secondSession = api.prepareDragSession({ draggedKeys: ['k1'], rootElement: root });
+            api.foldDraggedItems({ session: secondSession, rootElement: root });
+            expect(items.k1.classList.contains('sp-drag-folded')).toBe(true);
+            expect(items.k1.style.height).toBe('0px');
+            expect(items.k1.style.opacity).toBe('0');
+
+            jest.advanceTimersByTime(api.TRANSITION_MS + 80);
+
+            expect(items.k1.classList.contains('sp-drag-folded')).toBe(true);
+            expect(items.k1.style.height).toBe('0px');
+            expect(items.k1.style.opacity).toBe('0');
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    test.each([
+        ['empty inline values', {}],
+        ['custom inline values', { height: '17px', opacity: '0.65' }]
+    ])('settles a prior cancel restore before measuring the next session with %s', (_label, inlineStyle) => {
+        jest.useFakeTimers();
+        try {
+            const { root, items } = makeRoot([{
+                key: 'k1',
+                attr: 'data-source-key',
+                height: 48,
+                inlineStyle
+            }]);
+            const firstSession = api.prepareDragSession({ draggedKeys: ['k1'], rootElement: root });
+            api.foldDraggedItems({ session: firstSession, rootElement: root });
+            api.unfoldDraggedItems({ session: firstSession, rootElement: root, animated: true });
+
+            // This mirrors handleDragStart's preflight: it removes the old class,
+            // but an unfolding row was no longer folded, so its explicit 48px/1
+            // values remain until the old timer fires.
+            items.k1.classList.remove('sp-drag-unfolding');
+            expect(items.k1.style.height).toBe('48px');
+            expect(items.k1.style.opacity).toBe('1');
+
+            const secondSession = api.prepareDragSession({ draggedKeys: ['k1'], rootElement: root });
+            expect(secondSession.itemMetrics.get('k1')).toEqual(expect.objectContaining({
+                originalInlineHeight: inlineStyle.height || '',
+                originalInlineOpacity: inlineStyle.opacity || ''
+            }));
+
+            // The stale first cleanup runs before the new drag's deferred fold.
+            jest.advanceTimersByTime(api.TRANSITION_MS + 80);
+            api.foldDraggedItems({ session: secondSession, rootElement: root });
+            api.unfoldDraggedItems({ session: secondSession, rootElement: root, animated: true });
+            jest.advanceTimersByTime(api.TRANSITION_MS + 80);
+
+            expect(items.k1.style.height).toBe(inlineStyle.height || '');
+            expect(items.k1.style.opacity).toBe(inlineStyle.opacity || '');
+            expect(items.k1.classList.contains('sp-drag-folded')).toBe(false);
+            expect(items.k1.classList.contains('sp-drag-unfolding')).toBe(false);
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
     test('animated:false restores original inline height/opacity immediately', () => {
         const { root, items } = makeRoot([{
             key: 'k1',

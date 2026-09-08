@@ -25,6 +25,25 @@
         const itemMetricsCache = new WeakMap();
         const itemElementCacheByRoot = new WeakMap();
         const probeCssTextCache = new Map();
+        const pendingUnfoldRestores = new WeakMap();
+
+        function invalidatePendingUnfoldRestore(element) {
+            if (!element || (typeof element !== 'object' && typeof element !== 'function')) {
+                return false;
+            }
+            return pendingUnfoldRestores.delete(element);
+        }
+
+        function settlePendingUnfoldRestore(element) {
+            if (!element || (typeof element !== 'object' && typeof element !== 'function')) {
+                return false;
+            }
+            const pendingRestore = pendingUnfoldRestores.get(element);
+            if (!pendingRestore || typeof pendingRestore.restore !== 'function') return false;
+            pendingUnfoldRestores.delete(element);
+            pendingRestore.restore();
+            return true;
+        }
 
         function createDragSession() {
             return {
@@ -1111,6 +1130,13 @@
                 requestedKeys,
                 session.draggedType
             );
+            // The prior drag's animated unfold can still carry an explicit
+            // height/opacity until its timeout. Settle it before this session
+            // records metrics, otherwise a rapid re-drag permanently adopts the
+            // old transition values as its new baseline.
+            elementsByKey.forEach((element) => {
+                settlePendingUnfoldRestore(element);
+            });
             session.preparedElements = elementsByKey;
             const effectiveOriginKey = resolveEffectiveOriginKey({
                 originKey,
@@ -1164,6 +1190,9 @@
             for (const key of session.draggedKeys) {
                 const el = findItemElement(rootElement, key, session.draggedType);
                 if (!el || !el.style) continue;
+                // A prior cancelled drag may still have its animated unfold cleanup
+                // queued. Folding this element again makes that old cleanup stale.
+                invalidatePendingUnfoldRestore(el);
                 setInlineStyleProperty(el.style, 'height', '0px');
                 setInlineStyleProperty(el.style, 'opacity', '0');
                 if (el.classList && typeof el.classList.add === 'function') {
@@ -1228,8 +1257,16 @@
                     el.classList.remove('sp-drag-folded');
                     setInlineStyleProperty(el.style, 'height', `${unfoldHeight}px`);
                     setInlineStyleProperty(el.style, 'opacity', '1');
+                    const restoreToken = {};
+                    pendingUnfoldRestores.set(el, {
+                        token: restoreToken,
+                        restore: restoreOriginalState
+                    });
                     const cleanup = () => {
-                        restoreOriginalState();
+                        const pendingRestore = pendingUnfoldRestores.get(el);
+                        if (!pendingRestore || pendingRestore.token !== restoreToken) return;
+                        pendingUnfoldRestores.delete(el);
+                        pendingRestore.restore();
                     };
                     if (win) win.setTimeout(cleanup, 240);
                     continue;
@@ -1240,6 +1277,7 @@
                 // even when the row's baseline CSS also transitions height/margins.
                 const transition = readInlineStyleProperty(el.style, 'transition');
                 const animation = readInlineStyleProperty(el.style, 'animation');
+                invalidatePendingUnfoldRestore(el);
                 setInlineStyleProperty(el.style, 'transition', 'none', 'important');
                 setInlineStyleProperty(el.style, 'animation', 'none', 'important');
                 try {

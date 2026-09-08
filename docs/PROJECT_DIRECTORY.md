@@ -126,7 +126,7 @@ GeminiNotebook-Source-Management
 │   │   ├── content-drag-multi.js
 │   │   │   └── 多源拖拽 presentation helper：selection 解析、单元素 ghost、带实际滚动 callback 的 auto-scroll RAF controller；不拥有树 mutation
 │   │   ├── content-drag-reflow.js
-│   │   │   └── 拖拽让位 reflow 会话状态：真实 box model/折叠位移测量、类型化 shift delta、可视区动画/离屏静态 transform、被拖项折叠与取消恢复 helper
+│   │   │   └── 拖拽让位 reflow 会话状态：真实 box model/折叠位移测量、类型化 shift delta、可视区动画/离屏静态 transform、被拖项折叠与取消恢复 helper；元素恢复令牌隔离取消后快速重拖的旧定时器
 │   │   ├── content-source-view-switch-controller.js
 │   │   │   └── 来源视图切换目标归一、状态字段和 attempt 记录 helper
 │   │   ├── content-style-text.js
@@ -161,6 +161,8 @@ GeminiNotebook-Source-Management
 │   ├── smoke/
 │   │   ├── drag-reflow-layout.smoke.spec.js
 │   │   │   └── 真实 Chromium 中的混合/fixed box model 占位、跨 host 多选、preview、滚动恢复、reduced-motion 与原生 Esc/dragend
+│   │   ├── reflow-stable.smoke.spec.js
+│   │   │   └── 转正验收：真实鼠标触发 dragstart/drop/dragend，核对文件夹间落点、Undo/Redo、独立 storage 读回、非连续多选和窄面板取消
 │   │   ├── manager-performance.smoke.spec.js
 │   │   │   └── opt-in 100/500/1000/5000 来源 manager 基准；5 次 warm-up + 20 次测量，临时 content-script 隔离世界按样本记录初始渲染、搜索、Quick View、Tag filter、批量选择、同步输入、DOM mutation、query 与 layout read 的 p50/p95，并在每个样本结束还原原型
 │   │   └── 其他 Playwright 真实扩展上下文 smoke，默认 headless
@@ -174,6 +176,8 @@ GeminiNotebook-Source-Management
 │   ├── PROJECT_DIRECTORY.md
 │   ├── DRAG_PERFORMANCE_BASELINE.md
 │   │   └── opt-in 100/500 行 reflow 拖拽 Before/After 基线、验收门槛与重复稳定性结果；不进入发布包
+│   ├── DRAG_REFLOW_STABILITY.md
+│   │   └── 2026-09-08 避让拖拽转正审查、已证实问题、专项验证与剩余验收条件；不进入发布包
 │   ├── SECURITY_THREAT_MODEL.md
 │   ├── DEVELOPER_LOGGING.md
 │   ├── STORAGE_SCHEMA.md
@@ -185,6 +189,8 @@ GeminiNotebook-Source-Management
 │       │   │   └── 十项体验问题的目标行为、兼容边界与验收约束
 │       │   └── 历史设计规格；不是 runtime，也不进入发布包
 │       └── plans/
+│           ├── 2026-09-08-reflow-stable.md
+│           │   └── 避让拖拽转正条件、独立审查、真实鼠标验收、性能门槛与保留 Beta 的判定依据
 │           ├── 2026-09-08-top10-ux-repairs.md
 │           │   └── 十项来源身份、保存恢复、生命周期和UI问题的修复计划与验证状态
 │           ├── 2026-07-26-optimization-hardening-roadmap.md
@@ -398,6 +404,7 @@ manifest.json
 │   │   ├── 嵌套 children 和 parent map
 │   │   ├── 来源/分组拖拽排序
 │   │   ├── 批量模式多源拖拽与边缘自动滚动
+│   │   ├── 单来源/分组/多来源 drop payload 必须与本地 activeDragContext 类型及身份完全一致；在读取几何和提交树之前拒绝不匹配 payload
 │   │   ├── 两种拖拽模式（`content-preferences` 的全局 dragMode）：经典（默认，蓝色插入线 .drag-over-top/bottom + 散源落底部桶）/ 避让 Beta（按真实混合 box model/折叠位移形成空槽、折叠 + 让位 + 根层级定位、取消时精确恢复）；自定义 ghost = source-item 行克隆（单源单层 + 多源最多 3 层堆叠 + 右上角数字 badge）
 │   │   ├── 避让 dragover 每帧只读一次 geometry snapshot 后纯计算并集中写入；纯滚动按 root/嵌套 children 精确 delta 修补，auto-scroll 无新 dragover 时仍按静止指针合并刷新，drop 前同步消费 dirty geometry，尺寸/render/混合失效时 fail closed 重建
 │   │   ├── native dropEffect 只在原始 dragover 事件内由 clean snapshot 同步解析；dirty/missing snapshot 保守 move，未知 payload 为 none，异步 drag frame 不保留 DataTransfer
@@ -434,6 +441,7 @@ manifest.json
 │       ├── tests/content/content-source-action-menu.test.js
 │       ├── tests/locales.test.js
 │       ├── tests/smoke/drag-reflow-layout.smoke.spec.js
+│       ├── tests/smoke/reflow-stable.smoke.spec.js
 │       └── tests/smoke/drag-performance.smoke.spec.js（仅 `npm run benchmark:drag` opt-in）
 ├── 标签系统
 │   ├── 负责
