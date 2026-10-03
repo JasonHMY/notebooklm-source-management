@@ -2333,7 +2333,7 @@ describe('applyReflow / clearReflow', () => {
         });
 
         expect(visible.style.transform).toBe('');
-        expect(visible.classList.contains('sp-drop-shift-static')).toBe(true);
+        expect(visible.classList.contains('sp-drop-shift-static')).toBe(false);
         expect(offscreen.style.transform).toBe('');
         expect(offscreen.classList.contains('sp-drop-shift')).toBe(false);
         expect(session.shiftedSourceItems.size).toBe(0);
@@ -2353,6 +2353,55 @@ describe('applyReflow / clearReflow', () => {
         expect(session.animatedShiftedSourceItems.size).toBe(0);
         expect(session.usesScopedShiftClasses).toBe(false);
         expect(rootElement.querySelector).not.toHaveBeenCalled();
+    });
+
+    test('clearReflow removes a static shift class after its return spring settles', () => {
+        const frames = [];
+        let frameTime = 0;
+        const animatedApi = createContentDragReflow({
+            requestAnimationFrame: (callback) => {
+                frames.push(callback);
+                return frames.length;
+            },
+            cancelAnimationFrame: jest.fn(),
+            now: () => frameTime
+        });
+        const classes = new Set(['source-item']);
+        const source = {
+            dataset: { sourceKey: 'offscreen' },
+            style: {},
+            classList: {
+                add: (...names) => names.forEach((name) => classes.add(name)),
+                remove: (...names) => names.forEach((name) => classes.delete(name)),
+                contains: (name) => classes.has(name)
+            },
+            getAttribute: (name) => (name === 'data-source-key' ? 'offscreen' : null)
+        };
+        const rootElement = {
+            contains: (element) => element === source,
+            querySelector: (selector) => selector.includes('offscreen') ? source : null
+        };
+        const session = animatedApi.createDragSession();
+        const shifts = {
+            sources: new Map([['offscreen', 40]]),
+            groups: new Map(),
+            _shiftDeltaPlan: {
+                animatedKeys: { sources: new Set(), groups: new Set() }
+            }
+        };
+
+        animatedApi.applyReflow({ session, shifts, rootElement });
+        expect(source.classList.contains('sp-drop-shift-static')).toBe(true);
+        animatedApi.clearReflow({ session, rootElement });
+        expect(source.classList.contains('sp-drop-shift-static')).toBe(true);
+
+        for (let frame = 0; frame < 120 && frames.length > 0; frame += 1) {
+            frameTime += 16;
+            frames.shift()(frameTime);
+        }
+        expect(frames).toHaveLength(0);
+        expect(source.style.transform || '').toBe('');
+        expect(source.classList.contains('sp-drop-shift-static')).toBe(false);
     });
 });
 

@@ -193,15 +193,50 @@ async function startTrustedDrag(page, origin, holdTarget = null) {
     await expect.poll(() => origin.evaluate((element) => element.getBoundingClientRect().height)).toBeLessThanOrEqual(1);
 }
 
-async function finishTrustedDrop(page, origin, target, position) {
+async function finishTrustedDrop(page, origin, target, position, { followTarget = false } = {}) {
     await startTrustedDrag(page, origin);
-    const box = await target.boundingBox();
-    expect(box).not.toBeNull();
-    await page.mouse.move(
-        box.x + box.width * position.x,
-        box.y + box.height * position.y,
-        { steps: 12 }
-    );
+    if (!followTarget) {
+        const box = await target.boundingBox();
+        expect(box).not.toBeNull();
+        await page.mouse.move(
+            box.x + box.width * position.x,
+            box.y + box.height * position.y,
+            { steps: 12 }
+        );
+    } else {
+        // Folding the selected rows and the spring gap can move a folder header
+        // while a real pointer is crossing the list. Follow its live box until
+        // it settles, then release inside the intended header.
+        let landed = false;
+        for (let attempt = 0; attempt < 24; attempt += 1) {
+            const box = await target.boundingBox();
+            expect(box).not.toBeNull();
+            const x = box.x + box.width * position.x;
+            const y = box.y + box.height * position.y;
+            await page.mouse.move(x, y, { steps: attempt === 0 ? 12 : 3 });
+            const current = await target.evaluate(async (element) => {
+                const before = element.getBoundingClientRect();
+                await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                const after = element.getBoundingClientRect();
+                return {
+                    left: after.left,
+                    right: after.right,
+                    top: after.top,
+                    bottom: after.bottom,
+                    moved: Math.abs(after.top - before.top) + Math.abs(after.left - before.left)
+                };
+            });
+            const insetX = Math.min(4, (current.right - current.left) * 0.1);
+            const insetY = Math.min(4, (current.bottom - current.top) * 0.1);
+            if (current.moved < 0.25
+                && x > current.left + insetX && x < current.right - insetX
+                && y > current.top + insetY && y < current.bottom - insetY) {
+                landed = true;
+                break;
+            }
+        }
+        expect(landed, 'The trusted pointer must release inside a settled drop target').toBe(true);
+    }
     await page.mouse.up();
     await expect.poll(() => page.evaluate(() => window.__reflowTrustedEvents.some(
         (event) => event.type === 'pointerup' && event.trusted
@@ -781,7 +816,7 @@ test.describe.serial('stable reflow trusted drag', () => {
         }
         const origin = page.locator(`#sources-list .source-item[data-source-key="${selectedKeys[0]}"]`);
         const target = page.locator(`.group-container[data-group-id="${targetId}"] .group-header`).first();
-        await finishTrustedDrop(page, origin, target, { x: 0.8, y: 0.5 });
+        await finishTrustedDrop(page, origin, target, { x: 0.8, y: 0.5 }, { followTarget: true });
         const expectedChildren = selectedKeys.map((key) => ({ type: 'source', key }));
         await expect.poll(async () => (await readTree(bridge))?.groupsById?.[targetId]?.children).toEqual(expectedChildren);
         await expect(page.locator('#sources-list .sp-batch-checkbox')).toHaveCount(0);

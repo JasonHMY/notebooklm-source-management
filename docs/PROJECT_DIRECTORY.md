@@ -131,7 +131,7 @@ GeminiNotebook-Source-Management
 │   │   ├── content-drag-pointer.js
 │   │   │   └── 六点手柄 Pointer Events 会话；3px 阈值、稳定列表捕获、键盘排序及取消/失焦/teardown 清理
 │   │   ├── content-drag-reflow.js
-│   │   │   └── 拖拽让位 reflow 会话状态：真实 box model/折叠位移测量、类型化 shift delta、可视区动画/离屏静态 transform、被拖项折叠与取消恢复 helper；元素恢复令牌隔离取消后快速重拖的旧定时器
+│   │   │   └── 拖拽让位 reflow 会话状态：真实 box model/折叠位移测量、类型化 shift delta、可视区动画/离屏静态 transform、被拖项折叠与取消恢复 helper；归零清理动画/静态位移类，元素恢复令牌隔离取消后快速重拖的旧定时器
 │   │   ├── content-source-view-switch-controller.js
 │   │   │   └── 来源视图切换目标归一、状态字段和 attempt 记录 helper
 │   │   ├── content-style-text.js

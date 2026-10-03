@@ -1912,7 +1912,7 @@
                         session.motionElements.delete(motionKey);
                     }
                     if (element.classList) {
-                        element.classList.remove('sp-drop-shift');
+                        element.classList.remove('sp-drop-shift', 'sp-drop-shift-static');
                     }
                 } : null
             });

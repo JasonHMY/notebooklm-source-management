@@ -64,10 +64,13 @@ test.describe('beUI pointer presentation', () => {
         const box = await handle.boundingBox();
         const x = box.x + box.width / 2;
         const y = box.y + box.height / 2;
-        const originBox = await row.boundingBox();
         await page.mouse.move(x, y);
         await page.screenshot({ path: path.join(previewDir, 'before.png') });
         await page.mouse.down();
+        // Pointer preparation measures the pressed row, not its former hover
+        // scale. Compare the ghost to that same settled visual state.
+        await expect(row).toHaveCSS('transform', /matrix\(0\.995,/);
+        const originBox = await row.boundingBox();
         await page.mouse.move(x, y + 8);
         await expect(page.locator('.sp-drag-pointer-ghost')).toHaveCount(1);
         await paint();
