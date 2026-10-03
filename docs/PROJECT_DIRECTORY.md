@@ -15,9 +15,10 @@ GeminiNotebook-Source-Management
 │   ├── Content script: src/content/index.js
 │   ├── Background service worker: src/background/index.js
 │   └── Toolbar popup: src/popup/index.js
-└── 当前 Git 状态
-    ├── 本地分支: main
-    ├── 远端分支: origin/main
+└── Git 维护入口
+    ├── 默认集成分支: main（origin/main）
+    ├── 当前工作分支: 以 git branch --show-current 为准
+    ├── 仓库: https://github.com/JasonHMY/notebooklm-source-management
     └── 本文中的“功能分支”指 feature area，不代表真实 Git branch
 ```
 
@@ -677,7 +678,8 @@ manifest.json
     │   ├── release zip allowlist
     │   ├── forbidden entries 检查
     │   ├── ESLint flat config 静态检查（CI 在测试前跑 `npm run lint`）
-    │   └── GitHub Actions 验证
+    │   ├── GitHub Actions 验证
+    │   └── README/安装与反馈入口、package.json 仓库链接及 GitHub About 描述/主题保持一致
     ├── 先看
     │   ├── scripts/package.js
     │   ├── tests/package.test.js

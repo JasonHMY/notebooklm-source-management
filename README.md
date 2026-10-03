@@ -2,6 +2,9 @@
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Version](https://img.shields.io/badge/version-26.9.8-green.svg)
+[![CI](https://github.com/JasonHMY/notebooklm-source-management/actions/workflows/ci.yml/badge.svg)](https://github.com/JasonHMY/notebooklm-source-management/actions/workflows/ci.yml)
+
+[Chrome Web Store](https://chromewebstore.google.com/detail/gemininotebook-source-man/bhpgdibkpdcchkpaamfkbmdnhcmedkod) · [Report a problem](https://github.com/JasonHMY/notebooklm-source-management/issues) · [Changelog](CHANGELOG.md)
 
 A Chrome extension that makes source management inside Google Gemini Notebook (formerly NotebookLM) less awkward.
 
@@ -39,6 +42,10 @@ If one of your notebooks has started to fill up with PDFs, links, and uploads, t
 
 ## Installation
 
+Install the published extension from the [Chrome Web Store](https://chromewebstore.google.com/detail/gemininotebook-source-man/bhpgdibkpdcchkpaamfkbmdnhcmedkod).
+
+To run the current repository code, load it unpacked:
+
 1. Clone or download this repository.
 2. Open Chrome and go to `chrome://extensions/`.
 3. Turn on `Developer mode`.
@@ -72,6 +79,7 @@ The Playwright smoke suite covers the core extension surfaces and the higher-ris
 - developer-mode log sanitization and disabled-mode behavior
 - label/list view state sync, collapsed native label import, and fallback source-view behavior
 - route reattachment, hard reload recovery, import backup restore, hostile metadata rendering, blocked third-party icons, and stale-save rejection
+- handle-only pointer dragging, spring previews and landing, keyboard focus and ordering, whole-folder moves, noncontiguous batches, and 50-source selections across virtualized windows
 
 ## Permissions
 
@@ -128,8 +136,8 @@ Use this checklist after changes to the content script, popup launcher, or sourc
    - in single-source mode, drag any source toward the bottom edge of the list and verify the list auto-scrolls
    - drag near the top edge and verify reverse auto-scroll
    - drag a source over a collapsed folder header for 1 second and verify the folder expands automatically
-   - drag a source onto itself and verify the drop indicator turns red with a `not-allowed` cursor
-   - drag a parent group onto one of its child subgroups and verify the red indicator + `not-allowed` cursor
+   - drag a source onto itself and verify it does not duplicate or unexpectedly change position
+   - drag a parent group onto one of its child subgroups and verify the invalid-drop indicator and unchanged folder tree
    - hover-open a folder during drag, then drag away from it for 1 second; verify it auto-collapses with the same animation as a chevron click
 
 ## License
