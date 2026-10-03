@@ -540,7 +540,7 @@
         "message": "Enable reflow drag"
     },
     "ui_settings_drag_mode_body": {
-        "message": "while dragging, other sources move aside to open a slot, and you can drop a source between folders. Off (default) uses the classic blue insertion line. Switching back to classic moves any sources placed between folders to the bottom Ungrouped bin."
+        "message": "Drag the six-dot handle to reorder sources and folders. Other items spring aside to open a slot. On (default) allows dropping sources between folders; Off uses the classic blue insertion line and moves sources between folders to the bottom Ungrouped bin."
     },
     "ui_settings_drag_mode_enabled": {
         "message": "Reflow drag enabled"
@@ -1375,6 +1375,47 @@
     },
     "ui_tree_order": {
         "message": "Precise ordering"
+    },
+    "ui_drag_handle_source": {
+        "message": "Reorder source $1",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            }
+        }
+    },
+    "ui_drag_handle_group": {
+        "message": "Reorder folder $1",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            }
+        }
+    },
+    "ui_drag_handle_instructions": {
+        "message": "Drag to move. Use Up and Down to reorder, or Home and End to move to the first or last position."
+    },
+    "ui_tree_order_moved_first_status": {
+        "message": "Moved to first position. Position $1 of $2.",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            },
+            "2": {
+                "content": "$2"
+            }
+        }
+    },
+    "ui_tree_order_moved_last_status": {
+        "message": "Moved to last position. Position $1 of $2.",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            },
+            "2": {
+                "content": "$2"
+            }
+        }
     },
     "ui_tree_order_up": {
         "message": "Move up"

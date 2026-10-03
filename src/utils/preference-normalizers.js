@@ -58,6 +58,7 @@
     }
 
     function normalizeDragMode(value) {
+        if (value === undefined) return 'reflow';
         return value === 'reflow' ? 'reflow' : 'classic';
     }
 

@@ -921,6 +921,22 @@ describe('manager shell structure', () => {
         );
     });
 
+    it('styles pointer ghost layers according to the nested multi-source DOM', () => {
+        jest.resetModules();
+        require('../../src/content/content-style-text.js');
+
+        const css = global.NSM_CONTENT_STYLE_TEXT;
+        const stack = extractCssBlock(css, '.sp-drag-pointer-ghost > .sp-drag-ghost-stack {');
+        const layers = extractCssBlock(css, '.sp-drag-pointer-ghost > .sp-drag-ghost-stack > .sp-drag-ghost-layer {');
+        const top = extractCssBlock(css, '.sp-drag-pointer-ghost > .sp-drag-ghost-stack > .sp-drag-ghost-layer:nth-child(1) {');
+        const second = extractCssBlock(css, '.sp-drag-pointer-ghost > .sp-drag-ghost-stack > .sp-drag-ghost-layer:nth-child(2) {');
+
+        expect(stack).toContain('position: relative;');
+        expect(layers).toContain('position: absolute;');
+        expect(top).toContain('scale(1.025)');
+        expect(second).toContain('translate(4px, 4px)');
+    });
+
     it('gives source menus and batch surfaces explicit motion', () => {
         jest.resetModules();
         require('../../src/content/content-style-text.js');
@@ -1712,6 +1728,8 @@ describe('batch count and source menu motion rendering', () => {
         expect(groupChildren).toHaveLength(1);
         expect(groupChildren[0].attrs['aria-hidden']).toBe('true');
         expect(groupChildren[0].attrs.inert).toBe(true);
+        expect(findRenderTestNodesByClass(listContainer, 'sp-drag-handle')
+            .find((handle) => handle.dataset.groupId === 'group-1').disabled).toBe(true);
         expect(selectVisibleButton.attrs.disabled).toBe(true);
 
         state.filterQuery = 'alpha';
@@ -1939,7 +1957,9 @@ describe('batch count and source menu motion rendering', () => {
         renderModule.render();
 
         const source = findRenderTestNodesByClass(listContainer, 'source-item')[0];
+        expect(findRenderTestNodesByClass(source, 'sp-drag-handle')[0].disabled).toBe(false);
         expect(source.childNodes.map((child) => child?.className || child)).toEqual([
+            'sp-drag-handle',
             'icon-container',
             'sp-source-actions-anchor sp-source-actions-placeholder',
             'title-container',
@@ -1992,6 +2012,7 @@ describe('batch count and source menu motion rendering', () => {
 
         const source = findRenderTestNodesByClass(listContainer, 'source-item')[0];
         expect(source.className).toContain('loading-source');
+        expect(findRenderTestNodesByClass(source, 'sp-drag-handle')[0].disabled).toBe(true);
         expect(source.attrs.title).toBe('正在解析来源...');
         expect(findRenderTestNodesByClass(source, 'source-loading-status')[0].textContent).toBe('正在解析来源...');
     });
@@ -2039,6 +2060,7 @@ describe('batch count and source menu motion rendering', () => {
         const source = findRenderTestNodesByClass(listContainer, 'source-item')[0];
         const checkbox = findRenderTestNodesByClass(source, 'sp-checkbox')[0];
         expect(source.className).toContain('failed-source');
+        expect(findRenderTestNodesByClass(source, 'sp-drag-handle')[0].disabled).toBe(true);
         expect(source.attrs.title).toBe('来源导入失败');
         expect(checkbox.disabled).toBe(true);
     });
@@ -2751,6 +2773,7 @@ describe('batch count and source menu motion rendering', () => {
         const groupHeaders = findRenderTestNodesByClass(listContainer, 'group-header');
         const sources = findRenderTestNodesByClass(listContainer, 'source-item');
         const sourceActionButtons = findRenderTestNodesByClass(listContainer, 'sp-source-actions-button');
+        const dragHandles = findRenderTestNodesByClass(listContainer, 'sp-drag-handle');
         const sourceCheckboxes = findRenderTestNodesByClass(listContainer, 'sp-checkbox');
         const groupChildren = findRenderTestNodesByClass(listContainer, 'group-children');
         const carets = findRenderTestNodesByClass(listContainer, 'sp-caret');
@@ -2819,6 +2842,20 @@ describe('batch count and source menu motion rendering', () => {
             'ui_source_actions_for:Root / Child / Source 2',
             'ui_source_actions_for:ui_ungrouped / Loose'
         ]);
+        expect(dragHandles.map((button) => [
+            button.dataset.dragType,
+            button.dataset.sourceKey || button.dataset.groupId,
+            button.attrs['aria-label'],
+            button.attrs['aria-describedby'],
+            button.disabled
+        ])).toEqual([
+            ['group', 'root', 'ui_drag_handle_group:Root', 'sp-drag-group-instructions-2', false],
+            ['source', 'source-1', 'ui_drag_handle_source:Root / Source 1', 'sp-drag-source-instructions-1', false],
+            ['group', 'child', 'ui_drag_handle_group:Root / Child', 'sp-drag-group-instructions-1', false],
+            ['source', 'source-2', 'ui_drag_handle_source:Root / Child / Source 2', 'sp-drag-source-instructions-2', false],
+            ['source', 'loose', 'ui_drag_handle_source:ui_ungrouped / Loose', 'sp-drag-source-instructions-3', false]
+        ]);
+        expect([...groupHeaders, ...sources].every((row) => row.attrs.draggable === 'false')).toBe(true);
         expect(sourceCheckboxes.map((control) => control.attrs['aria-label'])).toEqual([
             'ui_source_enabled_checkbox:Root / Source 1',
             'ui_source_enabled_checkbox:Root / Child / Source 2',

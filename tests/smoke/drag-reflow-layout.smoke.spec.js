@@ -850,17 +850,35 @@ test('covers first, last, mixed, terminal-nested, multi-run, and nested 50-item 
                 expect.soft(preview.shifts.map(([key]) => key).sort()).toEqual(
                     Array.from(shiftedKeys).sort()
                 );
+                await expect.poll(async () => {
+                    const snapshot = await bridge(page, 'snapshot');
+                    return scenario.preview.siblingKeys.every((key) => {
+                        if (scenario.selectedKeys.includes(key)) return true;
+                        const expectedDelta = shiftedKeys.has(key)
+                            ? prepared.session.totalDraggedHeight
+                            : 0;
+                        return Math.abs(snapshot.rects[key].top - folded.rects[key].top - expectedDelta) <= 0.25;
+                    });
+                }, { timeout: 3_000 }).toBe(true);
+                const settledPreview = await bridge(page, 'snapshot');
                 for (const key of scenario.preview.siblingKeys) {
                     if (scenario.selectedKeys.includes(key)) continue;
                     const expectedDelta = shiftedKeys.has(key)
                         ? prepared.session.totalDraggedHeight
                         : 0;
                     expect.soft(
-                        preview.rects[key].top - folded.rects[key].top,
+                        settledPreview.rects[key].top - folded.rects[key].top,
                         `${scenario.name} preview delta for ${key}`
                     ).toBeCloseTo(expectedDelta, 0);
                 }
-                const cleared = await bridge(page, 'clear-preview');
+                await bridge(page, 'clear-preview');
+                await expect.poll(async () => {
+                    const snapshot = await bridge(page, 'snapshot');
+                    return scenario.preview.siblingKeys.every((key) => (
+                        Math.abs(snapshot.rects[key].top - folded.rects[key].top) <= 1
+                    ));
+                }, { timeout: 3_000 }).toBe(true);
+                const cleared = await bridge(page, 'snapshot');
                 expectRectMapsClose(cleared.rects, folded.rects);
             }
 
@@ -928,7 +946,7 @@ test('restores a bounded root scroll position after a terminal multi-row probe',
     }
 });
 
-test('keeps a trusted manager drag alive and restores its row after Escape and dragend', async () => {
+test('keeps a trusted manager pointer drag alive and restores its row after Escape', async () => {
     const extensionRoot = createInstrumentedExtensionRoot();
     let env;
     try {
@@ -947,16 +965,16 @@ test('keeps a trusted manager drag alive and restores its row after Escape and d
         await page.evaluate(() => {
             const root = document.querySelector('#sources-plus-root').shadowRoot;
             window.__dragReflowRuntimeEvents = [];
-            root.addEventListener('dragstart', (event) => {
+            root.addEventListener('pointerdown', (event) => {
                 window.__dragReflowRuntimeEvents.push({
-                    type: 'dragstart',
+                    type: 'pointerdown',
                     trusted: event.isTrusted,
                     defaultPrevented: event.defaultPrevented
                 });
             });
-            root.addEventListener('dragend', (event) => {
+            root.addEventListener('pointermove', (event) => {
                 window.__dragReflowRuntimeEvents.push({
-                    type: 'dragend',
+                    type: 'pointermove',
                     trusted: event.isTrusted,
                     defaultPrevented: event.defaultPrevented
                 });
@@ -976,12 +994,12 @@ test('keeps a trusted manager drag alive and restores its row after Escape and d
                 marginBottom: style.marginBottom,
                 inlineHeight: row.style.getPropertyValue('height'),
                 inlineOpacity: row.style.getPropertyValue('opacity'),
-                draggable: row.draggable
+                handleEnabled: !row.querySelector('.sp-drag-handle')?.disabled
             };
         });
-        expect(before.draggable).toBe(true);
+        expect(before.handleEnabled).toBe(true);
 
-        const originBox = await rows.nth(1).boundingBox();
+        const originBox = await rows.nth(1).locator('.sp-drag-handle').boundingBox();
         const targetBox = await rows.first().boundingBox();
         if (!originBox || !targetBox) throw new Error('Manager drag rows are not visible.');
         await page.mouse.move(
@@ -1002,12 +1020,12 @@ test('keeps a trusted manager drag alive and restores its row after Escape and d
 
         await expect.poll(async () => page.evaluate(() => (
             window.__dragReflowRuntimeEvents.some((event) => (
-                event.type === 'dragstart' && event.trusted
+                event.type === 'pointerdown' && event.trusted
             ))
         )), { timeout: 10_000 }).toBe(true);
         const trustedDragStart = await page.evaluate(() => (
             window.__dragReflowRuntimeEvents.find((event) => (
-                event.type === 'dragstart' && event.trusted
+                event.type === 'pointerdown' && event.trusted
             ))
         ));
         expect.soft(trustedDragStart.defaultPrevented).toBe(false);
@@ -1024,24 +1042,13 @@ test('keeps a trusted manager drag alive and restores its row after Escape and d
             currentTargetBox.y + currentTargetBox.height - 2,
             { steps: 4 }
         );
-        await page.evaluate(() => {
-            const root = document.querySelector('#sources-plus-root').shadowRoot;
-            const origin = root.querySelector('.source-item.sp-drag-folded');
-            const target = Array.from(root.querySelectorAll('.source-item')).find(
-                (row) => row !== origin
-            );
-            if (!origin || !target) throw new Error('Synthetic preview target is unavailable.');
-            const dataTransfer = new DataTransfer();
-            dataTransfer.setData('application/source-key', origin.dataset.sourceKey);
-            const rect = target.getBoundingClientRect();
-            target.dispatchEvent(new DragEvent('dragover', {
-                bubbles: true,
-                cancelable: true,
-                dataTransfer,
-                clientX: rect.left + rect.width / 2,
-                clientY: rect.top + 2
-            }));
-        });
+        const previewTargetBox = await rows.first().boundingBox();
+        if (!previewTargetBox) throw new Error('Pointer preview target is unavailable.');
+        await page.mouse.move(
+            previewTargetBox.x + previewTargetBox.width / 2,
+            previewTargetBox.y + 2,
+            { steps: 4 }
+        );
         await page.waitForTimeout(50);
         const folded = await page.evaluate(() => {
             const root = document.querySelector('#sources-plus-root').shadowRoot;
@@ -1060,13 +1067,16 @@ test('keeps a trusted manager drag alive and restores its row after Escape and d
         expect(folded.animations).toBe(0);
 
         await page.keyboard.press('Escape');
-        await expect.poll(async () => page.evaluate(() => (
-            window.__dragReflowRuntimeEvents.some((event) => (
-                event.type === 'dragend' && event.trusted
-            ))
-        )), { timeout: 10_000 }).toBe(true);
         await page.mouse.up();
-        await page.waitForTimeout(280);
+        await expect(page.locator('#sources-list.sp-drag-active')).toHaveCount(0);
+        await expect.poll(() => page.evaluate(() => {
+            const root = document.querySelector('#sources-plus-root')?.shadowRoot;
+            return {
+                folded: root?.querySelectorAll('.sp-drag-folded').length || 0,
+                unfolding: root?.querySelectorAll('.sp-drag-unfolding').length || 0,
+                shifted: root?.querySelectorAll('.sp-drop-shift, .sp-drop-shift-static').length || 0
+            };
+        }), { timeout: 3_000 }).toEqual({ folded: 0, unfolding: 0, shifted: 0 });
 
         const restored = await rows.nth(1).evaluate((row) => {
             const root = row.getRootNode();
@@ -1096,7 +1106,7 @@ test('keeps a trusted manager drag alive and restores its row after Escape and d
                 )).length,
                 foldedCount: root.querySelectorAll('.sp-drag-folded').length,
                 unfoldingCount: root.querySelectorAll('.sp-drag-unfolding').length,
-                shiftedCount: root.querySelectorAll('.sp-drop-shift').length
+                shiftedCount: root.querySelectorAll('.sp-drop-shift, .sp-drop-shift-static').length
             };
         });
         expect.soft(Math.abs(restored.rect.height - before.rect.height)).toBeLessThanOrEqual(1);

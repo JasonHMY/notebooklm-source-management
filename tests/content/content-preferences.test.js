@@ -104,7 +104,7 @@ describe('content preferences', () => {
         expect(preferences.getCommandShortcuts()).toEqual({});
         expect(preferences.getVisibleQuickViewKinds()).toEqual(DEFAULT_QUICK_VIEWS);
         expect(preferences.getHoverSpotlightEnabled()).toBe(true);
-        expect(preferences.getDragMode()).toBe('classic');
+        expect(preferences.getDragMode()).toBe('reflow');
     });
 
     it('loads and normalizes the complete preference state without loading logs', async () => {
@@ -199,7 +199,7 @@ describe('content preferences', () => {
         await expect(pendingLoad).resolves.toBe(false);
 
         expect(preferences.getPreferencesLoadStatus()).toBe('failed');
-        expect(preferences.getDragMode()).toBe('classic');
+        expect(preferences.getDragMode()).toBe('reflow');
     });
 
     it('rejects non-strict load success responses', async () => {
@@ -218,7 +218,7 @@ describe('content preferences', () => {
             .resolves.toBe(false);
         expect(preferences.getPreferencesLoadStatus()).toBe('failed');
         expect(preferences.getLanguageOverride()).toBe('auto');
-        expect(preferences.getDragMode()).toBe('classic');
+        expect(preferences.getDragMode()).toBe('reflow');
     });
 
     it('rejects non-strict save success responses and rolls back optimistically', async () => {
@@ -227,9 +227,9 @@ describe('content preferences', () => {
         });
         const preferences = createContentPreferences({ chrome: chromeApi });
 
-        await expect(preferences.setDragMode('reflow'))
+        await expect(preferences.setDragMode('classic'))
             .rejects.toThrow('runtime_failure');
-        expect(preferences.getDragMode()).toBe('classic');
+        expect(preferences.getDragMode()).toBe('reflow');
         expect(preferences.getPreferencesLoadStatus()).toBe('idle');
     });
 
@@ -649,7 +649,7 @@ describe('content preferences', () => {
             ['setHistoryRetentionLimit', 'getHistoryRetentionLimit', 50, 20],
             ['setLanguageOverride', 'getLanguageOverride', 'es', 'auto'],
             ['setHoverSpotlightEnabled', 'getHoverSpotlightEnabled', false, true],
-            ['setDragMode', 'getDragMode', 'reflow', 'classic']
+            ['setDragMode', 'getDragMode', 'classic', 'reflow']
         ];
 
         for (const [setter, getter, nextValue, previousValue] of scalarCases) {

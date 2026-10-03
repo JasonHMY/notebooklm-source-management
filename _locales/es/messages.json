@@ -540,7 +540,7 @@
         "message": "Activar arrastre con reflujo"
     },
     "ui_settings_drag_mode_body": {
-        "message": "al arrastrar, las demás fuentes se apartan para abrir un hueco y puedes soltar una fuente entre carpetas. Desactivado (predeterminado) usa la línea azul de inserción clásica. Al volver al modo clásico, las fuentes colocadas entre carpetas pasan al contenedor «Sin agrupar» del final."
+        "message": "Arrastra el asa de seis puntos para ordenar fuentes y carpetas. Los demás elementos se apartan suavemente. Activado (predeterminado) permite soltar fuentes entre carpetas; desactivado usa la línea azul clásica y mueve esas fuentes al final de Sin agrupar."
     },
     "ui_settings_drag_mode_enabled": {
         "message": "Arrastre con reflujo activado"
@@ -1375,6 +1375,47 @@
     },
     "ui_tree_order": {
         "message": "Orden preciso"
+    },
+    "ui_drag_handle_source": {
+        "message": "Reordenar fuente $1",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            }
+        }
+    },
+    "ui_drag_handle_group": {
+        "message": "Reordenar carpeta $1",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            }
+        }
+    },
+    "ui_drag_handle_instructions": {
+        "message": "Arrastra para mover. Usa Arriba y Abajo para cambiar el orden, o Inicio y Fin para ir a la primera o última posición."
+    },
+    "ui_tree_order_moved_first_status": {
+        "message": "Movido a la primera posición. Posición $1 de $2.",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            },
+            "2": {
+                "content": "$2"
+            }
+        }
+    },
+    "ui_tree_order_moved_last_status": {
+        "message": "Movido a la última posición. Posición $1 de $2.",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            },
+            "2": {
+                "content": "$2"
+            }
+        }
     },
     "ui_tree_order_up": {
         "message": "Mover hacia arriba"

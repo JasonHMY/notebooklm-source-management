@@ -52,7 +52,7 @@ GeminiNotebook-Source-Management
 │   │   ├── content-tree-placement.js
 │   │   │   └── 纯分组树放置 Module；集中 validate → plan → commit、四方向精准排序 target 与 render-scoped indexed resolver、entry shape、source XOR、文件夹唯一父级、reachable group 优先级、循环/索引/no-op、批量事务、跨 realm 安全克隆与迭代式原子归一化不变量
 │   │   ├── content-tree-interactions.js
-│   │   │   └── 分组树、checkbox、可跨重绘恢复草稿、在 filter/isolation/collapse 下强制显示 pending path 且确认前不持久化临时记录的即刻 inline naming、折叠 aria/inert、Select visible/Clear selection、上下文 empty-state CTA 与退出隔离时的 native effective-state 回同步、键盘精准排序、焦点恢复/live-region 播报、批量模式与拖拽 read → plan → write；single/batch drag、新增/删除/移出分组及批量移到未分组通过严格语义 target 适配 Tree Placement，未分组桶以 section rect + 内层 list items host 读取 geometry，批量 payload 必须与可信拖拽会话完全一致，另维护同步 native dropEffect、类型化 geometry snapshot、滚动 delta patch、auto-scroll 静止指针刷新/落下前同步 flush、ResizeObserver/render 失效和 fail-closed 重建
+│   │   │   └── 分组树、checkbox、可跨重绘恢复草稿、在 filter/isolation/collapse 下强制显示 pending path 且确认前不持久化临时记录的即刻 inline naming、折叠 aria/inert、Select visible/Clear selection、上下文 empty-state CTA 与退出隔离时的 native effective-state 回同步、键盘精准排序、焦点恢复/live-region 播报、批量模式与手柄 Pointer 拖拽 read → plan → write；single/batch drag、新增/删除/移出分组及批量移到未分组通过严格语义 target 适配 Tree Placement，未分组桶以 section rect + 内层 list items host 读取 geometry，批量 payload 必须与可信拖拽会话完全一致，另维护 layout/terminal/visual 三种 geometry、类型化 snapshot、滚动 delta patch、auto-scroll 静止指针刷新/落下前同步 flush、ResizeObserver/render 失效和 fail-closed 重建
 │   │   ├── content-render.js
 │   │   │   └── Shadow DOM manager 渲染、严格 owned list/listitem 树语义（含未分组 section → inner list、空态与批量条 wrapper）、上下文控件名称、折叠状态、上下文空状态、列表行、文件夹精准排序控件、按选择状态渐进展开的批量 toolbar、菜单层；将纯搜索分段映射为安全文本节点与高亮 span，并为截断的搜索计数保留完整 title
 │   │   ├── content-modals.js
@@ -125,6 +125,10 @@ GeminiNotebook-Source-Management
 │   │   │   └── diagnostics JSON 序列化、Error/unhandled rejection 脱敏摘要 helper
 │   │   ├── content-drag-multi.js
 │   │   │   └── 多源拖拽 presentation helper：selection 解析、单元素 ghost、带实际滚动 callback 的 auto-scroll RAF controller；不拥有树 mutation
+│   │   ├── content-drag-motion.js
+│   │   │   └── beUI 360/32/0.6 解析弹簧，共享 RAF、current/target 分离、离屏与 reduced-motion 静态更新及原始 transform 恢复
+│   │   ├── content-drag-pointer.js
+│   │   │   └── 六点手柄 Pointer Events 会话；3px 阈值、稳定列表捕获、键盘排序及取消/失焦/teardown 清理
 │   │   ├── content-drag-reflow.js
 │   │   │   └── 拖拽让位 reflow 会话状态：真实 box model/折叠位移测量、类型化 shift delta、可视区动画/离屏静态 transform、被拖项折叠与取消恢复 helper；元素恢复令牌隔离取消后快速重拖的旧定时器
 │   │   ├── content-source-view-switch-controller.js
@@ -160,9 +164,11 @@ GeminiNotebook-Source-Management
 │   │   └── content module loader 和 mock DOM harness
 │   ├── smoke/
 │   │   ├── drag-reflow-layout.smoke.spec.js
-│   │   │   └── 真实 Chromium 中的混合/fixed box model 占位、跨 host 多选、preview、滚动恢复、reduced-motion 与原生 Esc/dragend
+│   │   │   └── 真实 Chromium 中的混合/fixed box model 占位、spring preview、跨 host 多选、滚动恢复、reduced-motion 与 pointer Esc/cancel
+│   │   ├── pointer-drag.smoke.spec.js
+│   │   │   └── 手柄限制、跟手与 spring 实际位移截图、preview 不落盘、落下归位、Classic 兼容及键盘焦点/播报/刷新
 │   │   ├── reflow-stable.smoke.spec.js
-│   │   │   └── 转正验收：真实鼠标触发 dragstart/drop/dragend，核对文件夹间落点、Undo/Redo、独立 storage 读回、非连续多选和窄面板取消
+│   │   │   └── 转正验收：真实鼠标从手柄触发 pointer 会话，核对文件夹间落点、Undo/Redo、独立 storage 读回、非连续多选和窄面板取消
 │   │   ├── manager-performance.smoke.spec.js
 │   │   │   └── opt-in 100/500/1000/5000 来源 manager 基准；5 次 warm-up + 20 次测量，临时 content-script 隔离世界按样本记录初始渲染、搜索、Quick View、Tag filter、批量选择、同步输入、DOM mutation、query 与 layout read 的 p50/p95，并在每个样本结束还原原型
 │   │   └── 其他 Playwright 真实扩展上下文 smoke，默认 headless
@@ -314,6 +320,8 @@ manifest.json
     ├── src/content/content-view-state.js
     ├── src/content/content-native-checkbox-sync.js
     ├── src/content/content-drag-multi.js
+    ├── src/content/content-drag-motion.js
+    ├── src/content/content-drag-pointer.js
     ├── src/content/content-drag-reflow.js
     ├── src/content/content-tree-interactions.js
     ├── src/content/content-native-label-detector.js
@@ -404,12 +412,12 @@ manifest.json
 │   │   ├── 嵌套 children 和 parent map
 │   │   ├── 来源/分组拖拽排序
 │   │   ├── 批量模式多源拖拽与边缘自动滚动
-│   │   ├── 单来源/分组/多来源 drop payload 必须与本地 activeDragContext 类型及身份完全一致；在读取几何和提交树之前拒绝不匹配 payload
-│   │   ├── 两种拖拽模式（`content-preferences` 的全局 dragMode）：经典（默认，蓝色插入线 .drag-over-top/bottom + 散源落底部桶）/ 避让（按真实混合 box model/折叠位移形成空槽、折叠 + 让位 + 根层级定位、取消时精确恢复）；自定义 ghost = source-item 行克隆（单源单层 + 多源最多 3 层堆叠 + 右上角数字 badge）
-│   │   ├── 避让 dragover 每帧只读一次 geometry snapshot 后纯计算并集中写入；纯滚动按 root/嵌套 children 精确 delta 修补，auto-scroll 无新 dragover 时仍按静止指针合并刷新，drop 前同步消费 dirty geometry，尺寸/render/混合失效时 fail closed 重建
+│   │   ├── 单来源/分组/多来源由受控 pointer 会话绑定 sessionId、笔记本/manager context、稳定身份和完整逻辑选择；只有松手提交时通过 Tree Placement 保存，外部 native drag 不绑定生产监听
+│   │   ├── 两种拖拽模式（`content-preferences` 的全局 dragMode）：经典（蓝色插入线 .drag-over-top/bottom + 散源落底部桶）/ 避让（默认，beUI spring、按真实混合 box model/折叠位移形成空槽、折叠 + 让位 + 根层级定位、取消时精确恢复）；自定义 ghost = source-item 行克隆（单源单层 + 多源最多 3 层堆叠 + 右上角数字 badge）
+│   │   ├── 避让 pointer 每帧只读一次 geometry snapshot 后纯计算并集中写入；纯滚动按 root/嵌套 children 精确 delta 修补，auto-scroll 无新 pointermove 时仍按静止指针合并刷新，drop 前同步消费 dirty geometry，尺寸/render/混合失效时 fail closed 重建
 │   │   ├── refreshMountedDragSession 在窗口重建后按实际元素保存/恢复样式、重新实测挂载选择占位并 fold 新行；完整逻辑选择不变，不强制挂载离屏行，未确认几何拒绝 drop，初始fold后立即重投影窗口并保留origin，已有排队帧复用新几何、静止指针无排队帧时同步刷新，提交中的 render 不重新折叠落地来源
 │   │   ├── 窗口定位按真实正高度来源行/virtual spacer 的 rect 与 ordinal 区间映射，排除零高 fold pin；仅在 logical projection 不变时复用 DOM 锚点，过滤/顺序变化改用有界估计，避免50项拖拽及多分组时出现窗口漂移或空白
-│   │   ├── native dropEffect 只在原始 dragover 事件内由 clean snapshot 同步解析；dirty/missing snapshot 保守 move，未知 payload 为 none，异步 drag frame 不保留 DataTransfer
+│   │   ├── 几何区分 layoutRect、terminalRect 与当前 visualRect；落点只消费稳定目标投影，重测扣除 spring current/祖先位移，动画帧不触发几何失效；手柄 Up/Down/Home/End 复用 Tree Placement、焦点恢复和匿名 N/M 播报
 │   │   ├── reflow transform 使用 source/group 类型化 map；仅可视区 + 一个真实行高 overscan 动画，离屏位移静态应用并在结束/下次 preflight 清理
 │   │   ├── 批量选择、Select visible（基于完整逻辑投影选择所有明确可见且 native-operable 的来源，不受 windowing 当前挂载行限制）、Clear selection、Clear hidden selection、可见/隐藏/真实选中数、加入文件夹、添加/移除标签；零选择时只显示取消/计数/Select visible，选中后再显示清除与批量操作；删除进行中冻结选择变更
 │   │   ├── 纯 Tree Placement Interface 集中 entry shape、source XOR、循环拒绝、索引修正、no-op、批量/事务原子提交与 import normalization；single/batch drag、移动到分组、批量/单项移出分组、分组新增/删除、原生来源删除、Classic sweep、来源同步、restore/reconcile、state apply、配置/原生标签导入均已迁移，业务路径不再直接修改放置数组
@@ -423,6 +431,8 @@ manifest.json
 │   │   ├── src/content/content-state-reconcile.js
 │   │   ├── src/content/content-state-apply.js
 │   │   ├── src/content/content-drag-multi.js
+│   │   ├── src/content/content-drag-motion.js
+│   │   ├── src/content/content-drag-pointer.js
 │   │   ├── src/content/content-drag-reflow.js
 │   │   ├── src/content/content-native-checkbox-sync.js
 │   │   ├── src/content/content-render.js
@@ -436,6 +446,8 @@ manifest.json
 │       ├── tests/content/content-tree-placement.test.js
 │       ├── tests/content/content-tree.test.js
 │       ├── tests/content/content-drag-multi.test.js
+│       ├── tests/content/content-drag-motion.test.js
+│       ├── tests/content/content-drag-pointer.test.js
 │       ├── tests/content/content-drag-reflow.test.js
 │       ├── tests/content/content-native-checkbox-sync.test.js
 │       ├── tests/content/content-render.test.js
@@ -711,6 +723,7 @@ chrome.storage.local
 │   └── 排障: src/background/index.js, src/content/content-persistence.js
 ├── sourcesPlusPreferences
 │   ├── 用途: 全局偏好，包含 developerModeEnabled、welcomeOnboardingSeenVersion、whatsNewSeenVersion、historyRetentionLimit、languageOverride、dragMode、commandShortcuts、visibleQuickViewKinds、appearance
+│   ├── 默认: dragMode 缺失使用 reflow，显式 classic/reflow 保留，非法值回退 classic
 │   ├── 写入: settings / welcome onboarding / manifest-version what’s new / command palette shortcuts / quick view button visibility -> background SAVE_PREFERENCES
 │   ├── 读取: LOAD_PREFERENCES 同时返回从 preferences/state/history/log keys 派生的 usageState，用于区分新用户和升级用户
 │   └── 排障: src/content/content-preferences.js, src/content/index.js, src/background/index.js

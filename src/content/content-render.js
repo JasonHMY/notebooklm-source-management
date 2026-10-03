@@ -2154,6 +2154,7 @@
             );
             lastVisibleLogicalSourceKeys = visibleSourceKeysForWindow.slice();
             let materializedSourceCount = 0;
+            let renderedGroupDragCount = 0;
             let listMotionIndex = 0;
 
             const getNextListMotionStyle = () => {
@@ -2247,6 +2248,7 @@
                 const motionStyle = getNextListMotionStyle();
                 const sourceTitle = source.title || getMessage('ui_source_untitled');
                 const sourcePath = joinAccessibleTreePath(parentPath, sourceTitle);
+                const sourceDragInstructionsId = `sp-drag-source-instructions-${materializedSourceCount}`;
 
                 return el('div', {
                     className: 'source-item sp-list-item-enter sp-spotlight-surface' + extraClasses,
@@ -2258,7 +2260,7 @@
                     'aria-setsize': sourceWindowOrdinal >= 0
                         ? String(visibleSourceKeysForWindow.length)
                         : null,
-                    draggable: !isFailed && !isLoading ? 'true' : 'false',
+                    draggable: 'false',
                     dataset: {
                         sourceKey: source.key,
                         sourceWindowOrdinal: sourceWindowOrdinal >= 0
@@ -2268,6 +2270,18 @@
                     style: motionStyle,
                     title: titleAttr
                 }, [
+                    el('button', {
+                        type: 'button',
+                        className: 'sp-drag-handle',
+                        dataset: { dragType: 'source', sourceKey: source.key },
+                        title: getMessage('ui_drag_handle_source', [sourcePath]),
+                        'aria-label': getMessage('ui_drag_handle_source', [sourcePath]),
+                        'aria-describedby': sourceDragInstructionsId,
+                        disabled: isFailed || isLoading
+                    }, [
+                        el('span', { className: 'google-symbols', 'aria-hidden': 'true' }, ['drag_indicator']),
+                        el('span', { id: sourceDragInstructionsId, className: 'sp-sr-only' }, [getMessage('ui_drag_handle_instructions')])
+                    ]),
                     el('div', { className: 'icon-container' }, [
                         createSourceIconElement(source, isFailed)
                     ]),
@@ -2459,6 +2473,7 @@
                 const isPendingRenameExpanded = pendingInitialRenamePathGroupIds.has(group.id);
                 const isCollapsed = group.collapsed && !isSearchExpanded && !isPendingRenameExpanded;
                 const groupChildrenId = `sp-group-children-${String(group.id)}`;
+                const groupDragInstructionsId = `sp-drag-group-instructions-${++renderedGroupDragCount}`;
                 const treeOrderControls = !state.isBatchMode
                     ? el('div', {
                         className: 'sp-tree-order-controls',
@@ -2505,7 +2520,19 @@
                     },
                     style: `--sp-tree-indent:${Math.min(level, MAX_VISIBLE_TREE_INDENT_LEVEL) * TREE_INDENT_STEP_PX}px;${motionStyle}`
                 }, [
-                    el('div', { className: 'group-header sp-spotlight-surface', draggable: !state.isBatchMode ? 'true' : 'false', dataset: { dragType: 'group', groupId: group.id } }, [
+                    el('div', { className: 'group-header sp-spotlight-surface', draggable: 'false', dataset: { dragType: 'group', groupId: group.id } }, [
+                        el('button', {
+                            type: 'button',
+                            className: 'sp-drag-handle',
+                            dataset: { dragType: 'group', groupId: group.id },
+                            title: getMessage('ui_drag_handle_group', [groupPath]),
+                            'aria-label': getMessage('ui_drag_handle_group', [groupPath]),
+                            'aria-describedby': groupDragInstructionsId,
+                            disabled: state.isBatchMode
+                        }, [
+                            el('span', { className: 'google-symbols', 'aria-hidden': 'true' }, ['drag_indicator']),
+                            el('span', { id: groupDragInstructionsId, className: 'sp-sr-only' }, [getMessage('ui_drag_handle_instructions')])
+                        ]),
 	                        el('button', {
 	                            type: 'button',
 	                            className: 'sp-caret' + (isCollapsed ? ' collapsed' : ''),

@@ -10976,6 +10976,166 @@ describe('empty-bin ungroup dropzone (transient element)', () => {
     });
 });
 
+describe('pointer tree session and drag-handle keyboard moves', () => {
+    let createContentTreeInteractions;
+
+    function createHarness({ treePlacement = null } = {}) {
+        const state = {
+            root: ['source-a', 'source-b', 'source-c'].map((key) => ({ type: 'source', key })),
+            ungrouped: []
+        };
+        const { sourcesListEl, shadowRoot, elementMap } = makeMockShadowList({
+            items: ['source-a', 'source-b', 'source-c'].map((key, index) => ({
+                kind: 'source', key, top: 100 + index * 40
+            }))
+        });
+        sourcesListEl.style = {};
+        sourcesListEl.classList = makeMockClassList();
+        sourcesListEl.addEventListener = jest.fn();
+        sourcesListEl.removeEventListener = jest.fn();
+        const status = { textContent: '' };
+        const focusedHandle = { focus: jest.fn() };
+        shadowRoot.getElementById = (id) => (
+            id === 'sources-list' ? sourcesListEl
+                : id === 'sp-tree-order-status' ? status : null
+        );
+        shadowRoot.querySelector = jest.fn((selector) => (
+            selector.includes('.sp-drag-handle[data-source-key="source-b"]')
+                ? focusedHandle : null
+        ));
+        shadowRoot.querySelectorAll = jest.fn(() => []);
+        const sourcesByKey = new Map(['source-a', 'source-b', 'source-c'].map((key) => [
+            key, { key, title: `Private ${key}`, enabled: true }
+        ]));
+        const saveState = jest.fn();
+        const render = jest.fn();
+        let contextToken = 'notebook-1';
+        const runtime = {};
+        const tree = createContentTreeInteractions({
+            runtime,
+            ...(treePlacement ? { treePlacement } : {}),
+            getState: () => state,
+            getGroupsById: () => new Map(),
+            getSourcesByKey: () => sourcesByKey,
+            getParentMap: () => new Map(),
+            getPendingBatchKeys: () => new Set(),
+            getShadowRoot: () => shadowRoot,
+            getDocument: () => null,
+            getWindow: () => null,
+            getDragMode: () => 'classic',
+            getNativeSelectionContextToken: () => contextToken,
+            getSetTimeout: () => () => 1,
+            getMessage: (key, args = []) => `${key}:${args.join('/')}`,
+            saveState,
+            render
+        });
+        const handle = {
+            dataset: { sourceKey: 'source-b' },
+            disabled: false,
+            classList: { contains: (name) => name === 'sp-drag-handle' },
+            closest: (selector) => (
+                selector === '.source-item' ? elementMap.get('source:source-b') : null
+            )
+        };
+        const pointer = { handle, clientX: 20, clientY: 165, sessionId: 7 };
+        return {
+            tree, state, runtime, saveState, render, status, focusedHandle,
+            handle, pointer, sourcesListEl,
+            changeContext: () => { contextToken = 'notebook-2'; }
+        };
+    }
+
+    beforeEach(() => {
+        jest.resetModules();
+        setupGlobalMocks();
+        require('../../src/content/content-native-checkbox-sync.js');
+        createContentTreeInteractions = require('../../src/content/content-tree-interactions.js');
+    });
+
+    afterEach(teardownGlobalMocks);
+
+    it('starts only from a live drag handle and rejects stale session or notebook context', () => {
+        const h = createHarness();
+        expect(h.tree.startDrag({ ...h.pointer, handle: {
+            ...h.handle, classList: { contains: () => false }
+        } })).toBe(false);
+        expect(h.runtime.activeDragContext).toBeNull();
+
+        expect(h.tree.startDrag(h.pointer)).toBe(true);
+        expect(h.runtime.activeDragContext).toEqual({
+            kind: 'source-single', keys: ['source-b']
+        });
+        expect(h.tree.commitDrag({ ...h.pointer, sessionId: 8 })).toBe(false);
+        expect(h.saveState).not.toHaveBeenCalled();
+        expect(h.render).not.toHaveBeenCalled();
+
+        expect(h.tree.startDrag(h.pointer)).toBe(true);
+        h.changeContext();
+        expect(h.tree.updateDrag(h.pointer)).toBe(false);
+        expect(h.runtime.activeDragContext).toBeNull();
+        expect(h.saveState).not.toHaveBeenCalled();
+
+        const release = createHarness();
+        expect(release.tree.startDrag(release.pointer)).toBe(true);
+        release.changeContext();
+        expect(release.tree.commitDrag(release.pointer)).toBe(false);
+        expect(release.saveState).not.toHaveBeenCalled();
+        expect(release.runtime.activeDragContext).toBeNull();
+    });
+
+    it('moves with Up, Down, Home and End while restoring handle focus and announcing positions', () => {
+        const h = createHarness();
+        const keys = () => h.state.root.map((entry) => entry.key);
+        expect(h.tree.moveFromDragHandle({ handle: h.handle, direction: 'up' })).toBe(true);
+        expect(keys()).toEqual(['source-b', 'source-a', 'source-c']);
+        expect(h.status.textContent).toBe('ui_tree_order_moved_up_status:1/3');
+
+        expect(h.tree.moveFromDragHandle({ handle: h.handle, direction: 'down' })).toBe(true);
+        expect(keys()).toEqual(['source-a', 'source-b', 'source-c']);
+        expect(h.tree.moveFromDragHandle({ handle: h.handle, direction: 'first' })).toBe(true);
+        expect(keys()).toEqual(['source-b', 'source-a', 'source-c']);
+        expect(h.tree.moveFromDragHandle({ handle: h.handle, direction: 'last' })).toBe(true);
+        expect(keys()).toEqual(['source-a', 'source-c', 'source-b']);
+        expect(h.status.textContent).toBe('ui_tree_order_moved_last_status:3/3');
+        expect(h.status.textContent).not.toContain('Private');
+        expect(h.focusedHandle.focus).toHaveBeenCalledTimes(4);
+        expect(h.saveState).toHaveBeenCalledTimes(4);
+        expect(h.render).toHaveBeenCalledTimes(4);
+        expect(h.tree.moveFromDragHandle({ handle: h.handle, direction: 'last' })).toBe(false);
+        expect(h.saveState).toHaveBeenCalledTimes(4);
+    });
+
+    it('does not persist a pointer drop when placement reports no semantic change', () => {
+        const treePlacement = {
+            applyPlacement: jest.fn(() => ({ ok: true, changed: false })),
+            rebuildParentMap: jest.fn()
+        };
+        const h = createHarness({ treePlacement });
+        expect(h.tree.startDrag(h.pointer)).toBe(true);
+        expect(h.tree.commitDrag(h.pointer)).toBe(true);
+        expect(treePlacement.applyPlacement).toHaveBeenCalledTimes(1);
+        expect(h.saveState).not.toHaveBeenCalled();
+        expect(h.state.root.map((entry) => entry.key)).toEqual([
+            'source-a', 'source-b', 'source-c'
+        ]);
+        expect(h.render).not.toHaveBeenCalled();
+        expect(h.runtime.activeDragContext).toBeNull();
+    });
+
+    it('cancels without saving and allows another pointer session to start', () => {
+        const h = createHarness();
+        expect(h.tree.startDrag(h.pointer)).toBe(true);
+        h.tree.cancelDrag('escape', { immediate: true });
+        expect(h.runtime.activeDragContext).toBeNull();
+        expect(h.saveState).not.toHaveBeenCalled();
+        expect(h.tree.startDrag({ ...h.pointer, sessionId: 8 })).toBe(true);
+        expect(h.runtime.activeDragContext).toEqual({
+            kind: 'source-single', keys: ['source-b']
+        });
+        h.tree.cancelDrag('teardown', { immediate: true });
+    });
+});
+
 describe('single-frame drag geometry snapshot budgets', () => {
     let createContentTreeInteractions;
 
@@ -11247,6 +11407,37 @@ describe('single-frame drag geometry snapshot budgets', () => {
         expect(tree.resolveSynchronousDropEffect).toBeInstanceOf(Function);
         expect(tree.invalidateDragGeometry).toBeInstanceOf(Function);
         expect(tree.flushDragFrameNow).toBeInstanceOf(Function);
+    });
+
+    it('subtracts the physical spring offset when rebuilding geometry while retaining the target slot', () => {
+        const fixture = createGeometryFixture(1);
+        fixture.sources[0].style.transform = 'translateY(24px)';
+        fixture.sources[0].getBoundingClientRect.mockImplementation(() => ({
+            top: 112, bottom: 152, left: 0, right: 200, width: 200, height: 40
+        }));
+        const runtime = {
+            dragReflowSession: {
+                shiftedSourceItems: new Map([['source-0', 24]]),
+                shiftedGroupItems: new Map()
+            }
+        };
+        const dragReflow = {
+            extractInlineTranslateY: (element) => element === fixture.sources[0] ? 12 : 0,
+            motion: {
+                has: (element) => element === fixture.sources[0],
+                getTargetY: () => 24
+            }
+        };
+        const tree = buildTree({ fixture, runtime, dragReflow });
+        const snapshot = tree.readDragGeometry({
+            rootElement: fixture.root,
+            session: runtime.dragReflowSession
+        });
+        const source = snapshot.sourceEntries.get('source-0');
+        expect(source.visualRect.top).toBe(112);
+        expect(source.ownShiftY).toBe(12);
+        expect(source.layoutRect.top).toBe(100);
+        expect(source.terminalRect.top).toBe(124);
     });
 
     it.each([100, 500])('reads %i rows with one query batch and one rect read per element', (rowCount) => {
@@ -12808,6 +12999,8 @@ describe('single-frame drag geometry snapshot budgets', () => {
             }
         });
         const snapshot = tree.readDragGeometry({ rootElement: fixture.root, session: runtime.dragReflowSession });
+        const groupVisualTop = snapshot.groups.get('same-key').visualRect.top;
+        const sourceVisualTop = snapshot.sourceEntries.get('same-key').visualRect.top;
         fixture.resetWritePhase();
 
         tree.applyDragFramePlan({
@@ -12822,10 +13015,12 @@ describe('single-frame drag geometry snapshot budgets', () => {
             geometrySnapshot: snapshot
         });
 
-        expect(snapshot.groups.get('same-key').visualRect.top).toBe(124);
-        expect(snapshot.groups.get('same-key').header.visualRect.top).toBe(124);
-        expect(snapshot.groups.get('same-key').children.visualRect.top).toBe(164);
-        expect(snapshot.sourceEntries.get('same-key').visualRect.top).toBe(164);
+        expect(snapshot.groups.get('same-key').terminalRect.top).toBe(124);
+        expect(snapshot.groups.get('same-key').header.terminalRect.top).toBe(124);
+        expect(snapshot.groups.get('same-key').children.terminalRect.top).toBe(164);
+        expect(snapshot.sourceEntries.get('same-key').terminalRect.top).toBe(164);
+        expect(snapshot.groups.get('same-key').visualRect.top).toBe(groupVisualTop);
+        expect(snapshot.sourceEntries.get('same-key').visualRect.top).toBe(sourceVisualTop);
         expect(snapshot.sourceEntries.get('same-key').layoutRect.top).toBe(140);
         expect(runtime.dragGeometryDirty).toBe(false);
     });
@@ -12874,7 +13069,8 @@ describe('single-frame drag geometry snapshot budgets', () => {
         });
 
         expect(snapshot.sourceEntries.get('source-0').visualRect.top).toBe(source0Top);
-        expect(snapshot.sourceEntries.get('source-1').visualRect.top).toBe(source1Top + 40);
+        expect(snapshot.sourceEntries.get('source-1').terminalRect.top).toBe(source1Top + 40);
+        expect(snapshot.sourceEntries.get('source-1').visualRect.top).toBe(source1Top);
         expect(runtime.dragGeometryDirty).toBe(false);
     });
 

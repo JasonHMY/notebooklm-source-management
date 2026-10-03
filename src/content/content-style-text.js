@@ -973,9 +973,9 @@
             }
             .source-item {
                 display: grid;
-                grid-template-columns: 18px 24px minmax(0, 1fr) auto;
-                column-gap: 8px;
-                padding-left: 12px;
+                grid-template-columns: 24px 18px 24px minmax(0, 1fr) auto;
+                column-gap: 6px;
+                padding-left: 8px;
                 border: 1px solid transparent;
                 border-radius: 8px;
                 margin-bottom: 2px;
@@ -1127,6 +1127,51 @@
             }
             .sp-caret.collapsed {
                 transform: rotate(-90deg);
+            }
+            .sp-drag-handle {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                flex-shrink: 0;
+                width: 24px;
+                height: 24px;
+                padding: 0;
+                border: 0;
+                border-radius: 6px;
+                background: transparent;
+                color: var(--sp-text-secondary);
+                opacity: 0.8;
+                cursor: grab;
+                touch-action: none;
+                user-select: none;
+            }
+            .sp-drag-handle .google-symbols {
+                font-size: 16px;
+                line-height: 1;
+                pointer-events: none;
+            }
+            .sp-drag-handle:hover,
+            .sp-drag-handle:focus-visible {
+                opacity: 1;
+                background: var(--sp-icon-button-hover);
+                color: var(--sp-text-primary);
+            }
+            .sp-drag-handle:focus-visible {
+                outline: none;
+                box-shadow: var(--sp-focus-ring);
+            }
+            .sp-drag-handle:active,
+            #sources-list.sp-drag-active .sp-drag-handle:not(:disabled) {
+                cursor: grabbing;
+            }
+            .sp-drag-handle:disabled {
+                opacity: 0.32;
+                cursor: not-allowed;
+                pointer-events: none;
+            }
+            .sp-drag-handle:disabled:hover {
+                background: transparent;
+                color: var(--sp-text-secondary);
             }
             .icon-container {
                 flex-shrink: 0;
@@ -2942,13 +2987,9 @@
                 letter-spacing: 0.05em;
             }
 
-            /* .dragging is a state marker the dragstart handler sets on the originating row
-               (via setTimeout 0 so the native drag image is captured first). The dragged
-               source's visual reaction lives entirely in .sp-drag-folded — element collapses
-               to height/opacity 0. This rule intentionally has NO opacity / transform / shadow
-               so we don't leave a "half-transparent lift" artifact if fold ever fails to run.
-               cursor: grabbing is mostly cosmetic (native drag overrides cursor); transition:
-               none prevents any inherited transitions from animating mid-drag. */
+            /* Pin originating rows before a deferred fold or window replacement.
+               The pointer ghost owns the lifted appearance; this marker only
+               suppresses ordinary row transitions during the gesture. */
             .source-item.dragging,
             .group-header.dragging {
                 cursor: grabbing;
@@ -2975,7 +3016,75 @@
             }
 
             .sp-drop-shift {
-                transition: transform var(--sp-motion-base) var(--sp-ease-emphasized);
+                transition: none;
+            }
+            #sources-list.sp-drag-active,
+            #sources-list.sp-drag-active * {
+                cursor: grabbing !important;
+            }
+
+            /* Pointer ghosts stay in the Shadow DOM so theme tokens and row styling apply. */
+            .sp-drag-pointer-ghost {
+                position: fixed;
+                top: 0;
+                left: 0;
+                z-index: 10004;
+                pointer-events: none;
+                user-select: none;
+                will-change: transform;
+            }
+            .sp-drag-pointer-ghost .sp-drag-ghost-layer {
+                background: var(--sp-panel-bg);
+                border-radius: 8px;
+                box-shadow: var(--sp-shadow-hover-item);
+            }
+            .sp-drag-pointer-ghost.sp-drag-ghost-single > .sp-drag-ghost-layer {
+                transform: scale(1.025);
+            }
+            .sp-drag-pointer-ghost > .sp-drag-ghost-stack {
+                position: relative;
+            }
+            .sp-drag-pointer-ghost > .sp-drag-ghost-stack > .sp-drag-ghost-layer {
+                position: absolute;
+                top: 0;
+                left: 0;
+            }
+            .sp-drag-pointer-ghost > .sp-drag-ghost-stack > .sp-drag-ghost-layer:nth-child(1) {
+                z-index: 3;
+                transform: scale(1.025);
+            }
+            .sp-drag-pointer-ghost > .sp-drag-ghost-stack > .sp-drag-ghost-layer:nth-child(2) {
+                z-index: 2;
+                transform: translate(4px, 4px) rotate(-1deg) scale(1.025);
+                opacity: 0.85;
+            }
+            .sp-drag-pointer-ghost > .sp-drag-ghost-stack > .sp-drag-ghost-layer:nth-child(3) {
+                z-index: 1;
+                transform: translate(8px, 8px) rotate(-2deg) scale(1.025);
+                opacity: 0.7;
+            }
+            .sp-drag-pointer-ghost .sp-drag-ghost-badge {
+                position: absolute;
+                top: -8px;
+                right: -8px;
+                z-index: 4;
+                min-width: 22px;
+                height: 22px;
+                padding: 0 6px;
+                border-radius: 11px;
+                background: var(--sp-accent-fill);
+                color: var(--sp-text-toast);
+                font-size: 12px;
+                font-weight: 600;
+                line-height: 22px;
+                text-align: center;
+            }
+            .sp-drag-pointer-ghost .source-item,
+            .sp-drag-pointer-ghost .group-header {
+                margin: 0;
+                transform: none;
+                transition: none;
+                box-shadow: none;
             }
 
             /* Rows outside the list viewport still receive the same translateY
@@ -3604,6 +3713,10 @@
                 .sp-command-palette-item.is-active {
                     outline: 2px solid Highlight;
                     outline-offset: -2px;
+                }
+                .sp-drag-handle:focus-visible {
+                    outline: 2px solid Highlight;
+                    outline-offset: 1px;
                 }
                 .sp-resizer::after {
                     background-color: ButtonText;

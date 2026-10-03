@@ -1,17 +1,15 @@
 (function () {
     'use strict';
 
-    // Mirrors the CSS var(--sp-motion-base) used by .sp-drag-folded,
-    // .sp-drop-shift, .sp-drop-landing, .sp-drop-flying, .sp-drag-unfolding
-    // (all sourced from UI_GUIDELINES motion token). Kept here as a publicly
-    // queryable constant so callers can align timeouts / staggered work.
+    // Mirrors the CSS var(--sp-motion-base) used by folding and landing cues.
+    // Sibling translation uses the spring in content-drag-motion.js instead.
     const DEFAULT_TRANSITION_MS = 180;
 
     /**
      * createContentDragReflow(deps) — 拖拽 reflow / fold / drop-shift 视觉过渡引擎。
      * 拖拽期间把源行 fold 成 0 高度,对剩余可见行按 dropIntent 算 translateY shift,
-     * 给目标插入点留出预览空隙;dragend / drop 时 unfold 并清 shift。所有过渡时长统一用
-     * DEFAULT_TRANSITION_MS(同 UI_GUIDELINES `--sp-motion-base` token = 180ms)。
+     * 给目标插入点留出预览空隙;dragend / drop 时 unfold 并清 shift。折叠和落下提示使用
+     * DEFAULT_TRANSITION_MS；相邻行使用弹簧位移。
      *
      * @param {Object} deps Optional;当前实现是 pure DOM 操作,deps 仅 future-proof reserved。
      * @returns {{ TRANSITION_MS, createDragSession, prepareDragSession,
@@ -24,6 +22,11 @@
      */
     function createContentDragReflow(deps = {}) {
         const _ctx = deps && typeof deps === 'object' ? deps : {};
+        const createMotion = _ctx.createDragMotion
+            || globalThis.NSM_CREATE_CONTENT_DRAG_MOTION
+            || (typeof module !== 'undefined' && module.exports
+                ? require('./content-drag-motion.js') : null);
+        const motion = typeof createMotion === 'function' ? createMotion(_ctx) : null;
         const itemMetricsCache = new WeakMap();
         const itemElementCacheByRoot = new WeakMap();
         const probeCssTextCache = new Map();
@@ -71,6 +74,7 @@
                 shiftedItems: new Map(),
                 shiftedSourceItems: new Map(),
                 shiftedGroupItems: new Map(),
+                motionElements: new Map(),
                 animatedShiftedSourceItems: new Set(),
                 animatedShiftedGroupItems: new Set(),
                 staticShiftClassSourceItems: new Set(),
@@ -1581,6 +1585,9 @@
             draggedType,
             rootElement
         }) {
+            // Settle any previous cancellation before probing row dimensions.
+            // Rapid re-drags otherwise inherit an in-flight visual transform.
+            if (motion) motion.reset();
             const session = createDragSession();
             session.draggedType = draggedType === 'source' || draggedType === 'group'
                 ? draggedType
@@ -1881,6 +1888,52 @@
             return shifts;
         }
 
+        function setMotionShift(session, type, key, element, target, options = {}) {
+            if (!element || !element.style) return;
+            if (!(session.motionElements instanceof Map)) session.motionElements = new Map();
+            const motionKey = `${type}:${key}`;
+            const previousElement = session.motionElements.get(motionKey);
+            if (previousElement && previousElement !== element && motion) {
+                motion.clear(previousElement);
+            }
+            session.motionElements.set(motionKey, element);
+            if (!motion) {
+                element.style.transform = target ? `translateY(${target}px)` : '';
+                if (target === 0) session.motionElements.delete(motionKey);
+                return;
+            }
+            motion.set(element, target, {
+                immediate: options.immediate === true,
+                onComplete: target === 0 ? () => {
+                    // A later retarget replaces this callback, keeping the same
+                    // physical element alive through rapid pointer reversals.
+                    motion.clear(element);
+                    if (session.motionElements.get(motionKey) === element) {
+                        session.motionElements.delete(motionKey);
+                    }
+                    if (element.classList) {
+                        element.classList.remove('sp-drop-shift');
+                    }
+                } : null
+            });
+        }
+
+        function clearMotionShift(session, type, key, element, immediate = false) {
+            if (!element) return false;
+            setMotionShift(session, type, key, element, 0, { immediate });
+            // set() completes synchronously without RAF, with reduced motion,
+            // or when the row is already at zero. An in-flight spring retains
+            // its class until setMotionShift's completion callback removes it.
+            return Boolean(motion && motion.has(element));
+        }
+
+        function clearStaleMotionElement(session, type, key) {
+            const motionKey = `${type}:${key}`;
+            const element = session.motionElements?.get(motionKey);
+            if (element && motion) motion.clear(element);
+            session.motionElements?.delete(motionKey);
+        }
+
         function applyTypedReflow({
             session,
             shifts,
@@ -2004,6 +2057,7 @@
                         const el = findTypedItemElement(rootElement, type, key, elements);
                         if (!el || !el.style) {
                             complete = false;
+                            clearStaleMotionElement(session, type, key);
                             current.delete(key);
                             if (usesScopedClasses) {
                                 currentAnimated.delete(key);
@@ -2011,8 +2065,9 @@
                             }
                             return;
                         }
-                        el.style.transform = '';
-                        if (el.classList && typeof el.classList.remove === 'function') {
+                        const settling = clearMotionShift(session, type, key, el,
+                            usesScopedClasses && !currentAnimated.has(key));
+                        if (!settling && el.classList && typeof el.classList.remove === 'function') {
                             el.classList.remove('sp-drop-shift');
                             if (!usesScopedClasses || !currentStatic.has(key)) {
                                 el.classList.remove('sp-drop-shift-static');
@@ -2030,9 +2085,12 @@
                     const el = findTypedItemElement(rootElement, type, key, elements);
                     if (!el || !el.style) {
                         complete = false;
+                        clearStaleMotionElement(session, type, key);
                         return;
                     }
-                    el.style.transform = `translateY(${delta}px)`;
+                    setMotionShift(session, type, key, el, delta, {
+                        immediate: usesScopedClasses && !desiredAnimated.has(key)
+                    });
                     applyShiftClasses(el, key);
                     current.set(key, delta);
                     const appliedDelta = (Number(delta) || 0) - (Number(previousDelta) || 0);
@@ -2221,8 +2279,9 @@
             for (const key of session.shiftedItems.keys()) {
                 if (!next.has(key)) {
                     const el = findItemElement(rootElement, key);
-                    if (el && el.style) el.style.transform = '';
-                    if (el && el.classList && typeof el.classList.remove === 'function') {
+                    const settling = el && el.style
+                        ? clearMotionShift(session, 'item', key, el) : false;
+                    if (!settling && el && el.classList && typeof el.classList.remove === 'function') {
                         el.classList.remove('sp-drop-shift');
                     }
                     session.shiftedItems.delete(key);
@@ -2234,7 +2293,7 @@
                 if (prev === delta) continue;
                 const el = findItemElement(rootElement, key);
                 if (!el || !el.style) continue;
-                el.style.transform = `translateY(${delta}px)`;
+                setMotionShift(session, 'item', key, el, delta);
                 if (el.classList && typeof el.classList.add === 'function') {
                     el.classList.add('sp-drop-shift');
                 }
@@ -2247,9 +2306,21 @@
             session,
             rootElement,
             sourceElements,
-            groupElements
+            groupElements,
+            immediate = false
         }) {
-            if (!session || !rootElement) return;
+            if (!session) return;
+            if (!rootElement) {
+                for (const element of session.motionElements?.values() || []) {
+                    if (motion) motion.clear(element);
+                    element.classList?.remove('sp-drop-shift', 'sp-drop-shift-static');
+                }
+                session.motionElements?.clear();
+                session.shiftedItems?.clear();
+                session.shiftedSourceItems?.clear();
+                session.shiftedGroupItems?.clear();
+                return;
+            }
             const clearNamespace = (type, current, staticKeys, elements) => {
                 if (!(current instanceof Map)) return;
                 const keys = new Set(current.keys());
@@ -2258,8 +2329,9 @@
                 }
                 for (const key of keys) {
                     const el = findTypedItemElement(rootElement, type, key, elements);
-                    if (el && el.style) el.style.transform = '';
-                    if (el && el.classList && typeof el.classList.remove === 'function') {
+                    const settling = el && el.style
+                        ? clearMotionShift(session, type, key, el, immediate) : false;
+                    if (!settling && el && el.classList && typeof el.classList.remove === 'function') {
                         el.classList.remove('sp-drop-shift');
                         el.classList.remove('sp-drop-shift-static');
                     }
@@ -2281,13 +2353,23 @@
             );
             for (const key of session.shiftedItems.keys()) {
                 const el = findItemElement(rootElement, key);
-                if (el && el.style) el.style.transform = '';
-                if (el && el.classList && typeof el.classList.remove === 'function') {
+                const settling = el && el.style
+                    ? clearMotionShift(session, 'item', key, el, immediate) : false;
+                if (!settling && el && el.classList && typeof el.classList.remove === 'function') {
                     el.classList.remove('sp-drop-shift');
                     el.classList.remove('sp-drop-shift-static');
                 }
             }
             session.shiftedItems.clear();
+            if (session.motionElements instanceof Map) {
+                // Virtualization may have unmounted a shifted row. Its old DOM
+                // element must not continue animating after the drag ends.
+                for (const [key, element] of session.motionElements) {
+                    if (rootElement.contains?.(element)) continue;
+                    if (motion) motion.clear(element);
+                    session.motionElements.delete(key);
+                }
+            }
             if (session.animatedShiftedSourceItems instanceof Set) {
                 session.animatedShiftedSourceItems.clear();
             }
@@ -2302,10 +2384,15 @@
         // reflow shift on a sibling does not influence which slot the pointer is mapped to.
         function extractInlineTranslateY(el) {
             if (!el || !el.style) return 0;
+            if (motion && motion.has(el)) return motion.getCurrentY(el);
             const t = el.style.transform || '';
             if (!t) return 0;
             const m = t.match(/translateY\((-?\d+(?:\.\d+)?)px\)/);
             return m ? parseFloat(m[1]) : 0;
+        }
+
+        function getCurrentShiftY(element) {
+            return extractInlineTranslateY(element);
         }
 
         return {
@@ -2319,7 +2406,9 @@
             computeReflow,
             applyReflow,
             clearReflow,
-            extractInlineTranslateY
+            extractInlineTranslateY,
+            getCurrentShiftY,
+            motion
         };
     }
 

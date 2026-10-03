@@ -1749,7 +1749,36 @@ test.describe.serial('extension smoke', () => {
         await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
         await notebookPage.evaluate(() => window.__waitForFixtureHydration('full'));
 
-        const restoredOrder = await notebookPage.evaluate(async () => {
+        const initialOrder = await notebookPage.evaluate(async () => {
+            const root = document.querySelector('#sources-plus-root')?.shadowRoot;
+            const start = Date.now();
+            while (Date.now() - start < 5_000) {
+                const titles = Array.from(root?.querySelectorAll('.source-item .source-title-text') || [])
+                    .map((node) => node.textContent?.trim()).filter(Boolean);
+                if (titles.length >= 2) return titles;
+                await new Promise((resolve) => window.setTimeout(resolve, 25));
+            }
+            throw new Error('Expected at least two sources.');
+        });
+        const sourceRows = notebookPage.locator('#sources-list .source-item');
+        const handleBox = await sourceRows.first().locator('.sp-drag-handle').boundingBox();
+        expect(handleBox).not.toBeNull();
+        const startX = handleBox.x + handleBox.width / 2;
+        const startY = handleBox.y + handleBox.height / 2;
+        await notebookPage.mouse.move(startX, startY);
+        await notebookPage.mouse.down();
+        await notebookPage.mouse.move(startX + 8, startY + 8, { steps: 4 });
+        await expect(notebookPage.locator('#sources-list.sp-drag-active')).toHaveCount(1);
+        const targetBox = await sourceRows.nth(1).boundingBox();
+        expect(targetBox).not.toBeNull();
+        await notebookPage.mouse.move(
+            targetBox.x + targetBox.width * 0.25,
+            targetBox.y + targetBox.height * 0.8,
+            { steps: 10 }
+        );
+        await notebookPage.mouse.up();
+
+        const restoredOrder = await notebookPage.evaluate(async (expectedFirstTitle) => {
             const getRoot = () => document.querySelector('#sources-plus-root')?.shadowRoot || null;
             const waitForValue = async (readValue, errorMessage, timeoutMs = 5_000) => {
                 const start = Date.now();
@@ -1785,42 +1814,8 @@ test.describe.serial('extension smoke', () => {
                 const titles = readSourceTitles();
                 return titles[0] === expectedTitle ? titles : null;
             }, `Expected first source title ${expectedTitle}.`);
-            const dragFirstSourceAfterSecond = async () => {
-                const rows = Array.from(getRoot()?.querySelectorAll('.source-item') || []);
-                if (rows.length < 2) throw new Error('Expected at least two source rows.');
-
-                const dataTransfer = new DataTransfer();
-                rows[0].dispatchEvent(new DragEvent('dragstart', {
-                    bubbles: true,
-                    cancelable: true,
-                    dataTransfer
-                }));
-
-                const targetRect = rows[1].getBoundingClientRect();
-                rows[1].dispatchEvent(new DragEvent('dragover', {
-                    bubbles: true,
-                    cancelable: true,
-                    dataTransfer,
-                    clientY: targetRect.bottom - 1
-                }));
-                rows[1].dispatchEvent(new DragEvent('drop', {
-                    bubbles: true,
-                    cancelable: true,
-                    dataTransfer
-                }));
-                rows[0].dispatchEvent(new DragEvent('dragend', {
-                    bubbles: true,
-                    cancelable: true,
-                    dataTransfer
-                }));
-            };
-
             await waitForRoot();
-            const initialOrder = readSourceTitles();
-            if (initialOrder.length < 2) throw new Error('Expected at least two sources.');
-
-            await dragFirstSourceAfterSecond();
-            const movedOrder = await waitForFirstTitle(initialOrder[1]);
+            const movedOrder = await waitForFirstTitle(expectedFirstTitle);
 
             await clickSelector('#sp-settings-btn', 'Settings button missing.');
             await clickSelector('.sp-settings-import-section .sp-settings-collapsible-toggle', 'Import configuration toggle missing.');
@@ -1890,7 +1885,7 @@ test.describe.serial('extension smoke', () => {
             await clickRestoreImportToastAction();
 
             return waitForFirstTitle(movedOrder[0]);
-        });
+        }, initialOrder[1]);
 
         expect(restoredOrder[0]).toBe('Notebook import-sort source B');
         expect(restoredOrder[1]).toBe('Notebook import-sort source A');
@@ -1914,8 +1909,16 @@ test.describe.serial('extension smoke', () => {
         ]);
     });
 
-    test('classic drag mode (default) shows the blue insertion line and never folds the dragged row', async () => {
-        // No reflow seed → the default classic mode is active.
+    test('classic drag mode shows the blue insertion line and never folds the dragged row', async () => {
+        const preferencePage = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
+        try {
+            const response = await preferencePage.evaluate(async () => chrome.runtime.sendMessage({
+                type: 'SAVE_PREFERENCES', preferences: { dragMode: 'classic' }
+            }));
+            expect(response?.success).toBe(true);
+        } finally {
+            await preferencePage.close();
+        }
         const notebookPage = await env.context.newPage();
         await notebookPage.goto('https://notebooklm.google.com/notebook/import-sort');
         env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
@@ -1923,31 +1926,36 @@ test.describe.serial('extension smoke', () => {
         await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
         await notebookPage.evaluate(() => window.__waitForFixtureHydration('full'));
 
-        const result = await notebookPage.evaluate(async () => {
-            const getRoot = () => document.querySelector('#sources-plus-root')?.shadowRoot || null;
-            const sleep = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
-            const rows = () => Array.from(getRoot()?.querySelectorAll('.source-item') || []);
-            let current = rows();
-            for (let i = 0; i < 80 && current.length < 2; i += 1) { await sleep(25); current = rows(); }
-            if (current.length < 2) throw new Error('Expected at least two source rows.');
-
-            const dataTransfer = new DataTransfer();
-            current[0].dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer }));
-            await sleep(40); // give the (reflow-only) rAF-deferred fold a chance to run
-            const foldedAfterStart = getRoot().querySelectorAll('.sp-drag-folded').length;
-            const draggingAfterStart = getRoot().querySelectorAll('.dragging').length;
-
-            const targetRect = current[1].getBoundingClientRect();
-            current[1].dispatchEvent(new DragEvent('dragover', {
-                bubbles: true, cancelable: true, dataTransfer, clientY: targetRect.bottom - 1
-            }));
-            await sleep(40); // dragover rAF
-            const blueLines = getRoot().querySelectorAll('.drag-over-top, .drag-over-bottom').length;
-            const guideBars = getRoot().querySelectorAll('.sp-drag-guide').length;
-
-            current[0].dispatchEvent(new DragEvent('dragend', { bubbles: true, cancelable: true, dataTransfer }));
-            return { foldedAfterStart, draggingAfterStart, blueLines, guideBars };
+        const rows = notebookPage.locator('#sources-list .source-item');
+        await expect(rows).toHaveCount(2);
+        const handleBox = await rows.first().locator('.sp-drag-handle').boundingBox();
+        expect(handleBox).not.toBeNull();
+        const startX = handleBox.x + handleBox.width / 2;
+        const startY = handleBox.y + handleBox.height / 2;
+        await notebookPage.mouse.move(startX, startY);
+        await notebookPage.mouse.down();
+        await notebookPage.mouse.move(startX + 8, startY + 8, { steps: 4 });
+        await expect(notebookPage.locator('#sources-list.sp-drag-active')).toHaveCount(1);
+        const targetBox = await rows.nth(1).boundingBox();
+        expect(targetBox).not.toBeNull();
+        await notebookPage.mouse.move(
+            targetBox.x + targetBox.width * 0.25,
+            targetBox.y + targetBox.height * 0.8,
+            { steps: 8 }
+        );
+        await expect.poll(async () => notebookPage.locator('.drag-over-top, .drag-over-bottom').count())
+            .toBeGreaterThan(0);
+        const result = await notebookPage.evaluate(() => {
+            const root = document.querySelector('#sources-plus-root')?.shadowRoot;
+            return {
+                foldedAfterStart: root?.querySelectorAll('.sp-drag-folded').length || 0,
+                draggingAfterStart: root?.querySelectorAll('.dragging').length || 0,
+                blueLines: root?.querySelectorAll('.drag-over-top, .drag-over-bottom').length || 0,
+                guideBars: root?.querySelectorAll('.sp-drag-guide').length || 0
+            };
         });
+        await notebookPage.keyboard.press('Escape');
+        await notebookPage.mouse.up();
 
         // Classic: the dragged row is dimmed (.dragging) but never folded away, and feedback
         // is the blue insertion line — not the reflow fold / guide bar.
@@ -2043,89 +2051,54 @@ test.describe.serial('extension smoke', () => {
         expect(storedAfterStaleSave.backup).toEqual(protectedState);
     });
 
-    test('post-drop hover refresh: pseudo-hover lands on cursor row, not the dragstart row', async () => {
-        // Regression guard: Chrome's native :hover freezes during HTML5 drag and
-        // stays on the dragstart element after drop until a real mousemove fires.
-        // Because patchChildren re-uses DOM nodes in place, the dragstart node now
-        // displays a different source post-drop, so the user sees the "wrong" row
-        // highlighted. handleDragEnd compensates by adding .sp-drag-active on
-        // #sources-list (suppression CSS) + .sp-pseudo-hover on the cursor-under
-        // row, and tears down only on a trusted pointer event.
+    test('post-drop hover follows the cursor after pointer cleanup', async () => {
         const notebookPage = await env.context.newPage();
         await notebookPage.goto('https://notebooklm.google.com/notebook/hover-refresh');
 
         await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
         await notebookPage.evaluate(() => window.__waitForFixtureHydration('full'));
+        const rows = notebookPage.locator('#sources-list .source-item');
+        await expect(rows).toHaveCount(2);
+        const handleBox = await rows.first().locator('.sp-drag-handle').boundingBox();
+        expect(handleBox).not.toBeNull();
+        const startX = handleBox.x + handleBox.width / 2;
+        const startY = handleBox.y + handleBox.height / 2;
+        await notebookPage.mouse.move(startX, startY);
+        await notebookPage.mouse.down();
+        await notebookPage.mouse.move(startX + 8, startY + 8, { steps: 4 });
+        await expect(notebookPage.locator('.sp-drag-pointer-ghost')).toHaveCount(1);
+        const targetBox = await rows.nth(1).boundingBox();
+        expect(targetBox).not.toBeNull();
+        const cursorX = targetBox.x + targetBox.width * 0.25;
+        const cursorY = targetBox.y + targetBox.height * 0.8;
+        await notebookPage.mouse.move(cursorX, cursorY, { steps: 10 });
+        await notebookPage.mouse.up();
 
-        const dropOutcome = await notebookPage.evaluate(async () => {
-            const getRoot = () => document.querySelector('#sources-plus-root')?.shadowRoot || null;
-            const waitForValue = async (readValue, errorMessage, timeoutMs = 5_000) => {
-                const start = Date.now();
-                while ((Date.now() - start) < timeoutMs) {
-                    const value = readValue();
-                    if (value) return value;
-                    await new Promise((resolve) => window.setTimeout(resolve, 25));
-                }
-                throw new Error(errorMessage);
-            };
-            await waitForValue(getRoot, 'Manager root missing.');
-            const rows = await waitForValue(() => {
-                const list = Array.from(getRoot()?.querySelectorAll('.source-item') || []);
-                return list.length >= 2 ? list : null;
-            }, 'Need at least two source rows.');
-
-            const fromRow = rows[0];
-            const targetRow = rows[1];
-            const targetRect = targetRow.getBoundingClientRect();
-            const cursorX = Math.floor(targetRect.left + targetRect.width / 2);
-            const cursorY = Math.floor(targetRect.top + targetRect.height / 2);
-
-            const dataTransfer = new DataTransfer();
-            fromRow.dispatchEvent(new DragEvent('dragstart', {
-                bubbles: true, cancelable: true, dataTransfer
-            }));
-            targetRow.dispatchEvent(new DragEvent('dragover', {
-                bubbles: true, cancelable: true, dataTransfer,
-                clientX: cursorX, clientY: targetRect.bottom - 1
-            }));
-            targetRow.dispatchEvent(new DragEvent('drop', {
-                bubbles: true, cancelable: true, dataTransfer,
-                clientX: cursorX, clientY: cursorY
-            }));
-            // dragend MUST carry clientX/clientY — handleDragEnd's hover-refresh
-            // path is guarded on both being numbers.
-            fromRow.dispatchEvent(new DragEvent('dragend', {
-                bubbles: true, cancelable: true, dataTransfer,
-                clientX: cursorX, clientY: cursorY
-            }));
-
-            const root = getRoot();
-            const sourcesList = root?.getElementById('sources-list') || null;
-            const pseudoHoverRows = Array.from(root?.querySelectorAll('.sp-pseudo-hover') || []);
-            return {
-                hasDragActive: Boolean(sourcesList?.classList?.contains('sp-drag-active')),
-                pseudoHoverCount: pseudoHoverRows.length,
-                cursorX,
-                cursorY
-            };
-        });
-
-        // Immediately after dragend (no real mousemove yet): the suppression
-        // class and at least one pseudo-hover row must be present.
-        expect(dropOutcome.hasDragActive).toBe(true);
-        expect(dropOutcome.pseudoHoverCount).toBeGreaterThanOrEqual(1);
-
-        // A real (isTrusted=true) mousemove must tear both classes down so
-        // native :hover takes over again.
-        await notebookPage.mouse.move(dropOutcome.cursorX + 4, dropOutcome.cursorY + 4);
         await expect.poll(async () => notebookPage.evaluate(() => {
             const root = document.querySelector('#sources-plus-root')?.shadowRoot || null;
             if (!root) return null;
             const list = root.getElementById('sources-list');
             return {
                 hasDragActive: Boolean(list?.classList?.contains('sp-drag-active')),
-                pseudoHoverCount: root.querySelectorAll('.sp-pseudo-hover').length
+                ghostCount: root.querySelectorAll('.sp-drag-pointer-ghost').length,
+                draggingCount: root.querySelectorAll('.dragging').length
             };
-        }), { timeout: 5_000 }).toEqual({ hasDragActive: false, pseudoHoverCount: 0 });
+        }), { timeout: 5_000 }).toEqual({
+            hasDragActive: false, ghostCount: 0, draggingCount: 0
+        });
+        await expect.poll(async () => notebookPage.evaluate(({ x, y }) => {
+            const root = document.querySelector('#sources-plus-root')?.shadowRoot;
+            const hit = root?.elementFromPoint(x, y)?.closest('.source-item');
+            const hovered = root?.querySelector('.source-item:hover');
+            return {
+                hitKey: hit?.dataset.sourceKey || null,
+                hoveredKey: hovered?.dataset.sourceKey || null,
+                sameRow: Boolean(hit && hovered && hit === hovered)
+            };
+        }, { x: cursorX, y: cursorY }), { timeout: 5_000 }).toEqual(expect.objectContaining({
+            hitKey: expect.any(String),
+            hoveredKey: expect.any(String),
+            sameRow: true
+        }));
     });
 });

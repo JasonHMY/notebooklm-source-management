@@ -102,3 +102,19 @@ Two additional clean 500-row runs confirmed the result before the full matrix:
 
 - Run 1 callback p95: 1.4 ms (single), 1.8 ms (50 selected).
 - Run 2 callback p95: 0.7 ms (single), 2.7 ms (50 selected).
+
+
+## 2026-10-04 Pointer / beUI spring verification
+
+The pointer migration uses a trusted mouse press on the six-dot handle, then samples the shared pointer session through a temporary isolated-world DOM bridge. It retains the original 100/500-row fixtures, 1/50 selection sizes, 5 warm-up + 20 measured preparations, 10 warm-up + 50 measured frame callbacks, and every acceptance limit above. Fresh preferences suppress onboarding and the update modal so the trusted input reaches the handle. Benchmark instrumentation and its module bridge are confined to the disposable test extension.
+
+Independent run: Apple M3 Max, HeadlessChrome 145; `npm run benchmark:drag` passed.
+
+| Rows | Selection | Prepare p95 (ms) | Frame callback p95 (ms) | rect / query / queryAll calls | Prepare layout phases max |
+| --- | --- | --- | --- | --- | --- |
+| 100 | 1 | 2.2 | 0.9 | 290 / 40 / 40 | 3 |
+| 100 | 50 | 15.4 | 1.4 | 570 / 20 / 40 | 3 |
+| 500 | 1 | 2.5 | 0.9 | 994 / 56 / 56 | 3 |
+| 500 | 50 | 5.3 | 1.5 | 450 / 615 / 60 | 3 |
+
+These callback measurements cover intent, geometry and frame application; they do not claim to measure browser paint or every spring tick. Actual cursor alignment, intermediate spring movement and landing are separately checked in `tests/smoke/pointer-drag.smoke.spec.js`.

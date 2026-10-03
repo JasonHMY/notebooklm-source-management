@@ -12,6 +12,7 @@ const {
 } = require('./helpers/extension-context');
 const { installNotebookFixture } = require('./helpers/notebooklm-fixture');
 const createContentDragMulti = require('../../src/content/content-drag-multi.js');
+const manifest = require('../../manifest.json');
 
 const repoRoot = path.resolve(__dirname, '../..');
 const WARMUP_SESSIONS = 5;
@@ -37,13 +38,14 @@ function createSyntheticSources(rowCount) {
 async function seedReflowPreference(context, extensionId) {
     const bridgePage = await openExtensionPage(context, extensionId, 'src/popup/popup.html');
     try {
-        const response = await bridgePage.evaluate(async () => chrome.runtime.sendMessage({
+        const response = await bridgePage.evaluate(async (version) => chrome.runtime.sendMessage({
             type: 'SAVE_PREFERENCES',
             preferences: {
                 dragMode: 'reflow',
-                welcomeOnboardingSeenVersion: 1
+                welcomeOnboardingSeenVersion: 1,
+                whatsNewSeenVersion: version
             }
-        }));
+        }), manifest.version);
         if (!response?.success) {
             throw new Error(`Could not enable reflow drag mode: ${response?.errorCode || 'unknown_error'}.`);
         }
@@ -56,6 +58,58 @@ function createContentInstrumentationScript() {
     function instrumentContentWorld() {
         if (globalThis.__NSM_DRAG_BENCHMARK_INSTALLED__) return;
         globalThis.__NSM_DRAG_BENCHMARK_INSTALLED__ = true;
+        // This temporary extension copy exposes index.js's Jest test surface to
+        // the isolated content world; the packaged extension has no module global.
+        globalThis.module = { exports: {} };
+        let activeHandle = null;
+        let activeSourceKey = null;
+        document.addEventListener('sources-plus-drag-benchmark-pointer-command', () => {
+            const host = document.querySelector('#sources-plus-root');
+            const args = JSON.parse(host?.getAttribute('data-drag-benchmark-pointer-args') || '{}');
+            const api = globalThis.module?.exports;
+            const root = host?.shadowRoot;
+            if (!host) return;
+            if (!api || !root) {
+                host.setAttribute('data-drag-benchmark-pointer-result', JSON.stringify({
+                    error: 'Benchmark pointer bridge lacks module API or ShadowRoot.'
+                }));
+                return;
+            }
+            let result = false;
+            try {
+                if (args.command === 'prepare') {
+                    activeHandle = root.querySelector(
+                        `.source-item[data-source-key="${CSS.escape(args.sourceKey)}"] .sp-drag-handle`
+                    );
+                    activeSourceKey = args.sourceKey;
+                    result = Boolean(activeHandle?.isConnected && !activeHandle.disabled);
+                } else if (args.command === 'start') {
+                    if (!activeHandle || activeSourceKey !== args.sourceKey) {
+                        throw new Error('Benchmark pointer origin was not prepared.');
+                    }
+                    result = api._startDragForTest({ ...args, handle: activeHandle });
+                    if (result !== true) activeHandle = null;
+                } else if (args.command === 'update') {
+                    result = api._updateDragForTest({ ...args, handle: activeHandle });
+                } else if (args.command === 'commit') {
+                    result = api._commitDragForTest({ ...args, handle: activeHandle });
+                    activeHandle = null;
+                    activeSourceKey = null;
+                } else if (args.command === 'cancel') {
+                    api._cancelDragForTest(args.reason || 'benchmark');
+                    activeHandle = null;
+                    activeSourceKey = null;
+                    result = true;
+                }
+                host.setAttribute('data-drag-benchmark-pointer-result', JSON.stringify({ result }));
+            } catch (error) {
+                activeHandle = null;
+                activeSourceKey = null;
+                host.setAttribute('data-drag-benchmark-pointer-result', JSON.stringify({
+                    error: String(error?.message || error)
+                }));
+            }
+        });
         const state = {
             calls: { getBoundingClientRect: 0, querySelector: 0, querySelectorAll: 0 },
             geometryReads: { getBoundingClientRect: 0, offsetHeight: 0 },
@@ -345,8 +399,27 @@ test.describe.serial('drag performance baseline', () => {
             const allResults = [];
             for (const rowCount of rowCounts) {
                 const page = await env.context.newPage();
+                page.on('console', (message) => {
+                    if (message.type() === 'info' && message.text().startsWith('DRAG_BENCHMARK_STAGE ')) {
+                        console.log(message.text());
+                    }
+                });
                 await page.goto(`https://notebooklm.google.com/notebook/drag-benchmark-${rowCount}`);
                 await expect(page.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
+                const trustedHandle = page.locator('#sources-list .source-item .sp-drag-handle').first();
+                await expect(trustedHandle).toBeEnabled();
+                await trustedHandle.scrollIntoViewIfNeeded();
+                const handleBox = await trustedHandle.boundingBox();
+                expect(handleBox).not.toBeNull();
+                const handleX = handleBox.x + handleBox.width / 2;
+                const handleY = handleBox.y + handleBox.height / 2;
+                await page.mouse.move(handleX, handleY);
+                await page.mouse.down();
+                await page.mouse.move(handleX + 8, handleY + 8, { steps: 4 });
+                await expect(page.locator('#sources-list.sp-drag-active')).toHaveCount(1);
+                await page.keyboard.press('Escape');
+                await page.mouse.up();
+                await expect(page.locator('#sources-list.sp-drag-active')).toHaveCount(0);
 
                 const results = await page.evaluate(async ({ nextRowCount, sources, warmupSessions, measuredSessions, warmupFrames, measuredFrames, dragEdgePx }) => {
                     const getRoot = () => document.querySelector('#sources-plus-root')?.shadowRoot || null;
@@ -501,32 +574,60 @@ test.describe.serial('drag performance baseline', () => {
                         }
                         sourceWindowOrdinalByKey = nextOrdinals;
                     };
-                    const dispatchDrag = (row, type, extra = {}) => {
-                        const event = new DragEvent(type, {
+                    let nextDragSessionId = 0;
+                    const dragBridge = (command, args = {}) => {
+                        const host = document.querySelector('#sources-plus-root');
+                        if (!host) throw new Error('Benchmark pointer bridge host is unavailable.');
+                        host.setAttribute('data-drag-benchmark-pointer-args', JSON.stringify({ command, ...args }));
+                        host.dispatchEvent(new Event('sources-plus-drag-benchmark-pointer-command', {
                             bubbles: true,
-                            cancelable: true,
-                            dataTransfer: extra.dataTransfer || new DataTransfer(),
-                            clientX: extra.clientX || 12,
-                            clientY: extra.clientY || 12
-                        });
-                        row.dispatchEvent(event);
-                        return event.dataTransfer;
+                            composed: true
+                        }));
+                        const raw = host.getAttribute('data-drag-benchmark-pointer-result');
+                        if (!raw) throw new Error(`Benchmark pointer ${command} did not return a result.`);
+                        const response = JSON.parse(raw);
+                        if (response.error) throw new Error(response.error);
+                        return response.result;
                     };
-                    const dispatchCurrentDragEnd = (dataTransfer, label) => {
-                        const currentList = getSourcesList();
-                        if (!currentList?.isConnected) {
-                            throw new Error(`Benchmark ${label} dragend target is disconnected.`);
+                    const preparePointer = (row) => {
+                        const handle = row?.querySelector('.sp-drag-handle');
+                        if (!handle?.isConnected || handle.disabled
+                            || handle.closest('.source-item') !== row) {
+                            throw new Error('Benchmark origin is missing a live enabled source handle.');
                         }
-                        dispatchDrag(currentList, 'dragend', { dataTransfer });
+                        const rect = handle.getBoundingClientRect();
+                        if (dragBridge('prepare', { sourceKey: row.dataset.sourceKey }) !== true) {
+                            throw new Error('Benchmark pointer origin could not be prepared.');
+                        }
+                        return {
+                            sourceKey: row.dataset.sourceKey,
+                            clientX: rect.left + rect.width / 2,
+                            clientY: rect.top + rect.height / 2,
+                            sessionId: ++nextDragSessionId
+                        };
+                    };
+                    const startDrag = (pointer) => {
+                        if (dragBridge('start', pointer) !== true) {
+                            throw new Error('Benchmark shared pointer drag did not start.');
+                        }
+                        return pointer;
+                    };
+                    const updateDrag = (pointer, point) => {
+                        dragBridge('update', { ...pointer, ...point });
+                    };
+                    const cancelDrag = (label) => {
+                        if (!getSourcesList()?.isConnected) {
+                            throw new Error(`Benchmark ${label} pointer drag target is disconnected.`);
+                        }
+                        dragBridge('cancel', { reason: label });
                     };
                     const normalizePrepareState = () => {
                         const sourcesList = getRoot()?.querySelector('#sources-list');
                         if (!sourcesList) throw new Error('Benchmark sources list missing.');
 
-                        // A real next drag starts after a trusted pointerdown, which
-                        // clears dragend's pseudo-hover bridge before dragstart. The
-                        // benchmark dispatches synthetic drag events directly, so
-                        // reproduce that pre-drag state outside the timed interval.
+                        // Direct test-surface calls skip the pointerdown event's
+                        // incidental hover cleanup. Reproduce that settled state
+                        // outside the timed interval.
                         sourcesList.classList.remove('sp-drag-active');
                         sourcesList.querySelectorAll('.sp-pseudo-hover').forEach((node) => {
                             node.classList.remove('sp-pseudo-hover');
@@ -552,12 +653,6 @@ test.describe.serial('drag performance baseline', () => {
                         if (root?.querySelector('.sp-batch-checkbox')) return;
                         root.querySelector('#sp-batch-action-btn')?.click();
                         await waitFor(() => getRoot()?.querySelectorAll('.sp-batch-checkbox').length > 0, 'Batch mode did not enable.');
-                    };
-                    const disableBatch = async () => {
-                        const root = getRoot();
-                        if (!root?.querySelector('.sp-batch-checkbox')) return;
-                        root.querySelector('#sp-batch-action-btn')?.click();
-                        await waitFor(() => getRoot()?.querySelectorAll('.sp-batch-checkbox').length === 0, 'Batch mode did not disable.');
                     };
                     const selectKeys = async (keys) => {
                         for (let index = 0; index < keys.length; index += 1) {
@@ -618,18 +713,23 @@ test.describe.serial('drag performance baseline', () => {
                         const origin = await materializeSource(keys[0]);
                         const target = getRoot()?.querySelector(`.group-container[data-group-id="${groupId}"]`);
                         if (!origin || !target) throw new Error('Benchmark distribution target missing.');
-                        const dataTransfer = dispatchDrag(origin, 'dragstart');
-                        target.classList.add('drag-into');
-                        const rect = target.getBoundingClientRect();
-                        dispatchDrag(target, 'drop', {
-                            dataTransfer,
+                        const pointer = startDrag(preparePointer(origin));
+                        await nextFrame();
+                        const rect = target.querySelector('.group-header')?.getBoundingClientRect();
+                        if (!rect) throw new Error('Benchmark destination header missing.');
+                        const dropPoint = {
                             clientX: Math.floor(rect.left + rect.width * 0.75),
                             clientY: Math.floor(rect.top + rect.height / 2)
-                        });
-                        dispatchCurrentDragEnd(dataTransfer, 'distribution');
+                        };
+                        updateDrag(pointer, dropPoint);
+                        await nextFrame();
+                        if (dragBridge('commit', { ...pointer, ...dropPoint }) !== true) {
+                            throw new Error('Benchmark selection distribution did not commit.');
+                        }
                         await wait(30);
                         await nextFrame();
-                        await disableBatch();
+                        await waitFor(() => getRoot()?.querySelectorAll('.sp-batch-checkbox').length === 0,
+                            'Batch mode did not exit after pointer drop.');
                     };
                     const runPrepare = async (originKey, selectionCount, record) => {
                         const origin = await materializeSource(originKey, { forceScroll: true });
@@ -644,15 +744,10 @@ test.describe.serial('drag performance baseline', () => {
                             && Number(getSourcesList()?.dataset?.pendingSelected) !== selectionCount) {
                             throw new Error(`Drag prepare lost part of the ${selectionCount}-source logical selection.`);
                         }
+                        const pointer = preparePointer(origin);
                         const before = normalizePrepareState();
                         const start = performance.now();
-                        const dataTransfer = dispatchDrag(origin, 'dragstart');
-                        if (selectionCount > 1) {
-                            const selectedKeys = JSON.parse(dataTransfer.getData('application/source-keys') || '[]');
-                            if (!Array.isArray(selectedKeys) || selectedKeys.length !== selectionCount) {
-                                throw new Error(`Dragstart did not carry ${selectionCount} logical selected sources.`);
-                            }
-                        }
+                        startDrag(pointer);
                         const cpuMs = performance.now() - start;
                         const syncSnapshot = benchmarkBridge('snapshot');
                         const callsDelta = subtractCalls(syncSnapshot.calls, before.calls);
@@ -667,13 +762,13 @@ test.describe.serial('drag performance baseline', () => {
                             syncSnapshot.scheduledCallbackIds
                         );
                         if (syncSnapshot.forcedLayoutReadPhases < 1) {
-                            throw new Error('Synchronous dragstart did not record a write-before-geometry-read phase.');
+                            throw new Error('Synchronous pointer start did not record a write-before-geometry-read phase.');
                         }
                         if (geometryReadsDelta.offsetHeight < materializedSelectionCount) {
-                            throw new Error(`Synchronous dragstart recorded ${geometryReadsDelta.offsetHeight} offsetHeight reads for ${materializedSelectionCount}/${selectionCount} materialized/logical selected item(s).`);
+                            throw new Error(`Synchronous pointer start recorded ${geometryReadsDelta.offsetHeight} offsetHeight reads for ${materializedSelectionCount}/${selectionCount} materialized/logical selected item(s).`);
                         }
                         if (foldCallbackIds.length === 0) {
-                            throw new Error('Synchronous dragstart did not schedule its deferred fold callback.');
+                            throw new Error('Synchronous pointer start did not schedule its deferred fold callback.');
                         }
                         if (record) {
                             record.cpu.push(cpuMs);
@@ -681,9 +776,13 @@ test.describe.serial('drag performance baseline', () => {
                             record.materializedSelectionCounts.push(materializedSelectionCount);
                             addCalls(record.calls, callsDelta);
                         }
-                        await waitForCallbackIds(foldCallbackIds, 'Deferred dragstart fold did not complete');
+                        await waitForCallbackIds(foldCallbackIds, 'Deferred pointer-start fold did not complete');
+                        if (selectionCount > 1
+                            && Number(getSourcesList()?.dataset?.pendingSelected) !== selectionCount) {
+                            throw new Error(`Pointer drag did not retain ${selectionCount} logical selected sources.`);
+                        }
                         const beforeDragEnd = benchmarkBridge('snapshot');
-                        dispatchCurrentDragEnd(dataTransfer, 'prepare');
+                        cancelDrag('prepare');
                         const afterDragEnd = benchmarkBridge('snapshot');
                         await waitForCallbackIds(
                             newCallbackIds(beforeDragEnd.scheduledCallbackIds, afterDragEnd.scheduledCallbackIds),
@@ -712,15 +811,16 @@ test.describe.serial('drag performance baseline', () => {
                     const runCallbackFrames = async (originKey, selectionCount, frameCount) => {
                         const { origin, targetKeys } = await prepareCallbackTargets(originKey, selectionCount);
                         if (!origin) throw new Error(`Frame benchmark origin ${originKey} missing.`);
+                        const pointer = preparePointer(origin);
                         const beforeDragStart = benchmarkBridge('snapshot');
-                        const dataTransfer = dispatchDrag(origin, 'dragstart');
+                        startDrag(pointer);
                         const afterDragStart = benchmarkBridge('snapshot');
                         const foldCallbackIds = newCallbackIds(
                             beforeDragStart.scheduledCallbackIds,
                             afterDragStart.scheduledCallbackIds
                         );
                         if (foldCallbackIds.length === 0) {
-                            throw new Error('Frame benchmark dragstart did not synchronously schedule a fold callback.');
+                            throw new Error('Frame benchmark pointer start did not synchronously schedule a fold callback.');
                         }
                         await waitForCallbackIds(foldCallbackIds, 'Frame benchmark fold callback did not complete');
                         benchmarkBridge('reset-frames');
@@ -765,8 +865,7 @@ test.describe.serial('drag performance baseline', () => {
                                 throw new Error('Benchmark input left the connected list non-edge region.');
                             }
                             const beforeDragOver = benchmarkBridge('snapshot');
-                            dispatchDrag(target, 'dragover', {
-                                dataTransfer,
+                            updateDrag(pointer, {
                                 clientX: point.clientX,
                                 clientY: point.clientY
                             });
@@ -781,11 +880,11 @@ test.describe.serial('drag performance baseline', () => {
                             const callbackId = scheduledForDragOver[0];
                             targetCallbackIds.push(callbackId);
                             benchmarkBridge('expect-frame', null, callbackId);
-                            await waitForCallbackIds([callbackId], `Target dragover callback ${callbackId} did not complete`);
+                            await waitForCallbackIds([callbackId], `Target pointer-update callback ${callbackId} did not complete`);
                             const qualifying = benchmarkBridge('snapshot').frameSamples
                                 .filter((sample) => sample.callbackId === callbackId);
                             if (qualifying.length !== 1) {
-                                throw new Error(`Target dragover callback ${callbackId} produced ${qualifying.length} qualifying samples instead of exactly one.`);
+                                throw new Error(`Target pointer-update callback ${callbackId} produced ${qualifying.length} qualifying samples instead of exactly one.`);
                             }
                         }
                         const finalSnapshot = benchmarkBridge('capture-frames', false);
@@ -809,16 +908,20 @@ test.describe.serial('drag performance baseline', () => {
                             }
                         });
                         const beforeDragEnd = benchmarkBridge('snapshot');
-                        dispatchCurrentDragEnd(dataTransfer, 'callback');
+                        cancelDrag('callback');
                         const afterDragEnd = benchmarkBridge('snapshot');
                         await waitForCallbackIds(
                             newCallbackIds(beforeDragEnd.scheduledCallbackIds, afterDragEnd.scheduledCallbackIds),
-                            'Frame benchmark dragend cleanup callback did not complete'
+                            'Frame benchmark pointer-cancel cleanup callback did not complete'
                         );
                         return { frames, targetCallbackIds, inputPoints };
                     };
                     const benchmarkSelection = async ({ selectionCount, originKey, selectedKeys }) => {
+                        const reportStage = (stage) => console.info(
+                            `DRAG_BENCHMARK_STAGE ${nextRowCount}:${selectionCount}:${stage}`
+                        );
                         if (selectionCount === 50) {
+                            reportStage('select');
                             await enableBatch();
                             await selectKeys(selectedKeys);
                         }
@@ -828,18 +931,21 @@ test.describe.serial('drag performance baseline', () => {
                             materializedSelectionCounts: [],
                             calls: { getBoundingClientRect: 0, querySelector: 0, querySelectorAll: 0 }
                         };
+                        reportStage('prepare-warmup');
                         for (let index = 0; index < warmupSessions; index += 1) {
                             await runPrepare(originKey, selectionCount, null);
                         }
                         benchmarkBridge('reset');
+                        reportStage('prepare-measured');
                         for (let index = 0; index < measuredSessions; index += 1) {
                             await runPrepare(originKey, selectionCount, prepare);
                         }
-                        // Earlier synthetic dragend calls schedule the production pseudo-hover
+                        // Earlier pointer cancellations schedule the production pseudo-hover
                         // backstop for 1500ms. Let those old sessions finish before timing one
                         // continuous active-drag sequence, otherwise an old cleanup can remove
                         // the current list's manager-active marker mid-sample.
                         await wait(1600);
+                        reportStage('frame-warmup');
                         const warmup = await runCallbackFrames(originKey, selectionCount, warmupFrames);
                         if (warmup.frames.length !== warmupFrames
                             || warmup.targetCallbackIds.length !== warmupFrames) {
@@ -847,6 +953,7 @@ test.describe.serial('drag performance baseline', () => {
                         }
                         await wait(1600);
                         benchmarkBridge('reset');
+                        reportStage('frame-measured');
                         const measured = await runCallbackFrames(originKey, selectionCount, measuredFrames);
                         const callbackCalls = { getBoundingClientRect: 0, querySelector: 0, querySelectorAll: 0 };
                         measured.frames.forEach((sample) => addCalls(callbackCalls, sample.callsDelta));
@@ -905,6 +1012,7 @@ test.describe.serial('drag performance baseline', () => {
                     }
                     sourceKeyPrefix = firstKey.slice(0, -4);
                     const groupIds = await createGroups();
+                    console.info(`DRAG_BENCHMARK_STAGE ${nextRowCount}:distribute`);
                     for (let index = 0; index < 2; index += 1) {
                         const first = index * 10 + 1;
                         await moveSelectionIntoGroup(Array.from({ length: 10 }, (_, offset) => sourceKey(first + offset)), groupIds[index]);

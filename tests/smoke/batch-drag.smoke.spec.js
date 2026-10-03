@@ -142,61 +142,32 @@ test.describe.serial('batch drag smoke', () => {
             const targetGroup = getRoot()?.querySelector(`.group-container[data-group-id="${groupId}"]`);
             if (!targetGroup) throw new Error('Target group container missing before drag.');
 
-            // Dispatch a synthetic batch drag from the first selected row onto the group container,
-            // mirroring the shape used by handleDragStart/handleDrop.
-            const fromRow = selectedRows[0];
-            const dataTransfer = new DataTransfer();
-            fromRow.dispatchEvent(new DragEvent('dragstart', {
-                bubbles: true,
-                cancelable: true,
-                dataTransfer
-            }));
-
-            // Manually populate the multi-source MIME if the production dragstart handler did not
-            // (e.g. if jsdom-style stubs strip setData). This mirrors what content-tree-interactions
-            // writes during a real batch dragstart.
-            try {
-                if (!dataTransfer.getData('application/source-keys')) {
-                    dataTransfer.setData('application/source-key', selectedKeys[0]);
-                    dataTransfer.setData('application/source-keys', JSON.stringify(selectedKeys));
-                }
-            } catch (err) { /* ignore data-transfer write failures */ }
-
-            const rect = targetGroup.getBoundingClientRect();
-            // Use 75% width to land cursor clearly in the X-split right half ("inside") —
-            // Chrome integer-rounds clientX in synthesized DragEvent init dicts, so exact-midX
-            // coordinates can drift to the wrong side of the boundary by < 1px.
-            const clientX = Math.floor(rect.left + rect.width * 0.75);
-            const clientY = Math.floor(rect.top + rect.height / 2);
-
-            // Production code keys the drop intent off the drag-feedback classes that dragover applies.
-            // Force the drag-into intent to ensure a deterministic into-group drop.
-            targetGroup.classList.add('drag-into');
-
-            targetGroup.dispatchEvent(new DragEvent('dragover', {
-                bubbles: true,
-                cancelable: true,
-                dataTransfer,
-                clientX,
-                clientY
-            }));
-            targetGroup.dispatchEvent(new DragEvent('drop', {
-                bubbles: true,
-                cancelable: true,
-                dataTransfer,
-                clientX,
-                clientY
-            }));
-            fromRow.dispatchEvent(new DragEvent('dragend', {
-                bubbles: true,
-                cancelable: true,
-                dataTransfer
-            }));
-
             return { groupId, selectedKeys };
         });
 
         expect(result.selectedKeys).toHaveLength(3);
+        const handle = notebookPage.locator(
+            `.source-item[data-source-key="${result.selectedKeys[0]}"] .sp-drag-handle`
+        );
+        const destination = notebookPage.locator(
+            `.group-container[data-group-id="${result.groupId}"] .group-header`
+        );
+        await handle.scrollIntoViewIfNeeded();
+        const handleBox = await handle.boundingBox();
+        const targetBox = await destination.boundingBox();
+        expect(handleBox).not.toBeNull();
+        expect(targetBox).not.toBeNull();
+        const startX = handleBox.x + handleBox.width / 2;
+        const startY = handleBox.y + handleBox.height / 2;
+        await notebookPage.mouse.move(startX, startY);
+        await notebookPage.mouse.down();
+        await notebookPage.mouse.move(startX + 8, startY + 8, { steps: 4 });
+        await notebookPage.mouse.move(
+            targetBox.x + targetBox.width * 0.75,
+            targetBox.y + targetBox.height / 2,
+            { steps: 12 }
+        );
+        await notebookPage.mouse.up();
 
         // The three sources should now sit inside the new group's children container.
         await expect.poll(async () => notebookPage.evaluate((groupId) => {

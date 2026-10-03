@@ -887,7 +887,7 @@ describe('background.js message listener', () => {
                     languageOverride: 'auto',
                     commandShortcuts: {},
                     visibleQuickViewKinds: DEFAULT_VISIBLE_QUICK_VIEW_KINDS,
-                    dragMode: 'classic',
+                    dragMode: 'reflow',
                     appearance: { hoverSpotlightEnabled: true }
                 }
             },
@@ -903,7 +903,7 @@ describe('background.js message listener', () => {
                 languageOverride: 'auto',
                 commandShortcuts: {},
                 visibleQuickViewKinds: DEFAULT_VISIBLE_QUICK_VIEW_KINDS,
-                dragMode: 'classic',
+                dragMode: 'reflow',
                 appearance: { hoverSpotlightEnabled: true }
             }
         });
@@ -929,7 +929,7 @@ describe('background.js message listener', () => {
                 languageOverride: 'auto',
                 commandShortcuts: {},
                 visibleQuickViewKinds: DEFAULT_VISIBLE_QUICK_VIEW_KINDS,
-                dragMode: 'classic',
+                dragMode: 'reflow',
                 appearance: { hoverSpotlightEnabled: true }
             },
             usageState: {
@@ -998,7 +998,7 @@ describe('background.js message listener', () => {
                     languageOverride: 'auto',
                     commandShortcuts: {},
                     visibleQuickViewKinds: DEFAULT_VISIBLE_QUICK_VIEW_KINDS,
-                    dragMode: 'classic',
+                    dragMode: 'reflow',
                     appearance: { hoverSpotlightEnabled: true }
                 }
             },
@@ -1014,7 +1014,7 @@ describe('background.js message listener', () => {
                 languageOverride: 'auto',
                 commandShortcuts: {},
                 visibleQuickViewKinds: DEFAULT_VISIBLE_QUICK_VIEW_KINDS,
-                dragMode: 'classic',
+                dragMode: 'reflow',
                 appearance: { hoverSpotlightEnabled: true }
             }
         });
@@ -1052,7 +1052,7 @@ describe('background.js message listener', () => {
                     languageOverride: 'zh_CN',
                     commandShortcuts: {},
                     visibleQuickViewKinds: DEFAULT_VISIBLE_QUICK_VIEW_KINDS,
-                    dragMode: 'classic',
+                    dragMode: 'reflow',
                     appearance: { hoverSpotlightEnabled: true }
                 }
             },
@@ -1099,7 +1099,7 @@ describe('background.js message listener', () => {
                         'quick-view-issues': 'Ctrl+Alt+I'
                     },
                     visibleQuickViewKinds: DEFAULT_VISIBLE_QUICK_VIEW_KINDS,
-                    dragMode: 'classic',
+                    dragMode: 'reflow',
                     appearance: { hoverSpotlightEnabled: true }
                 }
             },
@@ -1143,7 +1143,7 @@ describe('background.js message listener', () => {
                         'quick-view-recent': 'Meta+Shift+R'
                     },
                     visibleQuickViewKinds: ['all', 'issues'],
-                    dragMode: 'classic',
+                    dragMode: 'reflow',
                     appearance: { hoverSpotlightEnabled: true }
                 }
             },
@@ -3114,17 +3114,17 @@ describe('dragMode preference', () => {
         delete global.chrome;
     });
 
-    it('normalizeDragMode falls back to classic for anything but reflow', () => {
+    it('normalizeDragMode defaults missing values to reflow and rejects invalid values', () => {
         const { normalizeDragMode } = require('../src/utils/preference-normalizers.js');
         expect(normalizeDragMode('reflow')).toBe('reflow');
         expect(normalizeDragMode('classic')).toBe('classic');
         expect(normalizeDragMode('bogus')).toBe('classic');
-        expect(normalizeDragMode(undefined)).toBe('classic');
+        expect(normalizeDragMode(undefined)).toBe('reflow');
         expect(normalizeDragMode(null)).toBe('classic');
     });
 
-    it('defaults dragMode to classic when unset', () => {
-        expect(normalizePreferences({}).dragMode).toBe('classic');
+    it('defaults dragMode to reflow when unset', () => {
+        expect(normalizePreferences({}).dragMode).toBe('reflow');
     });
 
     it('normalizes dragMode through normalizePreferences', () => {

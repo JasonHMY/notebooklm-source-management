@@ -1828,9 +1828,6 @@
         moveSourceToUngrouped,
         handleInteraction,
         handleOriginalCheckboxChange,
-        handleDragStart,
-        handleDragOver,
-        handleDragLeave,
         handleDrop,
         handleDragEnd,
         clearDragFeedback
@@ -6866,11 +6863,7 @@
         viewStateContainer.addEventListener('click', handleInteraction);
         listContainer.addEventListener('click', handleInteraction);
         listContainer.addEventListener('change', handleInteraction);
-        listContainer.addEventListener('dragstart', handleDragStart);
-        listContainer.addEventListener('dragover', handleDragOver);
-        listContainer.addEventListener('dragleave', handleDragLeave);
-        listContainer.addEventListener('drop', handleDrop);
-        listContainer.addEventListener('dragend', handleDragEnd);
+        treeInteractionsModule.bindPointerDragInteractions(listContainer);
 
         const panelHeader = sourcePanel.querySelector('.panel-header') || sourcePanel.firstElementChild || sourcePanel;
         if (panelHeader) {
@@ -7251,6 +7244,11 @@
         };
 
         const testSurface = {
+            _startDragForTest: treeInteractionsModule.startDrag,
+            _updateDragForTest: treeInteractionsModule.updateDrag,
+            _commitDragForTest: treeInteractionsModule.commitDrag,
+            _cancelDragForTest: treeInteractionsModule.cancelDrag,
+            _moveFromDragHandleForTest: treeInteractionsModule.moveFromDragHandle,
             _createBatchCountMessageChildrenForTest: createBatchCountMessageChildren,
             _collectBatchCountSnapshotForTest: collectBatchCountSnapshot,
             _animateBatchCountElementForTest: animateBatchCountElement,

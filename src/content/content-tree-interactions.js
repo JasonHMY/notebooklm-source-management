@@ -42,7 +42,9 @@
             up: 'ui_tree_order_moved_up_status',
             down: 'ui_tree_order_moved_down_status',
             in: 'ui_tree_order_moved_in_status',
-            out: 'ui_tree_order_moved_out_status'
+            out: 'ui_tree_order_moved_out_status',
+            first: 'ui_tree_order_moved_first_status',
+            last: 'ui_tree_order_moved_last_status'
         };
         const activeInitialRenameInputsByGroupId = new Map();
         const nativeSelectionGenerationBySourceKey = new Map();
@@ -108,10 +110,7 @@
         const getVisibleLogicalSourceKeys = typeof deps.getVisibleLogicalSourceKeys === 'function'
             ? deps.getVisibleLogicalSourceKeys
             : null;
-        // Drag mode preference ('classic' blue-line / 'reflow' avoidance Beta). Default
-        // 'reflow' here keeps the new engine active when no getter is injected (unit tests
-        // that predate the toggle); production index.js injects the real getDragMode, whose
-        // own default is 'classic'.
+        // Both modes share pointer input; only presentation and root placement differ.
         const getDragMode = typeof deps.getDragMode === 'function'
             ? deps.getDragMode
             : () => 'reflow';
@@ -337,9 +336,275 @@
                     ? globalThis.NSM_CREATE_CONTENT_DRAG_REFLOW({})
                     : null));
 
+        let pointerController = null;
+        let pointerDragSession = null;
+        let pointerGhostOrigin = null;
+        let pendingPointerLanding = null;
+        const pointerLandingCleanups = new Set();
+
         function getSourceListContainer() {
             const root = getShadowRoot();
             return root && typeof root.getElementById === 'function' ? root.getElementById('sources-list') : null;
+        }
+
+        function mountPointerGhost(ghost, origin, pointer, cachedRect = null) {
+            const rect = cachedRect || origin?.getBoundingClientRect?.();
+            if (!rect || !(rect.width > 0)) {
+                dragMulti?.destroyMultiDragGhost?.(ghost);
+                return;
+            }
+            ghost.classList.add('sp-drag-pointer-ghost');
+            ghost.inert = true;
+            ghost.style.left = `${rect.left}px`;
+            ghost.style.top = `${rect.top}px`;
+            ghost.style.width = `${rect.width}px`;
+            ghost.style.height = `${rect.height}px`;
+            ghost.style.transform = 'translateY(0px)';
+            for (const node of ghost.querySelectorAll?.('*') || []) {
+                node.removeAttribute?.('id');
+                node.removeAttribute?.('data-source-key');
+                node.removeAttribute?.('data-group-id');
+                node.removeAttribute?.('aria-describedby');
+                node.classList?.remove('sp-list-item-enter', 'sp-folder-enter', 'sp-drop-shift');
+                if (node.style) node.style.animation = 'none';
+                if (node.classList?.contains('source-item') || node.classList?.contains('group-header')) {
+                    // Entrance/fold opacity is a transient state, not part of
+                    // the source's appearance. Recompute it from row classes.
+                    node.style.removeProperty('opacity');
+                    node.style.removeProperty('transform');
+                    node.style.transition = 'none';
+                }
+            }
+            runtime.activeDragGhost = ghost;
+            pointerGhostOrigin = {
+                top: rect.top,
+                clientY: pointer.clientY,
+                key: origin.dataset?.sourceKey || origin.dataset?.groupId,
+                type: origin.dataset?.sourceKey ? 'source' : 'group'
+            };
+            dragReflow?.motion?.set(ghost, 0, { immediate: true });
+        }
+
+        function createPointerGroupGhost(header, pointer) {
+            const clone = dragMulti?.cloneSourceItem?.(header);
+            if (!clone) return;
+            const ghost = dragMulti.createMultiDragGhost({
+                count: 1,
+                sourceClones: [clone],
+                root: getShadowRoot()
+            });
+            if (ghost) mountPointerGhost(ghost, header, pointer);
+        }
+
+        function updatePointerGhost(pointer) {
+            const ghost = runtime.activeDragGhost;
+            if (!pointerGhostOrigin || !ghost || !pointer) return;
+            const delta = pointer.clientY - pointerGhostOrigin.clientY;
+            if (!Number.isFinite(delta)) return;
+            if (dragReflow?.motion) dragReflow.motion.set(ghost, delta, { immediate: true });
+            else ghost.style.transform = `translateY(${delta}px)`;
+        }
+
+        function isPointerDragContextValid(pointer = null) {
+            const session = pointerDragSession;
+            const context = runtime.activeDragContext;
+            if (!session || !context || session.context !== getNativeSelectionContextToken()) return false;
+            if (session.root !== getSourceListContainer()) return false;
+            if (pointer && pointer.sessionId !== session.id) return false;
+            if (context !== session.dragContext) return false;
+            if (context.kind === 'group') return getGroupsById().has(context.draggedGroupId);
+            return context.keys.every((key) => isBatchOperableSource(getSourcesByKey().get(key)));
+        }
+
+        function startDrag(pointer) {
+            const handle = pointer?.handle;
+            if (!handle?.classList?.contains('sp-drag-handle') || handle.disabled) return false;
+            if (handle.dataset?.groupId && getState().isBatchMode) return false;
+            if (handle.dataset?.sourceKey && !isBatchOperableSource(getSourcesByKey().get(handle.dataset.sourceKey))) return false;
+            cancelDrag('replacement', { immediate: true });
+            beginDrag(pointer);
+            if (!runtime.activeDragContext) return false;
+            pointerDragSession = {
+                id: pointer.sessionId,
+                context: getNativeSelectionContextToken(),
+                root: getSourceListContainer(),
+                dragContext: runtime.activeDragContext
+            };
+            _lastDragOverArgs = { clientX: pointer.clientX, clientY: pointer.clientY };
+            // The fixed overlay does not participate in list layout. Keep it
+            // following the pointer even while a virtual window is rebuilding.
+            updatePointerGhost(pointer);
+            _scheduleDragOverArgs({ ..._lastDragOverArgs });
+            return true;
+        }
+
+        function updateDrag(pointer) {
+            if (!isPointerDragContextValid(pointer)) {
+                pointerController?.cancel('context_changed');
+                cancelDrag('context_changed', { immediate: true });
+                return false;
+            }
+            _lastDragOverArgs = { clientX: pointer.clientX, clientY: pointer.clientY };
+            updatePointerGhost(pointer);
+            _scheduleDragOverArgs({ ..._lastDragOverArgs });
+            return true;
+        }
+
+        function commitDrag(pointer) {
+            if (!isPointerDragContextValid(pointer)) {
+                cancelDrag('context_changed', { immediate: true });
+                return false;
+            }
+            const context = runtime.activeDragContext;
+            const rect = getSourceListContainer()?.getBoundingClientRect?.();
+            if (!rect || pointer.clientX < rect.left || pointer.clientX >= rect.right
+                || pointer.clientY < rect.top || pointer.clientY >= rect.bottom) {
+                cancelDrag('outside');
+                return false;
+            }
+            flushDragFrameNow({ pointer, reason: 'pointer_release' });
+            const payload = context.kind === 'group'
+                ? { sourceKey: '', sourceKeysRaw: '', draggedGroupId: context.draggedGroupId }
+                : {
+                    sourceKey: context.keys[0],
+                    sourceKeysRaw: context.kind === 'source-multi' ? JSON.stringify(context.keys) : '',
+                    keys: context.keys.slice(),
+                    draggedGroupId: ''
+                };
+            commitDragPlacement(pointer, payload);
+            cancelDrag('finished');
+            return true;
+        }
+
+        function cancelDrag(_reason = 'cancelled', { immediate = false } = {}) {
+            if (_reason !== 'finished') {
+                for (const cleanup of [...pointerLandingCleanups]) cleanup();
+            }
+            if (dragReflow && runtime.dragReflowSession && immediate) {
+                dragReflow.clearReflow({ session: runtime.dragReflowSession, rootElement: getSourceListContainer(), immediate: true });
+                dragReflow.unfoldDraggedItems({ session: runtime.dragReflowSession, rootElement: getSourceListContainer(), animated: false });
+                runtime.dragReflowSession = null;
+            }
+            clearDragFeedback();
+            cleanupReflowSession();
+            const root = getSourceListContainer();
+            root?.classList?.remove('sp-drag-active');
+            const ghost = runtime.activeDragGhost;
+            if (ghost) {
+                dragReflow?.motion?.clear(ghost, { restore: false });
+                dragMulti?.destroyMultiDragGhost?.(ghost);
+            }
+            runtime.activeDragGhost = null;
+            pointerGhostOrigin = null;
+            pointerDragSession = null;
+        }
+
+        function applyPointerDropLanding(landedKeys, preRects, landedType) {
+            const root = getSourceListContainer();
+            const motion = dragReflow?.motion;
+            if (!root || !motion) return false;
+            const landed = new Set(landedKeys.map((key) => `${landedType}:${key}`));
+            const rows = Array.from(root.querySelectorAll('.source-item[data-source-key], .group-container[data-group-id]'));
+            const measurements = rows.map((row) => ({ row, key: getTypedDragRowKey(row), rect: row.getBoundingClientRect() }));
+            const deltas = new Map();
+            for (const { row, key, rect } of measurements) {
+                row.classList.remove('sp-list-item-enter', 'sp-folder-enter');
+                const before = preRects?.get(key);
+                deltas.set(row, typeof before === 'number' && !landed.has(key) ? before - rect.top : 0);
+            }
+            for (const { row, key } of measurements) {
+                if (landed.has(key)) continue;
+                let inherited = 0;
+                let parent = row.parentElement;
+                while (parent && parent !== root) {
+                    if (deltas.has(parent)) {
+                        inherited = deltas.get(parent);
+                        break;
+                    }
+                    parent = parent.parentElement;
+                }
+                const delta = deltas.get(row) - inherited;
+                motion.clear(row);
+                if (Math.abs(delta) < 0.1) continue;
+                row.classList.add('sp-drop-shift');
+                motion.set(row, delta, { immediate: true });
+                motion.set(row, 0, { onComplete: () => {
+                    motion.clear(row);
+                    row.classList.remove('sp-drop-shift');
+                } });
+            }
+            const ghost = runtime.activeDragGhost;
+            const origin = pointerGhostOrigin;
+            const target = measurements.find(({ key }) => key === `${origin?.type}:${origin?.key}`)
+                || measurements.find(({ key }) => landed.has(key));
+            if (!ghost || !origin || !target) return true;
+            runtime.activeDragGhost = null;
+            const row = target.row;
+            const opacity = row.style.getPropertyValue('opacity');
+            const priority = row.style.getPropertyPriority('opacity');
+            row.style.setProperty('opacity', '0');
+            let done = false;
+            const cleanup = () => {
+                if (done) return;
+                done = true;
+                pointerLandingCleanups.delete(cleanup);
+                if (opacity) row.style.setProperty('opacity', opacity, priority);
+                else row.style.removeProperty('opacity');
+                motion.clear(ghost, { restore: false });
+                dragMulti.destroyMultiDragGhost(ghost);
+            };
+            pointerLandingCleanups.add(cleanup);
+            ghost.style.left = `${target.rect.left}px`;
+            motion.set(ghost, target.rect.top - origin.top, { onComplete: cleanup });
+            return true;
+        }
+
+        function moveFromDragHandle({ handle, direction }) {
+            if (handle?.disabled) return false;
+            const item = handle?.dataset?.groupId
+                ? { kind: 'group', id: handle.dataset.groupId }
+                : { kind: 'source', key: handle?.dataset?.sourceKey };
+            if (item.kind === 'group' && getState().isBatchMode) return false;
+            if (item.kind === 'source' && !isBatchOperableSource(getSourcesByKey().get(item.key))) return false;
+            let result;
+            if (direction === 'up' || direction === 'down') {
+                result = executeDirectionalTreeMove(item, direction);
+            } else {
+                const location = treePlacement?.locateItem?.(item);
+                if (!location) return false;
+                const target = location.container === 'group'
+                    ? { container: 'group', groupId: location.groupId, index: direction === 'first' ? 0 : getDirectionalContainerLength(location) }
+                    : { container: location.container, index: direction === 'first' ? 0 : getDirectionalContainerLength(location) };
+                const placement = treePlacement.applyPlacement({ item, target });
+                if (!placement?.ok || !placement.changed) return false;
+                rebuildPlacementParentMap();
+                render();
+                saveState({ immediate: true, critical: true });
+                announceDirectionalTreeOrder(direction, placement.to);
+                result = true;
+            }
+            if (result) {
+                const selector = item.kind === 'source'
+                    ? `.sp-drag-handle[data-source-key="${cssEscape(item.key)}"]`
+                    : `.sp-drag-handle[data-group-id="${cssEscape(item.id)}"]`;
+                const next = getShadowRoot()?.querySelector?.(selector);
+                next?.focus?.({ preventScroll: true });
+            }
+            return result;
+        }
+
+        function bindPointerDragInteractions(root = getSourceListContainer()) {
+            pointerController?.dispose();
+            const create = globalThis.NSM_CREATE_CONTENT_DRAG_POINTER
+                || (typeof require === 'function' ? require('./content-drag-pointer.js') : null);
+            if (!create) return;
+            pointerController = create({
+                getRoot: getSourceListContainer, getWindow, getDocument,
+                onStart: startDrag, onUpdate: updateDrag, onCommit: commitDrag,
+                onCancel: cancelDrag, onKeyMove: moveFromDragHandle,
+                isContextValid: () => !pointerDragSession || isPointerDragContextValid()
+            });
+            pointerController.bind(root);
         }
 
         function resolveSiblingKeys(intent) {
@@ -714,6 +979,7 @@
             if (!entry) return;
             entry.visualRect = translateRectBy(entry.visualRect, deltaX, deltaY);
             entry.layoutRect = translateRectBy(entry.layoutRect, deltaX, deltaY);
+            entry.terminalRect = translateRectBy(entry.terminalRect, deltaX, deltaY);
         }
 
         function translateGeometrySnapshot(snapshot, rootRect, deltaX, deltaY) {
@@ -736,6 +1002,7 @@
                     deltaX,
                     deltaY
                 );
+                snapshot.bin.terminalRect = translateRectBy(snapshot.bin.terminalRect, deltaX, deltaY);
             }
             snapshot.rootRect = rootRect;
         }
@@ -834,6 +1101,44 @@
             return extractInlineTranslateY(element);
         }
 
+        function getTerminalShiftY(element) {
+            if (dragReflow?.motion?.has?.(element)) return dragReflow.motion.getTargetY(element);
+            if (element?.classList?.contains('sp-drop-shift') || element?.classList?.contains('sp-drop-shift-static')) {
+                const session = runtime.dragReflowSession;
+                const key = element.dataset?.sourceKey;
+                const id = element.dataset?.groupId;
+                if (key && session?.shiftedSourceItems?.has(key)) return session.shiftedSourceItems.get(key);
+                if (id && session?.shiftedGroupItems?.has(id)) return session.shiftedGroupItems.get(id);
+            }
+            return getOwnShiftY(element);
+        }
+
+        function getInheritedTerminalShiftY(element, rootElement) {
+            let total = 0;
+            let cursor = element?.parentElement;
+            while (cursor && cursor !== rootElement) {
+                total += getTerminalShiftY(cursor);
+                cursor = cursor.parentElement;
+            }
+            return total;
+        }
+
+        function refreshRenderedDragGeometry(snapshot) {
+            const refresh = (entry) => {
+                if (!entry?.layoutRect) return;
+                entry.ownShiftY = getOwnShiftY(entry.element);
+                entry.inheritedShiftY = getInheritedShiftY(entry.element, snapshot.rootElement);
+                entry.visualRect = translateRect(entry.layoutRect, entry.ownShiftY + entry.inheritedShiftY);
+            };
+            for (const entry of snapshot.sourceEntries.values()) refresh(entry);
+            for (const entry of snapshot.groups.values()) {
+                refresh(entry);
+                refresh(entry.header);
+                refresh(entry.children);
+            }
+            refresh(snapshot.bin);
+        }
+
         function getInheritedShiftY(element, rootElement) {
             let total = 0;
             let cursor = element && element.parentElement;
@@ -872,6 +1177,9 @@
         }) {
             const ownShiftY = getOwnShiftY(element);
             const inheritedShiftY = getInheritedShiftY(element, rootElement);
+            const layoutRect = translateRect(visualRect, -(ownShiftY + inheritedShiftY));
+            const terminalOwnShiftY = getTerminalShiftY(element);
+            const terminalInheritedShiftY = getInheritedTerminalShiftY(element, rootElement);
             return {
                 identity: type === 'group'
                     ? { type: 'group', id: key }
@@ -886,7 +1194,10 @@
                 ),
                 ownShiftY,
                 inheritedShiftY,
-                layoutRect: translateRect(visualRect, -(ownShiftY + inheritedShiftY))
+                layoutRect,
+                terminalOwnShiftY,
+                terminalInheritedShiftY,
+                terminalRect: translateRect(layoutRect, terminalOwnShiftY + terminalInheritedShiftY)
             };
         }
 
@@ -1112,16 +1423,7 @@
 
             const createBandEntry = (element) => {
                 if (!element) return null;
-                const ownShiftY = getOwnShiftY(element);
-                const inheritedShiftY = getInheritedShiftY(element, rootElement);
-                const visualRect = rectByElement.get(element);
-                return {
-                    element,
-                    visualRect,
-                    ownShiftY,
-                    inheritedShiftY,
-                    layoutRect: translateRect(visualRect, -(ownShiftY + inheritedShiftY))
-                };
+                return createGeometryEntry({ type: 'band', element, visualRect: rectByElement.get(element), rootElement });
             };
 
             for (const headerElement of groupHeaders) {
@@ -1179,12 +1481,7 @@
                 rootRect,
                 bin: binElement
                     ? {
-                        element: binElement,
-                        visualRect: rectByElement.get(binElement),
-                        layoutRect: translateRect(
-                            rectByElement.get(binElement),
-                            -getInheritedShiftY(binElement, rootElement)
-                        ),
+                        ...createBandEntry(binElement),
                         items: binItems
                     }
                     : null,
@@ -1282,7 +1579,7 @@
         }
 
         function getEntryMidY(entry) {
-            const rect = entry && entry.visualRect;
+            const rect = entry && (entry.terminalRect || entry.visualRect);
             return rect ? rect.top + rect.height / 2 : Number.POSITIVE_INFINITY;
         }
 
@@ -1428,7 +1725,7 @@
                 && geometrySnapshot.bin
                 && geometrySnapshot.bin.visualRect
             ) {
-                const binRect = geometrySnapshot.bin.visualRect;
+                const binRect = geometrySnapshot.bin.terminalRect || geometrySnapshot.bin.layoutRect;
                 if (clientY >= binRect.top && clientY < binRect.bottom) {
                     return resolveSlotIntent({
                         candidates: geometrySnapshot.bin.items.filter((entry) => !isFoldedGeometryEntry(entry)),
@@ -3130,6 +3427,7 @@
             const groupContainer = target.closest('.group-container');
             const groupId = groupContainer?.dataset.groupId;
             const sourceRow = target.closest('.source-item');
+            if (target.closest('.sp-drag-handle')) return;
             const sourceKey = sourceRow?.dataset.sourceKey;
             const sourceActionsButton = target.closest('.sp-source-actions-button');
             const sourceActionsMenuItem = target.closest('.sp-source-actions-menu-item');
@@ -3728,14 +4026,16 @@
             return restoredCount;
         }
 
-        function handleDragStart(e) {
+        function beginDrag(e) {
             cancelDeferredDragFold();
             teardownDragGeometryLifecycle();
             _cancelPendingDragOver();
             runtime.dragGeometrySnapshot = null;
             invalidateDragGeometry('drag_start_preflight', { schedule: false });
-            const sourceTarget = e.target.closest('.source-item');
-            const groupTarget = e.target.closest('.group-header');
+            const target = e.handle || e.target;
+            if (!target || typeof target.closest !== 'function') return;
+            const sourceTarget = target.closest('.source-item');
+            const groupTarget = target.closest('.group-header');
             const setTimeoutFn = getSetTimeout();
 
             cancelAllHoverTimers();
@@ -3886,8 +4186,8 @@
             // triggerRename() has no draggable="false", so this guard is the only
             // protection. preventDefault tells the browser not to enter the drag
             // lifecycle at all (cursor remains in text-select mode for the input).
-            if (e.target && typeof e.target.closest === 'function') {
-                const _editable = e.target.closest('input, textarea, [contenteditable=""], [contenteditable="true"]');
+            if (target && typeof target.closest === 'function') {
+                const _editable = target.closest('input, textarea, [contenteditable=""], [contenteditable="true"]');
                 if (_editable) {
                     _clearPreflightDragActive();
                     if (typeof e.preventDefault === 'function') e.preventDefault();
@@ -3902,8 +4202,8 @@
                     return;
                 }
 
-                if (typeof e.target.closest === 'function'
-                    && e.target.closest('input[type="checkbox"], .sp-batch-checkbox')) {
+                if (typeof target.closest === 'function'
+                    && target.closest('input[type="checkbox"], .sp-batch-checkbox')) {
                     _clearPreflightDragActive();
                     if (typeof e.preventDefault === 'function') e.preventDefault();
                     return;
@@ -3931,11 +4231,13 @@
                     ? { kind: 'source-multi', keys: keys.slice() }
                     : { kind: 'source-single', keys: [keys[0]] };
 
-                e.dataTransfer.setData('application/source-key', keys[0]);
-                if (selection.isMulti) {
-                    e.dataTransfer.setData('application/source-keys', JSON.stringify(keys));
+                if (e.dataTransfer) {
+                    e.dataTransfer.setData('application/source-key', keys[0]);
+                    if (selection.isMulti) {
+                        e.dataTransfer.setData('application/source-keys', JSON.stringify(keys));
+                    }
+                    if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
                 }
-                e.dataTransfer.effectAllowed = 'move';
 
                 // Prepare reflow before building the drag ghost. The footprint probe
                 // owns three batched layout-read phases; running the ghost's pointer
@@ -3959,9 +4261,9 @@
                 try {
                     if (dragMulti && typeof dragMulti.createMultiDragGhost === 'function') {
                         const doc = getDocument();
-                        const root = doc && doc.body ? doc.body : null;
+                        const root = e.handle ? getShadowRoot() : (doc && doc.body ? doc.body : null);
                         const sourcesListEl = getSourceListContainer();
-                        const sourceClones = keys.slice(0, 3).map((rowKey) => {
+                        const sourceClones = [key, ...keys.filter((rowKey) => rowKey !== key)].slice(0, 3).map((rowKey) => {
                             const preparedElement = preparedReflowSession
                                 && preparedReflowSession.preparedElements instanceof Map
                                 ? preparedReflowSession.preparedElements.get(rowKey) || null
@@ -3984,7 +4286,9 @@
                             sourceClones,
                             root
                         });
-                        if (ghost && typeof e.dataTransfer.setDragImage === 'function') {
+                        if (ghost && e.handle) {
+                            mountPointerGhost(ghost, sourceTarget, e, preparedReflowSession?.itemMetrics?.get(key)?.visualRect);
+                        } else if (ghost && typeof e.dataTransfer?.setDragImage === 'function') {
                             let offsetX = 12;
                             let offsetY = 12;
                             if (sourcesListEl) {
@@ -4051,41 +4355,42 @@
                 if (_activeListSrc && _activeListSrc.classList && typeof _activeListSrc.classList.add === 'function') {
                     _activeListSrc.classList.add('sp-drag-active');
                 }
-                if (typeof setTimeoutFn === 'function') {
-                    setTimeoutFn(() => {
-                        if (selection.isMulti) {
-                            const root = getShadowRoot();
-                            if (root && typeof root.querySelector === 'function') {
-                                keys.forEach((rowKey) => {
-                                    const row = root.querySelector(`.source-item[data-source-key="${cssEscape(rowKey)}"]`);
-                                    if (row && row.classList && typeof row.classList.add === 'function') {
-                                        row.classList.add('dragging');
-                                    }
-                                });
-                            } else if (sourceTarget.classList && typeof sourceTarget.classList.add === 'function') {
-                                sourceTarget.classList.add('dragging');
-                            }
+                const markDraggedSources = () => {
+                    if (selection.isMulti) {
+                        const root = getShadowRoot();
+                        if (root && typeof root.querySelector === 'function') {
+                            keys.forEach((rowKey) => {
+                                const row = root.querySelector(`.source-item[data-source-key="${cssEscape(rowKey)}"]`);
+                                if (row && row.classList && typeof row.classList.add === 'function') {
+                                    row.classList.add('dragging');
+                                }
+                            });
                         } else if (sourceTarget.classList && typeof sourceTarget.classList.add === 'function') {
                             sourceTarget.classList.add('dragging');
                         }
-                    }, 0);
-                }
+                    } else if (sourceTarget.classList && typeof sourceTarget.classList.add === 'function') {
+                        sourceTarget.classList.add('dragging');
+                    }
+                };
+                if (e.handle) markDraggedSources();
+                else if (typeof setTimeoutFn === 'function') setTimeoutFn(markDraggedSources, 0);
                 return;
             }
 
             if (groupTarget) {
                 const key = groupTarget.dataset.groupId;
                 if (key) {
-                    e.dataTransfer.setData('application/group-id', key);
+                    if (e.dataTransfer) e.dataTransfer.setData('application/group-id', key);
                     runtime.activeDragContext = { kind: 'group', draggedGroupId: key };
-                    e.dataTransfer.effectAllowed = 'move';
+                    if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
                     // See source branch: mark active so the guide bar follows .drag-into.
                     const _activeListGrp = getSourceListContainer();
                     installDragGeometryLifecycle(_activeListGrp);
                     if (_activeListGrp && _activeListGrp.classList && typeof _activeListGrp.classList.add === 'function') {
                         _activeListGrp.classList.add('sp-drag-active');
                     }
-                    if (typeof setTimeoutFn === 'function') {
+                    if (e.handle) groupTarget.classList.add('dragging');
+                    else if (typeof setTimeoutFn === 'function') {
                         setTimeoutFn(() => groupTarget.classList.add('dragging'), 0);
                     }
                     // Initialize drag-reflow session for group drag too. The session lets
@@ -4104,10 +4409,13 @@
                             rootElement
                         });
                         runtime.dragReflowSession = session;
+                        if (e.handle) createPointerGroupGhost(groupTarget, e);
                         // RAF-deferred fold (same reason as source branch — sync fold would
                         // turn the drag source into a 0×0 box during dragstart, which Chrome
                         // can cancel as "invalid drag source").
                         scheduleDeferredDragFold(session, rootElement);
+                    } else if (e.handle) {
+                        createPointerGroupGhost(groupTarget, e);
                     }
                 } else {
                     _clearPreflightDragActive();
@@ -4744,10 +5052,10 @@
         }
 
         function patchGeometryEntryVisual(entry, deltaY, { inherited = false } = {}) {
-            if (!entry || !entry.visualRect) return false;
-            entry.visualRect = translateRect(entry.visualRect, deltaY);
-            if (inherited) entry.inheritedShiftY += deltaY;
-            else entry.ownShiftY += deltaY;
+            if (!entry || !entry.terminalRect) return false;
+            entry.terminalRect = translateRect(entry.terminalRect, deltaY);
+            if (inherited) entry.terminalInheritedShiftY += deltaY;
+            else entry.terminalOwnShiftY += deltaY;
             return true;
         }
 
@@ -4784,12 +5092,12 @@
                 }
                 patchGeometryEntryVisual(group, delta);
                 if (group.header) {
-                    group.header.visualRect = translateRect(group.header.visualRect, delta);
-                    group.header.inheritedShiftY += delta;
+                    group.header.terminalRect = translateRect(group.header.terminalRect, delta);
+                    group.header.terminalInheritedShiftY += delta;
                 }
                 if (group.children) {
-                    group.children.visualRect = translateRect(group.children.visualRect, delta);
-                    group.children.inheritedShiftY += delta;
+                    group.children.terminalRect = translateRect(group.children.terminalRect, delta);
+                    group.children.terminalInheritedShiftY += delta;
                 }
                 for (const source of geometrySnapshot.sourceEntries.values()) {
                     if (source.parentGroupId === groupId) {
@@ -4807,18 +5115,18 @@
                     if (!groupIsDescendantOf(descendant, groupId, geometrySnapshot.groups)) continue;
                     patchGeometryEntryVisual(descendant, delta, { inherited: true });
                     if (descendant.header) {
-                        descendant.header.visualRect = translateRect(
-                            descendant.header.visualRect,
+                        descendant.header.terminalRect = translateRect(
+                            descendant.header.terminalRect,
                             delta
                         );
-                        descendant.header.inheritedShiftY += delta;
+                        descendant.header.terminalInheritedShiftY += delta;
                     }
                     if (descendant.children) {
-                        descendant.children.visualRect = translateRect(
-                            descendant.children.visualRect,
+                        descendant.children.terminalRect = translateRect(
+                            descendant.children.terminalRect,
                             delta
                         );
-                        descendant.children.inheritedShiftY += delta;
+                        descendant.children.terminalInheritedShiftY += delta;
                     }
                 }
             }
@@ -5061,6 +5369,7 @@
             if (!transformPatchComplete) {
                 invalidateDragGeometry('transform_patch_incomplete', { schedule: false });
             }
+            updatePointerGhost(_lastDragOverArgs);
         }
 
         // dragover can fire well above 60Hz; collapsing computeDropIntent + reflow
@@ -5179,6 +5488,7 @@
                 rootElement: sourceListEl,
                 session: runtime.dragReflowSession || null
             });
+            if (geometrySnapshot) refreshRenderedDragGeometry(geometrySnapshot);
             if (!geometrySnapshot) {
                 const priorSnapshot = runtime.dragGeometrySnapshot;
                 if (priorSnapshot) {
@@ -5344,6 +5654,10 @@
         }
 
         function teardownDragInteractions() {
+            pointerController?.dispose();
+            pointerController = null;
+            cancelDrag('manager_teardown', { immediate: true });
+            dragReflow?.motion?.dispose();
             _cancelPendingDragOver();
             cancelDeferredDragFold();
             teardownDragGeometryLifecycle();
@@ -5656,7 +5970,7 @@
                 const _cancelRoot = getSourceListContainer();
                 const _cancelSetTimeout = getSetTimeout();
                 const _cancelledNodes = [];
-                if (_cancelRoot && runtime.dragReflowSession.draggedKeys
+                if (!pointerDragSession && _cancelRoot && runtime.dragReflowSession.draggedKeys
                     && typeof _cancelRoot.querySelector === 'function') {
                     for (const key of runtime.dragReflowSession.draggedKeys) {
                         if (typeof key !== 'string' || !key) continue;
@@ -5720,7 +6034,18 @@
             return null;
         }
 
+        // Native adapters remain for existing geometry contracts in the unit harness;
+        // production binds only the pointer controller to the shared session methods.
+        function handleDragStart(e) {
+            beginDrag(e);
+        }
+
         function handleDrop(e) {
+            e.preventDefault?.();
+            commitDragPlacement(e, readTrustedDropPayload(e.dataTransfer));
+        }
+
+        function commitDragPlacement(e, dragPayload) {
             // Flush any dragover RAF still in flight so handleDrop reads the
             // up-to-date intent + reflow rather than a one-frame-stale snapshot.
             _flushPendingDragOver();
@@ -5738,7 +6063,8 @@
                 if (dragReflow && runtime.dragReflowSession && typeof dragReflow.clearReflow === 'function') {
                     dragReflow.clearReflow({
                         session: runtime.dragReflowSession,
-                        rootElement: getSourceListContainer()
+                        rootElement: getSourceListContainer(),
+                        immediate: true
                     });
                     reflowClearedForMutation = true;
                 }
@@ -5748,7 +6074,8 @@
                     if (!reflowClearedForMutation && typeof dragReflow.clearReflow === 'function') {
                         dragReflow.clearReflow({
                             session: runtime.dragReflowSession,
-                            rootElement: getSourceListContainer()
+                            rootElement: getSourceListContainer(),
+                            immediate: true
                         });
                     }
                     if (typeof dragReflow.unfoldDraggedItems === 'function') {
@@ -5762,12 +6089,11 @@
             };
             try {
                 cancelAllHoverTimers();
-                e.preventDefault();
+                e.preventDefault?.();
                 if (runtime.dragReflowSession?.mountedRefreshComplete === false) {
                     clearDragFeedback();
                     return;
                 }
-                const dragPayload = readTrustedDropPayload(e.dataTransfer);
                 if (!dragPayload) {
                     clearDragFeedback();
                     return;
@@ -5997,6 +6323,11 @@
                     finalizeReflow();
                 } finally {
                     runtime.dragDropInProgress = previousDropInProgress;
+                    if (pendingPointerLanding && pointerDragSession) {
+                        const landing = pendingPointerLanding;
+                        pendingPointerLanding = null;
+                        applyPointerDropLanding(landing.keys, landing.preRects, landing.type);
+                    }
                 }
             }
         }
@@ -6016,6 +6347,12 @@
             preRects,
             landedType = null
         ) {
+            if (pointerDragSession) {
+                // Restore the exact folded baselines first. Otherwise the
+                // finalizer can reveal this row underneath its landing ghost.
+                pendingPointerLanding = { keys: landedKeys, preRects, type: landedType };
+                return;
+            }
             // Classic mode has no fly-in / FLIP landing animation (26.5.26 dropped instantly).
             if (getDragMode() === 'classic') return;
             if (!Array.isArray(landedKeys) || landedKeys.length === 0) return;
@@ -6570,6 +6907,12 @@
             handleInteraction,
             handleOriginalCheckboxChange,
             triggerRename,
+            startDrag,
+            updateDrag,
+            commitDrag,
+            cancelDrag,
+            bindPointerDragInteractions,
+            moveFromDragHandle,
             preparePendingInitialRenamesForRender,
             restorePendingInitialRenamesAfterRender,
             handleDragStart,

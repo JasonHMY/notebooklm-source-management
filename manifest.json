@@ -93,6 +93,8 @@
         "src/content/content-view-state.js",
         "src/content/content-native-checkbox-sync.js",
         "src/content/content-drag-multi.js",
+        "src/content/content-drag-motion.js",
+        "src/content/content-drag-pointer.js",
         "src/content/content-drag-reflow.js",
         "src/content/content-tree-interactions.js",
         "src/content/content-native-label-detector.js",

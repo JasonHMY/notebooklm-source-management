@@ -540,7 +540,7 @@
         "message": "启用避让拖拽"
     },
     "ui_settings_drag_mode_body": {
-        "message": "拖动时其它来源会避让让出空位,并且可以把来源拖到文件夹之间。关闭(默认)使用经典蓝色插入线。切回经典时,已放在文件夹之间的来源会移动到底部「未分组」桶。"
+        "message": "拖动六点手柄可调整来源和文件夹顺序，相邻项目会平滑让位。开启（默认）可将来源放在文件夹之间；关闭后使用经典蓝色插入线，文件夹之间的来源会移到底部「未分组」区域。"
     },
     "ui_settings_drag_mode_enabled": {
         "message": "已启用避让拖拽"
@@ -1375,6 +1375,47 @@
     },
     "ui_tree_order": {
         "message": "精确排序"
+    },
+    "ui_drag_handle_source": {
+        "message": "调整来源顺序：$1",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            }
+        }
+    },
+    "ui_drag_handle_group": {
+        "message": "调整文件夹顺序：$1",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            }
+        }
+    },
+    "ui_drag_handle_instructions": {
+        "message": "拖动以移动。按上、下方向键调整顺序，或按 Home、End 移到首位、末位。"
+    },
+    "ui_tree_order_moved_first_status": {
+        "message": "已移到首位，当前位置 $1/$2。",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            },
+            "2": {
+                "content": "$2"
+            }
+        }
+    },
+    "ui_tree_order_moved_last_status": {
+        "message": "已移到末位，当前位置 $1/$2。",
+        "placeholders": {
+            "1": {
+                "content": "$1"
+            },
+            "2": {
+                "content": "$2"
+            }
+        }
     },
     "ui_tree_order_up": {
         "message": "上移"

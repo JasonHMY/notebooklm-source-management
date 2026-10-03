@@ -35,7 +35,7 @@ Global messages that are not notebook-state writes, such as extension enable/dis
 
 `appearance` is a nested object containing visual customization preferences. Currently includes `hoverSpotlightEnabled` (boolean, default true). `SAVE_PREFERENCES` deep-merges partial `appearance` updates so the background SW preserves sibling keys when more are added.
 
-`dragMode` is a top-level scalar enum (`classic` default / `reflow`) normalized by `normalizeDragMode`; `SAVE_PREFERENCES` accepts `{ dragMode }` and merges it like other top-level scalars (unknown values fall back to `classic`).
+`dragMode` is a top-level scalar enum (`reflow` default / `classic`) normalized by `normalizeDragMode`; `SAVE_PREFERENCES` accepts `{ dragMode }` and merges it like other top-level scalars. A missing (`undefined`) value defaults to `reflow`, an explicit valid choice is preserved, and invalid values (including `null`) fall back to `classic`. Both modes use the six-dot handle and pointer input; `classic` keeps its blue insertion line and placement semantics.
 
 ## Storage message key rules
 

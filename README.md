@@ -13,8 +13,8 @@ The extension supports the current `https://notebook.google.com/` site and keeps
 
 - Group sources into custom folders.
 - Create nested folders, move sources into subfolders, and visually isolate one folder without changing the sources used in Notebook answers.
-- Reorder sources or whole groups with drag and drop.
-- Choose your drag mode in Settings → Appearance: **classic** (default — a blue insertion line, loose sources land in folders or the bottom "Ungrouped" bin) or **reflow** — other sources move aside as you drag and you can drop a source anywhere at the root level, including between two folders.
+- Reorder sources, selections, or whole groups from their six-dot drag handles; use Up/Down or Home/End with a focused handle for keyboard ordering.
+- Choose your drag mode in Settings → Appearance: **reflow** (default — the dragged row follows the pointer while nearby rows spring aside, and sources can land anywhere at the root level, including between folders) or **classic** (a blue insertion line, with loose sources landing in folders or the bottom "Ungrouped" bin).
 - Search by source title, tag, or folder, with simple `tag:` and `folder:` filters. The organization toolbar remains available, so you can search first and then move the results in a batch.
 - Automatically expand folders that contain search results, then restore the previous collapsed state when search is cleared.
 - Add color-coded custom tags, search the tag picker, filter by tag, and batch add or remove tags.
@@ -117,7 +117,7 @@ Use this checklist after changes to the content script, popup launcher, or sourc
 6. Walk through the core interactions once:
    - create a group
    - name the group immediately, cancel once with Escape, then create and name it again
-   - drag a source or group
+   - drag a source or group using its six-dot handle; verify the ghost follows the pointer and nearby rows move aside
    - enter batch mode
    - use Select visible and Clear selection
    - create a destination folder from the Move dialog

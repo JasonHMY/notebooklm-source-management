@@ -80,10 +80,12 @@ async function collectTrustedEvents(page) {
                 className: typeof element?.className === 'string' ? element.className : '',
                 sourceKey: sourceRow?.dataset?.sourceKey || '',
                 groupId: groupHeader?.dataset?.groupId || '',
+                handle: Boolean(element?.closest?.('.sp-drag-handle')),
+                handleDisabled: element?.closest?.('.sp-drag-handle')?.disabled ?? null,
                 sourceDraggable: sourceRow?.draggable ?? null
             };
         };
-        for (const type of ['mousedown', 'mousemove', 'dragstart', 'dragover', 'drop', 'dragend']) {
+        for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel']) {
             root.addEventListener(type, (event) => {
                 window.__reflowTrustedEvents.push({
                     type,
@@ -91,7 +93,6 @@ async function collectTrustedEvents(page) {
                     composed: event.composed,
                     clientX: Number(event.clientX) || 0,
                     clientY: Number(event.clientY) || 0,
-                    dropEffect: event.dataTransfer?.dropEffect || null,
                     defaultPrevented: event.defaultPrevented,
                     target: describeTarget(event.target)
                 });
@@ -109,7 +110,9 @@ async function collectTrustedEvents(page) {
 
 async function readTrustedDragOriginPoint(origin) {
     return origin.evaluate((element) => {
-        const rect = element.getBoundingClientRect();
+        const handle = element.querySelector('.sp-drag-handle');
+        const rect = handle?.getBoundingClientRect();
+        if (!rect) return { usable: false };
         const root = element.getRootNode();
         const x = rect.left + rect.width / 2;
         const y = rect.top + rect.height / 2;
@@ -128,7 +131,8 @@ async function readTrustedDragOriginPoint(origin) {
             usable: Boolean(
                 rect.height > 1
                 && sourceRow === element
-                && !target?.closest?.('button, input, a, [role="button"]')
+                && target?.closest?.('.sp-drag-handle') === handle
+                && !handle.disabled
             )
         };
     });
@@ -142,7 +146,7 @@ async function prepareTrustedDragOrigin(page, origin) {
     for (let attempt = 0; attempt < 12; attempt += 1) {
         const point = await readTrustedDragOriginPoint(origin);
         if (point?.usable && point.sourceKey === expectedSourceKey) {
-            await origin.hover({
+            await origin.locator('.sp-drag-handle').hover({
                 position: { x: point.relativeX, y: point.relativeY }
             });
             const freshPoint = await readTrustedDragOriginPoint(origin);
@@ -170,8 +174,9 @@ async function startTrustedDrag(page, origin, holdTarget = null) {
     await page.mouse.down();
     await page.mouse.move(x + 12, y + 12, { steps: 4 });
     await expect.poll(() => page.evaluate(() => window.__reflowTrustedEvents.some(
-        (event) => event.type === 'dragstart' && event.trusted
+        (event) => event.type === 'pointerdown' && event.trusted && event.target.handle
     ))).toBe(true);
+    await expect(page.locator('#sources-list.sp-drag-active')).toHaveCount(1);
     if (holdTarget) {
         const targetBox = await holdTarget.boundingBox();
         expect(targetBox).not.toBeNull();
@@ -181,10 +186,7 @@ async function startTrustedDrag(page, origin, holdTarget = null) {
             { steps: 8 }
         );
         await expect.poll(() => page.evaluate(() => window.__reflowTrustedEvents.some(
-            (event) => event.type === 'dragover'
-                && event.trusted
-                && event.defaultPrevented
-                && event.dropEffect === 'move'
+            (event) => event.type === 'pointermove' && event.trusted && event.defaultPrevented
         ))).toBe(true);
     }
     await expect(page.locator('.sp-drag-folded').first()).toBeAttached();
@@ -192,19 +194,17 @@ async function startTrustedDrag(page, origin, holdTarget = null) {
 }
 
 async function finishTrustedDrop(page, origin, target, position) {
-    await collectTrustedEvents(page);
+    await startTrustedDrag(page, origin);
     const box = await target.boundingBox();
     expect(box).not.toBeNull();
-    // Playwright's native drag action re-resolves the target after dragstart
-    // and waits for its geometry to settle before releasing the mouse.
-    await origin.dragTo(target, {
-        targetPosition: { x: box.width * position.x, y: box.height * position.y }
-    });
+    await page.mouse.move(
+        box.x + box.width * position.x,
+        box.y + box.height * position.y,
+        { steps: 12 }
+    );
+    await page.mouse.up();
     await expect.poll(() => page.evaluate(() => window.__reflowTrustedEvents.some(
-        (event) => event.type === 'dragstart' && event.trusted
-    ))).toBe(true);
-    await expect.poll(() => page.evaluate(() => window.__reflowTrustedEvents.some(
-        (event) => event.type === 'drop' && event.trusted
+        (event) => event.type === 'pointerup' && event.trusted
     ))).toBe(true);
     await expect(page.locator('.sp-drag-folded')).toHaveCount(0);
 }
@@ -458,8 +458,8 @@ async function readMountedSelectionMetrics(page) {
         const list = root?.querySelector('#sources-list');
         return {
             pendingSelected: Number(list?.dataset.pendingSelected) || 0,
-            selectedRows: root?.querySelectorAll('.source-item.selected-for-batch').length || 0,
-            foldedRows: root?.querySelectorAll('.source-item.sp-drag-folded').length || 0,
+            selectedRows: list?.querySelectorAll('.source-item.selected-for-batch').length || 0,
+            foldedRows: list?.querySelectorAll('.source-item.sp-drag-folded').length || 0,
             windowStart: Number(list?.dataset.sourceWindowStart) || 0,
             windowEnd: Number(list?.dataset.sourceWindowEnd) || 0
         };
@@ -468,7 +468,7 @@ async function readMountedSelectionMetrics(page) {
 
 async function expectUsableDragOrigin(row, expectedKey) {
     expect(await row.getAttribute('data-source-key')).toBe(expectedKey);
-    expect(await row.getAttribute('draggable')).toBe('true');
+    await expect(row.locator('.sp-drag-handle')).toBeEnabled();
     await expect.poll(() => row.evaluate((element) => ({
         folded: element.classList.contains('sp-drag-folded'),
         height: element.getBoundingClientRect().height
@@ -499,15 +499,12 @@ async function finishTrustedMouseDrop(page, target, position) {
     await page.mouse.move(x + 1, y, { steps: 2 });
     await expect.poll(() => page.evaluate((index) => (
         window.__reflowTrustedEvents.slice(index).some(
-            (event) => event.type === 'dragover'
-                && event.trusted
-                && event.defaultPrevented
-                && event.dropEffect === 'move'
+            (event) => event.type === 'pointermove' && event.trusted && event.defaultPrevented
         )
     ), eventCountBeforeMove)).toBe(true);
     await page.mouse.up();
     await expect.poll(() => page.evaluate(() => window.__reflowTrustedEvents.some(
-        (event) => event.type === 'drop' && event.trusted
+        (event) => event.type === 'pointerup' && event.trusted
     ))).toBe(true);
     await expect(page.locator('.sp-drag-folded')).toHaveCount(0);
 }
@@ -520,7 +517,7 @@ async function readRetryPointerDiagnostics(page) {
             ? window.__reflowTrustedEvents.slice(-40)
             : [];
         const latestPointer = [...events].reverse().find((event) => (
-            event.type === 'mousedown' || event.type === 'mousemove' || event.type === 'dragover'
+            event.type === 'pointerdown' || event.type === 'pointermove'
         ));
         const describeElement = (element) => {
             const target = element instanceof Element ? element : null;
@@ -567,7 +564,7 @@ async function readDragStartDiagnostics(page, sourceKey) {
         const row = root?.querySelector(`.source-item[data-source-key="${CSS.escape(key)}"]`);
         const rowRect = row?.getBoundingClientRect();
         const lastPointer = [...(window.__reflowTrustedEvents || [])].reverse().find((event) => (
-            event.type === 'mousemove' || event.type === 'mousedown'
+            event.type === 'pointermove' || event.type === 'pointerdown'
         ));
         const pointTarget = lastPointer
             ? root?.elementFromPoint(lastPointer.clientX, lastPointer.clientY)
@@ -818,9 +815,7 @@ test.describe.serial('stable reflow trusted drag', () => {
         await page.mouse.move(target.x + target.width * 0.8, target.y + target.height / 2, { steps: 12 });
         await page.keyboard.press('Escape');
         await page.mouse.up();
-        await expect.poll(() => page.evaluate(() => window.__reflowTrustedEvents.some(
-            (event) => event.type === 'dragend' && event.trusted
-        ))).toBe(true);
+        await expect(page.locator('#sources-list.sp-drag-active')).toHaveCount(0);
         await expect(page.locator('.sp-drag-folded, .sp-drop-shift, .sp-drop-shift-static')).toHaveCount(0);
         expect(await readTree(bridge)).toEqual(before);
         await page.reload();
@@ -905,9 +900,7 @@ test.describe.serial('windowed reflow trusted drag', () => {
 
         await page.keyboard.press('Escape');
         await page.mouse.up();
-        await expect.poll(() => page.evaluate(() => window.__reflowTrustedEvents.some(
-            (event) => event.type === 'dragend' && event.trusted
-        ))).toBe(true);
+        await expect(page.locator('#sources-list.sp-drag-active')).toHaveCount(0);
         await expect(page.locator('.sp-drag-folded, .sp-drop-shift, .sp-drop-shift-static')).toHaveCount(0);
         const afterCancel = {
             window: await getSourceWindowMetadata(page),
@@ -972,6 +965,11 @@ test.describe.serial('windowed reflow trusted drag', () => {
             });
             throw error;
         }
+        await expect.poll(async () => {
+            const metrics = await readMountedSelectionMetrics(page);
+            return metrics.selectedRows > 0 && metrics.selectedRows < 50
+                && metrics.foldedRows === metrics.selectedRows;
+        }).toBe(true);
         const initialSelection = await readMountedSelectionMetrics(page);
         expect(initialSelection).toMatchObject({ pendingSelected: 50 });
         expect(initialSelection.selectedRows).toBeGreaterThan(0);
@@ -1000,6 +998,11 @@ test.describe.serial('windowed reflow trusted drag', () => {
         });
         await expect.poll(async () => (await readWindowedRowState(page, remoteKey))?.height)
             .toBeLessThanOrEqual(1);
+        await expect.poll(async () => {
+            const metrics = await readMountedSelectionMetrics(page);
+            return metrics.selectedRows > 0 && metrics.selectedRows < 50
+                && metrics.foldedRows === metrics.selectedRows;
+        }).toBe(true);
         const remoteSelection = await readMountedSelectionMetrics(page);
         expect(remoteSelection).toMatchObject({ pendingSelected: 50 });
         expect(remoteSelection.selectedRows).toBeGreaterThan(0);
