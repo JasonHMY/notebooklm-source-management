@@ -167,7 +167,7 @@ GeminiNotebook-Source-Management
 │   │   ├── drag-reflow-layout.smoke.spec.js
 │   │   │   └── 真实 Chromium 中的混合/fixed box model 占位、spring preview、跨 host 多选、滚动恢复、reduced-motion 与 pointer Esc/cancel
 │   │   ├── pointer-drag.smoke.spec.js
-│   │   │   └── 手柄限制、跟手与 spring 实际位移截图、preview 不落盘、落下归位、Classic 兼容及键盘焦点/播报/刷新
+│   │   │   └── 手柄限制、跟手与浏览器逐帧 spring 位移采样/截图、preview 不落盘、落下归位、Classic 兼容及键盘焦点/播报/刷新
 │   │   ├── reflow-stable.smoke.spec.js
 │   │   │   └── 转正验收：真实鼠标从手柄触发 pointer 会话，核对文件夹间落点、Undo/Redo、独立 storage 读回、非连续多选和窄面板取消
 │   │   ├── manager-performance.smoke.spec.js

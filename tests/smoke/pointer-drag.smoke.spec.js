@@ -79,6 +79,21 @@ test.describe('beUI pointer presentation', () => {
         expect(Math.abs(ghostBox.x - originBox.x)).toBeLessThan(1);
         expect(Math.abs(ghostBox.y - originBox.y - 8)).toBeLessThan(1);
         const firstTop = ghostBox.y;
+        await page.evaluate(() => {
+            const root = document.querySelector('#sources-plus-root').shadowRoot;
+            const list = root.querySelector('#sources-list');
+            window.__pointerSpringSamples = [];
+            list.addEventListener('pointermove', () => {
+                const sample = () => {
+                    window.__pointerSpringSamples.push(Array.from(list.querySelectorAll('.source-item'), (element) => ({
+                        key: element.dataset.sourceKey,
+                        shift: new DOMMatrix(getComputedStyle(element).transform).m42
+                    })));
+                    if (window.__pointerSpringSamples.length < 20) requestAnimationFrame(sample);
+                };
+                requestAnimationFrame(sample);
+            }, { once: true });
+        });
         await page.mouse.move(x, y + 98);
         await paint();
         expect(Math.abs((await ghost.boundingBox()).y - firstTop - 90)).toBeLessThan(1);
@@ -87,12 +102,19 @@ test.describe('beUI pointer presentation', () => {
         await expect(ghost.locator('.source-title-text')).toHaveText('Pointer source 0');
         await expect(ghost.locator('.source-item')).toHaveCSS('opacity', '1');
 
-        const shifted = page.locator('#sources-list .source-item.sp-drop-shift').last();
-        await expect(shifted).toBeVisible();
-        const early = await shifted.evaluate((element) => new DOMMatrix(getComputedStyle(element).transform).m42);
-        expect(early).toBeGreaterThan(0);
-        await expect.poll(() => shifted.evaluate((element) => new DOMMatrix(getComputedStyle(element).transform).m42))
-            .toBeGreaterThan(early + 0.5);
+        await expect.poll(() => page.evaluate(() => window.__pointerSpringSamples.length)).toBe(20);
+        const samples = await page.evaluate(() => window.__pointerSpringSamples);
+        const movingRows = samples[0].filter(({ key }) => {
+            const positions = samples.map((frame) => frame.find((row) => row.key === key)?.shift);
+            return positions.every(Number.isFinite)
+                && Math.max(...positions) - Math.min(...positions) > 0.5;
+        });
+        expect(movingRows.length).toBeGreaterThan(0);
+        for (const { key } of movingRows) {
+            const positions = samples.map((frame) => frame.find((row) => row.key === key).shift);
+            expect(positions.some((value) => value > Math.min(...positions) + 0.1
+                && value < Math.max(...positions) - 0.1)).toBe(true);
+        }
         await page.screenshot({ path: path.join(previewDir, 'dragging.png') });
         expect(await tree()).toEqual(before);
         await page.keyboard.press('Escape');
