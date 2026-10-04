@@ -65,7 +65,7 @@ GeminiNotebook-Source-Management
 │   │   ├── content-modal-welcome.js
 │   │   │   └── 首次欢迎 modal 渲染、按钮和反馈入口 helper
 │   │   ├── content-modal-whats-new.js
-│   │   │   └── 更新介绍 modal 渲染、变更亮点和反馈入口 helper；版本从 manifest 读取，当前发布文案由 _locales 三语消息提供
+│   │   │   └── 更新介绍 modal 渲染、变更亮点和反馈入口 helper；版本从 manifest 读取，当前 `26.10.4` 发布文案由 _locales 三语消息提供，展示手柄/多选/键盘/取消恢复四项
 │   │   ├── content-modal-tag-filter.js
 │   │   │   └── tag filter modal：标签搜索、结果计数、无匹配状态、aria-pressed 选中状态和过滤回调 helper
 │   │   ├── content-modal-move.js
@@ -853,7 +853,7 @@ content runtime memory
 ├── 拖拽性能基准（opt-in）
 │   ├── 命令: npm run benchmark:drag
 │   ├── 文件: tests/smoke/drag-performance.smoke.spec.js, docs/DRAG_PERFORMANCE_BASELINE.md
-│   └── 默认: 仅 DRAG_BENCHMARK=1 时执行；100/500 行 × 单项/50 项选择，500 行读取完整 logicalSourceCount/sourceWindowingActive 而非把未挂载行当丢失，按 source-window ordinal 临时挂载 origin 与 callback target；50 项选择同时校验 pendingSelected 和 DataTransfer 完整 50 keys，并单独记录 materialized selection subset。prepare 计时前在真实 pointerdown 后状态完成 settle/全量计数归零，以 isolated-world logical rAF callback ID 精确绑定目标帧；callback采用当前可见来源生成的固定非edge坐标，并向当前连接列表派发事件，避免追逐动画/旧节点，输出保留input points；After 四组合及重复 500 行稳定性样本已记录，仍非默认 smoke/CI timing gate
+│   └── 默认: 仅 DRAG_BENCHMARK=1 时执行；100/500 行 × 单项/50 项选择，500 行读取完整 logicalSourceCount/sourceWindowingActive 而非把未挂载行当丢失，按 source-window ordinal 临时挂载 origin 与 callback target；50 项选择同时校验 pendingSelected 和受控 pointer 会话完整 50 keys，并单独记录 materialized selection subset。prepare 计时前在真实 pointerdown 后状态完成 settle/全量计数归零，以 isolated-world logical rAF callback ID 精确绑定目标帧；callback采用当前可见来源生成的固定非edge坐标，并向当前连接列表派发事件，避免追逐动画/旧节点，输出保留input points；After 四组合及重复 500 行稳定性样本已记录，仍非默认 smoke/CI timing gate
 ├── Manager 大列表性能基准（opt-in）
 │   ├── 命令: npm run benchmark:manager
 │   ├── 文件: tests/smoke/manager-performance.smoke.spec.js

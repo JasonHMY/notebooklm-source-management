@@ -96,10 +96,10 @@
             ]);
             const content = el('div', { className: 'sp-folder-modal-content sp-welcome-content' }, [
                 el('div', { className: 'sp-welcome-feature-list' }, [
-                    featureRow('save', 'ui_whats_new_transaction_title', 'ui_whats_new_transaction_body'),
-                    featureRow('rule', 'ui_whats_new_native_safety_title', 'ui_whats_new_native_safety_body'),
+                    featureRow('drag_indicator', 'ui_whats_new_drag_title', 'ui_whats_new_drag_body'),
                     featureRow('checklist', 'ui_whats_new_batch_storage_title', 'ui_whats_new_batch_storage_body'),
-                    featureRow('manage_search', 'ui_whats_new_accessibility_scale_title', 'ui_whats_new_accessibility_scale_body')
+                    featureRow('keyboard', 'ui_whats_new_accessibility_scale_title', 'ui_whats_new_accessibility_scale_body'),
+                    featureRow('undo', 'ui_whats_new_stability_title', 'ui_whats_new_stability_body')
                 ])
             ]);
             const footer = el('div', { className: 'sp-folder-modal-footer sp-welcome-footer' }, [

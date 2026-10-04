@@ -1560,8 +1560,8 @@ describe('modal option motion', () => {
         expect(modal.getAttribute('aria-modal')).toBe('true');
         expect(modal.getAttribute('aria-labelledby')).toBe('sp-whats-new-modal-title');
         expect(modal.textContent).toContain('ui_whats_new_title');
-        expect(modal.textContent).toContain('ui_whats_new_transaction_title');
-        expect(modal.textContent).toContain('ui_whats_new_native_safety_title');
+        expect(modal.textContent).toContain('ui_whats_new_drag_title');
+        expect(modal.textContent).toContain('ui_whats_new_stability_title');
         expect(modal.textContent).toContain('ui_whats_new_batch_storage_title');
         expect(modal.textContent).toContain('ui_whats_new_accessibility_scale_title');
 

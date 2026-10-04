@@ -1,7 +1,7 @@
 # GeminiNotebook-Source-Management
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-26.9.8-green.svg)
+![Version](https://img.shields.io/badge/version-26.10.4-green.svg)
 [![CI](https://github.com/JasonHMY/notebooklm-source-management/actions/workflows/ci.yml/badge.svg)](https://github.com/JasonHMY/notebooklm-source-management/actions/workflows/ci.yml)
 
 [Chrome Web Store](https://chromewebstore.google.com/detail/gemininotebook-source-man/bhpgdibkpdcchkpaamfkbmdnhcmedkod) · [Report a problem](https://github.com/JasonHMY/notebooklm-source-management/issues) · [Changelog](CHANGELOG.md)

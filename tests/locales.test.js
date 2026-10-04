@@ -347,6 +347,27 @@ describe('locale message catalogs', () => {
         }
     });
 
+    it('introduces the current release and all four drag features in every locale', () => {
+        const version = require('../manifest.json').version;
+        const releaseKeys = [
+            'ui_whats_new_drag_title',
+            'ui_whats_new_drag_body',
+            'ui_whats_new_batch_storage_title',
+            'ui_whats_new_batch_storage_body',
+            'ui_whats_new_accessibility_scale_title',
+            'ui_whats_new_accessibility_scale_body',
+            'ui_whats_new_stability_title',
+            'ui_whats_new_stability_body'
+        ];
+        for (const localeId of ['en', 'es', 'zh_CN']) {
+            const messages = localeMessages[localeId];
+            expect(messages.ui_whats_new_subtitle.message).toContain(version);
+            for (const key of releaseKeys) {
+                expect(messages[key].message.trim()).not.toBe('');
+            }
+        }
+    });
+
     it('keeps contextual control names wired to their entity placeholder', () => {
         const contextualKeys = [
             'ui_group_name_input',

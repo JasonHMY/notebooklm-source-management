@@ -615,7 +615,7 @@
         "message": "Novedades"
     },
     "ui_whats_new_subtitle": {
-        "message": "26.9.8: Conserva tu organización, confirma las eliminaciones y recibe respuestas más rápidas en acciones por lotes."
+        "message": "26.10.4: Arrastra fuentes y carpetas para reordenarlas con mayor fluidez y precisión."
     },
     "ui_whats_new_transaction_title": {
         "message": "Conserva tu organización"
@@ -630,28 +630,28 @@
         "message": "Al eliminar una fuente se muestra su título completo y se pide confirmación. Mostrar solo esta carpeta filtra la vista sin cambiar las fuentes usadas para responder. Palabras como error o fallo en un título ya no marcan una fuente válida como fallida."
     },
     "ui_whats_new_batch_storage_title": {
-        "message": "Respuesta más rápida por lotes"
+        "message": "Mueve selecciones entre carpetas"
     },
     "ui_whats_new_batch_storage_body": {
-        "message": "Al activar o desactivar muchas fuentes, las casillas que responden se confirman antes; las esperas largas muestran el progreso y los fallos permiten reintentar. Desactivar la extensión o cambiar de cuaderno cancela las operaciones pendientes de la página anterior."
+        "message": "Arrastra las fuentes seleccionadas juntas a otra carpeta o a Sin agrupar. La vista previa muestra el total seleccionado mientras recorres listas largas."
     },
     "ui_whats_new_accessibility_scale_title": {
-        "message": "Organiza mientras buscas"
+        "message": "Reordena con el teclado"
     },
     "ui_whats_new_accessibility_scale_body": {
-        "message": "Las acciones por lotes, Nueva carpeta y Deshacer siguen disponibles sobre los resultados y se ajustan a paneles estrechos. Si el panel de fuentes está contraído, se espera a que lo expandas sin recargar toda la página."
+        "message": "Enfoca el control de seis puntos y usa Arriba o Abajo para mover una posición, o Inicio o Fin para ir a un extremo. Se anuncia la nueva posición."
     },
     "ui_whats_new_drag_title": {
-        "message": "Arrastre con reflujo disponible"
+        "message": "Arrastra desde el control de seis puntos"
     },
     "ui_whats_new_drag_body": {
-        "message": "Al arrastrar varias fuentes por listas grandes, la vista previa se actualiza al desplazarte y el destino sigue la posición real de filas y carpetas. Actívalo en Ajustes; el modo clásico sigue siendo el predeterminado."
+        "message": "Arrastra una fuente o carpeta desde su control. El elemento sigue al puntero mientras las filas cercanas se apartan con suavidad."
     },
     "ui_whats_new_stability_title": {
-        "message": "Orden preciso y recuperación más segura"
+        "message": "Cancela o conserva el modo clásico"
     },
     "ui_whats_new_stability_body": {
-        "message": "Las fuentes y carpetas ahora incluyen controles de teclado para moverlas. Arrastrar, mover, importar, sincronizar y restaurar usan las mismas reglas de colocación, y los cambios rápidos de preferencias conservan el último valor confirmado."
+        "message": "Pulsa Esc o suelta fuera de la lista para cancelar y restaurar la disposición. El modo fluido es ahora el predeterminado; tu elección guardada del modo clásico se conserva."
     },
     "ui_whats_new_primary": {
         "message": "Entendido"

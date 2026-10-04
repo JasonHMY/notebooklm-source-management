@@ -615,7 +615,7 @@
         "message": "更新介绍"
     },
     "ui_whats_new_subtitle": {
-        "message": "26.9.8：保留整理结果，删除先确认，批量操作更及时。"
+        "message": "26.10.4：来源和文件夹拖拽排序更顺手、落点更准确。"
     },
     "ui_whats_new_transaction_title": {
         "message": "保留你的整理结果"
@@ -630,28 +630,28 @@
         "message": "删除单条来源前会显示完整标题并等待确认；“仅看此分组”只筛选界面，不改变回答使用的来源。标题中的“错误”或“失败”不再被误判为来源故障。"
     },
     "ui_whats_new_batch_storage_title": {
-        "message": "批量勾选及时反馈"
+        "message": "多选跨文件夹移动"
     },
     "ui_whats_new_batch_storage_body": {
-        "message": "大量启用或停用来源时，更快确认已生效的勾选；等待较久会显示进度，失败时保留重试入口。关闭扩展或切换笔记本会取消旧页面的排队操作。"
+        "message": "选中的来源可一起拖入其他文件夹或未分组。滚动长列表时，预览仍显示完整选中数量。"
     },
     "ui_whats_new_accessibility_scale_title": {
-        "message": "搜索时继续整理"
+        "message": "用键盘调整顺序"
     },
     "ui_whats_new_accessibility_scale_body": {
-        "message": "搜索结果上保留批量操作、新建分组和撤销入口，窄面板也可换行显示；来源面板折叠时等待展开，不再因此自动刷新整个页面。"
+        "message": "聚焦六点手柄后，用上、下方向键移动一位，或用 Home、End 移到两端；位置变化会朗读。"
     },
     "ui_whats_new_drag_title": {
-        "message": "避让拖拽正式可用"
+        "message": "从六点手柄开始拖拽"
     },
     "ui_whats_new_drag_body": {
-        "message": "跨窗口拖动多选来源时，预览会随列表更新；混合高度和多层文件夹按实际位置确定落点，取消后恢复原布局。可在设置中开启，默认仍为经典拖拽。"
+        "message": "拖动来源或文件夹的手柄，内容会跟随指针，相邻行以弹簧动画让位。"
     },
     "ui_whats_new_stability_title": {
-        "message": "精准排序与更安全的恢复"
+        "message": "随时取消，经典模式保留"
     },
     "ui_whats_new_stability_body": {
-        "message": "来源和文件夹新增键盘移动控制;拖拽、移动、导入、同步与恢复统一使用同一套放置规则,快速连续修改偏好时也会保留最后确认的值。"
+        "message": "按 Esc 或在列表外松手可取消并恢复布局。避让拖拽现为默认模式；已保存的经典模式选择会保留。"
     },
     "ui_whats_new_primary": {
         "message": "知道了"

@@ -111,27 +111,27 @@ describe('content modal whats-new', () => {
         expect(customRow).toHaveBeenCalledTimes(4);
         expect(customRow).toHaveBeenNthCalledWith(
             1,
-            'save',
-            'ui_whats_new_transaction_title',
-            'ui_whats_new_transaction_body'
+            'drag_indicator',
+            'ui_whats_new_drag_title',
+            'ui_whats_new_drag_body'
         );
         expect(customRow).toHaveBeenNthCalledWith(
             2,
-            'rule',
-            'ui_whats_new_native_safety_title',
-            'ui_whats_new_native_safety_body'
-        );
-        expect(customRow).toHaveBeenNthCalledWith(
-            3,
             'checklist',
             'ui_whats_new_batch_storage_title',
             'ui_whats_new_batch_storage_body'
         );
         expect(customRow).toHaveBeenNthCalledWith(
-            4,
-            'manage_search',
+            3,
+            'keyboard',
             'ui_whats_new_accessibility_scale_title',
             'ui_whats_new_accessibility_scale_body'
+        );
+        expect(customRow).toHaveBeenNthCalledWith(
+            4,
+            'undo',
+            'ui_whats_new_stability_title',
+            'ui_whats_new_stability_body'
         );
     });
 
