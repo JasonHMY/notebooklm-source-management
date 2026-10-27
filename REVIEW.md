@@ -1,16 +1,12 @@
-# REVIEW.md
+# Review instructions
 
-Review rules for this repository. Read this before reviewing any change, whether you are the Codex review thread or a Claude reviewer. Project rules live in [AGENTS.md](AGENTS.md) and [CLAUDE.md](CLAUDE.md); this file only adds what a review needs. Source: shared-memory decision `30-Decisions/2026-10-26-claude-commander-codex-executor.md`, section 审核做法.
+Read this before reviewing any change in this repository. Use the shared `code-review-practice` skill (`~/.agents/skills/code-review-practice`) for the general method: tiers, finding format, round limits and answering findings. This file adds only what is specific to this project; the project rules are in [AGENTS.md](AGENTS.md) and [CLAUDE.md](CLAUDE.md), and both override the skill.
 
-## Tiers
+## Deep tier here
 
-Pick the tier by what the change touches, not by who wrote it. When unsure, go one tier up.
+Treat these as deep: state, storage, reconcile/remap, import/export and migrations; anything that clicks or deletes on the Gemini Notebook page; permissions, privacy and logging; packaging and store releases.
 
-- **Light**: docs, comments, rule files or wording only. The main thread checks it; it is not sent to Codex on its own.
-- **Standard**: ordinary code. Codex reviews this round's diff and the code it directly touches.
-- **Deep**: data correctness (state, storage, reconcile/remap, import/export, migrations), privacy, credentials, native actions on Gemini Notebook (delete, rename, any automatic click), or release and store delivery. Codex does a full review against every item below.
-
-## Blocking in this project
+## What counts as blocking (P1) here
 
 - **Native automation**: deleting or renaming without re-resolving a fresh row and verifying its identity; any new automatic click on a native control; clicking a direct-action control such as auto-label or relabel; not failing closed when the target is ambiguous or missing.
 - **Data loss**: any path where a source that still exists can lose its folder placement, tags, enabled state or record; a stale write overwriting newer storage; a schema, storage-key or export-format change without a migration and a `docs/STORAGE_SCHEMA.md` update.
@@ -19,7 +15,9 @@ Pick the tier by what the change touches, not by who wrote it. When unsure, go o
 - **Release**: `manifest.json`, `package.json`, `package-lock.json`, README badge, CHANGELOG and zip versions disagree; files outside the allowlist, or conflict copies, in the package.
 - **Tests**: a fix whose new tests would also pass on the old code, or an acceptance item that is not actually met.
 
-## Check every round
+Style, naming and refactoring suggestions are P3 at most.
+
+## Always check
 
 - Native-click paths and their guards; identity, remap and drop paths; storage writes and the revision guard.
 - `developerLog`: 4-argument signature, valid level and category, sanitized details (counts, booleans, reasons, keys).
@@ -32,11 +30,8 @@ Pick the tier by what the change touches, not by who wrote it. When unsure, go o
 
 - Anything ESLint or CI already enforces, and formatting.
 - Generated or local files: `package-lock.json` churn, `release/`, `output/`, `coverage/`, `node_modules/`, `docs/superpowers/plans/`, `.claude/`, `*.local.*`, `.vscode/`.
-- Naming or style preferences that do not hide behavior (P3 at most).
 
-## Format and limits
+## Limits and evidence
 
-- Start with the number of findings and the verdict. If there is nothing, say so.
-- Each finding: P1, P2 or P3; blocking or non-blocking; `file:line`; evidence from the code, not guesses from names; impact; fix. Problems this round did not introduce go in a separate "pre-existing" list and do not block the round.
-- At most 5 minor (P3) findings per round. Report every location of the same problem at once.
-- At most three review rounds per change. From round 2, review only the new diff and whether last round's blocking items are fixed. Do not repeat a finding already raised, or one already declined, without new evidence.
+- At most 5 P3 findings per review.
+- Cite `file:line` for every behavior claim; don't infer behavior from names.
