@@ -3320,9 +3320,26 @@
             return true;
         }
 
+        // A record whose native row is gone (deleted elsewhere) or not hydrated yet. It has no
+        // native checkbox, so it is not batch-operable; only the extension's own tree can move it.
+        function isMissingPlaceholderSource(source) {
+            return Boolean(
+                source
+                && source.isPendingNativeHydration
+                && !source.element
+                && source.hasNativeCheckbox === false
+                && !source.isDisabled
+                && !source.isFailed
+                && !source.isLoading
+            );
+        }
+
         function canMoveSourceToUngrouped(sourceKey) {
             const source = getSourcesByKey().get(sourceKey);
-            return Boolean(isBatchOperableSource(source) && findParentGroupOfSource(sourceKey));
+            return Boolean(
+                (isBatchOperableSource(source) || isMissingPlaceholderSource(source))
+                && findParentGroupOfSource(sourceKey)
+            );
         }
 
         function moveSourceToUngrouped(sourceKey) {
@@ -3347,6 +3364,13 @@
             });
             if (!result?.ok || !result.changed) return false;
 
+            const source = getSourcesByKey().get(sourceKey);
+            if (isMissingPlaceholderSource(source)) {
+                // No native row exists, so leaving a disabled folder must not push its effective
+                // state to the page. Record the post-move state as already applied.
+                rebuildPlacementParentMap();
+                previousEffectiveStates.set(sourceKey, Boolean(isSourceEffectivelyEnabled(source)));
+            }
             finishKeyboardTreeMove('ui_keyboard_moved_ungrouped_toast', previousEffectiveStates);
             return true;
         }
