@@ -1259,68 +1259,6 @@ describe('manager launcher messaging', () => {
         }));
     });
 
-    it('clicks the hidden native label-view entry point before showing plugin label mode', async () => {
-        const sendResponse = jest.fn();
-        resolveNativeLabelSwitchResponseDelayTimer();
-        let phase = 'list';
-        const labelGroup = {
-            textContent: 'AI Group',
-            parentElement: null,
-            parentNode: null,
-            style: {},
-            __computedStyle: {},
-            getAttribute: jest.fn((attr) => {
-                if (attr === 'aria-label') return 'AI Group label';
-                if (attr === 'data-testid') return 'source-label-group';
-                return null;
-            }),
-            matches: jest.fn((selector) => selector.includes('source-label') || selector.includes('label-group')),
-            querySelector: jest.fn(() => null),
-            querySelectorAll: jest.fn(() => [])
-        };
-        const labelButton = {
-            textContent: 'label_auto 标签视图',
-            disabled: false,
-            style: {
-                visibility: 'hidden'
-            },
-            __computedStyle: {
-                visibility: 'hidden'
-            },
-            click: jest.fn(() => {
-                phase = 'label';
-            }),
-            getAttribute: jest.fn((attr) => (attr === 'aria-label' ? '按主题自动为来源加标签' : null)),
-            matches: jest.fn(() => false),
-            closest: jest.fn(() => null),
-            querySelectorAll: jest.fn(() => [])
-        };
-        const { panel } = createMockPanel({ visible: true, contentVisible: true });
-        labelGroup.parentElement = panel;
-        labelGroup.parentNode = panel;
-        panel.querySelectorAll = jest.fn((selector) => {
-            const value = String(selector);
-            if (value.includes('button') || value.includes('[role="button"]')) return [labelButton];
-            if (phase === 'label' && (value.includes('source-label') || value.includes('label-group'))) return [labelGroup];
-            return [];
-        });
-        global.document.querySelector = jest.fn((selector) => (
-            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
-        ));
-
-        handleMountedSourceViewSwitch('label', sendResponse);
-        await flushAsyncMessageResponse();
-
-        expect(labelButton.click).toHaveBeenCalledTimes(1);
-        expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({
-            success: true,
-            viewKind: 'label',
-            nativeClicked: true,
-            nativeSwitchReason: 'clicked_hidden'
-        }));
-        expect(global.document.documentElement.classList.remove).toHaveBeenCalledWith('sources-plus-manager-active');
-    });
-
     it('clicks the native label_auto header entry point when switching from plugin list display to label view', async () => {
         const sendResponse = jest.fn();
         resolveNativeLabelSwitchResponseDelayTimer();

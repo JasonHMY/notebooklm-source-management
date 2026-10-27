@@ -253,6 +253,7 @@
     const NATIVE_RENAME_WATCHER_DURATION_MS = 5000;
     const CURRENT_WELCOME_ONBOARDING_VERSION = 1;
     const WHATS_NEW_ENABLED = true;
+    const EXTENSION_ENABLED_STORAGE_KEY = 'extensionEnabled';
     const SOURCE_VIEW_LIST = 'list';
     const SOURCE_VIEW_LABEL = 'label';
     const QUICK_VIEW_KINDS = new Set(['ungrouped', 'disabled', 'recent', 'issues']);
@@ -287,6 +288,8 @@
         ]
     };
     const NATIVE_LABEL_ACTION_MENU_TRIGGER_PATTERN = /\blabel_auto\b|\bauto[-\s]?label\b|\bre[-\s]?label\b|自动.*标签|重新.*标签|按主题/i;
+    // Same wording without the legacy `label_auto` icon token, which is a plain view toggle.
+    const NATIVE_DIRECT_AUTO_LABEL_ACTION_PATTERN = /\bauto[-\s]?label\b|\bre[-\s]?label\b|自动.*标签|重新.*标签|按主题/i;
     const NATIVE_LABEL_RETURN_TO_LIST_PATTERN = /\breturn\s+to\s+list\s+view\b|\bback\s+to\s+list\s+view\b|\bswitch\s+to\s+list\s+view\b|\bview\s+as\s+list\b|返回.*列表|回到.*列表|列表视图|volver.*lista|vista\s+de\s+lista/i;
 
     // --- Helper Functions ---
@@ -3296,6 +3299,24 @@
         syncManagerWithPanelLifecycle();
     }
 
+    // Single entry for stored-flag changes (startup read and storage events), so the
+    // popup's forwarded message and the storage event never apply the same state twice.
+    function applyExtensionEnabledState(enabled) {
+        if (enabled === isExtensionEnabled) return false;
+        developerLog('info', 'lifecycle', 'extension_enabled_changed', { enabled });
+        if (enabled) {
+            enableManagerRuntime();
+        } else {
+            disableManagerRuntime();
+        }
+        return true;
+    }
+
+    function handleExtensionEnabledStorageChange(changes, areaName) {
+        if (areaName !== 'local' || !changes?.[EXTENSION_ENABLED_STORAGE_KEY]) return;
+        applyExtensionEnabledState(changes[EXTENSION_ENABLED_STORAGE_KEY].newValue !== false);
+    }
+
     function focusManagerPanel() {
         const status = getManagerStatus();
         if (!status.ready) {
@@ -3769,6 +3790,7 @@
     }
 
     function scoreNativeViewSwitchCandidate(element, targetViewKind, options = {}) {
+        if (isNativeDirectActionAutoLabelControl(element)) return 0;
         const isLabelHeaderAction = targetViewKind === SOURCE_VIEW_LABEL &&
             isNativeLabelActionMenuTrigger(element, options.sourcePanel || findSourcePanel(), {
                 includeHidden: Boolean(options.includeHidden)
@@ -3867,6 +3889,28 @@
         return false;
     }
 
+    function hasNativeMenuTriggerSignal(element) {
+        const classText = getElementClassText(element);
+        return (
+            String(element?.getAttribute?.('aria-haspopup') || '').toLowerCase() === 'menu' ||
+            classText.includes('mat-mdc-menu-trigger') ||
+            classText.includes('mat-menu-trigger')
+        );
+    }
+
+    // Gemini Notebook's header "Auto-label your sources" button runs Google's AI
+    // labeling the moment it is clicked. It is not a view switch, so no automatic or
+    // popup-driven path may ever click it. A menu-trigger variant only opens a menu
+    // (the legacy "Return to list view" flow) and stays allowed.
+    function isNativeDirectActionAutoLabelControl(element) {
+        return Boolean(element)
+            && !hasNativeMenuTriggerSignal(element)
+            && (
+                hasElementClass(element, 'label-auto-button') ||
+                NATIVE_DIRECT_AUTO_LABEL_ACTION_PATTERN.test(getNativeViewSwitchText(element))
+            );
+    }
+
     function isNativeLabelActionMenuTrigger(element, sourcePanel, options = {}) {
         if (!element || isElementInsideExtensionRoot(element)) return false;
         if (!isElementWithinNativeSourcePanel(element, sourcePanel)) return false;
@@ -3877,19 +3921,10 @@
         const role = String(element.getAttribute?.('role') || '').toLowerCase();
         if (tagName !== 'button' && role !== 'button') return false;
 
-        const classText = getElementClassText(element);
-        const text = getNativeViewSwitchText(element);
-        const hasMenuSignal = (
-            String(element.getAttribute?.('aria-haspopup') || '').toLowerCase() === 'menu' ||
-            classText.includes('mat-mdc-menu-trigger') ||
-            classText.includes('mat-menu-trigger')
-        );
-        const hasLabelActionSignal = (
+        return hasNativeMenuTriggerSignal(element) && (
             hasElementClass(element, 'label-auto-button') ||
-            NATIVE_LABEL_ACTION_MENU_TRIGGER_PATTERN.test(text)
+            NATIVE_LABEL_ACTION_MENU_TRIGGER_PATTERN.test(getNativeViewSwitchText(element))
         );
-        if (options.requireMenuSignal && !hasMenuSignal) return false;
-        return hasLabelActionSignal;
     }
 
     function findNativeLabelActionMenuTrigger(sourcePanel) {
@@ -3909,9 +3944,7 @@
                 seen.add(element);
                 return true;
             });
-        return candidates.find((element) => isNativeLabelActionMenuTrigger(element, sourcePanel, {
-            requireMenuSignal: true
-        })) || null;
+        return candidates.find((element) => isNativeLabelActionMenuTrigger(element, sourcePanel)) || null;
     }
 
     function findNativeLabelViewEntryPoint(sourcePanel, options = {}) {
@@ -3931,8 +3964,7 @@
                 return true;
             });
         return candidates.find((element) => isNativeLabelActionMenuTrigger(element, sourcePanel, {
-            includeHidden: Boolean(options.includeHidden),
-            requireMenuSignal: false
+            includeHidden: Boolean(options.includeHidden)
         })) || null;
     }
 
@@ -4037,6 +4069,10 @@
 
     function clickNativeSourceViewSwitchButton(button) {
         if (!button) return false;
+        if (isNativeDirectActionAutoLabelControl(button)) {
+            developerLog('warn', 'view_switch', 'native_auto_label_click_blocked', {});
+            return false;
+        }
         if (typeof button.click === 'function') {
             button.click();
             return true;
@@ -4562,7 +4598,10 @@
                 nativeClicked: false,
                 nativeSwitchReason,
                 nativeAlreadyActive: false,
-                reason: nativeSwitchReason
+                reason: nativeSwitchReason,
+                errorMessageKey: nextViewKind === SOURCE_VIEW_LABEL && nativeSwitchReason === 'source_view_switch_control_missing'
+                    ? 'popup_reason_label_view_unavailable'
+                    : undefined
             }));
         }
 
@@ -5217,7 +5256,9 @@
             GET_MANAGER_STATUS: () => getManagerStatus(),
             FOCUS_MANAGER: () => focusManagerPanel(),
             SWITCH_SOURCE_VIEW: (request) => switchNativeSourceView(request.viewKind),
-            DISABLE_MANAGER: () => disableManagerRuntime(),
+            DISABLE_MANAGER: () => (isExtensionEnabled
+                ? disableManagerRuntime()
+                : { success: true, disabled: true, saveStarted: false }),
             ENABLE_MANAGER: () => {
                 enableManagerRuntime();
                 return {
@@ -6567,7 +6608,7 @@
             observerRoot: document.body,
             timeoutMs: ROUTE_REINIT_RETRY_DELAY_MS
         }).then((panel) => {
-            if (recoveryToken !== activeRouteRecoveryToken) return;
+            if (recoveryToken !== activeRouteRecoveryToken || !isExtensionEnabled) return;
 
             bindPanelLifecycleHooks(panel);
 
@@ -6940,15 +6981,26 @@
     window.addEventListener('error', handleContentErrorLog);
     window.addEventListener('unhandledrejection', handleUnhandledRejectionLog);
 
+    if (chrome.storage?.onChanged && typeof chrome.storage.onChanged.addListener === 'function') {
+        chrome.storage.onChanged.addListener(handleExtensionEnabledStorageChange);
+    }
+
+    // Read the stored flag on every page (also the home page), so a later SPA entry
+    // into a notebook respects it.
+    const extensionEnabledStatus = requestExtensionEnabledStatus().then((enabled) => {
+        applyExtensionEnabledState(enabled);
+        return enabled;
+    });
+
     if (projectId) {
-        requestExtensionEnabledStatus().then((enabled) => {
-            isExtensionEnabled = enabled;
+        extensionEnabledStatus.then((enabled) => {
             if (!enabled) {
                 managerStatusReason = 'extension_disabled';
                 return;
             }
 
             return waitForElement(DEPS.panel).then(panel => {
+                if (!isExtensionEnabled) return;
                 if (!panel) {
                     managerStatusReason = 'source_panel_missing';
                     showCrashBanner(getMessage('ui_crash_missing_panel'));
@@ -7025,6 +7077,14 @@
 
         window.removeEventListener('error', handleContentErrorLog);
         window.removeEventListener('unhandledrejection', handleUnhandledRejectionLog);
+
+        try {
+            if (typeof chrome.storage?.onChanged?.removeListener === 'function') {
+                chrome.storage.onChanged.removeListener(handleExtensionEnabledStorageChange);
+            }
+        } catch (error) {
+            console.warn('GeminiNotebook-Source-Management: Storage listener cleanup failed.', error);
+        }
 
         try {
             if (
@@ -7413,6 +7473,7 @@
                 currentUrl = getCurrentLocationHref();
             },
             _setAwaitingInitialStateLoadForTest: (val) => { isAwaitingInitialStateLoad = Boolean(val); },
+            _restorePersistedSourceViewDisplayKindForTest: restorePersistedSourceViewDisplayKind,
             _setViewSwitchInProgressForTest: (val) => { viewSwitchInProgress = Boolean(val); },
             _setSourceDetailViewRequestedForTest: (val) => { sourceDetailViewRequested = Boolean(val); },
             _setSourceDetailViewReadySuppressionUntilForTest: (val) => { sourceDetailViewReadySuppressionUntil = Number(val) || 0; },

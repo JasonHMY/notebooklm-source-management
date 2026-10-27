@@ -336,6 +336,10 @@ const setupGlobalMocks = () => {
                 get: jest.fn((keys, cb) => {
                     if (typeof cb === 'function') cb({});
                 })
+            },
+            onChanged: {
+                addListener: jest.fn(),
+                removeListener: jest.fn()
             }
         }
     };

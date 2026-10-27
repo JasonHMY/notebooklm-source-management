@@ -372,6 +372,7 @@ manifest.json
 │       ├── tests/content/content-diagnostics.test.js
 │       ├── tests/content/content-source-view-switch-controller.test.js
 │       ├── tests/content/content-lifecycle.test.js
+│       ├── tests/content/content-index-guards.test.js
 │       ├── tests/content/content-module.test.js
 │       └── tests/smoke/extension-smoke.spec.js
 ├── 来源扫描 / 来源描述符
@@ -397,6 +398,7 @@ manifest.json
 │   │   ├── 读取 native checkbox / aria-checked
 │   │   ├── 切回列表前同步标签组选择
 │   │   ├── 持久化并恢复上次 list/label view
+│   │   ├── 不点击直接执行的“按主题自动分类”按钮（`label-auto-button` 等非菜单控件），找不到真正的视图切换就回退列表显示
 │   │   ├── 折叠标签组隐藏 rows 读取
 │   │   └── partial sync 保护旧状态
 │   ├── 先看
@@ -414,6 +416,7 @@ manifest.json
 │       ├── tests/content/content-source-partial-sync-guard.test.js
 │       ├── tests/content/content-source-view-switch-controller.test.js
 │       ├── tests/content/content-lifecycle.test.js
+│       ├── tests/content/content-index-guards.test.js
 │       └── tests/popup.test.js
 ├── 分组树 / 拖拽 / 批量模式
 │   ├── 负责

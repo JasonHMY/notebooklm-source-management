@@ -56,6 +56,9 @@
     "popup_source_view_switch_failed": {
         "message": "Gemini Notebook's source view switch was not found. Expand the source panel first."
     },
+    "popup_reason_label_view_unavailable": {
+        "message": "Gemini Notebook has no label view switch in this notebook. The extension never triggers Auto-label for you."
+    },
     "popup_title_ready": {
         "message": "Source manager is ready in this notebook"
     },

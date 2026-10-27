@@ -178,7 +178,7 @@ Popup/background -> content
 
 `GET_MANAGER_STATUS` should report whether the manager is ready, the current reason when it is not ready, notebook/project context, and source view controls.
 
-`SWITCH_SOURCE_VIEW` requires a ready, mounted manager, matching the popup control availability. It preserves label-view selection state before clicking Gemini Notebook native view controls. The operation and every polling/finalization continuation are bound to the current notebook, route, request generation and manager instance. A normal native view control may replace its own host DOM: only that explicitly clicked, same-notebook request may hand off within the original confirmation deadline to a newly mounted manager, after reattachment and native target-view confirmation. Old callbacks never scan or save through a new token directly. Disable, route change, a newer request or an unconfirmed target cancels the old operation without applying state to a later context.
+`SWITCH_SOURCE_VIEW` requires a ready, mounted manager, matching the popup control availability. It preserves label-view selection state before clicking Gemini Notebook native view controls. It never clicks a direct-action auto-label control (class `label-auto-button` or auto-label/relabel wording without `aria-haspopup="menu"`): with no genuine switch the response is `success: false`, `reason: source_view_switch_control_missing`, and for the label view `errorMessageKey: popup_reason_label_view_unavailable`. The operation and every polling/finalization continuation are bound to the current notebook, route, request generation and manager instance. A normal native view control may replace its own host DOM: only that explicitly clicked, same-notebook request may hand off within the original confirmation deadline to a newly mounted manager, after reattachment and native target-view confirmation. Old callbacks never scan or save through a new token directly. Disable, route change, a newer request or an unconfirmed target cancels the old operation without applying state to a later context.
 
 The popup treats an action as complete only when the content response contains `success: true`. A missing response, `null`, or an object without explicit success is a retryable failure: the popup remains open and must not display the requested state as completed.
 
@@ -193,6 +193,8 @@ The popup treats an action as complete only when the content response contains `
   "saveStarted": true
 }
 ```
+
+Content scripts also observe `chrome.storage.local` `extensionEnabled` through `storage.onChanged` and read it at startup (including on the home page), so every open tab converges even when the popup only forwards the message to its active tab. A duplicate disable (storage event plus forwarded message) is a no-op and answers `{ "success": true, "disabled": true, "saveStarted": false }`.
 
 Destroy, route teardown, panel collapse, and source-detail suspension use the same flush-before-cleanup ordering. Panel collapse and source-detail suspension additionally preserve the in-memory reattach snapshot.
 

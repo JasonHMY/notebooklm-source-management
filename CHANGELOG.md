@@ -39,6 +39,10 @@
 - **冒烟测试启动更稳 (Steadier Smoke Harness)**: **影响**: 对扩展使用无可感知变化。扩展 ID 改为从 MV3 service worker 取得，不再轮询注册而偶发超时；smoke 默认使用 Playwright 自带的 Chromium（可用 `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` 覆盖），启动时打印浏览器版本；9 个互不依赖的 `describe.serial` 改为普通 `describe`，一次环境失败不再连带跳过其余用例。
 - **发布包拦截冲突副本 (Reject Conflict Copies in Package)**: **影响**: 对扩展使用无可感知变化。打包时如果 `src/` 等打包目录里出现 Finder/iCloud 冲突副本（如 `index 2.js`、`icon 2.png`），会直接报错，避免重复或过期文件进入发布 zip。
 
+### Fixed
+- **不再误点“按主题自动分类” (Never Click Auto-Label)**: **影响**: 打开笔记本或在弹窗切换标签视图时，插件不会再触发 Google 的 AI 自动分类。Gemini Notebook 现在的 “Auto-label your sources by topic” 按钮点下去就会执行，旧的视图切换逻辑会把它当成标签视图入口：保存的视图是标签视图时，每次打开笔记本都会自动点它，弹窗切换标签视图也会点到它。现在所有查找和点击入口都排除这类直接执行的按钮；找不到真正的视图切换时不点击、回退列表显示，弹窗提示当前笔记本没有标签视图切换。依赖菜单的旧版标签流程不受影响。
+- **关闭开关在所有入口生效 (Honor the Disable Toggle Everywhere)**: **影响**: 在弹窗里关闭插件后，从首页点进笔记本、或在其他窗口和标签页里的笔记本，都不会再显示管理器、隐藏原生列表或继续保存；重新打开后各标签页自动恢复。插件启动时在任何页面都读取开关，并监听 `chrome.storage` 变化。
+
 ## [2026-10-04] [26.10.4]
 
 ### Added

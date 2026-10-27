@@ -56,6 +56,9 @@
     "popup_source_view_switch_failed": {
         "message": "No se encontró el selector de vista de fuentes de Gemini Notebook. Expande primero el panel de fuentes."
     },
+    "popup_reason_label_view_unavailable": {
+        "message": "Gemini Notebook no ofrece un selector de vista de etiquetas en este cuaderno. La extensión nunca activa el etiquetado automático por ti."
+    },
     "popup_title_ready": {
         "message": "El gestor de fuentes está listo en este cuaderno"
     },

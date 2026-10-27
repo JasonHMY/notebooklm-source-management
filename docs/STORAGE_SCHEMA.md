@@ -7,7 +7,7 @@ This document defines the extension storage contract. Keep it updated whenever a
 ```text
 chrome.storage.local
 ├── extensionEnabled
-│   └── Global boolean. Missing means enabled.
+│   └── Global boolean. Missing means enabled. Content scripts read it at startup and observe it with `storage.onChanged` (read-only).
 ├── sourcesPlusState_<projectId>
 │   └── Per-notebook primary manager state.
 ├── sourcesPlusState_<projectId>__backup

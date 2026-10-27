@@ -56,6 +56,9 @@
     "popup_source_view_switch_failed": {
         "message": "没有找到 Gemini Notebook 的来源视图切换按钮。请先在页面中展开来源面板。"
     },
+    "popup_reason_label_view_unavailable": {
+        "message": "当前笔记本里没有 Gemini Notebook 的标签视图切换按钮。扩展不会替你触发自动标签。"
+    },
     "popup_title_ready": {
         "message": "当前笔记本中的来源管理器已就绪"
     },
