@@ -39,6 +39,7 @@
 - **冒烟测试启动更稳 (Steadier Smoke Harness)**: **影响**: 对扩展使用无可感知变化。扩展 ID 改为从 MV3 service worker 取得，不再轮询注册而偶发超时；smoke 默认使用 Playwright 自带的 Chromium（可用 `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` 覆盖），启动时打印浏览器版本；9 个互不依赖的 `describe.serial` 改为普通 `describe`，一次环境失败不再连带跳过其余用例。刷新后恢复标签视图会让测试页面重建，设置按钮改为轮询等待出现，不再偶发 “Settings button missing”。
 - **发布包拦截冲突副本 (Reject Conflict Copies in Package)**: **影响**: 对扩展使用无可感知变化。打包时如果 `src/` 等打包目录里出现 Finder/iCloud 冲突副本（如 `index 2.js`、`icon 2.png`，或 `content 2/` 这样的整个目录），会直接报错，避免重复或过期文件进入发布 zip。
 - **审核按风险分档 (Tiered Code Review)**: **影响**: 对扩展使用无可感知变化。新增根目录 `REVIEW.md`，只写本项目特有的部分：哪些改动算深档、阻断项、每轮必查、不用报的内容和小意见上限；通用的分档、意见格式和“同一改动最多审三轮”交给共享 skill `code-review-practice`；`AGENTS.md` 的 Agent Roles 改为按档送 Codex 审核，送审写明风险和回滚，送审前先由没写代码的一方审差异；`CLAUDE.md` 用 `@AGENTS.md` 引入项目规则，让 `/code-review` 也能读到。依据共享记忆里用户确认的“审核做法”。
+- **更换 Codex 审核线程 (Rotate the Codex Review Thread)**: **影响**: 对扩展使用无可感知变化。第一个专门审核线程上下文接近用满，按分工规则新开 `01a17ce4-d3bf-7c10-b322-e56d2d5585cf` 接替，`AGENTS.md` 和 `CLAUDE.md` 已更新，旧线程留作历史；仓库同时从 iCloud 同步的桌面搬到 `~/Developer/notebooklm-source-management`。
 
 
 ### Fixed
