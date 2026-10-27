@@ -120,7 +120,7 @@
                 );
                 const text = String(element?.textContent || '');
                 if (/(?![0-9])\p{Nd}/u.test(text)) return null;
-                const match = /^[^0-9]*?(\d{1,3}(?:[,.   ]\d{3})+|\d+)(?![,.   ]?\d)/.exec(text);
+                const match = /^[^0-9]*?(\d{1,3}(?:[,. \u00A0\u202F]\d{3})+|\d+)(?![,. \u00A0\u202F]?\d)/.exec(text);
                 if (!match) return null;
                 const total = Number.parseInt(match[1].replace(/\D/g, ''), 10);
                 return Number.isSafeInteger(total) && total >= 0 ? total : null;

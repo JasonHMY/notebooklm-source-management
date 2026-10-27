@@ -1791,10 +1791,13 @@
          * refs. The two scans must also be independent: they need different native
          * observation generations (a change the page made outside the extension's own
          * root happened in between) and at least HEADER_REMOVAL_MIN_INTERVAL_MS apart, so
-         * a rescan the extension triggers on the same DOM never confirms. The header must
-         * be fresh for the current notebook (isNativeSourceTotalFresh), otherwise nothing is
-         * recorded or confirmed. Anything else clears or replaces the record, returns an
-         * empty set, and the caller keeps its fail-closed behavior.
+         * a rescan the extension triggers on the same DOM never confirms. While the evidence
+         * keeps matching, a too-early or same-generation scan leaves the original record
+         * (generation and recordedAt) untouched, so the first matching scan that is both
+         * newer and at least that interval later confirms. The header must be fresh for the
+         * current notebook (isNativeSourceTotalFresh), otherwise nothing is recorded or
+         * confirmed. A mismatch, non-fresh header or incomplete scan clears or replaces the
+         * record, returns an empty set, and the caller keeps its fail-closed behavior.
          */
         function findHeaderConfirmedRemovedRefs(
             storedEntries,
@@ -1859,16 +1862,20 @@
                 generation: getNativeObservationGeneration(),
                 recordedAt: getNow()
             };
-            if (
-                isSameHeaderRemovalEvidence(pendingHeaderRemoval, evidence)
-                && evidence.generation > pendingHeaderRemoval.generation
-                && evidence.recordedAt - pendingHeaderRemoval.recordedAt >= HEADER_REMOVAL_MIN_INTERVAL_MS
-            ) {
-                resetPendingHeaderRemoval();
+            if (isSameHeaderRemovalEvidence(pendingHeaderRemoval, evidence)) {
+                if (
+                    evidence.generation > pendingHeaderRemoval.generation
+                    && evidence.recordedAt - pendingHeaderRemoval.recordedAt >= HEADER_REMOVAL_MIN_INTERVAL_MS
+                ) {
+                    resetPendingHeaderRemoval();
+                    return removedKeys;
+                }
+                // Same page generation or too soon: an extension-triggered rescan of the same DOM
+                // is not a second observation. Keep the original record (and its clock) so scans
+                // arriving less than a second apart cannot postpone confirmation forever.
+                removedKeys.clear();
                 return removedKeys;
             }
-            // Same page generation or too soon: an extension-triggered rescan of the same DOM is
-            // not a second observation, so it replaces the record instead of confirming it.
             pendingHeaderRemoval = evidence;
             developerLog('info', 'source_sync', 'first_load_removal_pending', {
                 count: removedKeys.size,

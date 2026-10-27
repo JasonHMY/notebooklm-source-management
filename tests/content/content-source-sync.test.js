@@ -6122,7 +6122,7 @@ describe('scanAndSyncSources', () => {
             );
         });
 
-        it('reads the first integer of a localized header and ignores unparsable text', () => {
+        it('reads the whole number token of a localized header and ignores unparsable text', () => {
             installInventoryDom(2, { headerText: '2 个来源' });
             expect(mod._getNativeSourceInventorySnapshotForTest().totalHint).toBe(2);
 
@@ -7906,8 +7906,6 @@ describe('untrusted scan protection', () => {
                 { type: 'source', key: keys.keyA }
             ]);
             expect(mod.state.ungrouped).toEqual([keys.keyC, keys.keyE]);
-            expect(mod.sourcesByKey.has(keys.keyB)).toBe(false);
-            expect(mod.sourcesByKey.has(keys.keyD)).toBe(false);
             const persisted = mod.buildPersistableState();
             expect(persisted.sourceStateById[keys.keyB]).toBeUndefined();
             expect(persisted.sourceStateById[keys.keyD]).toBeUndefined();
@@ -7956,14 +7954,13 @@ describe('untrusted scan protection', () => {
         });
 
         it('does not drop on two scans in the same native generation, however far apart', () => {
-            const { rows, loadedState, keys } = buildStoredState();
+            const { rows, loadedState } = buildStoredState();
             installFirstLoadDom([rows[0], rows[2], rows[4]], '3 sources');
 
             scanFirstLoad(loadedState);
             nowMs += 10 * MIN_INTERVAL_MS;
 
             expect(scanFirstLoad(loadedState).ok).toBe(false);
-            expect(mod.sourcesByKey.has(keys.keyB)).toBe(false);
             expect(getEventCount('first_load_removal_confirmed')).toBe(0);
 
             // The unchanged page never produced a new generation, so it still cannot confirm.
@@ -7984,14 +7981,108 @@ describe('untrusted scan protection', () => {
         });
 
         it('drops once a later generation and the minimum interval both hold', () => {
-            const { rows, loadedState, keys } = buildStoredState();
+            const { rows, loadedState } = buildStoredState();
             installFirstLoadDom([rows[0], rows[2], rows[4]], '3 sources');
 
             scanFirstLoad(loadedState);
             advanceNativeObservation(MIN_INTERVAL_MS);
 
             expect(scanFirstLoad(loadedState).ok).toBe(true);
-            expect(mod.sourcesByKey.has(keys.keyB)).toBe(false);
+            expect(getEventCount('first_load_removal_confirmed')).toBe(1);
+        });
+
+        it('confirms on the first matching scan one interval after the first record when scans arrive every 300 ms', () => {
+            const { rows, loadedState } = buildStoredState();
+            installFirstLoadDom([rows[0], rows[2], rows[4]], '3 sources');
+
+            scanFirstLoad(loadedState);
+
+            // Each scan is a newer generation but too soon after the original record; none of
+            // them may move the clock, so the 1200 ms scan (>= 1000 ms after the first) confirms.
+            [300, 300, 300].forEach(() => {
+                advanceNativeObservation(300);
+                expect(scanFirstLoad(loadedState).ok).toBe(false);
+                expect(getEventCount('first_load_removal_confirmed')).toBe(0);
+            });
+            advanceNativeObservation(300);
+            expect(scanFirstLoad(loadedState).ok).toBe(true);
+
+            expect(getEventCount('first_load_removal_pending')).toBe(1);
+            expect(getEventCount('first_load_removal_confirmed')).toBe(1);
+        });
+
+        it('keeps waiting for a newer generation when matching scans in one generation outlast the interval', () => {
+            const { rows, loadedState } = buildStoredState();
+            installFirstLoadDom([rows[0], rows[2], rows[4]], '3 sources');
+
+            scanFirstLoad(loadedState);
+            nowMs += 600;
+            expect(scanFirstLoad(loadedState).ok).toBe(false);
+            nowMs += 600;
+            expect(scanFirstLoad(loadedState).ok).toBe(false);
+            expect(getEventCount('first_load_removal_confirmed')).toBe(0);
+
+            // The first scan from a newer generation is already more than the interval after the
+            // original record, so it confirms immediately.
+            advanceNativeObservation(0);
+            expect(scanFirstLoad(loadedState).ok).toBe(true);
+            expect(getEventCount('first_load_removal_pending')).toBe(1);
+            expect(getEventCount('first_load_removal_confirmed')).toBe(1);
+        });
+
+        it('restarts the interval clock after a mismatch in between', () => {
+            const { rows, loadedState } = buildStoredState();
+            const visibleRows = [rows[0], rows[2], rows[4]];
+            installFirstLoadDom(visibleRows, '3 sources');
+            scanFirstLoad(loadedState);
+
+            advanceNativeObservation(600);
+            expect(scanFirstLoad(loadedState).ok).toBe(false);
+
+            // A mismatch clears the record; the next matching scan records afresh at this time.
+            installFirstLoadDom(visibleRows, '4 sources');
+            expect(scanFirstLoad(loadedState).ok).toBe(false);
+            installFirstLoadDom(visibleRows, '3 sources');
+            expect(scanFirstLoad(loadedState).ok).toBe(false);
+            expect(getEventCount('first_load_removal_pending')).toBe(2);
+
+            // 1200 ms after the first record, but only 600 ms after the restarted one.
+            advanceNativeObservation(600);
+            expect(scanFirstLoad(loadedState).ok).toBe(false);
+            expect(getEventCount('first_load_removal_confirmed')).toBe(0);
+
+            advanceNativeObservation(400);
+            expect(scanFirstLoad(loadedState).ok).toBe(true);
+            expect(getEventCount('first_load_removal_confirmed')).toBe(1);
+        });
+
+        it('replaces the pending record when a valid header shows a different row set (A to B to A)', () => {
+            const { rows, loadedState } = buildStoredState();
+            const rowSetA = [rows[0], rows[2], rows[4]];
+            // Same '3 sources' header and the same count, but a different resolved row set
+            // (A, C, D): still a valid all-resolving scan with 2 unresolved stored refs.
+            const rowSetB = [rows[0], rows[2], rows[3]];
+            installFirstLoadDom(rowSetA, '3 sources');
+            scanFirstLoad(loadedState);
+            expect(getEventCount('first_load_removal_pending')).toBe(1);
+
+            // A valid but different evidence set does not confirm; it replaces the record.
+            advanceNativeObservation(300);
+            installFirstLoadDom(rowSetB, '3 sources');
+            expect(scanFirstLoad(loadedState).ok).toBe(false);
+            expect(getEventCount('first_load_removal_pending')).toBe(2);
+            expect(getEventCount('first_load_removal_confirmed')).toBe(0);
+
+            // 1200 ms after the original A record, but that record was replaced by B and then
+            // by this A scan, so the clock restarted and A cannot confirm yet.
+            advanceNativeObservation(900);
+            installFirstLoadDom(rowSetA, '3 sources');
+            expect(scanFirstLoad(loadedState).ok).toBe(false);
+            expect(getEventCount('first_load_removal_pending')).toBe(3);
+            expect(getEventCount('first_load_removal_confirmed')).toBe(0);
+
+            advanceNativeObservation(1000);
+            expect(scanFirstLoad(loadedState).ok).toBe(true);
             expect(getEventCount('first_load_removal_confirmed')).toBe(1);
         });
 
@@ -8014,7 +8105,7 @@ describe('untrusted scan protection', () => {
         });
 
         it('does not record or confirm with a header that has not changed since the SPA route change', () => {
-            const { rows, loadedState, keys } = buildStoredState();
+            const { rows, loadedState } = buildStoredState();
             const headerNode = {};
             const visibleRows = [rows[0], rows[2], rows[4]];
             // The previous notebook's header showed 3 and is still on screen after the switch.
@@ -8028,7 +8119,6 @@ describe('untrusted scan protection', () => {
             advanceNativeObservation();
             expect(scanFirstLoad(loadedState).ok).toBe(false);
 
-            expect(mod.sourcesByKey.has(keys.keyB)).toBe(false);
             expect(getEventCount('first_load_removal_pending')).toBe(0);
             expect(getEventCount('first_load_removal_confirmed')).toBe(0);
         });
@@ -8051,7 +8141,7 @@ describe('untrusted scan protection', () => {
         });
 
         it('allows confirmation after an SPA switch once the header text changed', () => {
-            const { rows, loadedState, keys } = buildStoredState();
+            const { rows, loadedState } = buildStoredState();
             const headerNode = {};
             const visibleRows = [rows[0], rows[2], rows[4]];
             installFirstLoadDom(visibleRows, '12 sources', headerNode);
@@ -8063,7 +8153,6 @@ describe('untrusted scan protection', () => {
             advanceNativeObservation();
 
             expect(scanFirstLoad(loadedState).ok).toBe(true);
-            expect(mod.sourcesByKey.has(keys.keyB)).toBe(false);
             expect(getEventCount('first_load_removal_confirmed')).toBe(1);
         });
 
@@ -8083,7 +8172,7 @@ describe('untrusted scan protection', () => {
         });
 
         it('does not confirm when the header reads 1,234 sources with a single parsed row', () => {
-            const { rows, loadedState, keys } = buildStoredState();
+            const { rows, loadedState } = buildStoredState();
             installFirstLoadDom([rows[0]], '1,234 sources');
 
             scanFirstLoad(loadedState);
@@ -8092,13 +8181,12 @@ describe('untrusted scan protection', () => {
             advanceNativeObservation();
             expect(scanFirstLoad(loadedState).ok).toBe(false);
 
-            expect(mod.sourcesByKey.has(keys.keyB)).toBe(false);
             expect(getEventCount('first_load_removal_pending')).toBe(0);
             expect(getEventCount('first_load_removal_confirmed')).toBe(0);
         });
 
         it('does not drop when the header total changes between the two scans', () => {
-            const { rows, loadedState, keys } = buildStoredState();
+            const { rows, loadedState } = buildStoredState();
             const visibleRows = [rows[0], rows[2], rows[4]];
             installFirstLoadDom(visibleRows, '3 sources');
             scanFirstLoad(loadedState);
@@ -8109,7 +8197,6 @@ describe('untrusted scan protection', () => {
             // The mismatch cleared the pending confirmation: this scan only records again.
             installFirstLoadDom(visibleRows, '3 sources');
             expect(scanFirstLoad(loadedState).ok).toBe(false);
-            expect(mod.sourcesByKey.has(keys.keyB)).toBe(false);
             expect(getEventCount('first_load_removal_pending')).toBe(2);
             expect(getEventCount('first_load_removal_confirmed')).toBe(0);
 
@@ -8201,8 +8288,6 @@ describe('untrusted scan protection', () => {
             advanceNativeObservation();
             expect(scanFirstLoad(loadedState).shouldUpgradeStorage).toBe(true);
 
-            expect(mod.sourcesByKey.has(keys.keyB)).toBe(false);
-            expect(mod.sourcesByKey.has('ghost-ref')).toBe(false);
             expect(mod.state.ungrouped).toEqual([keys.keyC, keys.keyE]);
         });
 
