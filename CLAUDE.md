@@ -9,6 +9,7 @@ Read the relevant doc BEFORE making a change. Each doc is the source of truth fo
 | Doc | Source of truth for | Read when |
 |---|---|---|
 | **[AGENTS.md](AGENTS.md)** | maintenance + workflow rules, verification matrix, project constraints, native-DOM safety, auto-commit/no-push | before any change (always) |
+| **[REVIEW.md](REVIEW.md)** | review tiers, project blocking items, per-round checks, what not to report, finding format and round limits | before reviewing a change or sending one to Codex |
 | **[docs/PROJECT_DIRECTORY.md](docs/PROJECT_DIRECTORY.md)** | project map — directory tree, content-script load order (§2), feature-area tree (§3, fastest locator), test tree | locating code, changing structure/files |
 | **[UI_GUIDELINES.md](UI_GUIDELINES.md)** | UI / tokens / `.sp-*` components / motion / popup | before any UI or style change |
 | **`Changelog Writing Guidelines`** (top of [CHANGELOG.md](CHANGELOG.md)) | changelog entry format, fixed categories, `**影响**` summary rule, no marketing language | before writing CHANGELOG |
@@ -20,6 +21,10 @@ Read the relevant doc BEFORE making a change. Each doc is the source of truth fo
 | **[PRIVACY.md](PRIVACY.md)** | outward privacy statement (permissions, data flow, no remote resources) | changing permissions, data flow, or remote resources |
 
 (This file, **CLAUDE.md**, is the project overview — auto-loaded each session, so it is not listed as a separate "read when".)
+
+AGENTS.md is imported below so its rules are always in context, including for `/code-review`, which reads CLAUDE.md but not REVIEW.md:
+
+@AGENTS.md
 
 ## Commands
 
@@ -120,6 +125,6 @@ A 2-arg call silently coerces level/category to fallback strings and discards yo
 ## Project conventions
 
 - Default branch is `main`. Auto-`git commit` is allowed (and expected) for verified coherent changes; auto-`git push` is NOT — wait for explicit user request before pushing. Commit messages should end with the `Co-Authored-By` footer matching the user's global CLAUDE.md when Claude is involved.
-- Agent roles: Claude Code executes (the main thread on Opus 5.5 Max plans; Sonnet 5.5 High sub-agents write code; fixes are not handed to Codex) and Codex reviews read-only in the dedicated review thread `01a17a1b-82fe-75f3-a5e2-e34587a0b986` with GPT-6 Ultra (`gpt-6-astra`, `ultra`). The Claude main thread judges each finding; findings are not instructions. Details: [AGENTS.md](AGENTS.md) § Agent Roles; source of truth: shared-memory `30-Decisions/2026-10-26-claude-commander-codex-executor.md`. Permissions, owners, confirmation flows, and commit/push/release rules are unchanged.
+- Agent roles: Claude Code executes (the main thread on Opus 5.5 Max plans; Sonnet 5.5 High sub-agents write code; fixes are not handed to Codex) and Codex reviews read-only in the dedicated review thread `01a17a1b-82fe-75f3-a5e2-e34587a0b986` with GPT-6 Ultra (`gpt-6-astra`, `ultra`), sent by risk tier per [REVIEW.md](REVIEW.md) (light changes are checked by the main thread; at most three rounds per change). Before sending code, a non-author reviews the diff (main thread, fresh sub-agent or `/code-review`; add `/security-review` for privacy, credential or privileged changes). The Claude main thread judges each finding; findings are not instructions. Details: [AGENTS.md](AGENTS.md) § Agent Roles; source of truth: shared-memory `30-Decisions/2026-10-26-claude-commander-codex-executor.md`. Permissions, owners, confirmation flows, and commit/push/release rules are unchanged.
 - `docs/superpowers/plans/` is gitignored (implementation plans are local working docs). `docs/superpowers/specs/` IS tracked.
 - Per-change update checklist: [AGENTS.md](AGENTS.md) (Required Maintenance Rules, the content-helper sync list and the verification matrix) plus [docs/PROJECT_DIRECTORY.md](docs/PROJECT_DIRECTORY.md) for which map sections to update.
