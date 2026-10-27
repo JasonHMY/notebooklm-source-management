@@ -618,7 +618,7 @@
         "message": "What's new"
     },
     "ui_whats_new_subtitle": {
-        "message": "26.10.4: Drag sources and folders with smoother, more precise reordering."
+        "message": "26.10.27: Safer with Gemini Notebook, and deleting sources works again."
     },
     "ui_whats_new_transaction_title": {
         "message": "Keep your organization"
@@ -633,28 +633,28 @@
         "message": "Deleting one source now shows its full title and asks for confirmation. Show only this folder filters the view without changing the sources used for answers. Words like error or failure in a title no longer mark a healthy source as failed."
     },
     "ui_whats_new_batch_storage_title": {
-        "message": "Move selections across folders"
+        "message": "Turning it off applies everywhere"
     },
     "ui_whats_new_batch_storage_body": {
-        "message": "Drag selected sources together into another folder or Ungrouped. The preview shows the full selection count as you scroll long lists."
+        "message": "Turn the extension off in the popup and all tabs follow, including notebooks opened from the home page. Turn it on again and they come back."
     },
     "ui_whats_new_accessibility_scale_title": {
-        "message": "Reorder with the keyboard"
+        "message": "Deleting sources works again"
     },
     "ui_whats_new_accessibility_scale_body": {
-        "message": "Focus a six-dot handle, then use Up or Down to move one place, or Home or End to reach an edge. Position changes are announced."
+        "message": "Before deleting, the extension checks the source total Google shows. If it doesn't match, nothing is deleted and you'll see a clear message."
     },
     "ui_whats_new_drag_title": {
-        "message": "Drag by the six-dot handle"
+        "message": "No more auto-label clicks"
     },
     "ui_whats_new_drag_body": {
-        "message": "Drag a source or folder by its handle. The item follows your pointer while neighboring rows spring aside."
+        "message": "The extension no longer clicks Google's Auto-label button. Restoring the label view can't start an AI re-label by accident."
     },
     "ui_whats_new_stability_title": {
-        "message": "Cancel or keep Classic"
+        "message": "Your folders stay put"
     },
     "ui_whats_new_stability_body": {
-        "message": "Press Esc or release outside the list to cancel and restore the layout. Smooth reflow is now the default; your saved Classic choice is preserved."
+        "message": "Unrecognized sources stay in their folders, and Gemini's checkmarks are left alone. Toggles no longer show a false save error. Sources deleted elsewhere can be cleaned up from the menu with Move to Ungrouped."
     },
     "ui_whats_new_primary": {
         "message": "Got it"

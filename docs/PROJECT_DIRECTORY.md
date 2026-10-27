@@ -72,7 +72,7 @@ GeminiNotebook-Source-Management
 │   │   ├── content-modal-welcome.js
 │   │   │   └── 首次欢迎 modal 渲染、按钮和反馈入口 helper
 │   │   ├── content-modal-whats-new.js
-│   │   │   └── 更新介绍 modal 渲染、变更亮点和反馈入口 helper；版本从 manifest 读取，当前 `26.10.4` 发布文案由 _locales 三语消息提供，展示手柄/多选/键盘/取消恢复四项
+│   │   │   └── 更新介绍 modal 渲染、变更亮点和反馈入口 helper；版本从 manifest 读取，当前 `26.10.27` 发布文案由 _locales 三语消息提供，展示不再误点自动分类/关闭开关全标签页生效/从插件删除来源恢复/整理结果更稳四项
 │   │   ├── content-modal-tag-filter.js
 │   │   │   └── tag filter modal：标签搜索、结果计数、无匹配状态、aria-pressed 选中状态和过滤回调 helper
 │   │   ├── content-modal-move.js

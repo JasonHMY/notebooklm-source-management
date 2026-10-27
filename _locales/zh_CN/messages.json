@@ -618,7 +618,7 @@
         "message": "更新介绍"
     },
     "ui_whats_new_subtitle": {
-        "message": "26.10.4：来源和文件夹拖拽排序更顺手、落点更准确。"
+        "message": "26.10.27：和 Gemini Notebook 配合更稳，从插件删除来源恢复可用。"
     },
     "ui_whats_new_transaction_title": {
         "message": "保留你的整理结果"
@@ -633,28 +633,28 @@
         "message": "删除单条来源前会显示完整标题并等待确认；“仅看此分组”只筛选界面，不改变回答使用的来源。标题中的“错误”或“失败”不再被误判为来源故障。"
     },
     "ui_whats_new_batch_storage_title": {
-        "message": "多选跨文件夹移动"
+        "message": "关闭后所有标签页同步生效"
     },
     "ui_whats_new_batch_storage_body": {
-        "message": "选中的来源可一起拖入其他文件夹或未分组。滚动长列表时，预览仍显示完整选中数量。"
+        "message": "在弹窗里关掉插件后，所有标签页都会跟着关，从首页点进笔记本也一样。重新打开后自动恢复。"
     },
     "ui_whats_new_accessibility_scale_title": {
-        "message": "用键盘调整顺序"
+        "message": "从插件删除来源恢复可用"
     },
     "ui_whats_new_accessibility_scale_body": {
-        "message": "聚焦六点手柄后，用上、下方向键移动一位，或用 Home、End 移到两端；位置变化会朗读。"
+        "message": "删除前会先核对 Google 显示的来源总数，对不上就不删，并明确提示。"
     },
     "ui_whats_new_drag_title": {
-        "message": "从六点手柄开始拖拽"
+        "message": "不再误点自动分类"
     },
     "ui_whats_new_drag_body": {
-        "message": "拖动来源或文件夹的手柄，内容会跟随指针，相邻行以弹簧动画让位。"
+        "message": "插件不会再点 Google 的“按主题自动分类”按钮。恢复标签视图时，不会再误触发 AI 重新分类。"
     },
     "ui_whats_new_stability_title": {
-        "message": "随时取消，经典模式保留"
+        "message": "整理结果更稳"
     },
     "ui_whats_new_stability_body": {
-        "message": "按 Esc 或在列表外松手可取消并恢复布局。避让拖拽现为默认模式；已保存的经典模式选择会保留。"
+        "message": "来源认不出来时不会被移出文件夹，也不会悄悄改 Gemini 的勾选。切换开关不再误报“保存失败”。在别处删掉的来源，可从菜单“移到未分组”清理。"
     },
     "ui_whats_new_primary": {
         "message": "知道了"

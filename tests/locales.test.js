@@ -349,7 +349,7 @@ describe('locale message catalogs', () => {
         }
     });
 
-    it('introduces the current release and all four drag features in every locale', () => {
+    it('introduces the current release and all four highlights in every locale', () => {
         const version = require('../manifest.json').version;
         const releaseKeys = [
             'ui_whats_new_drag_title',
