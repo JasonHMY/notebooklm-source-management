@@ -7627,4 +7627,343 @@ describe('untrusted scan protection', () => {
         expect(mod.groupsById.get('keep-folder').children).toEqual([]);
         expect(mod.sourcesByKey.has(descriptorA.key)).toBe(false);
     });
+
+    describe('removal confirmed by Google\'s header total without a baseline scan', () => {
+        function installFirstLoadDom(rowMocks, headerText) {
+            const { panel } = createMockPanel({ visible: true, contentVisible: true });
+            const rowElements = rowMocks.map(({ row }) => row);
+            panel.querySelectorAll = jest.fn((selector) => (
+                mod.DEPS.row.includes(selector) ? rowElements : []
+            ));
+            global.document.querySelector = jest.fn((selector) => {
+                if (mod.DEPS.panel.includes(selector)) return panel;
+                if (mod.DEPS.sourceTotal.includes(selector) && headerText != null) {
+                    return { textContent: headerText };
+                }
+                return null;
+            });
+            global.document.querySelectorAll = jest.fn((selector) => (
+                mod.DEPS.row.includes(selector) ? rowElements : []
+            ));
+        }
+
+        // Stored: A and B in a folder, C, D, E ungrouped. B and D were deleted elsewhere.
+        function buildStoredState() {
+            const rows = ['A', 'B', 'C', 'D', 'E'].map((name) => createRow(
+                `${name} Source`,
+                `doc-${name.toLowerCase()}`
+            ));
+            const [keyA, keyB, keyC, keyD, keyE] = rows.map(keyOf);
+            const loadedState = {
+                schemaVersion: 5,
+                root: [{ type: 'group', id: 'keep-folder' }],
+                groupsById: {
+                    'keep-folder': {
+                        id: 'keep-folder',
+                        title: 'Folder',
+                        children: [{ type: 'source', key: keyA }, { type: 'source', key: keyB }]
+                    }
+                },
+                ungrouped: [keyC, keyD, keyE],
+                sourceStateById: Object.fromEntries(rows.map((mockRow) => {
+                    const descriptor = mod.createSourceDescriptor(mockRow.row, new Map(), new Map());
+                    return [descriptor.key, {
+                        enabled: true,
+                        title: descriptor.title,
+                        normalizedTitle: descriptor.normalizedTitle,
+                        stableToken: descriptor.stableToken,
+                        fingerprint: descriptor.fingerprint,
+                        identityType: descriptor.identityType
+                    }];
+                })),
+                tagsById: {},
+                tagOrder: [],
+                sourceTagsById: {}
+            };
+            return { rows, loadedState, keys: { keyA, keyB, keyC, keyD, keyE } };
+        }
+
+        beforeEach(async () => {
+            expect(await mod.setDeveloperModeEnabled(true)).toBe(true);
+        });
+
+        function scanFirstLoad(loadedState) {
+            return mod.scanAndSyncSources(loadedState, true, COMPLETE);
+        }
+
+        function getEventCount(event) {
+            return mod.getDeveloperLogs().filter((entry) => entry.event === event).length;
+        }
+
+        it('records the first confirmation without dropping anything', () => {
+            const { rows, loadedState } = buildStoredState();
+            installFirstLoadDom([rows[0], rows[2], rows[4]], '3 sources');
+
+            expect(scanFirstLoad(loadedState)).toEqual(expect.objectContaining({
+                ok: false,
+                reason: 'partial_initial_source_sync'
+            }));
+
+            expect(getEventCount('first_load_removal_pending')).toBe(1);
+            expect(getEventCount('first_load_removal_confirmed')).toBe(0);
+        });
+
+        it('drops the sources deleted elsewhere on the second identical first-load scan and asks for a save', () => {
+            const { rows, loadedState, keys } = buildStoredState();
+            installFirstLoadDom([rows[0], rows[2], rows[4]], '3 sources');
+
+            scanFirstLoad(loadedState);
+            expect(scanFirstLoad(loadedState)).toEqual(expect.objectContaining({
+                ok: true,
+                shouldUpgradeStorage: true
+            }));
+
+            expect(mod.groupsById.get('keep-folder').children).toEqual([
+                { type: 'source', key: keys.keyA }
+            ]);
+            expect(mod.state.ungrouped).toEqual([keys.keyC, keys.keyE]);
+            expect(mod.sourcesByKey.has(keys.keyB)).toBe(false);
+            expect(mod.sourcesByKey.has(keys.keyD)).toBe(false);
+            const persisted = mod.buildPersistableState();
+            expect(persisted.sourceStateById[keys.keyB]).toBeUndefined();
+            expect(persisted.sourceStateById[keys.keyD]).toBeUndefined();
+            expect(persisted.sourceStateById[keys.keyA]).toBeDefined();
+            expect(getEventCount('first_load_removal_pending')).toBe(1);
+            expect(getEventCount('first_load_removal_confirmed')).toBe(1);
+        });
+
+        it('stages placeholders on restore and drops them on the next independent scan', () => {
+            const { rows, loadedState, keys } = buildStoredState();
+            installFirstLoadDom([rows[0], rows[2], rows[4]], '3 sources');
+
+            // The restore-time merge scan runs on the same DOM as the first-load scan, so it is
+            // not a second confirmation.
+            expect(mod.restoreInitialLoadedState(loadedState).shouldUpgradeStorage).toBe(false);
+            expect(mod.groupsById.get('keep-folder').children).toHaveLength(2);
+            expect(mod.sourcesByKey.get(keys.keyB)).toMatchObject({ isPendingNativeHydration: true });
+            expect(mod.sourcesByKey.get(keys.keyD)).toMatchObject({ isPendingNativeHydration: true });
+
+            mod.scanAndSyncSources(null, false, COMPLETE);
+
+            expect(mod.groupsById.get('keep-folder').children).toEqual([
+                { type: 'source', key: keys.keyA }
+            ]);
+            expect(mod.state.ungrouped).toEqual([keys.keyC, keys.keyE]);
+            expect(mod.sourcesByKey.has(keys.keyB)).toBe(false);
+            expect(mod.sourcesByKey.has(keys.keyD)).toBe(false);
+        });
+
+        it('does not drop when the header total changes between the two scans', () => {
+            const { rows, loadedState, keys } = buildStoredState();
+            const visibleRows = [rows[0], rows[2], rows[4]];
+            installFirstLoadDom(visibleRows, '3 sources');
+            scanFirstLoad(loadedState);
+
+            installFirstLoadDom(visibleRows, '4 sources');
+            expect(scanFirstLoad(loadedState).ok).toBe(false);
+
+            // The mismatch cleared the pending confirmation: this scan only records again.
+            installFirstLoadDom(visibleRows, '3 sources');
+            expect(scanFirstLoad(loadedState).ok).toBe(false);
+            expect(mod.sourcesByKey.has(keys.keyB)).toBe(false);
+            expect(getEventCount('first_load_removal_pending')).toBe(2);
+            expect(getEventCount('first_load_removal_confirmed')).toBe(0);
+
+            expect(scanFirstLoad(loadedState).ok).toBe(true);
+            expect(getEventCount('first_load_removal_confirmed')).toBe(1);
+        });
+
+        it('does not drop when the visible rows change between the two scans', () => {
+            const { rows, loadedState } = buildStoredState();
+            installFirstLoadDom([rows[0], rows[2], rows[4]], '3 sources');
+            scanFirstLoad(loadedState);
+
+            // Same count and same header, but a different row set (D instead of E).
+            installFirstLoadDom([rows[0], rows[2], rows[3]], '3 sources');
+            expect(scanFirstLoad(loadedState).ok).toBe(false);
+            expect(getEventCount('first_load_removal_confirmed')).toBe(0);
+        });
+
+        it('does not drop when the notebook context changes between the two scans', () => {
+            const { rows, loadedState } = buildStoredState();
+            installFirstLoadDom([rows[0], rows[2], rows[4]], '3 sources');
+            scanFirstLoad(loadedState);
+
+            mod._setProjectId('another-notebook');
+
+            expect(scanFirstLoad(loadedState)).toEqual(expect.objectContaining({
+                ok: false,
+                reason: 'partial_initial_source_sync'
+            }));
+            expect(getEventCount('first_load_removal_confirmed')).toBe(0);
+        });
+
+        it('does not drop on an incomplete second scan', () => {
+            const { rows, loadedState } = buildStoredState();
+            installFirstLoadDom([rows[0], rows[2], rows[4]], '3 sources');
+            scanFirstLoad(loadedState);
+
+            expect(mod.scanAndSyncSources(loadedState, true, { scanCompleteness: 'partial' }).ok).toBe(false);
+            expect(scanFirstLoad(loadedState).ok).toBe(false);
+            expect(getEventCount('first_load_removal_confirmed')).toBe(0);
+        });
+
+        it('keeps the missing sources as placeholders when the header total is absent', () => {
+            const { rows, loadedState, keys } = buildStoredState();
+            installFirstLoadDom([rows[0], rows[2], rows[4]], null);
+
+            expect(mod.restoreInitialLoadedState(loadedState).shouldUpgradeStorage).toBe(false);
+
+            expect(mod.groupsById.get('keep-folder').children).toEqual([
+                { type: 'source', key: keys.keyA },
+                { type: 'source', key: keys.keyB }
+            ]);
+            expect(mod.sourcesByKey.get(keys.keyB)).toMatchObject({ isPendingNativeHydration: true });
+            expect(mod.sourcesByKey.get(keys.keyD)).toMatchObject({ isPendingNativeHydration: true });
+        });
+
+        it('keeps the missing sources when the header total disagrees with the parsed rows', () => {
+            const { rows, loadedState, keys } = buildStoredState();
+            installFirstLoadDom([rows[0], rows[2], rows[4]], '4 sources');
+
+            expect(mod.restoreInitialLoadedState(loadedState).shouldUpgradeStorage).toBe(false);
+
+            expect(mod.groupsById.get('keep-folder').children).toHaveLength(2);
+            expect(mod.sourcesByKey.get(keys.keyB)).toMatchObject({ isPendingNativeHydration: true });
+            expect(mod.sourcesByKey.get(keys.keyD)).toMatchObject({ isPendingNativeHydration: true });
+        });
+
+        it('keeps the missing sources when a row is unknown to the stored records', () => {
+            const { rows, loadedState, keys } = buildStoredState();
+            installFirstLoadDom(
+                [rows[0], rows[2], rows[4], createRow('Brand New Source', 'doc-new')],
+                '4 sources'
+            );
+
+            expect(mod.restoreInitialLoadedState(loadedState).shouldUpgradeStorage).toBe(false);
+
+            expect(mod.groupsById.get('keep-folder').children).toHaveLength(2);
+            expect(mod.sourcesByKey.get(keys.keyB)).toMatchObject({ isPendingNativeHydration: true });
+            expect(mod.sourcesByKey.get(keys.keyD)).toMatchObject({ isPendingNativeHydration: true });
+        });
+
+        it('counts a stored ref without a record among the removed ones', () => {
+            const { rows, loadedState, keys } = buildStoredState();
+            loadedState.ungrouped.push('ghost-ref');
+            installFirstLoadDom([rows[0], rows[2], rows[4]], '3 sources');
+
+            scanFirstLoad(loadedState);
+            expect(scanFirstLoad(loadedState).shouldUpgradeStorage).toBe(true);
+
+            expect(mod.sourcesByKey.has(keys.keyB)).toBe(false);
+            expect(mod.sourcesByKey.has('ghost-ref')).toBe(false);
+            expect(mod.state.ungrouped).toEqual([keys.keyC, keys.keyE]);
+        });
+
+        it('drops a placed source on a later scan without a baseline after two identical confirmations', () => {
+            const rowA = createRow('Alpha Source', 'doc-a');
+            const rowB = createRow('Beta Source', 'doc-b');
+            const rowC = createRow('Gamma Source', 'doc-c');
+            showRows([rowA, rowB, rowC]);
+            mod.scanAndSyncSources(null, true, COMPLETE);
+            const keyA = keyOf(rowA);
+            placeInFolder('keep-folder', [keyA]);
+            // A new manager context has no accepted scan to measure a row-count drop against.
+            mod._setProjectId('another-notebook');
+            installFirstLoadDom([rowB, rowC], '2 sources');
+
+            mod.scanAndSyncSources(null, false, COMPLETE);
+            expect(mod.groupsById.get('keep-folder').children).toEqual([{ type: 'source', key: keyA }]);
+
+            mod.scanAndSyncSources(null, false, COMPLETE);
+            expect(mod.groupsById.get('keep-folder').children).toEqual([]);
+            expect(mod.sourcesByKey.has(keyA)).toBe(false);
+        });
+
+        it('clears placeholders staged before the header appeared once later scans confirm them twice', () => {
+            const { rows, loadedState, keys } = buildStoredState();
+            // Only B (in the folder) was deleted elsewhere; D was never stored.
+            loadedState.ungrouped = [keys.keyC, keys.keyE];
+            delete loadedState.sourceStateById[keys.keyD];
+            installFirstLoadDom([rows[0], rows[2], rows[4]], null);
+            mod.restoreInitialLoadedState(loadedState);
+            expect(mod.sourcesByKey.get(keys.keyB)).toMatchObject({ isPendingNativeHydration: true });
+
+            // The placeholder survives scans while the header is still absent.
+            mod.scanAndSyncSources(null, false, COMPLETE);
+            expect(mod.sourcesByKey.has(keys.keyB)).toBe(true);
+
+            installFirstLoadDom([rows[0], rows[2], rows[4]], '3 sources');
+            mod.scanAndSyncSources(null, false, COMPLETE);
+            expect(mod.groupsById.get('keep-folder').children).toHaveLength(2);
+            expect(mod.sourcesByKey.has(keys.keyB)).toBe(true);
+            expect(getEventCount('first_load_removal_pending')).toBe(1);
+
+            mod.scanAndSyncSources(null, false, COMPLETE);
+            expect(mod.groupsById.get('keep-folder').children).toEqual([
+                { type: 'source', key: keys.keyA }
+            ]);
+            expect(mod.state.ungrouped).toEqual([keys.keyC, keys.keyE]);
+            expect(mod.sourcesByKey.has(keys.keyB)).toBe(false);
+            expect(getEventCount('first_load_removal_confirmed')).toBe(1);
+        });
+
+        it('does not use the header path when a scan also leaves a newly unresolved placed ref', () => {
+            const { rows, loadedState, keys } = buildStoredState();
+            // C joins the folder next to A and B; B and D were deleted elsewhere.
+            loadedState.groupsById['keep-folder'].children.push({ type: 'source', key: keys.keyC });
+            loadedState.ungrouped = [keys.keyD, keys.keyE];
+            installFirstLoadDom([rows[0], rows[2], rows[4]], null);
+            mod.restoreInitialLoadedState(loadedState);
+            expect(mod.sourcesByKey.get(keys.keyB)).toMatchObject({ isPendingNativeHydration: true });
+
+            // C now vanishes as well: the header agrees with the two visible rows, but C is
+            // not a known placeholder, so the B2 rules decide (a pure one-row removal drops C
+            // and keeps the earlier placeholder B).
+            installFirstLoadDom([rows[0], rows[4]], '2 sources');
+            // The first scan is held by the missing-source guard; the second sees the same
+            // pure removal and applies it.
+            mod.scanAndSyncSources(null, false, COMPLETE);
+            mod.scanAndSyncSources(null, false, COMPLETE);
+
+            expect(getEventCount('first_load_removal_pending')).toBe(0);
+            expect(mod.groupsById.get('keep-folder').children).toEqual([
+                { type: 'source', key: keys.keyA },
+                { type: 'source', key: keys.keyB }
+            ]);
+            expect(mod.sourcesByKey.get(keys.keyB)).toMatchObject({ isPendingNativeHydration: true });
+            expect(mod.sourcesByKey.has(keys.keyC)).toBe(false);
+
+            // With C settled, B is the only unresolved ref and is a known placeholder, so the
+            // header path takes over from the next scan on.
+            mod.scanAndSyncSources(null, false, COMPLETE);
+            expect(getEventCount('first_load_removal_pending')).toBe(1);
+        });
+
+        it('still keeps an already staged placeholder when a baseline exists, header or not', () => {
+            const rowA = createRow('Alpha Source', 'doc-a');
+            const rowB = createRow('Beta Source', 'doc-b');
+            const rowC = createRow('Gamma Source', 'doc-c');
+            showRows([rowA, rowB, rowC]);
+            mod.scanAndSyncSources(null, true, COMPLETE);
+            const keyA = keyOf(rowA);
+            placeInFolder('keep-folder', [keyA, keyOf(rowB)]);
+
+            // A is renamed (kept as a placeholder), then both A's replacement and B vanish natively.
+            showRows([createRow('Alpha v2', 'doc-a2'), rowB, rowC]);
+            mod.scanAndSyncSources(null, false, COMPLETE);
+            mod.scanAndSyncSources(null, false, COMPLETE);
+            expect(mod.sourcesByKey.get(keyA).isPendingNativeHydration).toBe(true);
+
+            installFirstLoadDom([rowB, rowC], '2 sources');
+            mod.scanAndSyncSources(null, false, COMPLETE);
+            mod.scanAndSyncSources(null, false, COMPLETE);
+
+            expect(mod.groupsById.get('keep-folder').children).toEqual([
+                { type: 'source', key: keyA },
+                { type: 'source', key: keyOf(rowB) }
+            ]);
+            expect(mod.sourcesByKey.get(keyA).isPendingNativeHydration).toBe(true);
+        });
+    });
 });
