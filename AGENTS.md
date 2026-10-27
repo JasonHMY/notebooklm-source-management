@@ -14,11 +14,8 @@ Before starting work, read the relevant project instructions, repository guidanc
 
 ## Project-Specific Workflow Rules
 
-- Start every code, test, docs, config, packaging, or workflow task by checking:
-  - `AGENTS.md`
-  - `docs/PROJECT_DIRECTORY.md`
-  - the `Changelog Writing Guidelines` section at the top of `CHANGELOG.md`
-  - `git status --short`
+- Start edits by checking `git status --short` and the relevant instructions. Use `docs/PROJECT_DIRECTORY.md` to locate unfamiliar structure or when that structure changes; read the changelog guidelines when preparing a changelog entry. A small, already-located copy or documentation edit does not require reading the whole map.
+- `.agent/skills` contains legacy provider-specific reference material, not the default Codex workflow for this extension. Load an entry only when its exact capability is needed; verify optional helper availability and do not generate/install missing skills as an automatic prerequisite.
 - This project has no content-script bundler. `manifest.json` content script order is the runtime dependency order. When adding or moving a content helper:
   - update `manifest.json`
   - update `tests/helpers/load-content-module.js`
