@@ -3334,11 +3334,21 @@
             );
         }
 
+        function isRootPositionedSource(sourceKey) {
+            const root = getState()?.root;
+            return Array.isArray(root)
+                && root.some((entry) => entry?.type === 'source' && entry.key === sourceKey);
+        }
+
+        // A normal source needs a parent folder; a missing placeholder may also sit at the root.
         function canMoveSourceToUngrouped(sourceKey) {
             const source = getSourcesByKey().get(sourceKey);
             return Boolean(
-                (isBatchOperableSource(source) || isMissingPlaceholderSource(source))
-                && findParentGroupOfSource(sourceKey)
+                (isBatchOperableSource(source) && findParentGroupOfSource(sourceKey))
+                || (
+                    isMissingPlaceholderSource(source)
+                    && (findParentGroupOfSource(sourceKey) || isRootPositionedSource(sourceKey))
+                )
             );
         }
 

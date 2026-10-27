@@ -3583,20 +3583,26 @@ describe('drag and drop ordering guards', () => {
     describe('moving a missing placeholder to Ungrouped', () => {
         const createContentViewState = require('../../src/content/content-view-state.js');
         const createContentTreePlacement = require('../../src/content/content-tree-placement.js');
+        const createContentSourceActionMenu = require('../../src/content/content-source-action-menu.js');
 
-        // A folder that is switched off holds the source under test and a live neighbour.
-        function createMoveHarness(sourceUnderTest) {
+        // A folder that is switched off holds the source under test and a live neighbour; with
+        // atRoot the source is a positioned root entry after the folder instead.
+        function createMoveHarness(sourceUnderTest, { atRoot = false } = {}) {
             const state = {
-                root: [{ type: 'group', id: 'folder' }],
+                root: atRoot
+                    ? [{ type: 'group', id: 'folder' }, { type: 'source', key: sourceUnderTest.key }]
+                    : [{ type: 'group', id: 'folder' }],
                 ungrouped: ['bin-source']
             };
             const folder = {
                 id: 'folder',
                 enabled: false,
-                children: [
-                    { type: 'source', key: sourceUnderTest.key },
-                    { type: 'source', key: 'live-neighbour' }
-                ]
+                children: atRoot
+                    ? [{ type: 'source', key: 'live-neighbour' }]
+                    : [
+                        { type: 'source', key: sourceUnderTest.key },
+                        { type: 'source', key: 'live-neighbour' }
+                    ]
             };
             const groupsById = new Map([['folder', folder]]);
             const nativeCheckbox = { click: jest.fn() };
@@ -3611,10 +3617,9 @@ describe('drag and drop ordering guards', () => {
                 }],
                 ['bin-source', { key: 'bin-source', enabled: true, hasNativeCheckbox: true, element: liveRow }]
             ]);
-            const parentMap = new Map([
-                [sourceUnderTest.key, 'folder'],
-                ['live-neighbour', 'folder']
-            ]);
+            const parentMap = new Map(atRoot
+                ? [['live-neighbour', 'folder']]
+                : [[sourceUnderTest.key, 'folder'], ['live-neighbour', 'folder']]);
             const syncSourceToPageWithResult = jest.fn(() => Promise.resolve({ ok: true }));
             const syncSourceToPage = jest.fn();
             const saveState = jest.fn();
@@ -3727,21 +3732,79 @@ describe('drag and drop ordering guards', () => {
         });
 
         it('stays unavailable for records that are not plain missing placeholders', () => {
-            [
-                { isPendingNativeHydration: false },
-                { element: { querySelector: jest.fn() } },
-                { isLoading: true },
-                { isFailed: true },
-                { isDisabled: true }
-            ].forEach((overrides) => {
-                const h = createMoveHarness(createPlaceholder(overrides));
-                expect(h.interactions.canMoveSourceToUngrouped('placeholder')).toBe(false);
-                expect(h.interactions.moveSourceToUngrouped('placeholder')).toBe(false);
-                expect(h.folder.children).toHaveLength(2);
-                expect(h.state.ungrouped).toEqual(['bin-source']);
-                expect(h.showToast).toHaveBeenCalledWith('ui_keyboard_move_unavailable', { variant: 'info' });
-                expect(h.saveState).not.toHaveBeenCalled();
+            [false, true].forEach((atRoot) => {
+                [
+                    { isPendingNativeHydration: false },
+                    { element: { querySelector: jest.fn() } },
+                    { isLoading: true },
+                    { isFailed: true },
+                    { isDisabled: true }
+                ].forEach((overrides) => {
+                    const h = createMoveHarness(createPlaceholder(overrides), { atRoot });
+                    const rootBefore = JSON.stringify(h.state.root);
+                    expect(h.interactions.canMoveSourceToUngrouped('placeholder')).toBe(false);
+                    expect(h.interactions.moveSourceToUngrouped('placeholder')).toBe(false);
+                    expect(h.folder.children).toHaveLength(atRoot ? 1 : 2);
+                    expect(JSON.stringify(h.state.root)).toBe(rootBefore);
+                    expect(h.state.ungrouped).toEqual(['bin-source']);
+                    expect(h.showToast).toHaveBeenCalledWith('ui_keyboard_move_unavailable', { variant: 'info' });
+                    expect(h.saveState).not.toHaveBeenCalled();
+                });
             });
+        });
+
+        it('moves a root-positioned missing placeholder to the end of Ungrouped without native sync or click', async () => {
+            const h = createMoveHarness(createPlaceholder(), { atRoot: true });
+            const sourceActionMenu = createContentSourceActionMenu({
+                getState: () => h.state,
+                getSourcesByKey: () => h.sourcesByKey,
+                getMessage: (key) => key,
+                canMoveSourceToUngrouped: h.interactions.canMoveSourceToUngrouped
+            });
+
+            expect(h.interactions.isBatchOperableSource(h.sourcesByKey.get('placeholder'))).toBe(false);
+            expect(h.interactions.canMoveSourceToUngrouped('placeholder')).toBe(true);
+            expect(sourceActionMenu.getSourceActionMenuItems('placeholder')
+                .find((item) => item.action === 'move-ungrouped')).toMatchObject({ disabled: false });
+            expect(h.interactions.moveSourceToUngrouped('placeholder')).toBe(true);
+            for (let tick = 0; tick < 5; tick += 1) await Promise.resolve();
+
+            expect(h.state.ungrouped).toEqual(['bin-source', 'placeholder']);
+            expect(h.state.root).toEqual([{ type: 'group', id: 'folder' }]);
+            expect(h.folder.children).toEqual([{ type: 'source', key: 'live-neighbour' }]);
+            expect(h.syncSourceToPageWithResult).not.toHaveBeenCalled();
+            expect(h.syncSourceToPage).not.toHaveBeenCalled();
+            expect(h.nativeCheckbox.click).not.toHaveBeenCalled();
+            expect(h.liveRow.querySelector).not.toHaveBeenCalled();
+            expect(h.saveState).toHaveBeenCalledWith({ immediate: true, critical: true });
+            expect(h.render).toHaveBeenCalled();
+            expect(h.showUndoableToast).toHaveBeenCalledWith(
+                'ui_keyboard_moved_ungrouped_toast',
+                { variant: 'success' }
+            );
+            expect(h.showToast).not.toHaveBeenCalledWith('ui_keyboard_move_unavailable', expect.anything());
+            expect(h.interactions.canMoveSourceToUngrouped('placeholder')).toBe(false);
+        });
+
+        it('keeps a normal root-positioned source unable to use Move to Ungrouped', () => {
+            const h = createMoveHarness({
+                key: 'normal',
+                enabled: true,
+                hasNativeCheckbox: true,
+                element: { querySelector: jest.fn() }
+            }, { atRoot: true });
+
+            expect(h.interactions.canMoveSourceToUngrouped('normal')).toBe(false);
+            expect(h.interactions.moveSourceToUngrouped('normal')).toBe(false);
+
+            expect(h.state.root).toEqual([
+                { type: 'group', id: 'folder' },
+                { type: 'source', key: 'normal' }
+            ]);
+            expect(h.state.ungrouped).toEqual(['bin-source']);
+            expect(h.showToast).toHaveBeenCalledWith('ui_keyboard_move_unavailable', { variant: 'info' });
+            expect(h.saveState).not.toHaveBeenCalled();
+            expect(h.syncSourceToPageWithResult).not.toHaveBeenCalled();
         });
 
         it('does not offer the move once the placeholder is outside a folder or unknown', () => {
