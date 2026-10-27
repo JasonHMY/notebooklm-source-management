@@ -810,6 +810,16 @@
             const nextSourceTagsById = new Map();
             const seenSourceRefs = new Set();
             const unresolvedWeakIdentityKeys = new Set();
+            // Stored refs no row resolved to (all), the subset that still has a folder or
+            // root placement, and refs that only a positional guess resolved. The caller
+            // decides whether dropping an unresolved placed ref has removal evidence.
+            const unresolvedStoredKeys = new Set();
+            const unresolvedPlacedKeys = new Set();
+            const positionalResolvedKeys = new Set();
+            // Unresolved stored keys the caller wants kept as their own (placeholder) key.
+            const keepStoredKeys = previousState?.keepStoredKeys instanceof Set
+                ? previousState.keepStoredKeys
+                : new Set();
             const positionalRemap = buildSingleSourcePositionalRemap(sourceLookup, previousState);
             const resolveCurrentSourceKey = (storedKey, sourceRecord) => {
                 const resolution = resolveStoredSourceKeyWithReason(storedKey, sourceLookup, sourceRecord);
@@ -818,7 +828,13 @@
                     unresolvedWeakIdentityKeys.add(storedKey);
                     return null;
                 }
-                return positionalRemap.get(storedKey)?.key || null;
+                const positionalKey = positionalRemap.get(storedKey)?.key || null;
+                if (positionalKey) {
+                    positionalResolvedKeys.add(storedKey);
+                    return positionalKey;
+                }
+                unresolvedStoredKeys.add(storedKey);
+                return keepStoredKeys.has(storedKey) ? storedKey : null;
             };
 
             runtime.groupsById.forEach((group, groupId) => {
@@ -845,6 +861,7 @@
 
                     const sourceRecord = previousState.sourceRecordsByKey.get(childSourceKey) || null;
                     const resolvedKey = resolveCurrentSourceKey(childSourceKey, sourceRecord);
+                    if (unresolvedStoredKeys.has(childSourceKey)) unresolvedPlacedKeys.add(childSourceKey);
                     if (!resolvedKey) return;
 
                     nextGroup.children.push({ type: 'source', key: resolvedKey });
@@ -870,6 +887,7 @@
 
                 const sourceRecord = previousState.sourceRecordsByKey.get(sourceKey) || null;
                 const resolvedKey = resolveCurrentSourceKey(sourceKey, sourceRecord);
+                if (unresolvedStoredKeys.has(sourceKey)) unresolvedPlacedKeys.add(sourceKey);
                 if (!resolvedKey) return;
 
                 nextRoot.push({ type: 'source', key: resolvedKey });
@@ -924,7 +942,10 @@
                 sourceStateById: nextSourceStateById,
                 sourceTagsById: nextSourceTagsById,
                 seenSourceRefs,
-                unresolvedWeakIdentityKeys
+                unresolvedWeakIdentityKeys,
+                unresolvedStoredKeys,
+                unresolvedPlacedKeys,
+                positionalResolvedKeys
             };
         }
 

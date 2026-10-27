@@ -4476,7 +4476,7 @@ describe('scanAndSyncSources', () => {
         });
     });
 
-    it('does not keep grouped sources mapped during non-initial rescans when a new stable token appears', () => {
+    it('keeps a grouped source as a missing placeholder instead of remapping it when a new stable token appears', () => {
         const firstPass = createMockSourceRow({ title: 'Mapped Source', stableToken: 'doc-old', checked: true });
         const secondPass = createMockSourceRow({ title: 'Mapped Source', stableToken: 'doc-new', checked: true });
         const firstDescriptor = mod.createSourceDescriptor(firstPass.row, new Map(), new Map());
@@ -4505,7 +4505,15 @@ describe('scanAndSyncSources', () => {
         mod.scanAndSyncSources(null, false, { scanCompleteness: 'complete' });
 
         expect(firstDescriptor.key).not.toBe(secondDescriptor.key);
-        expect(mod.groupsById.get('group1').children).toEqual([]);
+        // Row count unchanged and one unknown row: that is not a pure removal, so the
+        // folder placement stays (as a missing placeholder) rather than being dropped.
+        expect(mod.groupsById.get('group1').children).toEqual([{ type: 'source', key: firstDescriptor.key }]);
+        expect(mod.sourcesByKey.get(firstDescriptor.key)).toEqual(expect.objectContaining({
+            enabled: false,
+            isPendingNativeHydration: true
+        }));
+        expect(mod.getSourceTagIds(firstDescriptor.key)).toEqual([tagId]);
+        // The new row is not guessed onto the old identity.
         expect(mod.state.ungrouped).toEqual([secondDescriptor.key]);
         expect(mod.sourcesByKey.get(secondDescriptor.key).enabled).toBe(true);
         expect(mod.getSourceTagIds(secondDescriptor.key)).toEqual([]);
@@ -4835,7 +4843,7 @@ describe('scanAndSyncSources', () => {
         expect(mod.sourcesByKey.get(renamedDescriptor.key).enabled).toBe(false);
     });
 
-    it('does not positionally inherit state when the candidate has a new stable token', () => {
+    it('does not positionally inherit state when the candidate has a new stable token and keeps the old placement as a placeholder', () => {
         const oldRenamedRow = createMockSourceRow({ title: 'Original Source', stableToken: null, checked: true });
         const oldAnchorRow = createMockSourceRow({ title: 'Anchor Source', stableToken: 'anchor-doc', checked: true });
         const firstDescriptor = mod.createSourceDescriptor(oldRenamedRow.row, new Map(), new Map());
@@ -4867,7 +4875,11 @@ describe('scanAndSyncSources', () => {
         mod.scanAndSyncSources(null, false, { scanCompleteness: 'complete' });
         mod.scanAndSyncSources(null, false, { scanCompleteness: 'complete' });
 
-        expect(mod.groupsById.get('group1').children).toEqual([]);
+        expect(mod.groupsById.get('group1').children).toEqual([{ type: 'source', key: firstDescriptor.key }]);
+        expect(mod.sourcesByKey.get(firstDescriptor.key)).toEqual(expect.objectContaining({
+            enabled: false,
+            isPendingNativeHydration: true
+        }));
         expect(mod.sourcesByKey.get(renamedDescriptor.key).enabled).toBe(true);
         expect(mod.getSourceTagIds(renamedDescriptor.key)).toEqual([]);
     });
@@ -5622,7 +5634,7 @@ describe('scanAndSyncSources', () => {
         ]));
     });
 
-    it('leaves ambiguous remaps ungrouped instead of guessing', () => {
+    it('leaves ambiguous remaps ungrouped instead of guessing and keeps the old placement as a placeholder', () => {
         const oldRows = [
             createMockSourceRow({ title: 'Duplicate Source', stableToken: 'doc-a', checked: true }),
             createMockSourceRow({ title: 'Duplicate Source', stableToken: 'doc-b', checked: true })
@@ -5652,8 +5664,10 @@ describe('scanAndSyncSources', () => {
         mod.scanAndSyncSources(null, false, { scanCompleteness: 'complete' });
         mod.scanAndSyncSources(null, false, { scanCompleteness: 'complete' });
 
-        expect(mod.groupsById.get('group1').children).toEqual([]);
+        expect(mod.groupsById.get('group1').children).toEqual([{ type: 'source', key: oldKeys[0] }]);
+        expect(mod.sourcesByKey.get(oldKeys[0]).isPendingNativeHydration).toBe(true);
         expect(mod.state.ungrouped).toHaveLength(2);
+        expect(mod.state.ungrouped).not.toContain(oldKeys[0]);
     });
 
     it('detects persisted source refs even when the DOM is not ready yet', () => {
@@ -7289,5 +7303,328 @@ describe('mutation-driven persistence', () => {
 
         expect(syncModule.getPersistableStateSignature()).toBeNull();
         expect(syncModule.shouldSaveAfterMutationSync(null, null)).toBe(true);
+    });
+});
+
+describe('untrusted scan protection', () => {
+    let mod;
+
+    beforeEach(() => {
+        jest.resetModules();
+        setupGlobalMocks();
+        global.setTimeout = (cb) => {
+            cb();
+            return 1;
+        };
+        global.clearTimeout = jest.fn();
+        mod = loadContentModule();
+        mod._resetState();
+        mod._setProjectId('untrusted-scan-project');
+    });
+
+    afterEach(teardownGlobalMocks);
+
+    const COMPLETE = { scanCompleteness: 'complete' };
+
+    function showRows(rows) {
+        global.document.querySelectorAll = jest.fn((selector) => (
+            mod.DEPS.row.includes(selector) ? rows.map(({ row }) => row) : []
+        ));
+    }
+
+    function keyOf(mockRow) {
+        return mod.createSourceDescriptor(mockRow.row, new Map(), new Map()).key;
+    }
+
+    function createRow(title, token, checked = true) {
+        return createMockSourceRow({ title, stableToken: token, checked });
+    }
+
+    function placeInFolder(groupId, keys, extra = {}) {
+        mod.state.root = [{ type: 'group', id: groupId }];
+        mod.state.ungrouped = mod.state.ungrouped.filter((key) => !keys.includes(key));
+        mod.groupsById.set(groupId, {
+            id: groupId,
+            title: 'Folder',
+            enabled: true,
+            collapsed: false,
+            children: keys.map((key) => ({ type: 'source', key })),
+            ...extra
+        });
+    }
+
+    function getSavedData() {
+        const saves = global.chrome.runtime.sendMessage.mock.calls
+            .map(([message]) => message)
+            .filter((message) => message?.type === 'SAVE_STATE');
+        return saves.length > 0 ? saves[saves.length - 1].data : null;
+    }
+
+    it('skips passive native enforcement for a scan where a source in a disabled folder loses its identity', () => {
+        const rowA = createRow('Alpha Source', 'doc-a');
+        const rowB = createRow('Beta Source', 'doc-b');
+        showRows([rowA, rowB]);
+        mod.scanAndSyncSources(null, true, COMPLETE);
+        const keyA = keyOf(rowA);
+        const keyB = keyOf(rowB);
+        placeInFolder('off-folder', [keyA], { enabled: false });
+        mod.sourcesByKey.get(keyB).enabled = true;
+
+        // Gemini changed A's identity (new token + title) and B's checkbox was cleared elsewhere.
+        const renamedA = createRow('Alpha Source (synced)', 'doc-a-new');
+        rowB.checkbox.checked = false;
+        showRows([renamedA, rowB]);
+
+        mod.scanAndSyncSources(null, false, COMPLETE);
+        mod.scanAndSyncSources(null, false, COMPLETE);
+
+        expect(renamedA.checkbox.click).not.toHaveBeenCalled();
+        expect(rowB.checkbox.click).not.toHaveBeenCalled();
+        // The disabled-folder placement survives instead of silently turning A "enabled".
+        expect(mod.groupsById.get('off-folder').children).toEqual([{ type: 'source', key: keyA }]);
+        expect(mod.groupsById.get('off-folder').enabled).toBe(false);
+        expect(mod.sourcesByKey.get(keyA)).toEqual(expect.objectContaining({
+            enabled: true,
+            isPendingNativeHydration: true
+        }));
+
+        // Once the placeholder is a known quantity the next stable scan enforces again.
+        mod.scanAndSyncSources(null, false, COMPLETE);
+        expect(rowB.checkbox.click).toHaveBeenCalledTimes(1);
+        expect(renamedA.checkbox.click).not.toHaveBeenCalled();
+    });
+
+    it('skips passive native enforcement on a partial scan and resumes on a complete one', () => {
+        const rowA = createRow('Alpha Source', 'doc-a');
+        const rowB = createRow('Beta Source', 'doc-b');
+        showRows([rowA, rowB]);
+        mod.scanAndSyncSources(null, true, COMPLETE);
+        mod.sourcesByKey.get(keyOf(rowB)).enabled = true;
+        rowB.checkbox.checked = false;
+
+        expect(mod.scanAndSyncSources(null, false, { scanCompleteness: 'partial' })).toEqual(
+            expect.objectContaining({ ok: true })
+        );
+        expect(rowB.checkbox.click).not.toHaveBeenCalled();
+
+        mod.scanAndSyncSources(null, false, COMPLETE);
+        expect(rowB.checkbox.click).toHaveBeenCalledTimes(1);
+    });
+
+    it('still enforces stored selection on a normal stable scan', () => {
+        const rowA = createRow('Alpha Source', 'doc-a');
+        const rowB = createRow('Beta Source', 'doc-b');
+        showRows([rowA, rowB]);
+        mod.scanAndSyncSources(null, true, COMPLETE);
+        const keyA = keyOf(rowA);
+        placeInFolder('off-folder', [keyA], { enabled: false });
+
+        mod.scanAndSyncSources(null, false, COMPLETE);
+
+        expect(rowA.checkbox.click).toHaveBeenCalledTimes(1);
+        expect(rowB.checkbox.click).not.toHaveBeenCalled();
+    });
+
+    it('keeps the placements of two sources renamed at once as placeholders and persists them', () => {
+        const rowA = createRow('Alpha Source', 'doc-a');
+        const rowB = createRow('Beta Source', 'doc-b');
+        const rowC = createRow('Gamma Source', 'doc-c');
+        showRows([rowA, rowB, rowC]);
+        mod.scanAndSyncSources(null, true, COMPLETE);
+        const keyA = keyOf(rowA);
+        const keyB = keyOf(rowB);
+        const keyC = keyOf(rowC);
+        placeInFolder('keep-folder', [keyA, keyB]);
+        mod.sourcesByKey.get(keyA).enabled = false;
+
+        const renamedA = createRow('Alpha Source v2', 'doc-a-new');
+        const renamedB = createRow('Beta Source v2', 'doc-b-new');
+        showRows([renamedA, renamedB, rowC]);
+        const newKeyA = keyOf(renamedA);
+        const newKeyB = keyOf(renamedB);
+        global.chrome.runtime.sendMessage.mockClear();
+
+        const { panel } = createMockPanel({ visible: true, contentVisible: true });
+        global.document.querySelector = jest.fn(() => panel);
+        mountManagerForDebouncedSourceSync(mod);
+        mod._debouncedScanAndSyncForTest();
+        mod._debouncedScanAndSyncForTest();
+        mod.flushPendingStateSave();
+
+        expect(mod.groupsById.get('keep-folder').children).toEqual([
+            { type: 'source', key: keyA },
+            { type: 'source', key: keyB }
+        ]);
+        expect(mod.sourcesByKey.get(keyA)).toEqual(expect.objectContaining({
+            enabled: false,
+            isPendingNativeHydration: true
+        }));
+        expect(mod.sourcesByKey.has(keyB)).toBe(true);
+        expect(mod.state.ungrouped.slice().sort()).toEqual([keyC, newKeyA, newKeyB].sort());
+
+        const saved = getSavedData();
+        expect(saved).not.toBeNull();
+        expect(saved.groupsById['keep-folder'].children).toEqual([
+            { type: 'source', key: keyA },
+            { type: 'source', key: keyB }
+        ]);
+        expect(saved.sourceStateById[keyA]).toEqual(expect.objectContaining({ enabled: false }));
+        expect(saved.sourceStateById[keyB]).toBeDefined();
+        expect(saved.ungrouped).toEqual(expect.arrayContaining([newKeyA, newKeyB]));
+
+        // Unchanged afterwards: repeated identical scans never drop them.
+        mod.scanAndSyncSources(null, false, COMPLETE);
+        mod.scanAndSyncSources(null, false, COMPLETE);
+        expect(mod.groupsById.get('keep-folder').children).toHaveLength(2);
+    });
+
+    it('restores a kept placeholder when the original row comes back', () => {
+        const rowA = createRow('Alpha Source', 'doc-a');
+        const rowB = createRow('Beta Source', 'doc-b');
+        const rowC = createRow('Gamma Source', 'doc-c');
+        showRows([rowA, rowB, rowC]);
+        mod.scanAndSyncSources(null, true, COMPLETE);
+        const keyA = keyOf(rowA);
+        const keyB = keyOf(rowB);
+        placeInFolder('keep-folder', [keyA, keyB]);
+
+        showRows([createRow('Alpha v2', 'doc-a2'), createRow('Beta v2', 'doc-b2'), rowC]);
+        mod.scanAndSyncSources(null, false, COMPLETE);
+        mod.scanAndSyncSources(null, false, COMPLETE);
+        expect(mod.sourcesByKey.get(keyA).isPendingNativeHydration).toBe(true);
+
+        showRows([rowA, rowB, rowC]);
+        mod.scanAndSyncSources(null, false, COMPLETE);
+        mod.scanAndSyncSources(null, false, COMPLETE);
+
+        expect(mod.groupsById.get('keep-folder').children).toEqual([
+            { type: 'source', key: keyA },
+            { type: 'source', key: keyB }
+        ]);
+        expect(mod.sourcesByKey.get(keyA).isPendingNativeHydration).not.toBe(true);
+        expect(mod.sourcesByKey.get(keyA).element).toBe(rowA.row);
+    });
+
+    it('holds an ungrouped staged placeholder for a second identical complete scan', () => {
+        const rowA = createRow('Alpha Source', 'doc-a');
+        const rowB = createRow('Beta Source', 'doc-b');
+        const rowC = createRow('Gamma Source', 'doc-c', false);
+        showRows([rowA, rowB, rowC]);
+        mod.scanAndSyncSources(null, true, COMPLETE);
+        const keyC = keyOf(rowC);
+
+        // Progressive render: the staged merge sees only part of the rows and keeps C as a placeholder.
+        showRows([rowA, rowB]);
+        mod.scanAndSyncSources(null, false, { preserveMissingExistingSources: true, scanCompleteness: 'partial' });
+        expect(mod.sourcesByKey.get(keyC)).toEqual(expect.objectContaining({ isPendingNativeHydration: true }));
+
+        // First later complete scan without C: held, C stays (it is not placed, so only the
+        // two-identical-scan rule protects it).
+        const first = mod.scanAndSyncSources(null, false, COMPLETE);
+        expect(first.reason).toBe('partial_source_sync');
+        expect(mod.sourcesByKey.has(keyC)).toBe(true);
+        expect(mod.state.ungrouped).toContain(keyC);
+    });
+
+    it('drops a placed source that was removed natively (row count fell, no new rows)', () => {
+        const rowA = createRow('Alpha Source', 'doc-a');
+        const rowB = createRow('Beta Source', 'doc-b');
+        const rowC = createRow('Gamma Source', 'doc-c');
+        showRows([rowA, rowB, rowC]);
+        mod.scanAndSyncSources(null, true, COMPLETE);
+        const keyA = keyOf(rowA);
+        const keyB = keyOf(rowB);
+        placeInFolder('keep-folder', [keyA, keyB]);
+
+        showRows([rowB, rowC]);
+        mod.scanAndSyncSources(null, false, COMPLETE);
+        mod.scanAndSyncSources(null, false, COMPLETE);
+
+        expect(mod.groupsById.get('keep-folder').children).toEqual([{ type: 'source', key: keyB }]);
+        expect(mod.sourcesByKey.has(keyA)).toBe(false);
+        expect(mod.buildPersistableState().sourceStateById[keyA]).toBeUndefined();
+    });
+
+    it('drops a placed source removed together with an ungrouped one when the row count fell by both', () => {
+        const rowA = createRow('Alpha Source', 'doc-a');
+        const rowB = createRow('Beta Source', 'doc-b');
+        const rowC = createRow('Gamma Source', 'doc-c');
+        showRows([rowA, rowB, rowC]);
+        mod.scanAndSyncSources(null, true, COMPLETE);
+        placeInFolder('keep-folder', [keyOf(rowA)]);
+
+        showRows([rowC]);
+        mod.scanAndSyncSources(null, false, COMPLETE);
+        mod.scanAndSyncSources(null, false, COMPLETE);
+
+        expect(mod.groupsById.get('keep-folder').children).toEqual([]);
+        expect(mod.sourcesByKey.has(keyOf(rowA))).toBe(false);
+        expect(mod.sourcesByKey.size).toBe(1);
+    });
+
+    it('keeps a placed source when one source disappears while another unknown row appears', () => {
+        const rowA = createRow('Alpha Source', 'doc-a');
+        const rowB = createRow('Beta Source', 'doc-b');
+        showRows([rowA, rowB]);
+        mod.scanAndSyncSources(null, true, COMPLETE);
+        const keyA = keyOf(rowA);
+        placeInFolder('keep-folder', [keyA]);
+
+        showRows([rowB, createRow('Brand New Source', 'doc-new')]);
+        mod.scanAndSyncSources(null, false, COMPLETE);
+        mod.scanAndSyncSources(null, false, COMPLETE);
+
+        expect(mod.groupsById.get('keep-folder').children).toEqual([{ type: 'source', key: keyA }]);
+    });
+
+    it('does not use a row count last seen in a different notebook as removal evidence', () => {
+        const rowA = createRow('Alpha Source', 'doc-a');
+        const rowB = createRow('Beta Source', 'doc-b');
+        showRows([rowA, rowB]);
+        mod.scanAndSyncSources(null, true, COMPLETE);
+        const keyA = keyOf(rowA);
+        placeInFolder('keep-folder', [keyA]);
+        mod._setProjectId('another-notebook');
+
+        showRows([rowB]);
+        mod.scanAndSyncSources(null, false, COMPLETE);
+        mod.scanAndSyncSources(null, false, COMPLETE);
+
+        expect(mod.groupsById.get('keep-folder').children).toEqual([{ type: 'source', key: keyA }]);
+    });
+
+    it('drops a placed source with the extension\'s own native-delete evidence even when a new row appeared', () => {
+        const rowA = createRow('Alpha Source', 'doc-a');
+        const rowB = createRow('Beta Source', 'doc-b');
+        showRows([rowA, rowB]);
+        mod.scanAndSyncSources(null, true, COMPLETE);
+        const descriptorA = mod.createSourceDescriptor(rowA.row, new Map(), new Map());
+        placeInFolder('keep-folder', [descriptorA.key]);
+        // The native delete went through but the local tree update failed closed, so the ref remains.
+        mod._setRecentNativeDeleteMarkersForTest(descriptorA.key, descriptorA);
+
+        showRows([rowB, createRow('Brand New Source', 'doc-new')]);
+        mod.scanAndSyncSources(null, false, COMPLETE);
+
+        expect(mod.groupsById.get('keep-folder').children).toEqual([]);
+        expect(mod.sourcesByKey.has(descriptorA.key)).toBe(false);
+    });
+
+    it('leaves the extension-initiated delete path unchanged', () => {
+        const rowA = createRow('Alpha Source', 'doc-a');
+        const rowB = createRow('Beta Source', 'doc-b');
+        showRows([rowA, rowB]);
+        mod.scanAndSyncSources(null, true, COMPLETE);
+        const descriptorA = mod.createSourceDescriptor(rowA.row, new Map(), new Map());
+        placeInFolder('keep-folder', [descriptorA.key]);
+        mod._setRecentNativeDeleteMarkersForTest(descriptorA.key, descriptorA);
+
+        expect(mod._handleNativeSourceDeleteAcceptedForTest(descriptorA.key)).toBe(true);
+        showRows([rowB]);
+        mod.scanAndSyncSources(null, false, COMPLETE);
+        mod.scanAndSyncSources(null, false, COMPLETE);
+
+        expect(mod.groupsById.get('keep-folder').children).toEqual([]);
+        expect(mod.sourcesByKey.has(descriptorA.key)).toBe(false);
     });
 });

@@ -2239,7 +2239,7 @@ describe('manager launcher messaging', () => {
             enabled: true,
             collapsed: false
         });
-        mod.state.groups = ['ai-group'];
+        mod.state.root = [{ type: 'group', id: 'ai-group' }];
         mod.state.ungrouped = [];
         phase = 'collapsed-label';
 

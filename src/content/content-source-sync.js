@@ -1621,6 +1621,116 @@
             return true;
         }
 
+        // Row count (and context) of the last complete scan whose result was accepted.
+        // Pure-removal evidence compares the next scan against this baseline, never against
+        // a held or partial scan.
+        let lastAcceptedScan = null;
+
+        function getScanContextToken() {
+            return [
+                String(runtime.projectId || ''),
+                String(runtime.activeManagerInstanceToken || '')
+            ].join(':');
+        }
+
+        // Source refs that sit in a folder or at a root position, per container. Used to see
+        // whether one scan pass dropped or moved existing placements.
+        function collectPlacedSourceCounts() {
+            const counts = new Map();
+            const state = getState();
+            counts.set('root', (Array.isArray(state.root) ? state.root : [])
+                .filter((entry) => entry?.type === 'source').length);
+            getGroupsById().forEach((group, groupId) => {
+                counts.set(`group:${groupId}`, (Array.isArray(group?.children) ? group.children : [])
+                    .filter((child) => child?.type === 'source').length);
+            });
+            return counts;
+        }
+
+        function countPlacementChanges(before, after) {
+            let changes = 0;
+            new Set([...before.keys(), ...after.keys()]).forEach((containerId) => {
+                changes += Math.abs((before.get(containerId) || 0) - (after.get(containerId) || 0));
+            });
+            return changes;
+        }
+
+        function isKnownMissingPlaceholder(storedKey) {
+            const source = getSourcesByKey().get(storedKey);
+            return Boolean(source?.isPendingNativeHydration && !source.element);
+        }
+
+        // True when the stored ref sits in a folder or at a positioned root slot (not just Ungrouped).
+        function hasStoredPlacement(storedKey) {
+            const isSourceEntry = (entry) => entry?.type === 'source' && entry.key === storedKey;
+            const state = getState();
+            if (Array.isArray(state.root) && state.root.some(isSourceEntry)) return true;
+            for (const group of getGroupsById().values()) {
+                if (Array.isArray(group?.children) && group.children.some(isSourceEntry)) return true;
+            }
+            return false;
+        }
+
+        function hasNativeDeleteEvidenceForStoredRef(storedKey, sourceRecord, authorizedNativeDeleteKeys) {
+            if (authorizedNativeDeleteKeys?.has?.(storedKey)) return true;
+            return isRecentlyNativeDeletedSource({
+                key: storedKey,
+                stableToken: sourceRecord?.stableToken || '',
+                fingerprint: sourceRecord?.fingerprint || ''
+            });
+        }
+
+        /**
+         * Later scans may drop an unresolved stored ref that still has a folder or root
+         * placement only with removal evidence: (a) the extension's own native-delete
+         * markers for it, or (b) a pure removal -- the complete scan parsed exactly as
+         * many fewer rows than the last accepted scan as there are newly unresolved
+         * stored refs, and no row is unknown to the stored records. Returns the stored
+         * keys without such evidence so the caller keeps them as missing placeholders.
+         */
+        function selectPlacedRefsToKeepWithoutRemovalEvidence(
+            remappedState,
+            currentSources,
+            parsedRowCount,
+            previousSourceRecordsByKey,
+            authorizedNativeDeleteKeys,
+            scanCompleteness
+        ) {
+            const placedKeys = Array.from(remappedState?.unresolvedPlacedKeys || []);
+            if (placedKeys.length === 0) return [];
+
+            const currentKeys = new Set(currentSources.map((source) => source?.key).filter(Boolean));
+            const evidencedKeys = new Set(placedKeys.filter((storedKey) => (
+                hasNativeDeleteEvidenceForStoredRef(
+                    storedKey,
+                    previousSourceRecordsByKey?.get?.(storedKey) || null,
+                    authorizedNativeDeleteKeys
+                )
+            )));
+            const newlyUnresolvedCount = Array.from(remappedState.unresolvedStoredKeys || [])
+                .filter((storedKey) => !isKnownMissingPlaceholder(storedKey)).length;
+            const unknownRowCount = currentSources.filter((source) => (
+                source?.key
+                && !source.isPendingNativeHydration
+                && !remappedState.seenSourceRefs.has(source.key)
+                && !remappedState.sourceStateById.has(source.key)
+            )).length;
+            const pureRemoval = Boolean(
+                scanCompleteness?.completeness === 'complete'
+                && lastAcceptedScan
+                && lastAcceptedScan.contextToken === getScanContextToken()
+                && unknownRowCount === 0
+                && newlyUnresolvedCount > 0
+                && lastAcceptedScan.rowCount - parsedRowCount === newlyUnresolvedCount
+            );
+
+            return placedKeys.filter((storedKey) => (
+                !evidencedKeys.has(storedKey)
+                && !currentKeys.has(storedKey)
+                && (!pureRemoval || isKnownMissingPlaceholder(storedKey))
+            ));
+        }
+
         function applyNativeLabelGroupSelectionsToExistingSources(selectionMap) {
             const sourcesByKey = getSourcesByKey();
             const groupsById = getGroupsById();
@@ -2271,10 +2381,24 @@
             const probeDeletedSourceKeys = recentNativeDeletedSourceKeys
                 ? new Set(recentNativeDeletedSourceKeys)
                 : null;
+            // On a complete scan that shows rows, placed refs (folder or root slot) already
+            // held as missing placeholders are not "newly missing"; counting them would hold
+            // every other scan while a placeholder exists. Ungrouped placeholders stay
+            // visible to the guard so they still need two identical complete scans.
+            // Partial or empty scans still see every placeholder and keep being held.
+            let guardedSourceRecordsByKey = previousSourceRecordsByKey;
+            if (scanCompleteness?.completeness === 'complete' && currentSources.length > 0) {
+                guardedSourceRecordsByKey = new Map();
+                previousSourceRecordsByKey?.forEach?.((sourceRecord, storedKey) => {
+                    if (!(isKnownMissingPlaceholder(storedKey) && hasStoredPlacement(storedKey))) {
+                        guardedSourceRecordsByKey.set(storedKey, sourceRecord);
+                    }
+                });
+            }
             const shouldPreserve = partialSyncShouldPreserveExistingSources(
                 currentSources,
                 sourceLookup,
-                previousSourceRecordsByKey,
+                guardedSourceRecordsByKey,
                 {
                     recentNativeDeletedSourceKeys: probeDeletedSourceKeys,
                     completeness: scanCompleteness?.completeness || 'partial',
@@ -2344,15 +2468,12 @@
             });
             runtime.keyByElement = keyByElement;
             buildParentMap();
-            const currentSourceViewKind = getCurrentSourceViewKind();
-            if (currentSourceViewKind !== SOURCE_VIEW_KIND_LABEL) {
-                hydratedSources.forEach(({ record }) => {
-                    syncSourceToPage(record, isSourceEffectivelyEnabled(record), {
-                        currentSourceViewKind,
-                        preferStoredCheckbox: true
-                    });
-                });
-            }
+            // A held partial scan is untrusted by definition: no passive native-selection push.
+            developerLog('info', 'source_sync', 'native_selection_enforcement_skipped', {
+                reason: 'scan_held_partial',
+                count: hydratedSources.length,
+                sourceViewKind: getCurrentSourceViewKind()
+            });
 
             return hydratedSources.length;
         }
@@ -2795,6 +2916,12 @@
             let candidateRoot;
             let candidateUngrouped;
             let candidateGroupsById;
+            // Why passive native-selection enforcement must be skipped for this pass.
+            let untrustedScanReason = scanCompleteness.completeness === 'complete'
+                ? ''
+                : 'scan_incomplete';
+            let untrustedScanCount = 0;
+            let placementCountsBefore = null;
             if (isFirstLoad) {
                 const reconciledTree = reconcilePersistedTree(loadedState, sourceLookup);
                 if (!reconciledTree?.ok) {
@@ -2807,7 +2934,8 @@
                 candidateUngrouped = reconciledTree.ungrouped;
                 candidateGroupsById = reconciledTree.groupsById;
             } else {
-                const remappedState = remapExistingStateToCurrentSources(sourceLookup, {
+                placementCountsBefore = collectPlacedSourceCounts();
+                let remappedState = remapExistingStateToCurrentSources(sourceLookup, {
                     sourceRecordsByKey: previousSourceRecordsByKey,
                     sourceTagsById: oldSourceTags
                 });
@@ -2823,6 +2951,49 @@
                         reason: 'unsafe_remap'
                     });
                     return createScanResult(false, false, 'unsafe_remap');
+                }
+                const keepPlacedKeys = selectPlacedRefsToKeepWithoutRemovalEvidence(
+                    remappedState,
+                    currentSources,
+                    rawCurrentSources.length,
+                    previousSourceRecordsByKey,
+                    authorizedNativeDeleteKeys,
+                    scanCompleteness
+                );
+                if (keepPlacedKeys.length > 0) {
+                    // No removal evidence: keep the placements as missing placeholders (the
+                    // first-load mechanism) instead of dropping them and persisting that.
+                    const placeholderSources = keepPlacedKeys.map((storedKey) => (
+                        createPreservedPartialSourceDescriptor(
+                            storedKey,
+                            previousSourceRecordsByKey.get(storedKey) || null
+                        )
+                    ));
+                    currentSources = currentSources.concat(placeholderSources);
+                    remappedState = remapExistingStateToCurrentSources(sourceLookup, {
+                        sourceRecordsByKey: previousSourceRecordsByKey,
+                        sourceTagsById: oldSourceTags,
+                        keepStoredKeys: new Set(keepPlacedKeys)
+                    });
+                    const newlyKeptCount = keepPlacedKeys
+                        .filter((storedKey) => !isKnownMissingPlaceholder(storedKey)).length;
+                    if (newlyKeptCount > 0) {
+                        developerLog('warn', 'source_sync', 'placed_sources_kept_without_removal_evidence', {
+                            count: newlyKeptCount,
+                            currentCount: rawCurrentSources.length,
+                            reason: 'no_removal_evidence'
+                        });
+                    }
+                }
+                const newlyUnresolvedCount = Array.from(remappedState.unresolvedStoredKeys || [])
+                    .filter((storedKey) => !isKnownMissingPlaceholder(storedKey)).length;
+                const positionalResolvedCount = remappedState.positionalResolvedKeys?.size || 0;
+                if (!untrustedScanReason && newlyUnresolvedCount > 0) {
+                    untrustedScanReason = 'unresolved_identity';
+                    untrustedScanCount = newlyUnresolvedCount;
+                } else if (!untrustedScanReason && positionalResolvedCount > 0) {
+                    untrustedScanReason = 'positional_identity';
+                    untrustedScanCount = positionalResolvedCount;
                 }
                 candidateRoot = remappedState.root;
                 candidateUngrouped = remappedState.ungrouped;
@@ -2910,6 +3081,16 @@
             if (!placementResult.ok) {
                 return createScanResult(false, false, 'placement_failed');
             }
+            if (!untrustedScanReason && placementCountsBefore) {
+                const placementChangeCount = countPlacementChanges(
+                    placementCountsBefore,
+                    collectPlacedSourceCounts()
+                );
+                if (placementChangeCount > 0) {
+                    untrustedScanReason = 'placements_changed';
+                    untrustedScanCount = placementChangeCount;
+                }
+            }
 
             if (isFirstLoad && normalizedTagState) {
                 const tagsById = runtime.tagsById instanceof Map ? runtime.tagsById : ensureMap('tagsById');
@@ -2941,13 +3122,28 @@
                 options.syncNativeSelection !== false &&
                 currentSourceViewKind !== SOURCE_VIEW_KIND_LABEL
             ) {
-                sourcesByKey.forEach((source) => {
-                    if (source.isPreservedPartialSource) return;
-                    syncSourceToPage(source, isSourceEffectivelyEnabled(source), {
-                        currentSourceViewKind,
-                        preferStoredCheckbox: true
+                if (untrustedScanReason) {
+                    // Passive enforcement pushes stored enabled state into Gemini's native
+                    // checkboxes; an untrusted scan could push it onto the wrong rows.
+                    developerLog('info', 'source_sync', 'native_selection_enforcement_skipped', {
+                        reason: untrustedScanReason,
+                        count: untrustedScanCount
                     });
-                });
+                } else {
+                    sourcesByKey.forEach((source) => {
+                        if (source.isPreservedPartialSource) return;
+                        syncSourceToPage(source, isSourceEffectivelyEnabled(source), {
+                            currentSourceViewKind,
+                            preferStoredCheckbox: true
+                        });
+                    });
+                }
+            }
+            if (scanCompleteness.completeness === 'complete') {
+                lastAcceptedScan = {
+                    contextToken: getScanContextToken(),
+                    rowCount: rawCurrentSources.length
+                };
             }
 
             const pendingStorageUpgrade = isFirstLoad && getPendingStorageUpgrade();

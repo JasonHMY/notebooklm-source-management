@@ -103,6 +103,65 @@ describe('content state reconciliation guards', () => {
         expect(remapped.ungrouped).toEqual([]);
     });
 
+    it('reports unresolved placed refs and keeps them under their own key only when asked', () => {
+        const runtime = {
+            groupsById: new Map([
+                ['g1', { id: 'g1', title: 'Folder', children: [{ type: 'source', key: 'gone-in-folder' }] }]
+            ]),
+            state: {
+                root: [{ type: 'group', id: 'g1' }, { type: 'source', key: 'gone-at-root' }],
+                ungrouped: ['gone-ungrouped', 'present']
+            }
+        };
+        const reconcile = createReconcileModule(runtime);
+        const sourceLookup = reconcile.buildSourceLookup([
+            { key: 'present', title: 'Present', normalizedTitle: 'present', stableToken: '', fingerprint: '' },
+            { key: 'brand-new-1', title: 'Brand New One', normalizedTitle: 'brand new one', stableToken: '', fingerprint: '' },
+            { key: 'brand-new-2', title: 'Brand New Two', normalizedTitle: 'brand new two', stableToken: '', fingerprint: '' }
+        ]);
+        const record = (title) => ({
+            title,
+            normalizedTitle: title.toLowerCase(),
+            enabled: true,
+            stableToken: '',
+            fingerprint: ''
+        });
+        const previousState = {
+            sourceRecordsByKey: new Map([
+                ['gone-in-folder', record('Gone In Folder')],
+                ['gone-at-root', record('Gone At Root')],
+                ['gone-ungrouped', record('Gone Ungrouped')],
+                ['present', record('Present')]
+            ]),
+            sourceTagsById: new Map()
+        };
+
+        const dropped = reconcile.remapExistingStateToCurrentSources(sourceLookup, previousState);
+
+        expect(Array.from(dropped.unresolvedStoredKeys).sort()).toEqual([
+            'gone-at-root', 'gone-in-folder', 'gone-ungrouped'
+        ]);
+        expect(Array.from(dropped.unresolvedPlacedKeys).sort()).toEqual(['gone-at-root', 'gone-in-folder']);
+        expect(dropped.positionalResolvedKeys.size).toBe(0);
+        expect(dropped.groupsById.get('g1').children).toEqual([]);
+        expect(dropped.root).toEqual([{ type: 'group', id: 'g1' }]);
+
+        const kept = reconcile.remapExistingStateToCurrentSources(sourceLookup, {
+            ...previousState,
+            keepStoredKeys: new Set(['gone-in-folder', 'gone-at-root'])
+        });
+
+        expect(kept.groupsById.get('g1').children).toEqual([{ type: 'source', key: 'gone-in-folder' }]);
+        expect(kept.root).toEqual([
+            { type: 'group', id: 'g1' },
+            { type: 'source', key: 'gone-at-root' }
+        ]);
+        expect(kept.ungrouped).toEqual(['present']);
+        expect(kept.sourceStateById.get('gone-in-folder')).toBeDefined();
+        // Still reported as unresolved so the caller can tell the pass was untrusted.
+        expect(kept.unresolvedPlacedKeys.has('gone-in-folder')).toBe(true);
+    });
+
     it('reconcilePersistedTree preserves a positioned root source from loadedState.root', () => {
         const reconcile = createReconcileModule({ groupsById: new Map(), state: {} });
         const sourceLookup = reconcile.buildSourceLookup([
