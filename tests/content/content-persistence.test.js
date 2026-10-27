@@ -1093,6 +1093,101 @@ describe('saveState', () => {
         }
     });
 
+    describe('critical save failure toast', () => {
+        const mountToastRoot = () => {
+            mod._setShadowRootForTest({
+                host: { isConnected: true },
+                querySelector: jest.fn(() => null),
+                appendChild: jest.fn()
+            });
+        };
+        const failRecoveryCleanup = () => {
+            global.sessionStorage.removeItem.mockImplementation(() => {
+                throw new Error('session_cleanup_failed');
+            });
+        };
+
+        afterEach(() => {
+            mod._hideActiveToastForTest(false);
+        });
+
+        it('stays quiet when a confirmed critical save only fails to clear its recovery copy', async () => {
+            seedPersistedState();
+            mountToastRoot();
+            failRecoveryCleanup();
+            const consoleWarn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+            try {
+                const result = await mod.saveState({ immediate: true, critical: true });
+
+                expect(result).toMatchObject({
+                    ok: false,
+                    reason: 'recovery_cleanup_failed',
+                    persistenceCommitted: true
+                });
+                expect(mod._getActiveToastItemForTest()).toBeNull();
+            } finally {
+                consoleWarn.mockRestore();
+            }
+        });
+
+        it('still reports a committed import save whose stored state is then rolled back', async () => {
+            seedPersistedState();
+            mountToastRoot();
+            failRecoveryCleanup();
+            const consoleWarn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+            try {
+                const result = await mod.saveState({
+                    immediate: true,
+                    critical: true,
+                    recoveryFallbackSnapshot: JSON.parse(JSON.stringify(expectedPersistableState))
+                });
+
+                expect(result).toMatchObject({
+                    ok: false,
+                    reason: 'recovery_cleanup_failed',
+                    persistenceCommitted: true
+                });
+                expect(mod._getActiveToastItemForTest()).toMatchObject({
+                    message: 'ui_save_failed',
+                    variant: 'error'
+                });
+            } finally {
+                consoleWarn.mockRestore();
+            }
+        });
+
+        it('reports an equal-revision conflict as a stale save', async () => {
+            seedPersistedState();
+            mountToastRoot();
+            global.chrome.runtime.sendMessage = undefined;
+            const storedState = {
+                ...expectedPersistableState,
+                root: [{ type: 'group', id: 'stored-only' }],
+                groupsById: {
+                    'stored-only': { id: 'stored-only', title: 'Stored', children: [] }
+                },
+                _saveRevision: 1,
+                _savedAt: '2026-04-22T00:00:00.000Z'
+            };
+            global.chrome.storage.local.get.mockImplementation((keys, cb) => {
+                cb({
+                    sourcesPlusState_test_project_id: storedState,
+                    sourcesPlusState_test_project_id__backup: storedState
+                });
+            });
+
+            const result = await mod.saveState({ immediate: true, critical: true });
+
+            expect(result).toMatchObject({ ok: false, reason: 'equal_revision_conflict' });
+            expect(mod._getActiveToastItemForTest()).toMatchObject({
+                message: 'ui_save_stale_failed',
+                variant: 'error'
+            });
+        });
+    });
+
     it('preserves a failed Classic sweep recovery with the storage-plan failure reason', async () => {
         const projectId = seedPersistedState();
         global.chrome.runtime.sendMessage.mockImplementationOnce((message, cb) => {

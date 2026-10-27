@@ -3250,6 +3250,50 @@ describe('drag and drop ordering guards', () => {
         expect(syncSourcesToEffectiveState).toHaveBeenCalledTimes(1);
     });
 
+    it('saves once when a toggle input fires both click and change', () => {
+        const group = { id: 'group-1', enabled: true };
+        const source = { key: 'source-1', enabled: true };
+        const saveState = jest.fn();
+        const interactions = createContentTreeInteractions({
+            getState: () => ({ isBatchMode: false }),
+            getGroupsById: () => new Map([[group.id, group]]),
+            getSourcesByKey: () => new Map([[source.key, source]]),
+            collectEffectiveSourceStates: () => new Map([[source.key, true]]),
+            syncSourcesToEffectiveState: jest.fn(),
+            isSourceEffectivelyEnabled: (candidate) => candidate.enabled,
+            invalidateDerivedGroupEffectiveStateCache: jest.fn(),
+            render: jest.fn(),
+            saveState
+        });
+        const createToggle = (className, dataset, sourceRow = null) => ({
+            checked: false,
+            dataset,
+            classList: { contains: (name) => name === className },
+            matches: (selector) => selector.split(/,\s*/).includes(`.${className}`),
+            closest: jest.fn((selector) => (selector === '.source-item' ? sourceRow : null))
+        });
+        const groupToggle = createToggle('sp-group-toggle-checkbox', { groupId: group.id });
+        const sourceToggle = createToggle(
+            'sp-checkbox',
+            { sourceKey: source.key },
+            { dataset: { sourceKey: source.key }, querySelector: jest.fn() }
+        );
+
+        // A real toggle dispatches click first, then change on the same input.
+        interactions.handleInteraction({ type: 'click', target: groupToggle });
+        interactions.handleInteraction({ type: 'change', target: groupToggle });
+
+        expect(group.enabled).toBe(false);
+        expect(saveState).toHaveBeenCalledTimes(1);
+
+        saveState.mockClear();
+        interactions.handleInteraction({ type: 'click', target: sourceToggle });
+        interactions.handleInteraction({ type: 'change', target: sourceToggle });
+
+        expect(source.enabled).toBe(false);
+        expect(saveState).toHaveBeenCalledTimes(1);
+    });
+
     it('clears contextual empty-state filters without mutating source data', () => {
         const state = {
             filterQuery: 'missing',

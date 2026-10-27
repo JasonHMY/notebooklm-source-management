@@ -136,6 +136,101 @@ test.describe('current Gemini Notebook DOM (2026-10)', () => {
         expect(nativeClicks.rowMore).toBe(0);
     });
 
+    test('folder switch and source checkbox toggles save once without a false failure toast', async () => {
+        const page = await env.context.newPage();
+        await page.goto(CURRENT_DOM_URL);
+        await expect(page.locator('#sources-list .source-item')).toHaveCount(FAKE_TITLES.length, { timeout: 20_000 });
+        const bridgePage = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
+
+        // Count error toasts as they appear: one that shows and hides between two assertions must not be missed.
+        await page.evaluate(() => {
+            window.__errorToasts = 0;
+            const root = document.querySelector('#sources-plus-root').shadowRoot;
+            new MutationObserver((records) => {
+                records.forEach((record) => record.addedNodes.forEach((node) => {
+                    if (node.nodeType === 1 && (node.matches('.sp-toast-error') || node.querySelector('.sp-toast-error'))) {
+                        window.__errorToasts += 1;
+                    }
+                }));
+            }).observe(root, { childList: true, subtree: true });
+        });
+        const readStored = () => bridgePage.evaluate(async () => {
+            const key = 'sourcesPlusState_current-dom';
+            const stored = (await chrome.storage.local.get(key))[key];
+            if (!stored) return null;
+            return {
+                folders: Object.values(stored.groupsById || {}).map((group) => group.enabled),
+                sources: Object.fromEntries(
+                    Object.values(stored.sourceStateById || {}).map((record) => [record.title, record.enabled])
+                )
+            };
+        });
+        const readNativeChecked = () => page.evaluate(() => Object.fromEntries(
+            Array.from(document.querySelectorAll('.single-source-container')).map((container) => [
+                container.textContent.match(/Fake Source \d/)?.[0],
+                container.querySelector('input[type="checkbox"]').checked
+            ])
+        ));
+        const sourceCheckbox = (title) => page.locator('#sources-list .source-item', { hasText: title }).locator('.sp-checkbox');
+
+        await page.locator('#sp-new-group-btn').click();
+        const nameInput = page.locator('.sp-inline-group-name-input');
+        await nameInput.fill('Toggle folder');
+        await nameInput.press('Enter');
+        const folder = page.locator('.group-container', { hasText: 'Toggle folder' });
+        await expect(folder.locator('.group-title').first()).toHaveText('Toggle folder');
+        await page.locator('#sources-list .source-item', { hasText: FAKE_TITLES[0] }).locator('.sp-source-actions-button').click();
+        await page.locator('.sp-source-actions-menu-item[data-action="move"]').click();
+        await page.locator('.sp-folder-option').filter({ hasText: 'Toggle folder' }).click();
+        await expect(folder.locator('.source-item')).toHaveCount(1);
+
+        // A real click on the switch fires click and change on the same input.
+        await folder.locator('.sp-toggle-switch').first().click();
+        await expect(folder.locator('.sp-group-toggle-checkbox')).not.toBeChecked();
+        await expect(folder.locator('.badge').first()).toHaveText(/0\s*\/\s*1/);
+        await expect.poll(readNativeChecked, { timeout: 10_000 }).toEqual({
+            'Fake Source 1': false, 'Fake Source 2': true, 'Fake Source 3': true
+        });
+        await expect.poll(async () => (await readStored())?.folders).toEqual([false]);
+
+        await folder.locator('.sp-toggle-switch').first().click();
+        await expect(folder.locator('.sp-group-toggle-checkbox')).toBeChecked();
+        await expect(folder.locator('.badge').first()).toHaveText(/1\s*\/\s*1/);
+        await expect.poll(readNativeChecked, { timeout: 10_000 }).toEqual({
+            'Fake Source 1': true, 'Fake Source 2': true, 'Fake Source 3': true
+        });
+        await expect.poll(async () => (await readStored())?.folders).toEqual([true]);
+
+        // Mouse click, then keyboard Space (browsers synthesize a click for it) on source checkboxes.
+        await sourceCheckbox(FAKE_TITLES[1]).click();
+        await expect(sourceCheckbox(FAKE_TITLES[1])).not.toBeChecked();
+        await sourceCheckbox(FAKE_TITLES[2]).focus();
+        await page.keyboard.press('Space');
+        await expect(sourceCheckbox(FAKE_TITLES[2])).not.toBeChecked();
+        await expect.poll(readNativeChecked, { timeout: 10_000 }).toEqual({
+            'Fake Source 1': true, 'Fake Source 2': false, 'Fake Source 3': false
+        });
+        await expect.poll(async () => (await readStored())?.sources).toMatchObject({
+            'Fake Source 1': true, 'Fake Source 2': false, 'Fake Source 3': false
+        });
+
+        // The false failure toast shows up shortly after the commit, so give it time before asserting.
+        await page.waitForTimeout(500);
+        expect(await page.evaluate(() => window.__errorToasts)).toBe(0);
+        await expect(page.locator('.sp-toast-error')).toHaveCount(0);
+
+        await page.reload();
+        await expect(page.locator('#sources-list .source-item')).toHaveCount(FAKE_TITLES.length, { timeout: 20_000 });
+        await expect(page.locator('.group-container', { hasText: 'Toggle folder' }).locator('.sp-group-toggle-checkbox')).toBeChecked();
+        await expect(sourceCheckbox(FAKE_TITLES[0])).toBeChecked();
+        await expect(sourceCheckbox(FAKE_TITLES[1])).not.toBeChecked();
+        await expect(sourceCheckbox(FAKE_TITLES[2])).not.toBeChecked();
+        await expect.poll(readNativeChecked, { timeout: 10_000 }).toEqual({
+            'Fake Source 1': true, 'Fake Source 2': false, 'Fake Source 3': false
+        });
+        await bridgePage.close();
+    });
+
     test('deletes one source through the native menu using the header count as evidence', async () => {
         const page = await env.context.newPage();
         await page.goto(CURRENT_DOM_URL);

@@ -3458,6 +3458,8 @@
             const sourcesByKey = getSourcesByKey();
             const pendingBatchKeys = getPendingBatchKeys();
             const target = event.target;
+            // The click (mouse, label, keyboard Space) already toggled these inputs; handling the follow-up change would save twice.
+            if (event?.type === 'change' && target?.matches?.('.sp-group-toggle-checkbox, .sp-checkbox')) return;
             const groupContainer = target.closest('.group-container');
             const groupId = groupContainer?.dataset.groupId;
             const sourceRow = target.closest('.source-item');

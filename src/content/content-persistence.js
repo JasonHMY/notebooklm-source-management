@@ -1021,9 +1021,15 @@
             };
         }
 
-        function notifyCriticalSaveFailure(result) {
+        function notifyCriticalSaveFailure(result, { recoveryFallbackSnapshot = null } = {}) {
             if (result?.ok) return;
-            const messageKey = result?.reason === 'stale_revision'
+            // Only the session recovery copy could not be cleared and the state is stored. Import still gets
+            // the toast because it rolls that stored state back (its modal shows no failure message).
+            if (result?.persistenceCommitted === true && !recoveryFallbackSnapshot) return;
+            const messageKey = (
+                result?.reason === 'stale_revision'
+                || result?.reason === 'equal_revision_conflict'
+            )
                 ? 'ui_save_stale_failed'
                 : result?.reason === 'storage_quota_exceeded'
                     ? 'ui_save_quota_failed'
@@ -1267,7 +1273,7 @@
                             });
                         }
                         if (operationOptions.critical && isCurrentOperationContext()) {
-                            notifyCriticalSaveFailure(resolvedResult);
+                            notifyCriticalSaveFailure(resolvedResult, operationOptions);
                         }
                         return resolvedResult;
                     });
