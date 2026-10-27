@@ -23,8 +23,17 @@
             '.mat-mdc-checkbox',
             '.mdc-checkbox'
         ],
-        moreBtn: ['[aria-label="More options"]', '.source-item-more-button'],
-        icon: ['mat-icon[class*="-icon-color"]', 'mat-icon:not([aria-label="More options"] mat-icon):not(button mat-icon)'],
+        // The header auto-label button also carries .source-item-more-button, so it is excluded by class.
+        moreBtn: [
+            '.source-item-more-button:not(.label-auto-button)',
+            '[aria-label="More options"]',
+            '[aria-label="More"]'
+        ],
+        icon: [
+            'mat-icon.source-item-source-icon',
+            'mat-icon[class*="-icon-color"]',
+            'mat-icon:not([aria-label="More options"] mat-icon):not(.source-item-more-button mat-icon):not(button mat-icon)'
+        ],
         iconImage: [
             'img',
             '[style*="background-image"]',

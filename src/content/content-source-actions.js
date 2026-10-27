@@ -2051,6 +2051,8 @@
             if (type === 'checkbox' || role === 'checkbox') return false;
             if (ariaLabel === 'more options') return false;
             if (className.includes('source-item-more-button')) return false;
+            // The More button's own icon sits inside the button; a click on it opens the native menu.
+            if (typeof target.closest === 'function' && target.closest('.source-item-more-button')) return false;
 
             return typeof target.click === 'function' || typeof target.dispatchEvent === 'function';
         }
@@ -2059,8 +2061,8 @@
             const selectors = [
                 'a[href]',
                 '[role="link"]',
-                'button:not([aria-label="More options"])',
-                '[role="button"]:not([aria-label="More options"])',
+                'button:not([aria-label="More options"]):not(.source-item-more-button)',
+                '[role="button"]:not([aria-label="More options"]):not(.source-item-more-button)',
                 '[jsaction]',
                 '[tabindex]:not([tabindex="-1"])',
                 '[data-testid="source-title"]',
@@ -2081,8 +2083,8 @@
                     [
                         'a[href]',
                         '[role="link"]',
-                        'button:not([aria-label="More options"])',
-                        '[role="button"]:not([aria-label="More options"])',
+                        'button:not([aria-label="More options"]):not(.source-item-more-button)',
+                        '[role="button"]:not([aria-label="More options"]):not(.source-item-more-button)',
                         '[jsaction]',
                         '[tabindex]:not([tabindex="-1"])'
                     ].join(', ')

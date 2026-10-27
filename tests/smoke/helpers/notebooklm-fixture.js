@@ -589,6 +589,141 @@ function renderNotebookHtml(notebookId, sources, options = {}) {
 </html>`;
 }
 
+function defaultCurrentDomTitles() {
+    return ['Fake Source 1', 'Fake Source 2', 'Fake Source 3'];
+}
+
+// Mirrors the Gemini Notebook Sources panel captured on 2026-10-27 (tests/fixtures/real-dom):
+// no data-testid, no stable id attributes, aria-label "More" on the row menu button, and a header
+// auto-label button that also carries .source-item-more-button.
+// window.__fixtureClicks counts every click, real or synthetic, that reaches a native control.
+function renderCurrentDomHtml(notebookId, titles, options = {}) {
+    const rowTitles = Array.isArray(titles) && titles.length > 0
+        ? titles.map((title) => String(title))
+        : defaultCurrentDomTitles();
+    const renderRow = (title) => `
+                <div class="single-source-container single-source-container-magic-index-only source-sorting-enabled" draggable="false">
+                    <button class="source-stretched-button" type="button" aria-label="${escapeHtml(title)}"></button>
+                    <div class="icon-and-menu-container icon-and-menu-container-collapsed">
+                        <div class="source-item-menu-button-visible">
+                            <div class="source-item-icon-container">
+                                <mat-icon class="mat-icon notranslate source-item-source-icon icon pdf-icon-color google-symbols" role="img" aria-hidden="true">drive_pdf</mat-icon>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="source-title-column" aria-hidden="true">
+                        <div class="mat-mdc-tooltip-trigger source-title mat-body-medium" aria-label="${escapeHtml(title)}"><span aria-hidden="true">${escapeHtml(title)}</span></div>
+                    </div>
+                    <div>
+                        <button class="mdc-icon-button mat-mdc-icon-button mat-mdc-menu-trigger source-item-more-button icon-button-small source-item-more-button-magic-index-only" type="button" aria-label="More" aria-expanded="false" aria-haspopup="menu">
+                            <div><mat-icon class="mat-icon notranslate source-item-more-menu-icon google-symbols" role="img" aria-hidden="true">more_vert</mat-icon></div>
+                        </button>
+                    </div>
+                    <div class="select-checkbox-container">
+                        <mat-checkbox class="mat-mdc-checkbox select-checkbox mat-primary">
+                            <label class="mdc-form-field mat-internal-form-field">
+                                <span class="mdc-checkbox"><input class="mdc-checkbox__native-control" type="checkbox" aria-label="Select ${escapeHtml(title)}" tabindex="0" checked></span>
+                            </label>
+                        </mat-checkbox>
+                    </div>
+                </div>`;
+    const rowsHtml = rowTitles.map(renderRow).join('');
+
+    return `<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Notebook ${escapeHtml(notebookId)}</title>
+    <style>
+        html, body { margin: 0; min-height: 100%; font-family: Arial, sans-serif; }
+        body { min-height: 100vh; background: #f6f7fb; color: #1f2937; }
+        chat-panel-header, source-picker, nb-button, mat-checkbox, mat-menu { display: block; }
+        .app-shell { display: grid; grid-template-columns: 360px 1fr; gap: 24px; padding: 24px; box-sizing: border-box; }
+        .source-panel { border: 1px solid #cfd6e4; border-radius: 12px; background: #fff; overflow: hidden; min-height: 320px; }
+        .panel-header { display: flex; align-items: center; min-height: 56px; padding: 0 16px; font-weight: 700; border-bottom: 1px solid #e5e7eb; }
+        .panel-header h2 { margin: 0; font-size: 16px; }
+        .button-row, .label-row { display: flex; align-items: center; gap: 8px; padding: 8px 16px; }
+        .label-row-start { display: flex; gap: 4px; }
+        .scroll-area-desktop { padding: 8px 16px 16px; }
+        .single-source-container { display: flex; align-items: center; gap: 10px; min-height: 44px; margin-bottom: 8px; padding: 6px 12px; position: relative; border: 1px solid #e5e7eb; border-radius: 10px; background: #fbfdff; }
+        .source-stretched-button { position: absolute; inset: 0; opacity: 0; border: 0; background: transparent; z-index: 0; }
+        .source-title-column { flex: 1; }
+        .source-item-more-button, .select-checkbox-container { position: relative; z-index: 1; }
+        .cover-subtitle { padding: 12px 24px; color: #6b7280; }
+    </style>
+</head>
+<body>
+    <main class="app-shell">
+        <chat-panel-header>
+            <div class="cover-content">
+                <div class="cover-subtitle mat-body-medium"><span class="cover-subtitle-source-count">${rowTitles.length} sources</span></div>
+            </div>
+        </chat-panel-header>
+        <section class="source-panel">
+            <div class="panel-header">
+                <nav><h2 class="panel-header-content"><span>Sources</span></h2></nav>
+            </div>
+            <div class="source-panel-content">
+                <source-picker class="source-sorting-enabled">
+                    <div class="contents">
+                        <div>
+                            <div class="button-row">
+                                <nb-button class="add-source-button"><button type="button" aria-label="Add sources">Add sources</button></nb-button>
+                            </div>
+                            <div class="row label-row">
+                                <div class="label-row-start">
+                                    <span>
+                                        <button class="mdc-icon-button mat-mdc-icon-button source-item-more-button label-auto-button icon-button-small" type="button" aria-label="Auto-label your sources by topic"><mat-icon class="mat-icon notranslate google-symbols" role="img" aria-hidden="true">layers</mat-icon></button>
+                                    </span>
+                                    <button class="mdc-icon-button mat-mdc-icon-button mat-mdc-menu-trigger source-sort-button icon-button-small" type="button" aria-label="Sort sources" aria-expanded="false" aria-haspopup="menu"><mat-icon class="mat-icon notranslate google-symbols" role="img" aria-hidden="true">sort</mat-icon></button>
+                                </div>
+                                <div class="header-title header-title-muted mat-body-medium">
+                                    <div class="select-checkbox-all-sources-container">
+                                        <mat-checkbox class="mat-mdc-checkbox select-checkbox-all-sources mat-primary">
+                                            <label class="mdc-form-field mat-internal-form-field">
+                                                <span class="mdc-checkbox"><input class="mdc-checkbox__native-control" type="checkbox" aria-label="Select all sources" tabindex="0" checked></span>
+                                            </label>
+                                        </mat-checkbox>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="xap-uploader-dropzone sources-list-dropzone has-sources">
+                            <div class="scroll-container">
+                                <div class="scroll-area-desktop" id="fixture-scroll-area">${options.deferRows ? '' : rowsHtml}</div>
+                            </div>
+                        </div>
+                    </div>
+                </source-picker>
+            </div>
+        </section>
+    </main>
+    <script>
+        (function () {
+            const rowsHtml = ${JSON.stringify(rowsHtml)};
+            const clicks = { autoLabel: 0, sort: 0, selectAll: 0, rowMore: 0, rowButton: 0 };
+            window.__fixtureClicks = clicks;
+            document.addEventListener('click', (event) => {
+                const target = event.target instanceof Element ? event.target : null;
+                if (!target) return;
+                if (target.closest('.label-auto-button')) clicks.autoLabel += 1;
+                else if (target.closest('.source-sort-button')) clicks.sort += 1;
+                else if (target.closest('.select-checkbox-all-sources')) clicks.selectAll += 1;
+                else if (target.closest('.source-item-more-button')) clicks.rowMore += 1;
+                else if (target.closest('.source-stretched-button')) clicks.rowButton += 1;
+            }, true);
+            window.__fixtureRenderRows = function renderRows() {
+                const scrollArea = document.getElementById('fixture-scroll-area');
+                scrollArea.innerHTML = rowsHtml;
+                return scrollArea.querySelectorAll('.single-source-container').length;
+            };
+        })();
+    </script>
+</body>
+</html>`;
+}
+
 function renderHomeHtml() {
     return `<!doctype html>
 <html lang="en">
@@ -678,6 +813,19 @@ async function installNotebookFixture(context, options = {}) {
             ]
                 : null;
 
+        if (fixtureName === 'current-dom') {
+            await route.fulfill({
+                status: 200,
+                contentType: 'text/html',
+                body: renderCurrentDomHtml(
+                    notebookId,
+                    Array.isArray(sources) ? sources.map((source) => source.title) : null,
+                    { deferRows: url.searchParams.get('rows') === 'deferred' }
+                )
+            });
+            return;
+        }
+
         await route.fulfill({
             status: 200,
             contentType: 'text/html',
@@ -700,6 +848,7 @@ async function installNotebookFixture(context, options = {}) {
 module.exports = {
     defaultSourcesForNotebook,
     installNotebookFixture,
+    renderCurrentDomHtml,
     renderHomeHtml,
     renderNotebookHtml
 };

@@ -169,7 +169,11 @@ GeminiNotebook-Source-Management
 │   │   └── content script 单元测试，按功能模块拆分
 │   ├── helpers/
 │   │   └── content module loader 和 mock DOM harness
+│   ├── fixtures/real-dom/
+│   │   └── 2026-10-27-notebook.google.com.html：只读采集并脱敏的真实来源面板结构（假标题、`[TEXT]`、白名单属性）；Google 改来源面板后重新采集
 │   ├── smoke/
+│   │   ├── current-dom.smoke.spec.js
+│   │   │   └── 2026-10 当前页面结构（`?fixture=current-dom`）：真实检测器识别来源行与行菜单按钮、不把自动分类按钮当成行控件、加载时不点自动分类；真实采集样本的检测也在这里跑（仓库没有 jsdom）
 │   │   ├── drag-reflow-layout.smoke.spec.js
 │   │   │   └── 真实 Chromium 中的混合/fixed box model 占位、spring preview、跨 host 多选、滚动恢复、reduced-motion 与 pointer Esc/cancel
 │   │   ├── pointer-drag.smoke.spec.js
@@ -179,6 +183,8 @@ GeminiNotebook-Source-Management
 │   │   ├── manager-performance.smoke.spec.js
 │   │   │   └── opt-in 100/500/1000/5000 来源 manager 基准；5 次 warm-up + 20 次测量，临时 content-script 隔离世界按样本记录初始渲染、搜索、Quick View、Tag filter、批量选择、同步输入、DOM mutation、query 与 layout read 的 p50/p95，并在每个样本结束还原原型
 │   │   └── 其他 Playwright 真实扩展上下文 smoke，默认 headless
+│   ├── content/content-real-dom-contract.test.js
+│   │   └── 真实采集样本的脱敏与选择器约定（静态检查）
 │   ├── background.test.js
 │   ├── popup.test.js
 │   ├── locales.test.js
