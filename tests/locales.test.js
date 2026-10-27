@@ -270,6 +270,8 @@ function getRequiredMessageKeys() {
         'ui_native_action_menu_item_missing',
         'ui_native_action_confirm_dialog_missing',
         'ui_native_action_confirm_button_missing',
+        'ui_native_action_delete_unverified',
+        'ui_native_action_delete_unconfirmed',
         'ui_native_action_failed',
         'ui_move_to_ungrouped',
         'ui_keyboard_move_unavailable',

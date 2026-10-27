@@ -29,6 +29,8 @@
             '[aria-label="More options"]',
             '[aria-label="More"]'
         ],
+        // Google's own "N sources" count in the chat header; the row/panel total attributes it used to rely on are absent.
+        sourceTotal: ['chat-panel-header .cover-subtitle-source-count'],
         icon: [
             'mat-icon.source-item-source-icon',
             'mat-icon[class*="-icon-color"]',

@@ -10,9 +10,9 @@
      * @param {Object} deps Required: runtime (持 attachedPanelHeader / panelResizeObserver 等运行时句柄).
      *   Optional 一组环境注入(default → globalThis): document, window, MutationObserver,
      *   ResizeObserver, setTimeout, clearTimeout; DEPS (selector bundle), SCROLL_AREA_SELECTOR。
-     * @returns {Object} 17 helpers,主要分三组:
+     * @returns {Object} 21 helpers,主要分三组:
      *   - DOM 查询: findElement, queryAllElements, waitForElement, findSourcePanel,
-     *     findSourcePanelContent, getSourcePanelHeader
+     *     findSourcePanelContent, readNativeSourceHeaderTotal, getSourcePanelHeader
      *   - 渲染/可见性: getElementComputedStyle, isTransparentColor, resolveSourcePanelSurfaceColor,
      *     applySourcePanelSurfaceColor, getElementBoundingRect, hasRenderableBox,
      *     isElementRenderable, isSourcePanelCollapsed, isSourcePanelRenderable
@@ -105,6 +105,24 @@
         function findSourcePanelContent(panel = findSourcePanel()) {
             if (!panel) return null;
             return findElement(SOURCE_PANEL_CONTENT_SELECTORS, panel);
+        }
+
+        // Google's own source total ("53 sources" in the chat header). Digits only, so it is
+        // locale-agnostic; null when the header is absent (collapsed chat panel, some notebooks)
+        // or carries no integer. Callers must still compare it with the parsed row count.
+        function readNativeSourceHeaderTotal(parent = documentObj) {
+            try {
+                const element = findElement(
+                    Array.isArray(DEPS.sourceTotal) ? DEPS.sourceTotal : [],
+                    parent
+                );
+                const match = /\d+/.exec(String(element?.textContent || ''));
+                if (!match) return null;
+                const total = Number.parseInt(match[0], 10);
+                return Number.isSafeInteger(total) && total >= 0 ? total : null;
+            } catch (error) {
+                return null;
+            }
         }
 
         function getSourcePanelHeader(panel = findSourcePanel()) {
@@ -402,6 +420,7 @@
             waitForElement,
             findSourcePanel,
             findSourcePanelContent,
+            readNativeSourceHeaderTotal,
             getSourcePanelHeader,
             getElementComputedStyle,
             isTransparentColor,

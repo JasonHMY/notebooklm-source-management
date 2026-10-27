@@ -28,6 +28,41 @@ const installReadyNativeSourcePanel = (mod) => {
     return panel;
 };
 
+// Exposes the given sources' rows as the complete native list with a matching Google
+// header total, so the delete inventory preflight (which now runs before the native
+// menu opens) passes and tests can exercise the later menu/dialog stages.
+// Call it after the test has installed its own document.querySelectorAll mock.
+// With `headerFirstReadOnly` only the first header read (the pre-menu preflight) reports a total,
+// so a test can still reach the later stages and stop at the second inventory read.
+const exposeAuthoritativeNativeInventory = (
+    mod,
+    sourceKeys,
+    headerText = null,
+    rowOverrides = {},
+    headerFirstReadOnly = false
+) => {
+    let headerReads = 0;
+    const rows = sourceKeys.map((sourceKey) => {
+        const source = mod.sourcesByKey.get(sourceKey);
+        const row = rowOverrides[sourceKey] || source.element;
+        const descriptor = mod.createSourceDescriptor(row, new Map(), new Map());
+        source.stableToken = descriptor?.stableToken || '';
+        source.fingerprint = descriptor?.fingerprint || '';
+        return row;
+    });
+    const previousQuerySelectorAll = global.document.querySelectorAll;
+    const previousQuerySelector = global.document.querySelector;
+    global.document.querySelectorAll = jest.fn((selector) => (
+        mod.DEPS.row.includes(selector) ? rows : previousQuerySelectorAll(selector)
+    ));
+    global.document.querySelector = jest.fn((selector) => {
+        if (!mod.DEPS.sourceTotal.includes(selector)) return previousQuerySelector(selector);
+        headerReads += 1;
+        if (headerFirstReadOnly && headerReads > 1) return null;
+        return { textContent: headerText ?? `${rows.length} sources` };
+    });
+};
+
 describe('executeBatchDelete', () => {
     let mod;
 
@@ -282,6 +317,7 @@ describe('executeBatchDelete', () => {
             isDisabled: false
         });
         global.document.body.contains = jest.fn(() => false);
+        exposeAuthoritativeNativeInventory(mod, ['key2'], null, { key2: mockFreshRow });
 
         await mod.executeBatchDelete();
 
@@ -315,6 +351,7 @@ describe('executeBatchDelete', () => {
         });
 
         global.document.querySelectorAll = jest.fn(() => []);
+        exposeAuthoritativeNativeInventory(mod, ['key3']);
 
         await mod.executeBatchDelete();
 
@@ -355,6 +392,7 @@ describe('executeBatchDelete', () => {
             if (sel.includes('dialog')) return deleteClicked ? [mockDialog] : [];
             return [];
         });
+        exposeAuthoritativeNativeInventory(mod, ['key4']);
 
         await mod.executeBatchDelete();
 
@@ -429,6 +467,7 @@ describe('executeBatchDelete', () => {
             if (sel.includes('dialog')) return deleteClicked ? [dialogWithoutConfirmButton] : [];
             return [];
         });
+        exposeAuthoritativeNativeInventory(mod, ['key4', 'key5']);
 
         await mod.executeBatchDelete();
 
@@ -973,11 +1012,12 @@ describe('deleteNativeSource', () => {
             actions,
             confirmButton,
             deleteMenuItem,
+            moreButton,
             onNativeSourceDeleteAccepted
         };
     };
 
-    it('fails before native confirmation when the pre-delete inventory has no explicit total', async () => {
+    it('refuses before opening the native menu when no source total is available', async () => {
         const { moreButton, isNativeMenuOpened } = seedSourceWithMoreButton();
         let deleteClicked = false;
         const deleteMenuItem = createDeleteMenuItem({
@@ -1004,9 +1044,10 @@ describe('deleteNativeSource', () => {
             deleted: false,
             reason: 'native_delete_inventory_unverified'
         });
-        expect(moreButton.click).toHaveBeenCalled();
-        expect(deleteMenuItem.click).toHaveBeenCalled();
+        expect(moreButton.click).not.toHaveBeenCalled();
+        expect(deleteMenuItem.click).not.toHaveBeenCalled();
         expect(confirmButton.click).not.toHaveBeenCalled();
+        expect(global.document.body.click).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -1040,14 +1081,15 @@ describe('deleteNativeSource', () => {
             },
             'native_delete_target_ambiguous'
         ]
-    ])('fails before native confirmation when inventory %s', async (_label, inventory, reason) => {
+    ])('refuses before opening the native menu when inventory %s', async (_label, inventory, reason) => {
         const fixture = createDeleteInventoryPreflightFixture(inventory);
 
         await expect(fixture.actions.deleteNativeSource('target-source')).resolves.toEqual({
             deleted: false,
             reason
         });
-        expect(fixture.deleteMenuItem.click).toHaveBeenCalledTimes(1);
+        expect(fixture.moreButton.click).not.toHaveBeenCalled();
+        expect(fixture.deleteMenuItem.click).not.toHaveBeenCalled();
         expect(fixture.confirmButton.click).not.toHaveBeenCalled();
         expect(fixture.onNativeSourceDeleteAccepted).not.toHaveBeenCalled();
     });
@@ -1221,6 +1263,8 @@ describe('deleteNativeSource', () => {
             return [];
         });
 
+        exposeAuthoritativeNativeInventory(mod, ['failed-source'], null, {}, true);
+
         await expect(mod.deleteNativeSource('failed-source')).resolves.toEqual({
             deleted: false,
             reason: 'native_delete_inventory_unverified'
@@ -1263,6 +1307,8 @@ describe('deleteNativeSource', () => {
             return [];
         });
 
+        exposeAuthoritativeNativeInventory(mod, ['key1'], null, {}, true);
+
         await expect(mod.deleteNativeSource('key1')).resolves.toEqual({
             deleted: false,
             reason: 'native_delete_inventory_unverified'
@@ -1299,6 +1345,8 @@ describe('deleteNativeSource', () => {
             if (sel.includes('dialog')) return dialogOpen ? [dialog] : [];
             return [];
         });
+
+        exposeAuthoritativeNativeInventory(mod, ['key1'], null, {}, true);
 
         await expect(mod.deleteNativeSource('key1')).resolves.toEqual({
             deleted: false,
@@ -1360,6 +1408,8 @@ describe('deleteNativeSource', () => {
             return [];
         });
 
+        exposeAuthoritativeNativeInventory(mod, ['key1'], null, {}, true);
+
         await expect(mod.deleteNativeSource('key1')).resolves.toEqual({
             deleted: false,
             reason: 'native_delete_inventory_unverified'
@@ -1397,6 +1447,8 @@ describe('deleteNativeSource', () => {
             if (selector.includes('dialog')) return dialogOpen ? [dialog] : [];
             return [];
         });
+
+        exposeAuthoritativeNativeInventory(mod, ['key1'], null, {}, true);
 
         await expect(mod.deleteNativeSource('key1')).resolves.toEqual({
             deleted: false,
@@ -1470,6 +1522,8 @@ describe('deleteNativeSource', () => {
             return [];
         });
 
+        exposeAuthoritativeNativeInventory(mod, ['key1'], null, {}, true);
+
         await expect(mod.deleteNativeSource('key1')).resolves.toEqual({
             deleted: false,
             reason: 'native_delete_inventory_unverified'
@@ -1527,6 +1581,8 @@ describe('deleteNativeSource', () => {
             return [];
         });
 
+        exposeAuthoritativeNativeInventory(mod, ['key1'], null, { key1: freshRow.row }, true);
+
         await expect(mod.deleteNativeSource('key1')).resolves.toEqual({
             deleted: false,
             reason: 'native_delete_inventory_unverified'
@@ -1558,7 +1614,11 @@ describe('deleteNativeSource', () => {
         const sourceRow = {
             textContent: 'key1',
             getAttribute: jest.fn(() => null),
-            querySelector: jest.fn(() => null),
+            querySelector: jest.fn((selector) => {
+                if (mod.DEPS.title.includes(selector)) return { textContent: 'key1' };
+                if (mod.DEPS.checkbox.includes(selector)) return { getAttribute: jest.fn(() => null) };
+                return null;
+            }),
             querySelectorAll: jest.fn((selector) => (selector === 'button' ? [moreButton] : []))
         };
         const deleteMenuItem = createDeleteMenuItem({
@@ -1597,6 +1657,8 @@ describe('deleteNativeSource', () => {
             if (sel.includes('dialog')) return deleteClicked ? [dialog] : [];
             return [];
         });
+
+        exposeAuthoritativeNativeInventory(mod, ['key1'], null, {}, true);
 
         await expect(mod.deleteNativeSource('key1')).resolves.toEqual({
             deleted: false,
@@ -1688,6 +1750,8 @@ describe('deleteNativeSource', () => {
         const { moreButton } = seedSourceWithMoreButton();
         global.document.querySelectorAll = jest.fn(() => []);
 
+        exposeAuthoritativeNativeInventory(mod, ['key1']);
+
         await expect(mod.deleteNativeSource('key1')).resolves.toEqual({
             deleted: false,
             reason: 'delete_menu_missing'
@@ -1711,6 +1775,8 @@ describe('deleteNativeSource', () => {
             if (sel.includes('dialog')) return deleteClicked ? [dialog] : [];
             return [];
         });
+
+        exposeAuthoritativeNativeInventory(mod, ['key1']);
 
         await expect(mod.deleteNativeSource('key1')).resolves.toEqual({
             deleted: false,
@@ -1755,6 +1821,8 @@ describe('deleteNativeSource', () => {
             return [];
         });
 
+        exposeAuthoritativeNativeInventory(mod, ['key1'], null, {}, true);
+
         await expect(mod.deleteNativeSource('key1')).resolves.toEqual({
             deleted: false,
             reason: 'native_delete_inventory_unverified'
@@ -1791,6 +1859,8 @@ describe('deleteNativeSource', () => {
             if (sel.includes('dialog')) return [reusedDialog];
             return [];
         });
+
+        exposeAuthoritativeNativeInventory(mod, ['key1'], null, {}, true);
 
         await expect(mod.deleteNativeSource('key1')).resolves.toEqual({
             deleted: false,
@@ -1846,6 +1916,8 @@ describe('deleteNativeSource', () => {
             return [];
         });
 
+        exposeAuthoritativeNativeInventory(mod, ['key1'], null, {}, true);
+
         await expect(mod.deleteNativeSource('key1')).resolves.toEqual({
             deleted: false,
             reason: 'native_delete_inventory_unverified'
@@ -1889,6 +1961,8 @@ describe('deleteNativeSource', () => {
             }
             return [];
         });
+
+        exposeAuthoritativeNativeInventory(mod, ['key1'], null, {}, true);
 
         await expect(mod.deleteNativeSource('key1')).resolves.toEqual({
             deleted: false,
@@ -1947,6 +2021,8 @@ describe('deleteNativeSource', () => {
             return [];
         });
 
+        exposeAuthoritativeNativeInventory(mod, ['key1'], null, {}, true);
+
         await expect(mod.deleteNativeSource('key1')).resolves.toEqual({
             deleted: false,
             reason: 'native_delete_inventory_unverified'
@@ -1987,6 +2063,8 @@ describe('deleteNativeSource', () => {
             return [];
         });
 
+        exposeAuthoritativeNativeInventory(mod, ['key1'], null, {}, true);
+
         await expect(mod.deleteNativeSource('key1')).resolves.toEqual({
             deleted: false,
             reason: 'native_delete_inventory_unverified'
@@ -2024,6 +2102,8 @@ describe('deleteNativeSource', () => {
             if (sel.includes('dialog')) return deleteClicked ? [firstDialog, secondDialog] : [];
             return [];
         });
+
+        exposeAuthoritativeNativeInventory(mod, ['key1']);
 
         await expect(mod.deleteNativeSource('key1')).resolves.toEqual({
             deleted: false,
@@ -2092,6 +2172,8 @@ describe('deleteNativeSource', () => {
             return [];
         });
 
+        exposeAuthoritativeNativeInventory(mod, ['key1']);
+
         await expect(mod.deleteNativeSource('key1')).resolves.toEqual({
             deleted: false,
             reason: 'confirm_dialog_mismatched_source'
@@ -2152,6 +2234,8 @@ describe('deleteNativeSource', () => {
             return [];
         });
 
+        exposeAuthoritativeNativeInventory(mod, ['key1']);
+
         await expect(mod.deleteNativeSource('key1')).resolves.toEqual({
             deleted: false,
             reason: 'confirm_dialog_unmatched'
@@ -2177,6 +2261,8 @@ describe('deleteNativeSource', () => {
             if (sel.includes('dialog')) return [staleDialog];
             return [];
         });
+
+        exposeAuthoritativeNativeInventory(mod, ['key1']);
 
         await expect(mod.deleteNativeSource('key1')).resolves.toEqual({
             deleted: false,
@@ -2212,6 +2298,8 @@ describe('deleteNativeSource', () => {
             if (sel.includes('dialog')) return deleteClicked ? [unrelatedDialog] : [];
             return [];
         });
+
+        exposeAuthoritativeNativeInventory(mod, ['key1']);
 
         await expect(mod.deleteNativeSource('key1')).resolves.toEqual({
             deleted: false,
@@ -3091,6 +3179,163 @@ describe('source action menu', () => {
         mod.scanAndSyncSources(null, false);
         expect(mod.sourcesByKey.has('source-1')).toBe(false);
         expect(mod.state.ungrouped).toEqual([]);
+    });
+
+    describe('delete evidence from the Google header total', () => {
+        // Two native rows; the panel exposes no total attribute, only the chat header count.
+        // `readHeader(deleted, reads)` lets a test choose what the header shows on each read.
+        const setupHeaderTotalDelete = ({ readHeader }) => {
+            global.setTimeout = (callback) => {
+                callback();
+                return 1;
+            };
+            const state = { menuOpen: false, dialogOpen: false, deleted: false, headerReads: 0 };
+            const moreButton = { click: jest.fn(() => { state.menuOpen = true; }) };
+            const targetRow = createMockSourceRow({
+                title: 'Target Source',
+                stableToken: 'target-doc',
+                nativeMoreButton: moreButton
+            }).row;
+            const survivorRow = createMockSourceRow({
+                title: 'Survivor Source',
+                stableToken: 'survivor-doc'
+            }).row;
+            const targetDescriptor = mod.createSourceDescriptor(targetRow, new Map(), new Map());
+            mod.sourcesByKey.set('target', {
+                key: 'target',
+                title: 'Target Source',
+                stableToken: targetDescriptor.stableToken,
+                fingerprint: targetDescriptor.fingerprint,
+                element: targetRow,
+                enabled: true,
+                isLoading: false,
+                isDisabled: false
+            });
+            const currentRows = () => (state.deleted ? [survivorRow] : [targetRow, survivorRow]);
+            const deleteMenuItem = createNativeMenuItem({ text: 'Delete', icon: 'delete' });
+            deleteMenuItem.click = jest.fn(() => { state.dialogOpen = true; });
+            const confirmButton = {
+                textContent: 'Delete',
+                className: 'warn',
+                click: jest.fn(() => {
+                    state.deleted = true;
+                    state.dialogOpen = false;
+                }),
+                querySelector: jest.fn(() => null),
+                getAttribute: jest.fn(() => null)
+            };
+            const confirmDialog = {
+                textContent: 'Delete Target Source?',
+                getAttribute: jest.fn(() => null),
+                querySelectorAll: jest.fn((selector) => (selector === 'button' ? [confirmButton] : []))
+            };
+            const panel = {
+                hidden: false,
+                contains: jest.fn((element) => currentRows().includes(element)),
+                getAttribute: jest.fn(() => null),
+                querySelector: jest.fn(() => null),
+                querySelectorAll: jest.fn((selector) => (
+                    mod.DEPS.row.includes(selector) ? currentRows() : []
+                ))
+            };
+            global.document.querySelector = jest.fn((selector) => {
+                if (mod.DEPS.panel.includes(selector)) return panel;
+                if (mod.DEPS.sourceTotal.includes(selector)) {
+                    state.headerReads += 1;
+                    const text = readHeader(state);
+                    return text == null ? null : { textContent: text };
+                }
+                return null;
+            });
+            global.document.body.contains = jest.fn((element) => (
+                element === panel || currentRows().includes(element)
+            ));
+            global.document.querySelectorAll = jest.fn((selector) => {
+                if (mod.DEPS.row.includes(selector)) return currentRows();
+                if (selector.includes('[role="menuitem"]')) return state.menuOpen ? [deleteMenuItem] : [];
+                if (selector.includes('dialog')) return state.dialogOpen ? [confirmDialog] : [];
+                return [];
+            });
+            return { state, moreButton, deleteMenuItem, confirmButton };
+        };
+
+        it('deletes when the header total lags behind the row removal and then drops by one', async () => {
+            const fixture = setupHeaderTotalDelete({
+                readHeader: (state) => {
+                    if (!state.deleted) return '2 sources';
+                    // Rows are already gone; the header keeps showing 2 for three reads.
+                    return state.headerReads - state.headerReadsAtDelete > 3 ? '1 source' : '2 sources';
+                }
+            });
+            fixture.confirmButton.click.mockImplementation(() => {
+                fixture.state.deleted = true;
+                fixture.state.dialogOpen = false;
+                fixture.state.headerReadsAtDelete = fixture.state.headerReads;
+            });
+
+            await expect(mod.deleteNativeSource('target')).resolves.toEqual({ deleted: true });
+
+            expect(fixture.moreButton.click).toHaveBeenCalledTimes(1);
+            expect(fixture.confirmButton.click).toHaveBeenCalledTimes(1);
+            expect(mod.sourcesByKey.has('target')).toBe(false);
+        });
+
+        it('does not confirm the delete when the header total never drops', async () => {
+            const fixture = setupHeaderTotalDelete({ readHeader: () => '2 sources' });
+
+            await expect(mod.deleteNativeSource('target')).resolves.toEqual({
+                deleted: false,
+                reason: 'delete_not_confirmed'
+            });
+
+            expect(fixture.confirmButton.click).toHaveBeenCalledTimes(1);
+            expect(mod.sourcesByKey.has('target')).toBe(true);
+        });
+
+        it('does not confirm the delete when the header drops by more than one', async () => {
+            const fixture = setupHeaderTotalDelete({
+                readHeader: (state) => (state.deleted ? '0 sources' : '2 sources')
+            });
+
+            await expect(mod.deleteNativeSource('target')).resolves.toEqual({
+                deleted: false,
+                reason: 'delete_not_confirmed'
+            });
+            expect(fixture.confirmButton.click).toHaveBeenCalledTimes(1);
+            expect(mod.sourcesByKey.has('target')).toBe(true);
+        });
+
+        it('refuses before the native menu opens when the header total disagrees with the rows', async () => {
+            const fixture = setupHeaderTotalDelete({ readHeader: () => '3 sources' });
+
+            await expect(mod.deleteNativeSource('target')).resolves.toEqual({
+                deleted: false,
+                reason: 'native_delete_inventory_unverified'
+            });
+            expect(fixture.moreButton.click).not.toHaveBeenCalled();
+            expect(fixture.deleteMenuItem.click).not.toHaveBeenCalled();
+            expect(global.document.body.click).not.toHaveBeenCalled();
+        });
+
+        it('refuses before the native menu opens when the header is absent', async () => {
+            const fixture = setupHeaderTotalDelete({ readHeader: () => null });
+
+            await expect(mod.deleteNativeSource('target')).resolves.toEqual({
+                deleted: false,
+                reason: 'native_delete_inventory_unverified'
+            });
+            expect(fixture.moreButton.click).not.toHaveBeenCalled();
+        });
+
+        it('describes a safety refusal and an unconfirmed delete accurately', () => {
+            global.chrome.i18n.getMessage = jest.fn((key) => `[${key}]`);
+
+            expect(mod.getNativeActionFailureMessage('delete', 'native_delete_inventory_unverified'))
+                .toBe('[ui_delete_source_failed] [ui_native_action_delete_unverified]');
+            // The row may really be gone, so the "could not start" base message is dropped.
+            expect(mod.getNativeActionFailureMessage('delete', 'delete_not_confirmed'))
+                .toBe('[ui_native_action_delete_unconfirmed]');
+        });
     });
 
     it('closes the action menu on outside clicks without breaking search-rail clicks', () => {

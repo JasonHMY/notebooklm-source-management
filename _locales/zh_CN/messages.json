@@ -1361,6 +1361,12 @@
     "ui_native_action_confirm_button_missing": {
         "message": "未找到 Gemini Notebook 的确认按钮。"
     },
+    "ui_native_action_delete_unverified": {
+        "message": "未删除任何内容。扩展无法将来源列表与 Gemini Notebook 显示的总数核对一致。"
+    },
+    "ui_native_action_delete_unconfirmed": {
+        "message": "无法确认删除结果，该来源可能已被删除。请查看 Gemini Notebook 的来源列表，然后刷新页面。"
+    },
     "ui_native_action_failed": {
         "message": "Gemini Notebook 页面结构可能已经变化。"
     },

@@ -702,7 +702,7 @@ function renderCurrentDomHtml(notebookId, titles, options = {}) {
     <script>
         (function () {
             const rowsHtml = ${JSON.stringify(rowsHtml)};
-            const clicks = { autoLabel: 0, sort: 0, selectAll: 0, rowMore: 0, rowButton: 0 };
+            const clicks = { autoLabel: 0, sort: 0, selectAll: 0, rowMore: 0, rowButton: 0, deleted: 0 };
             window.__fixtureClicks = clicks;
             document.addEventListener('click', (event) => {
                 const target = event.target instanceof Element ? event.target : null;
@@ -713,6 +713,52 @@ function renderCurrentDomHtml(notebookId, titles, options = {}) {
                 else if (target.closest('.source-item-more-button')) clicks.rowMore += 1;
                 else if (target.closest('.source-stretched-button')) clicks.rowButton += 1;
             }, true);
+            // Native delete flow: row More menu -> Delete item -> confirm dialog naming the title ->
+            // row removed and the header count decremented (like the live page, all synchronously).
+            const overlay = document.createElement('div');
+            overlay.className = 'cdk-overlay-container';
+            document.body.appendChild(overlay);
+            const closeOverlay = () => { overlay.innerHTML = ''; };
+            const readRowTitle = (row) => row.querySelector('.source-title')?.getAttribute('aria-label') || '';
+            document.addEventListener('click', (event) => {
+                const target = event.target instanceof Element ? event.target : null;
+                if (!target) return;
+                const rowMore = target.closest('.single-source-container .source-item-more-button:not(.label-auto-button)');
+                if (rowMore) {
+                    closeOverlay();
+                    const row = rowMore.closest('.single-source-container');
+                    row.setAttribute('data-fixture-menu-owner', 'true');
+                    const menu = document.createElement('div');
+                    menu.className = 'mat-mdc-menu-panel';
+                    menu.innerHTML = '<button class="mat-mdc-menu-item" role="menuitem" type="button" data-fixture-delete><mat-icon class="google-symbols">delete</mat-icon><span>Delete source</span></button>';
+                    overlay.appendChild(menu);
+                    return;
+                }
+                if (target.closest('[data-fixture-delete]')) {
+                    const row = document.querySelector('[data-fixture-menu-owner="true"]');
+                    closeOverlay();
+                    if (!row) return;
+                    const dialog = document.createElement('mat-dialog-container');
+                    dialog.setAttribute('role', 'dialog');
+                    dialog.innerHTML = '<p class="fixture-dialog-title"></p><button type="button" data-fixture-cancel>Cancel</button><button type="button" class="mat-mdc-button-primary" data-fixture-confirm>Delete</button>';
+                    dialog.querySelector('.fixture-dialog-title').textContent = 'Delete ' + readRowTitle(row) + '?';
+                    overlay.appendChild(dialog);
+                    return;
+                }
+                if (target.closest('[data-fixture-confirm]')) {
+                    const row = document.querySelector('[data-fixture-menu-owner="true"]');
+                    closeOverlay();
+                    if (!row) return;
+                    row.remove();
+                    clicks.deleted += 1;
+                    const count = document.querySelectorAll('.single-source-container').length;
+                    document.querySelector('.cover-subtitle-source-count').textContent = count + (count === 1 ? ' source' : ' sources');
+                    return;
+                }
+                if (target.closest('[data-fixture-cancel]') || !target.closest('.cdk-overlay-container')) {
+                    closeOverlay();
+                }
+            });
             window.__fixtureRenderRows = function renderRows() {
                 const scrollArea = document.getElementById('fixture-scroll-area');
                 scrollArea.innerHTML = rowsHtml;

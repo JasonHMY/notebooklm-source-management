@@ -56,6 +56,9 @@
         const findSourcePanel = typeof deps.findSourcePanel === 'function'
             ? deps.findSourcePanel
             : () => null;
+        const readNativeSourceTotal = typeof deps.readNativeSourceTotal === 'function'
+            ? deps.readNativeSourceTotal
+            : () => null;
         const isSourcePanelRenderable = typeof deps.isSourcePanelRenderable === 'function'
             ? deps.isSourcePanelRenderable
             : () => false;
@@ -2203,6 +2206,9 @@
                 })
                 .filter(Boolean)
                 .sort();
+            // Delete evidence only: Google's header total backs the inventory when no total attribute
+            // exists. Scan completeness itself deliberately ignores it.
+            const totalHint = scanCompleteness.totalHint ?? readNativeSourceTotal();
             return {
                 complete: scanCompleteness.completeness === 'complete',
                 completeness: scanCompleteness.completeness,
@@ -2212,10 +2218,10 @@
                 identityKeys: observedIdentityKeys,
                 identitySignature: observedIdentityKeys.join('|'),
                 rowCount: sourceEntries.length,
-                totalHint: scanCompleteness.totalHint,
+                totalHint,
                 hasAuthoritativeTotal: scanCompleteness.completeness === 'complete'
-                    && scanCompleteness.totalHint != null
-                    && observedIdentityKeys.length === scanCompleteness.totalHint,
+                    && totalHint != null
+                    && observedIdentityKeys.length === totalHint,
                 panel,
                 rows: sourceEntries.map((entry) => entry.row).filter(Boolean)
             };

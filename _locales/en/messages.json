@@ -1361,6 +1361,12 @@
     "ui_native_action_confirm_button_missing": {
         "message": "Gemini Notebook's confirmation button was not found."
     },
+    "ui_native_action_delete_unverified": {
+        "message": "Nothing was deleted. The extension could not match the source list with the total Gemini Notebook shows."
+    },
+    "ui_native_action_delete_unconfirmed": {
+        "message": "The deletion could not be confirmed, and the source may already be deleted. Check Gemini Notebook's source list, then refresh the page."
+    },
     "ui_native_action_failed": {
         "message": "Gemini Notebook's page structure may have changed."
     },

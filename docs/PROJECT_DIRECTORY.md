@@ -173,7 +173,7 @@ GeminiNotebook-Source-Management
 │   │   └── 2026-10-27-notebook.google.com.html：只读采集并脱敏的真实来源面板结构（假标题、`[TEXT]`、白名单属性）；Google 改来源面板后重新采集
 │   ├── smoke/
 │   │   ├── current-dom.smoke.spec.js
-│   │   │   └── 2026-10 当前页面结构（`?fixture=current-dom`）：真实检测器识别来源行与行菜单按钮、不把自动分类按钮当成行控件、加载时不点自动分类；真实采集样本的检测也在这里跑（仓库没有 jsdom）
+│   │   │   └── 2026-10 当前页面结构（`?fixture=current-dom`）：真实检测器识别来源行与行菜单按钮、不把自动分类按钮当成行控件、加载时不点自动分类；模拟原生 More 菜单 → Delete → 确认框 → 表头总数减 1 的单条删除；真实采集样本的检测也在这里跑（仓库没有 jsdom）
 │   │   ├── drag-reflow-layout.smoke.spec.js
 │   │   │   └── 真实 Chromium 中的混合/fixed box model 占位、spring preview、跨 host 多选、滚动恢复、reduced-motion 与 pointer Esc/cancel
 │   │   ├── pointer-drag.smoke.spec.js
@@ -537,7 +537,8 @@ manifest.json
 │   │   ├── 失败来源删除入口
 │   │   ├── rename/delete/details 和完整 batch-delete 会话互斥；route、manager instance 或来源身份变化即 fail closed
 │   │   ├── 原生 overlay 样式只在宿主同时带有 operation-scoped `sources-plus-native-action-active` class 与 `data-nsm-native-action-active="true"` 时生效，并在成功、失败、取消、超时或 teardown 后清理
-│   │   └── 删除确认弹窗歧义防护与原生删除后的完整 inventory identity absence proof
+│   │   ├── 删除确认弹窗歧义防护与原生删除后的完整 inventory identity absence proof
+│   │   └── 来源总数先读面板/行属性，没有时读聊天区标题的 “N sources”（`content-panel-dom.js` 的 `readNativeSourceHeaderTotal`，选择器 `DEPS.sourceTotal`）；总数核对在打开原生 More 菜单之前完成
 │   ├── 先看
 │   │   ├── src/content/content-native-action-coordinator.js
 │   │   ├── src/content/content-source-actions.js

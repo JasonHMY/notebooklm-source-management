@@ -1361,6 +1361,12 @@
     "ui_native_action_confirm_button_missing": {
         "message": "No se encontró el botón de confirmación de Gemini Notebook."
     },
+    "ui_native_action_delete_unverified": {
+        "message": "No se eliminó nada. La extensión no pudo cotejar la lista de fuentes con el total que muestra Gemini Notebook."
+    },
+    "ui_native_action_delete_unconfirmed": {
+        "message": "No se pudo confirmar la eliminación y es posible que la fuente ya se haya eliminado. Revisa la lista de fuentes de Gemini Notebook y recarga la página."
+    },
     "ui_native_action_failed": {
         "message": "Es posible que haya cambiado la estructura de la página de Gemini Notebook."
     },

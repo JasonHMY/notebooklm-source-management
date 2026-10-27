@@ -109,6 +109,9 @@
         const getNativeSourceInventory = typeof deps.getNativeSourceInventory === 'function'
             ? deps.getNativeSourceInventory
             : null;
+        const readNativeSourceTotal = typeof deps.readNativeSourceTotal === 'function'
+            ? deps.readNativeSourceTotal
+            : () => null;
         const requestSingleSourceDeleteConfirmation = typeof deps.requestSingleSourceDeleteConfirmation === 'function'
             ? deps.requestSingleSourceDeleteConfirmation
             : () => false;
@@ -238,8 +241,8 @@
             rename_menu_ambiguous: 'ui_native_action_menu_item_missing',
             delete_menu_ambiguous: 'ui_native_action_menu_item_missing',
             rename_watch_failed: 'ui_native_action_failed',
-            delete_not_confirmed: 'ui_native_action_failed',
-            native_delete_inventory_unverified: 'ui_native_action_failed',
+            delete_not_confirmed: 'ui_native_action_delete_unconfirmed',
+            native_delete_inventory_unverified: 'ui_native_action_delete_unverified',
             native_delete_target_missing: 'ui_native_action_source_unavailable',
             native_delete_target_ambiguous: 'ui_native_action_failed',
             source_row_mismatch: 'ui_native_action_source_unavailable',
@@ -451,6 +454,10 @@
             const reasonKey = NATIVE_ACTION_REASON_MESSAGE_KEYS[reason] || 'ui_native_action_failed';
             const baseMessage = getMessage(baseKey);
             const reasonMessage = getMessage(reasonKey);
+            // The deletion may already have happened, so the "could not start" base message would be wrong.
+            if (reason === 'delete_not_confirmed' && reasonMessage && reasonMessage !== reasonKey) {
+                return reasonMessage;
+            }
             if (!reasonMessage || reasonMessage === reasonKey || reasonMessage === baseMessage) {
                 return baseMessage;
             }
@@ -1612,7 +1619,8 @@
                     rowHint = setSize;
                 }
             });
-            return rowHint;
+            if (rowHint != null) return rowHint;
+            return parseNativeSourceCountHint(readNativeSourceTotal());
         }
 
         function getNativeIdentityKey(identity) {
@@ -2426,6 +2434,23 @@
                     return { deleted: false, reason: 'menu_button_missing' };
                 }
                 const sourceRowBeforeDelete = rowResult.row;
+
+                // Refuse before the native menu opens: no menu or dialog flash when Google's
+                // total is missing or disagrees with the parsed rows. The inventory is read
+                // again once the confirm dialog is open (below) and that read is the baseline
+                // for the post-delete proof.
+                const earlyInventoryPreflight = getNativeDeleteInventoryPreflight(
+                    getNativeSourceInventorySnapshot(),
+                    source
+                );
+                if (!earlyInventoryPreflight.ok) {
+                    developerLog('warn', 'native_action', 'delete_failed', {
+                        sourceKey,
+                        reason: earlyInventoryPreflight.reason,
+                        stage: 'before_menu'
+                    });
+                    return { deleted: false, reason: earlyInventoryPreflight.reason };
+                }
 
                 const existingMenuFingerprints = new Set(
                     queryNativeMenuItems().map((item) => getNativeMenuItemFingerprint(item))

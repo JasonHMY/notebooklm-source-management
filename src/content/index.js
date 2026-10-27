@@ -446,6 +446,7 @@
         waitForElement,
         findSourcePanel,
         findSourcePanelContent,
+        readNativeSourceHeaderTotal,
         resolveSourcePanelSurfaceColor,
         applySourcePanelSurfaceColor,
         isSourcePanelCollapsed,
@@ -648,6 +649,7 @@
         getNativeSourceInventory: () => (
             sourceSyncModule?.getNativeSourceInventorySnapshot?.() || null
         ),
+        readNativeSourceTotal: () => readNativeSourceHeaderTotal(),
         getDEPS: () => DEPS,
         getMessage,
         runtime: runtimeContext,
@@ -967,6 +969,7 @@
         queryAllElements: (...args) => queryAllElements(...args),
         findElement: (...args) => findElement(...args),
         findSourcePanel: (...args) => findSourcePanel(...args),
+        readNativeSourceTotal: () => readNativeSourceHeaderTotal(),
         isSourcePanelRenderable: (...args) => isSourcePanelRenderable(...args),
         isManageableSourceIdentity,
         hasPreservableManagerSnapshot: (...args) => hasPreservableManagerSnapshot(...args),

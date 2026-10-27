@@ -136,6 +136,29 @@ test.describe('current Gemini Notebook DOM (2026-10)', () => {
         expect(nativeClicks.rowMore).toBe(0);
     });
 
+    test('deletes one source through the native menu using the header count as evidence', async () => {
+        const page = await env.context.newPage();
+        await page.goto(CURRENT_DOM_URL);
+        await expect(page.locator('#sources-list .source-item')).toHaveCount(FAKE_TITLES.length, { timeout: 20_000 });
+        await expect(page.locator('.cover-subtitle-source-count')).toHaveText('3 sources');
+
+        await page.locator('.sp-source-actions-button').first().click();
+        await page.locator('.sp-source-actions-menu [data-action="delete-source"]').click();
+        await expect(page.getByRole('alertdialog')).toBeVisible();
+        await page.locator('.sp-batch-delete-confirm-final-btn').click();
+
+        await expect(page.locator('.single-source-container')).toHaveCount(FAKE_TITLES.length - 1, { timeout: 20_000 });
+        await expect(page.locator('.cover-subtitle-source-count')).toHaveText('2 sources');
+        await expect.poll(() => readManagerTitles(page), { timeout: 20_000 }).toEqual(FAKE_TITLES.slice(1));
+
+        const nativeClicks = await readNativeClicks(page);
+        expect(nativeClicks.deleted).toBe(1);
+        expect(nativeClicks.rowMore).toBe(1);
+        expect(nativeClicks.autoLabel).toBe(0);
+        expect(nativeClicks.sort).toBe(0);
+        expect(nativeClicks.selectAll).toBe(0);
+    });
+
     test.describe('real-DOM capture', () => {
         test('mounts on the sanitized 2026-10-27 capture without clicking the auto-label button', async () => {
             const capture = fs.readFileSync(REAL_DOM_CAPTURE_PATH, 'utf8');

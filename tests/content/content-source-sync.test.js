@@ -6065,6 +6065,83 @@ describe('scanAndSyncSources', () => {
         );
     });
 
+    describe('Google header source total in the native inventory', () => {
+        const installInventoryDom = (rowCount, { headerText = null, panelTotalAttribute = null } = {}) => {
+            const { panel } = createMockPanel({ visible: true, contentVisible: true });
+            const rows = Array.from({ length: rowCount }, (_, index) => createMockSourceRow({
+                title: `Header Total ${index + 1}`,
+                stableToken: `header-total-${index + 1}`,
+                checked: true
+            }));
+            const rowElements = rows.map(({ row }) => row);
+            if (panelTotalAttribute != null) {
+                panel.getAttribute = jest.fn((name) => (
+                    name === 'data-total-count' ? String(panelTotalAttribute) : null
+                ));
+            }
+            panel.querySelectorAll = jest.fn((selector) => (
+                mod.DEPS.row.includes(selector) ? rowElements : []
+            ));
+            global.document.querySelector = jest.fn((selector) => {
+                if (mod.DEPS.panel.includes(selector)) return panel;
+                if (mod.DEPS.sourceTotal.includes(selector) && headerText != null) {
+                    return { textContent: headerText };
+                }
+                return null;
+            });
+            global.document.querySelectorAll = jest.fn((selector) => (
+                mod.DEPS.row.includes(selector) ? rowElements : []
+            ));
+        };
+
+        it('uses the header total when no total attribute exists', () => {
+            installInventoryDom(2, { headerText: '2 sources' });
+
+            expect(mod._getNativeSourceInventorySnapshotForTest()).toEqual(
+                expect.objectContaining({
+                    complete: true,
+                    completeness: 'complete',
+                    totalHint: 2,
+                    hasAuthoritativeTotal: true,
+                    rowCount: 2
+                })
+            );
+        });
+
+        it('reads the first integer of a localized header and ignores unparsable text', () => {
+            installInventoryDom(2, { headerText: '2 个来源' });
+            expect(mod._getNativeSourceInventorySnapshotForTest().totalHint).toBe(2);
+
+            installInventoryDom(2, { headerText: 'No sources yet' });
+            expect(mod._getNativeSourceInventorySnapshotForTest()).toEqual(
+                expect.objectContaining({ totalHint: null, hasAuthoritativeTotal: false })
+            );
+        });
+
+        it('keeps an existing total attribute ahead of the header total', () => {
+            installInventoryDom(1, { headerText: '9 sources', panelTotalAttribute: 1 });
+
+            expect(mod._getNativeSourceInventorySnapshotForTest()).toEqual(
+                expect.objectContaining({ totalHint: 1, hasAuthoritativeTotal: true })
+            );
+        });
+
+        it('does not turn a header total larger than the parsed rows into an incomplete scan', () => {
+            installInventoryDom(2, { headerText: '3 sources' });
+
+            // Scan completeness ignores the header; only the delete inventory total disagrees.
+            expect(mod._getNativeSourceInventorySnapshotForTest()).toEqual(
+                expect.objectContaining({
+                    complete: true,
+                    completeness: 'complete',
+                    totalHint: 3,
+                    hasAuthoritativeTotal: false,
+                    rowCount: 2
+                })
+            );
+        });
+    });
+
     it('merges newly visible rows with persisted rows during a partial initial restore', () => {
         const { panel } = createMockPanel({ visible: true, contentVisible: true });
         const persistedRow = createMockSourceRow({

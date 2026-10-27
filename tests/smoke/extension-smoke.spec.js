@@ -1297,7 +1297,7 @@ test.describe('extension smoke', () => {
         await expect(notebookPage.locator('.group-container .source-item')).toHaveCount(1);
     });
 
-    test('requires cancellable single-source confirmation before clicking any native delete controls', async () => {
+    test('requires cancellable single-source confirmation, then refuses a native delete without a verified total', async () => {
         const notebookPage = await env.context.newPage();
         await notebookPage.goto('https://notebooklm.google.com/notebook/single-delete-confirm');
         await expect(notebookPage.locator('#sources-list .source-item')).toHaveCount(2);
@@ -1322,10 +1322,11 @@ test.describe('extension smoke', () => {
 
         await openConfirmation();
         await notebookPage.locator('.sp-batch-delete-confirm-final-btn').click();
-        await expect.poll(async () => notebookPage.evaluate(() => window.__nativeMenuClickCount)).toBe(1);
         await expect(notebookPage.getByRole('alertdialog')).toHaveCount(0);
-        // This fixture has no native menu implementation; only the explicit confirmation
-        // is permitted to begin that native flow. Native deletion is covered in unit tests.
+        // This fixture exposes no native source total, so the inventory preflight refuses the
+        // delete before the native More menu is opened: no native control is clicked at all.
+        await expect(notebookPage.locator('.sp-toast-error')).toContainText('Nothing was deleted');
+        expect(await notebookPage.evaluate(() => window.__nativeMenuClickCount)).toBe(0);
         await expect(notebookPage.locator('[data-testid="source-item"]')).toHaveCount(2);
     });
 
