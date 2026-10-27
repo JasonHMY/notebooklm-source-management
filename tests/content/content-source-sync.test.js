@@ -6147,7 +6147,21 @@ describe('scanAndSyncSources', () => {
             ['12 3 sources', null],
             ['٥٣ sources', null],
             ['٥3 sources', null],
-            ['No sources yet', null]
+            ['No sources yet', null],
+            // The whole leading numeric token is validated; a malformed grouping never falls
+            // back to its numeric prefix ("1, 234" must not become 1).
+            ['1, 234 sources', null],
+            ['1  234 sources', null],
+            ['1\u00A0\u00A0234 sources', null],
+            ['1,234.567 sources', null],
+            ['1,234\u00A0567 sources', null],
+            ['1,234, sources', null],
+            // A separator attached directly before the first digit is not a plain label prefix.
+            ['.5 sources', null],
+            [',234 sources', null],
+            ['1 .234 sources', null],
+            ['Sources: 53', 53],
+            ['sources', null]
         ])('reads the whole number token of the header text %j', (headerText, expectedTotal) => {
             installInventoryDom(2, { headerText });
 

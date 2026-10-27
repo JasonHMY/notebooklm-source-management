@@ -108,9 +108,11 @@
         }
 
         // Google's own source total ("53 sources" in the chat header). Locale-agnostic: the whole
-        // number token is read -- plain ASCII digits, or groups of three joined by ',', '.',
-        // space, U+00A0 or U+202F ("1,234 sources" -> 1234). Anything else (a decimal, a
-        // malformed group, non-ASCII digit scripts) is null, as is an absent header (collapsed
+        // leading numeric token is read and validated -- plain ASCII digits, or groups of three
+        // joined by one consistent separator among ',', '.', space, U+00A0 or U+202F
+        // ("1,234 sources" -> 1234). Anything else (a decimal, "1, 234", a double space, mixed
+        // separators, a ',' or '.' attached before or after the number, non-ASCII digit scripts)
+        // is null and never falls back to a numeric prefix, as is an absent header (collapsed
         // chat panel, some notebooks). Callers must still compare it with the parsed row count.
         function readNativeSourceHeaderTotal(parent = documentObj) {
             try {
@@ -120,9 +122,19 @@
                 );
                 const text = String(element?.textContent || '');
                 if (/(?![0-9])\p{Nd}/u.test(text)) return null;
-                const match = /^[^0-9]*?(\d{1,3}(?:[,. \u00A0\u202F]\d{3})+|\d+)(?![,. \u00A0\u202F]?\d)/.exec(text);
-                if (!match) return null;
-                const total = Number.parseInt(match[1].replace(/\D/g, ''), 10);
+                const run = /\d[\d,. \u00A0\u202F]*/.exec(text);
+                if (!run) return null;
+                // A ',' or '.' glued to the first digit (".5", ",234") is a malformed number,
+                // not a label prefix such as "Sources: 53".
+                if (run.index > 0 && /[,.]/.test(text[run.index - 1])) return null;
+                // Spaces after the number only delimit the label ("53 sources"); a trailing ','
+                // or '.' stays in the candidate and fails validation.
+                const candidate = run[0].replace(/[ \u00A0\u202F]+$/, '');
+                if (!/^\d+$/.test(candidate)
+                    && !/^\d{1,3}([,. \u00A0\u202F])\d{3}(?:\1\d{3})*$/.test(candidate)) {
+                    return null;
+                }
+                const total = Number.parseInt(candidate.replace(/\D/g, ''), 10);
                 return Number.isSafeInteger(total) && total >= 0 ? total : null;
             } catch (error) {
                 return null;

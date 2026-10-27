@@ -3182,9 +3182,10 @@ describe('source action menu', () => {
     });
 
     describe('delete evidence from the Google header total', () => {
-        // Two native rows; the panel exposes no total attribute, only the chat header count.
-        // `readHeader(deleted, reads)` lets a test choose what the header shows on each read.
-        const setupHeaderTotalDelete = ({ readHeader }) => {
+        // Two native rows (one when `withSurvivor` is false); the panel exposes no total
+        // attribute, only the chat header count. `readHeader(state)` lets a test choose what the
+        // header shows on each read.
+        const setupHeaderTotalDelete = ({ readHeader, withSurvivor = true }) => {
             global.setTimeout = (callback) => {
                 callback();
                 return 1;
@@ -3211,7 +3212,8 @@ describe('source action menu', () => {
                 isLoading: false,
                 isDisabled: false
             });
-            const currentRows = () => (state.deleted ? [survivorRow] : [targetRow, survivorRow]);
+            const survivors = withSurvivor ? [survivorRow] : [];
+            const currentRows = () => (state.deleted ? survivors : [targetRow, ...survivors]);
             const deleteMenuItem = createNativeMenuItem({ text: 'Delete', icon: 'delete' });
             deleteMenuItem.click = jest.fn(() => { state.dialogOpen = true; });
             const confirmButton = {
@@ -3320,6 +3322,18 @@ describe('source action menu', () => {
         it('refuses before the native menu opens when a grouped-thousands header only starts with the row count', async () => {
             // "2,000 sources" must not be read as 2 and match the two parsed rows.
             const fixture = setupHeaderTotalDelete({ readHeader: () => '2,000 sources' });
+
+            await expect(mod.deleteNativeSource('target')).resolves.toEqual({
+                deleted: false,
+                reason: 'native_delete_inventory_unverified'
+            });
+            expect(fixture.moreButton.click).not.toHaveBeenCalled();
+            expect(fixture.deleteMenuItem.click).not.toHaveBeenCalled();
+        });
+
+        it('refuses before the native menu opens when a malformed grouped header only starts with the row count', async () => {
+            // "1, 234 sources" must not fall back to the prefix 1 and match the one parsed row.
+            const fixture = setupHeaderTotalDelete({ readHeader: () => '1, 234 sources', withSurvivor: false });
 
             await expect(mod.deleteNativeSource('target')).resolves.toEqual({
                 deleted: false,
