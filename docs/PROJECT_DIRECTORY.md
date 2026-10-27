@@ -1138,8 +1138,14 @@ CI: .github/workflows/ci.yml
 │   └── 2026-07-30-user-centered-top-10-optimizations.md
 │       └── 三路用户视角审计产生的 Top 10 优化、逐项实施范围、验收和回滚边界
 ├── docs/superpowers/reports/
-│   └── 2026-07-26-optimization-baseline.md
-│       └── 当前优化工作的无变更验证基线、roadmap 起始 SHA、后续专项 red-contract 与 drag benchmark 台账
+│   ├── 2026-07-26-optimization-baseline.md
+│   │   └── 当前优化工作的无变更验证基线、roadmap 起始 SHA、后续专项 red-contract 与 drag benchmark 台账
+│   ├── 2026-10-27-gemini-notebook-audit.md
+│   │   └── 改名后整体审计：真实页面核对、主要风险、整体逻辑建议和分阶段修复顺序（中文主报告）
+│   ├── 2026-10-27-gemini-notebook-audit-evidence.md
+│   │   └── 上述审计的英文证据附录：每条发现的位置、证据、复核意见和 Codex 审核更正
+│   └── 2026-10-27-live-dom-check.md
+│       └── 2026-10-27 只读现场 DOM 核对记录（精选笔记本与自有笔记本分开记录）
 ├── marketing/
 │   └── 宣传资料工作区；记录社媒账号矩阵、内容日历、平台打法、素材清单和 X 本地发布工具，不属于扩展 runtime
 ├── CHANGELOG.md

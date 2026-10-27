@@ -28,6 +28,7 @@
 ## [Unreleased] (未发布)
 
 ### Added
+- **整体审计报告 (Whole-Project Audit Report)**: **影响**: 对扩展使用无可感知变化。新增 `docs/superpowers/reports/2026-10-27-gemini-notebook-audit.md`、英文证据附录和现场页面核对记录：按改名后的 Gemini Notebook 真实页面核对插件依赖，列出删除总数校验、自动分类按钮误触、关闭开关、识别与存储风险，以及分阶段修复顺序；已经 Codex 两轮审核修订。
 - **剩余拖拽问题修复计划 (Plan Remaining Drag Repairs)**: **影响**: 对扩展使用无可感知变化。将已复现的跨窗口拖拽预览与 5000 来源搜索慢尾拆为独立修复工作，明确原始性能门槛、数据兼容与转正验收条件。
 
 ### Changed
