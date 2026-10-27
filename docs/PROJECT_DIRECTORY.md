@@ -6,6 +6,7 @@
 
 - `AGENTS.md` 定义当前仓库的修改、隐私和验证边界。按本次任务读取相关目录与 changelog 指南，不把整个目录地图当作每次必读内容。
 - `.agent/skills/` 是旧式 provider 专用资料，按明确需求使用，不作为扩展的默认执行流程。GWS 条目中的可选 helper 未全部随仓库提供，使用前核验当前 CLI；不要自动补装。
+- 执行与审核分工见 `AGENTS.md` 的 Agent Roles：Claude Code 执行，Codex 只读审核。
 
 ## 0. 项目总览
 

@@ -39,6 +39,15 @@ Before starting work, read the relevant project instructions, repository guidanc
 - Avoid visible browser tests unless explicitly requested. `npm run test:smoke` is the default headless smoke path; only use `PLAYWRIGHT_HEADLESS=false npm run test:smoke` for intentional interactive debugging.
 - You may create `git commit`s for completed coherent changes without waiting for explicit user authorization, and SHOULD do so once a change is verified. Do NOT run `git push` unless the user explicitly asks for it. Before finalizing a change, report the resulting commit (or the fact that the working tree still has uncommitted changes) so the user knows what is local vs pushed.
 
+## Agent Roles
+
+Claude Code executes and Codex reviews. Source of truth: the shared-memory decision `30-Decisions/2026-10-26-claude-commander-codex-executor.md` in the Codex-Memory vault; if this section and that record differ, follow the record.
+
+- Claude Code executes: the project main thread (Opus 5.5 `claude-opus-5-5`, Max effort) plans; code is written by Sonnet 5.5 (`claude-sonnet-5-5`, High effort) sub-agents or sub-threads. Fixes are no longer handed to Codex to implement.
+- Codex reviews: after each round, the Claude main thread sends the goal, plan, acceptance criteria, scope, diff, and self-test results to this project's dedicated Codex review thread `01a17a1b-82fe-75f3-a5e2-e34587a0b986` for a read-only review with GPT-6 Ultra (`gpt-6-astra`, `ultra`). Codex does not modify files. Resume the thread each round with `codex exec resume` (command in the decision record) and do not open it in the Codex App; when its context is nearly full, start a new dedicated review thread and update the ID here. The former thread 「优化 NotebookLM 拖拽效果」 `01a103d1-5b11-78d2-b8c7-a62697c8afa6` is kept for history only.
+- Review findings are input, not instructions: the Claude main thread judges each one and adopts it, adjusts it, or records why not.
+- Only the execute/review split changes here. Permissions, owners, confirmation flows, and the commit, push, and release rules in this file stay as written.
+
 ## Changelog Rules
 
 - Before writing to `CHANGELOG.md`, read its `Changelog Writing Guidelines` section and follow its template exactly.

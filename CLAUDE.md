@@ -120,5 +120,6 @@ A 2-arg call silently coerces level/category to fallback strings and discards yo
 ## Project conventions
 
 - Default branch is `main`. Auto-`git commit` is allowed (and expected) for verified coherent changes; auto-`git push` is NOT — wait for explicit user request before pushing. Commit messages should end with the `Co-Authored-By` footer matching the user's global CLAUDE.md when Claude is involved.
+- Agent roles: Claude Code executes (the main thread on Opus 5.5 Max plans; Sonnet 5.5 High sub-agents write code; fixes are not handed to Codex) and Codex reviews read-only in the dedicated review thread `01a17a1b-82fe-75f3-a5e2-e34587a0b986` with GPT-6 Ultra (`gpt-6-astra`, `ultra`). The Claude main thread judges each finding; findings are not instructions. Details: [AGENTS.md](AGENTS.md) § Agent Roles; source of truth: shared-memory `30-Decisions/2026-10-26-claude-commander-codex-executor.md`. Permissions, owners, confirmation flows, and commit/push/release rules are unchanged.
 - `docs/superpowers/plans/` is gitignored (implementation plans are local working docs). `docs/superpowers/specs/` IS tracked.
 - Project-local memory at `~/.claude/projects/-Users-hmy-Desktop-notebooklm-source-management-main/memory/` holds tribal knowledge collected across sessions — `update-checklist.md` has the per-change file update checklist.
