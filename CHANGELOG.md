@@ -36,6 +36,8 @@
 - **Agent 分工改为 Claude 执行、Codex 审核 (Claude Executes, Codex Reviews)**: **影响**: 对扩展使用无可感知变化。`AGENTS.md` 新增 Agent Roles，`CLAUDE.md` 同步摘要：Claude Code 主线程做计划、Sonnet 子代理写代码，Codex 指定线程只读审核，以共享记忆中的分工决定为准；权限、提交和发布规则不变。
 - **忽略本地覆盖率和代码索引 (Ignore Local Coverage and Code Index)**: 将 `coverage/` 和 `.codegraph/` 加入 `.gitignore`，避免 Jest 覆盖率报告和本机 codegraph 索引被误提交到公开仓库；项目地图同步列出这两个本地目录。
 - **校正 Claude 项目说明 (Correct Claude Project Notes)**: **影响**: 对扩展使用无可感知变化。`CLAUDE.md` 按当前代码改写：根层是 `state.root`，拖拽只走六点手柄的指针输入、smoke 用真实鼠标，页面匹配 notebook.google.com 和 notebooklm.google.com，模块清单以 manifest 为准；去掉不存在的 `update-checklist.md`，改指向 `AGENTS.md` 和项目地图。
+- **冒烟测试启动更稳 (Steadier Smoke Harness)**: **影响**: 对扩展使用无可感知变化。扩展 ID 改为从 MV3 service worker 取得，不再轮询注册而偶发超时；smoke 默认使用 Playwright 自带的 Chromium（可用 `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` 覆盖），启动时打印浏览器版本；9 个互不依赖的 `describe.serial` 改为普通 `describe`，一次环境失败不再连带跳过其余用例。
+- **发布包拦截冲突副本 (Reject Conflict Copies in Package)**: **影响**: 对扩展使用无可感知变化。打包时如果 `src/` 等打包目录里出现 Finder/iCloud 冲突副本（如 `index 2.js`、`icon 2.png`），会直接报错，避免重复或过期文件进入发布 zip。
 
 ## [2026-10-04] [26.10.4]
 

@@ -7,8 +7,7 @@ const { test, expect } = require('@playwright/test');
 const {
     closeExtensionContext,
     launchExtensionContext,
-    openExtensionPage,
-    waitForExtensionId
+    openExtensionPage
 } = require('./helpers/extension-context');
 const { installNotebookFixture } = require('./helpers/notebooklm-fixture');
 const createContentDragMulti = require('../../src/content/content-drag-multi.js');
@@ -380,7 +379,7 @@ function createBenchmarkExtensionRoot() {
     return benchmarkRoot;
 }
 
-test.describe.serial('drag performance baseline', () => {
+test.describe('drag performance baseline', () => {
     test.setTimeout(180_000);
 
     test('records deterministic 100 and 500-row reflow samples', async () => {
@@ -394,8 +393,7 @@ test.describe.serial('drag performance baseline', () => {
                     return match ? createSyntheticSources(Number(match[1])) : null;
                 }
             });
-            const extensionId = await waitForExtensionId(env.context, env.userDataDir, benchmarkExtensionRoot);
-            await seedReflowPreference(env.context, extensionId);
+            await seedReflowPreference(env.context, env.extensionId);
             const allResults = [];
             for (const rowCount of rowCounts) {
                 const page = await env.context.newPage();

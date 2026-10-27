@@ -8,8 +8,7 @@ const { test, expect } = require('@playwright/test');
 const {
     closeExtensionContext,
     launchExtensionContext,
-    openExtensionPage,
-    waitForExtensionId
+    openExtensionPage
 } = require('./helpers/extension-context');
 const { installNotebookFixture } = require('./helpers/notebooklm-fixture');
 
@@ -290,7 +289,7 @@ function createBenchmarkExtensionRoot() {
     return benchmarkRoot;
 }
 
-test.describe.serial('manager performance budget', () => {
+test.describe('manager performance budget', () => {
     test.setTimeout(600_000);
 
     test('records deterministic manager interaction samples at supported scales', async () => {
@@ -304,12 +303,7 @@ test.describe.serial('manager performance budget', () => {
                     return match ? createSyntheticSources(Number(match[1])) : null;
                 }
             });
-            const extensionId = await waitForExtensionId(
-                env.context,
-                env.userDataDir,
-                benchmarkExtensionRoot
-            );
-            await seedBenchmarkPreferences(env.context, extensionId);
+            await seedBenchmarkPreferences(env.context, env.extensionId);
             const allResults = [];
 
             for (const rowCount of ROW_COUNTS) {

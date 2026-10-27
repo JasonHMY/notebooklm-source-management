@@ -61,6 +61,24 @@ describe('package script', () => {
         ])).toThrow(/unexpected entries|forbidden entries/);
     });
 
+    it('rejects Finder or iCloud conflict copies of runtime files', () => {
+        const baseEntries = [
+            { targetPath: 'manifest.json' },
+            { targetPath: 'src/content/index.js' },
+            { targetPath: '_locales/en/messages.json' }
+        ];
+
+        ['src/content/index 2.js', 'src/assets/icons/icon 2.png', 'src/popup/popup 3'].forEach((targetPath) => {
+            expect(() => assertPackageEntries([...baseEntries, { targetPath }]))
+                .toThrow(/forbidden entries/);
+        });
+        expect(assertPackageEntries([
+            ...baseEntries,
+            { targetPath: 'src/assets/icons/1.png' },
+            { targetPath: 'src/content/content-v2.js' }
+        ])).toBe(true);
+    });
+
     it('archives entries after validating the package list', () => {
         const archive = { file: jest.fn() };
         const entries = archiveFiles(archive, { baseDir: tempDir });

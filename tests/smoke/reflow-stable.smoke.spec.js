@@ -3,7 +3,6 @@ const { test, expect } = require('@playwright/test');
 const {
     launchExtensionContext,
     closeExtensionContext,
-    waitForExtensionId,
     openExtensionPage
 } = require('./helpers/extension-context');
 const { installNotebookFixture } = require('./helpers/notebooklm-fixture');
@@ -710,7 +709,7 @@ async function readViewportSources(page) {
     });
 }
 
-test.describe.serial('stable reflow trusted drag', () => {
+test.describe('stable reflow trusted drag', () => {
     let env;
     let bridge;
     let page;
@@ -724,8 +723,7 @@ test.describe.serial('stable reflow trusted drag', () => {
                 title: `Reflow source ${index + 1}`
             }))
         });
-        const extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
-        bridge = await openExtensionPage(env.context, extensionId, 'src/popup/popup.html');
+        bridge = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
         const response = await bridge.evaluate((version) => chrome.runtime.sendMessage({
             type: 'SAVE_PREFERENCES',
             preferences: {
@@ -859,7 +857,7 @@ test.describe.serial('stable reflow trusted drag', () => {
     });
 });
 
-test.describe.serial('windowed reflow trusted drag', () => {
+test.describe('windowed reflow trusted drag', () => {
     let env;
     let bridge;
     let page;
@@ -877,8 +875,7 @@ test.describe.serial('windowed reflow trusted drag', () => {
                 }`
             }))
         });
-        const extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
-        bridge = await openExtensionPage(env.context, extensionId, 'src/popup/popup.html');
+        bridge = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
         const response = await bridge.evaluate((version) => chrome.runtime.sendMessage({
             type: 'SAVE_PREFERENCES',
             preferences: {
@@ -1070,7 +1067,7 @@ test.describe.serial('windowed reflow trusted drag', () => {
     });
 });
 
-test.describe.serial('mixed-height grouped source window', () => {
+test.describe('mixed-height grouped source window', () => {
     let env;
     let bridge;
     let page;
@@ -1089,8 +1086,7 @@ test.describe.serial('mixed-height grouped source window', () => {
                     : `Mixed source ${index + 1}`
             }))
         });
-        const extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
-        bridge = await openExtensionPage(env.context, extensionId, 'src/popup/popup.html');
+        bridge = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
         const response = await bridge.evaluate((version) => chrome.runtime.sendMessage({
             type: 'SAVE_PREFERENCES',
             preferences: {

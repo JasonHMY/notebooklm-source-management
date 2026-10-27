@@ -20,6 +20,8 @@ const ALLOWED_ENTRY_PATTERNS = [
 
 const FORBIDDEN_ENTRY_PATTERNS = [
   /(^|\/)\.DS_Store$/,
+  // Finder/iCloud conflict copies such as "index 2.js", "icon 2.png" or "folder 3".
+  /(^|\/)[^/]+ \d+(\.[^/.]+)*$/,
   /^node_modules\//,
   /^tests\//,
   /^release\//,

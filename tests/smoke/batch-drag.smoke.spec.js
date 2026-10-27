@@ -5,8 +5,7 @@ const { test, expect } = require('@playwright/test');
 const {
     closeExtensionContext,
     launchExtensionContext,
-    openExtensionPage,
-    waitForExtensionId
+    openExtensionPage
 } = require('./helpers/extension-context');
 const { installNotebookFixture } = require('./helpers/notebooklm-fixture');
 
@@ -15,7 +14,7 @@ const manifest = require('../../manifest.json');
 const SMOKE_WELCOME_ONBOARDING_SEEN_VERSION = 1;
 const SMOKE_WHATS_NEW_SEEN_VERSION = manifest.version;
 
-test.describe.serial('batch drag smoke', () => {
+test.describe('batch drag smoke', () => {
     let env;
 
     async function seedSmokePreferences() {
@@ -42,7 +41,6 @@ test.describe.serial('batch drag smoke', () => {
     test.beforeEach(async () => {
         env = await launchExtensionContext(repoRoot);
         await installNotebookFixture(env.context);
-        env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
         await seedSmokePreferences();
     });
 
@@ -60,7 +58,6 @@ test.describe.serial('batch drag smoke', () => {
         ];
         const notebookPage = await env.context.newPage();
         await notebookPage.goto('https://notebooklm.google.com/notebook/batch-drag');
-        env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
         await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
 
         await notebookPage.evaluate((nextSources) => {

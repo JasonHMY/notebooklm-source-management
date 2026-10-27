@@ -7,8 +7,7 @@ const { test, expect } = require('@playwright/test');
 const {
     closeExtensionContext,
     launchExtensionContext,
-    openExtensionPage,
-    waitForExtensionId
+    openExtensionPage
 } = require('./helpers/extension-context');
 const { installNotebookFixture } = require('./helpers/notebooklm-fixture');
 
@@ -391,8 +390,7 @@ test('measures the real 48px folded footprint and restores the probe synchronous
     try {
         env = await launchExtensionContext(extensionRoot);
         await installNotebookFixture(env.context);
-        const extensionId = await waitForExtensionId(env.context, env.userDataDir, extensionRoot);
-        await seedReflowPreference(env.context, extensionId);
+        await seedReflowPreference(env.context, env.extensionId);
 
         const page = await env.context.newPage();
         await page.goto('https://notebooklm.google.com/notebook/drag-reflow-layout');
@@ -495,12 +493,7 @@ test('keeps root and grouped-source geometry stable after the deferred fold fram
     try {
         env = await launchExtensionContext(extensionRoot);
         await installNotebookFixture(env.context);
-        const extensionId = await waitForExtensionId(
-            env.context,
-            env.userDataDir,
-            extensionRoot
-        );
-        await seedReflowPreference(env.context, extensionId);
+        await seedReflowPreference(env.context, env.extensionId);
 
         const page = await env.context.newPage();
         await page.goto('https://notebooklm.google.com/notebook/drag-fold-stability');
@@ -573,8 +566,7 @@ test('covers first, last, mixed, terminal-nested, multi-run, and nested 50-item 
     try {
         env = await launchExtensionContext(extensionRoot);
         await installNotebookFixture(env.context);
-        const extensionId = await waitForExtensionId(env.context, env.userDataDir, extensionRoot);
-        await seedReflowPreference(env.context, extensionId);
+        await seedReflowPreference(env.context, env.extensionId);
 
         const page = await env.context.newPage();
         await page.goto('https://notebooklm.google.com/notebook/drag-reflow-layout-matrix');
@@ -906,8 +898,7 @@ test('restores a bounded root scroll position after a terminal multi-row probe',
     try {
         env = await launchExtensionContext(extensionRoot);
         await installNotebookFixture(env.context);
-        const extensionId = await waitForExtensionId(env.context, env.userDataDir, extensionRoot);
-        await seedReflowPreference(env.context, extensionId);
+        await seedReflowPreference(env.context, env.extensionId);
 
         const page = await env.context.newPage();
         await page.goto('https://notebooklm.google.com/notebook/drag-reflow-bounded-scroll');
@@ -952,8 +943,7 @@ test('keeps a trusted manager pointer drag alive and restores its row after Esca
     try {
         env = await launchExtensionContext(extensionRoot);
         await installNotebookFixture(env.context);
-        const extensionId = await waitForExtensionId(env.context, env.userDataDir, extensionRoot);
-        await seedReflowPreference(env.context, extensionId);
+        await seedReflowPreference(env.context, env.extensionId);
 
         const page = await env.context.newPage();
         await page.goto('https://notebooklm.google.com/notebook/drag-reflow-runtime');

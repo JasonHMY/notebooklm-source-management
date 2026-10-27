@@ -1,7 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const { test, expect } = require('@playwright/test');
-const { launchExtensionContext, closeExtensionContext, waitForExtensionId, openExtensionPage } = require('./helpers/extension-context');
+const { launchExtensionContext, closeExtensionContext, openExtensionPage } = require('./helpers/extension-context');
 const { installNotebookFixture } = require('./helpers/notebooklm-fixture');
 
 const repoRoot = path.resolve(__dirname, '../..');
@@ -25,8 +25,7 @@ test.describe('beUI pointer presentation', () => {
         await installNotebookFixture(env.context, { resolveSources: () => Array.from({ length: 6 }, (_, index) => ({
             id: `pointer-${index}`, token: `pointer-${index}`, title: `Pointer source ${index}`
         })) });
-        const id = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
-        bridge = await openExtensionPage(env.context, id, 'src/popup/popup.html');
+        bridge = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
         const prefs = await bridge.evaluate((version) => chrome.runtime.sendMessage({
             type: 'SAVE_PREFERENCES', preferences: { welcomeOnboardingSeenVersion: 1, whatsNewSeenVersion: version }
         }), manifest.version);

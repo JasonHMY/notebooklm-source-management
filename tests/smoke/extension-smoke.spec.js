@@ -5,8 +5,7 @@ const { test, expect } = require('@playwright/test');
 const {
     closeExtensionContext,
     launchExtensionContext,
-    openExtensionPage,
-    waitForExtensionId
+    openExtensionPage
 } = require('./helpers/extension-context');
 const {
     installNotebookFixture,
@@ -19,7 +18,7 @@ const manifest = require('../../manifest.json');
 const SMOKE_WELCOME_ONBOARDING_SEEN_VERSION = 1;
 const SMOKE_WHATS_NEW_SEEN_VERSION = manifest.version;
 
-test.describe.serial('extension smoke', () => {
+test.describe('extension smoke', () => {
     let env;
 
     async function readProjectState(projectId, bridgePage) {
@@ -66,13 +65,6 @@ test.describe.serial('extension smoke', () => {
         )), { timeout: 10_000 }).toBeTruthy();
     }
 
-    async function resolveExtensionIdAfterBootstrap(targetPath = '/notebook/bootstrap') {
-        const bootstrapPage = await env.context.newPage();
-        await bootstrapPage.goto(`https://notebooklm.google.com${targetPath}`);
-        env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
-        await bootstrapPage.close();
-    }
-
     async function seedSmokePreferences() {
         const bridgePage = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
         try {
@@ -115,7 +107,6 @@ test.describe.serial('extension smoke', () => {
     test.beforeEach(async () => {
         env = await launchExtensionContext(repoRoot);
         await installNotebookFixture(env.context);
-        env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
         await seedSmokePreferences();
     });
 
@@ -126,7 +117,6 @@ test.describe.serial('extension smoke', () => {
 
     test('boots extension and renders the popup shell', async () => {
         const errors = [];
-        await resolveExtensionIdAfterBootstrap();
         const popupPage = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
 
         popupPage.on('pageerror', (error) => errors.push(error));
@@ -156,7 +146,6 @@ test.describe.serial('extension smoke', () => {
         });
 
         await notebookPage.goto('https://notebook.google.com/notebook/a');
-        env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
         const bridgePage = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
 
         await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
@@ -218,7 +207,6 @@ test.describe.serial('extension smoke', () => {
         });
 
         await notebookPage.goto('https://notebooklm.google.com/notebook/accessibility');
-        env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
         const bridgePage = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
         await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
         await expect(notebookPage.locator('#sources-list .source-item')).toHaveCount(2);
@@ -570,7 +558,6 @@ test.describe.serial('extension smoke', () => {
         const notebookPage = await env.context.newPage();
 
         await notebookPage.goto(`https://notebooklm.google.com/notebook/${projectId}`);
-        env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
         await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
 
         const bridgePage = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
@@ -665,7 +652,6 @@ test.describe.serial('extension smoke', () => {
         const notebookPage = await env.context.newPage();
 
         await notebookPage.goto('https://notebooklm.google.com/notebook/popup-view-switch?fixture=material-labels');
-        env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
         await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
 
         const popupPage = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
@@ -747,7 +733,6 @@ test.describe.serial('extension smoke', () => {
         const notebookPage = await env.context.newPage();
 
         await notebookPage.goto('https://notebooklm.google.com/notebook/popup-view-switch-aria?fixture=material-labels-aria');
-        env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
         await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
 
         const popupPage = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
@@ -810,7 +795,6 @@ test.describe.serial('extension smoke', () => {
         const notebookPage = await env.context.newPage();
 
         await notebookPage.goto('https://notebooklm.google.com/notebook/popup-view-switch-noop?fixture=material-labels-noop');
-        env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
         await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
 
         const popupPage = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
@@ -857,7 +841,6 @@ test.describe.serial('extension smoke', () => {
         const notebookPage = await env.context.newPage();
 
         await notebookPage.goto('https://notebooklm.google.com/notebook/native-label-direct-switch');
-        env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
         await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
 
         await sendNotebookMessage('/notebook/native-label-direct-switch', { type: 'SWITCH_SOURCE_VIEW', viewKind: 'label' });
@@ -888,7 +871,6 @@ test.describe.serial('extension smoke', () => {
         const notebookPage = await env.context.newPage();
 
         await notebookPage.goto('https://notebooklm.google.com/notebook/label-view?fixture=label');
-        env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
         const bridgePage = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
 
         const savedTallState = {
@@ -989,7 +971,6 @@ test.describe.serial('extension smoke', () => {
         const notebookPage = await env.context.newPage();
 
         await notebookPage.goto('https://notebooklm.google.com/notebook/label-empty?fixture=label-empty');
-        env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
 
         await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
         await sendNotebookMessage('/notebook/label-empty', { type: 'SWITCH_SOURCE_VIEW', viewKind: 'label' });
@@ -1008,7 +989,6 @@ test.describe.serial('extension smoke', () => {
         const notebookPage = await env.context.newPage();
 
         await notebookPage.goto('https://notebooklm.google.com/notebook/label-import?fixture=label-collapsed');
-        env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
 
         await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
         await sendNotebookMessage('/notebook/label-import', { type: 'SWITCH_SOURCE_VIEW', viewKind: 'label' });
@@ -1064,7 +1044,6 @@ test.describe.serial('extension smoke', () => {
         const notebookPage = await env.context.newPage();
 
         await notebookPage.goto('https://notebooklm.google.com/notebook/toggle');
-        env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
         const popupPage = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
 
         await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
@@ -1120,7 +1099,6 @@ test.describe.serial('extension smoke', () => {
         const notebookPage = await env.context.newPage();
 
         await notebookPage.goto('https://notebooklm.google.com/notebook/a');
-        env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
         const bridgePage = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
 
         await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
@@ -1159,7 +1137,6 @@ test.describe.serial('extension smoke', () => {
         const notebookPage = await env.context.newPage();
 
         await notebookPage.goto('https://notebooklm.google.com/notebook/hostile-source?fixture=malicious-icons');
-        await waitForExtensionId(env.context, env.userDataDir, repoRoot);
         await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
 
         await expect.poll(async () => notebookPage.evaluate(() => {
@@ -1182,7 +1159,6 @@ test.describe.serial('extension smoke', () => {
         const notebookPage = await env.context.newPage();
 
         await notebookPage.goto('https://notebooklm.google.com/notebook/a');
-        env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
         const bridgePage = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
 
         await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
@@ -1597,7 +1573,6 @@ test.describe.serial('extension smoke', () => {
     test('preserves folders and tags across a hard reload with staged source hydration', async () => {
         const notebookPage = await env.context.newPage();
         await notebookPage.goto('https://notebooklm.google.com/notebook/persist?fixture=staged');
-        env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
         const bridgePage = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
 
         await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
@@ -1743,7 +1718,6 @@ test.describe.serial('extension smoke', () => {
 
         const notebookPage = await env.context.newPage();
         await notebookPage.goto('https://notebooklm.google.com/notebook/import-sort');
-        env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
         const bridgePage = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
 
         await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
@@ -1921,7 +1895,6 @@ test.describe.serial('extension smoke', () => {
         }
         const notebookPage = await env.context.newPage();
         await notebookPage.goto('https://notebooklm.google.com/notebook/import-sort');
-        env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
 
         await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
         await notebookPage.evaluate(() => window.__waitForFixtureHydration('full'));
@@ -1968,7 +1941,6 @@ test.describe.serial('extension smoke', () => {
     test('rejects stale saves without overwriting newer storage state', async () => {
         const notebookPage = await env.context.newPage();
         await notebookPage.goto('https://notebooklm.google.com/notebook/stale-save');
-        env.extensionId = await waitForExtensionId(env.context, env.userDataDir, repoRoot);
         const bridgePage = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
 
         await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });

@@ -222,7 +222,7 @@ GeminiNotebook-Source-Management
 │   └── zh_CN/messages.json
 ├── scripts/
 │   └── package.js
-│       └── Chrome Web Store zip 打包 allowlist
+│       └── Chrome Web Store zip 打包 allowlist；拒绝 Finder/iCloud 冲突副本（`name 2.ext`）
 ├── marketing/
 │   ├── README.md
 │   ├── account-matrix.md
@@ -857,6 +857,7 @@ content runtime memory
 │   ├── 命令: npm run test:smoke
 │   ├── 文件: tests/smoke/extension-smoke.spec.js, tests/smoke/batch-drag.smoke.spec.js, tests/smoke/drag-reflow-layout.smoke.spec.js, tests/smoke/reflow-stable.smoke.spec.js
 │   ├── 跨窗口拖拽: reflow-stable 使用可信 mouse/wheel 与独立 fixture，核对远端选中行折叠、取消恢复、完整逻辑选择及最终 storage/刷新结果；当前验收结论见 docs/DRAG_REFLOW_STABILITY.md
+│   ├── 浏览器: 默认 Playwright 自带 Chromium（`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` 可覆盖），启动时打印版本；扩展 ID 由 `launchExtensionContext` 从 MV3 service worker 取得（`env.extensionId`）；互不依赖的用例不再串行连坐
 │   └── 默认: headless，不应该弹出可见浏览器窗口；extension smoke 先验证零选择批量栏只保留基础选择控件，再选中来源并用长批量文案验证 240/320px 窄面板、高倍缩放与跨平台字体度量下无水平溢出
 ├── 拖拽性能基准（opt-in）
 │   ├── 命令: npm run benchmark:drag
