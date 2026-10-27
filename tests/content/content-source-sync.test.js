@@ -7797,40 +7797,11 @@ describe('untrusted scan protection', () => {
         expect(mod.sourcesByKey.has(descriptorA.key)).toBe(false);
     });
 
-    describe('removal confirmed by Google\'s header total without a baseline scan', () => {
-        const MIN_INTERVAL_MS = 1000;
-        let nowMs;
-        let dateNowSpy;
-
-        beforeEach(() => {
-            nowMs = 1000000;
-            dateNowSpy = jest.spyOn(Date, 'now').mockImplementation(() => nowMs);
-        });
-
-        afterEach(() => {
-            dateNowSpy.mockRestore();
-        });
-
-        // A change the page itself made (outside the extension root), then enough time for
-        // the second confirmation to count as independent.
-        function advanceNativeObservation(elapsedMs = MIN_INTERVAL_MS + 500) {
-            mod._noteNativeMutationsForTest([{
-                type: 'childList',
-                target: { nodeName: 'DIV' },
-                addedNodes: [],
-                removedNodes: []
-            }]);
-            nowMs += elapsedMs;
-        }
-
-        // `headerNode` lets a test keep one header element across installs (an SPA switch that
-        // re-renders text in place) instead of getting a fresh node every time.
-        function installFirstLoadDom(rowMocks, headerText, headerNode = null) {
+    describe('sources deleted elsewhere stay as missing placeholders', () => {
+        function installFirstLoadDom(rowMocks, headerText) {
             const { panel } = createMockPanel({ visible: true, contentVisible: true });
             const rowElements = rowMocks.map(({ row }) => row);
-            const header = headerText == null
-                ? null
-                : Object.assign(headerNode || {}, { textContent: headerText });
+            const header = headerText == null ? null : { textContent: headerText };
             panel.querySelectorAll = jest.fn((selector) => (
                 mod.DEPS.row.includes(selector) ? rowElements : []
             ));
@@ -7880,378 +7851,127 @@ describe('untrusted scan protection', () => {
             return { rows, loadedState, keys: { keyA, keyB, keyC, keyD, keyE } };
         }
 
-        beforeEach(async () => {
-            expect(await mod.setDeveloperModeEnabled(true)).toBe(true);
-        });
-
         function scanFirstLoad(loadedState) {
             return mod.scanAndSyncSources(loadedState, true, COMPLETE);
         }
 
-        function getEventCount(event) {
-            return mod.getDeveloperLogs().filter((entry) => entry.event === event).length;
+        // The user's move out of a folder, done on the state like placeInFolder does.
+        function moveToUngrouped(key) {
+            mod.groupsById.forEach((group) => {
+                group.children = group.children.filter((entry) => entry.key !== key);
+            });
+            mod.state.ungrouped.push(key);
+            mod.parentMap.delete(key);
         }
 
-        it('records the first confirmation without dropping anything', () => {
-            const { rows, loadedState } = buildStoredState();
-            installFirstLoadDom([rows[0], rows[2], rows[4]], '3 sources');
+        // Stored: A and B in a folder, C and E ungrouped; only B was deleted elsewhere.
+        function buildStateMissingOnlyB() {
+            const stored = buildStoredState();
+            stored.loadedState.ungrouped = [stored.keys.keyC, stored.keys.keyE];
+            delete stored.loadedState.sourceStateById[stored.keys.keyD];
+            return stored;
+        }
 
-            expect(scanFirstLoad(loadedState)).toEqual(expect.objectContaining({
-                ok: false,
-                reason: 'partial_initial_source_sync'
-            }));
+        it('keeps sources deleted elsewhere as placeholders when the header equals the parsed rows on first load', () => {
+            // Recreate the conditions the withdrawn header-confirmed cleanup needed: a clock the
+            // test controls, and a page-made mutation seen by the real body observer, at least
+            // 1.5 s after the previous one, before every later scan.
+            let nowMs = 1000000;
+            const dateNowSpy = jest.spyOn(Date, 'now').mockImplementation(() => nowMs);
+            // This describe runs timers inline; the observer callback also schedules a panel
+            // lifecycle sync, which would rebuild the manager mid-test. Keep that timer inert.
+            const timerBeforeTest = global.setTimeout;
+            global.setTimeout = jest.fn(() => 1);
+            try {
+                const { rows, loadedState, keys } = buildStoredState();
+                // B and D, both deleted elsewhere, sit in folders; Ungrouped has the live C and E.
+                loadedState.groupsById['keep-folder'].children.push({ type: 'source', key: keys.keyD });
+                loadedState.ungrouped = [keys.keyC, keys.keyE];
+                installFirstLoadDom([rows[0], rows[2], rows[4]], '3 sources');
+                const bodyObserver = global.__mutationObserverInstances.find((observer) => (
+                    observer.observe.mock.calls.some(([target]) => target === global.document.body)
+                ));
+                expect(bodyObserver).toBeDefined();
+                const observePageMutation = () => {
+                    bodyObserver.callback([{
+                        type: 'childList',
+                        target: { nodeName: 'DIV' },
+                        addedNodes: [],
+                        removedNodes: []
+                    }]);
+                    nowMs += 1500;
+                };
 
-            expect(getEventCount('first_load_removal_pending')).toBe(1);
-            expect(getEventCount('first_load_removal_confirmed')).toBe(0);
+                // Same as before the header-confirmed cleanup existed: the first-load scan is
+                // skipped and the restore-time merge stages the missing refs as placeholders.
+                expect(scanFirstLoad(loadedState)).toEqual(expect.objectContaining({
+                    ok: false,
+                    reason: 'partial_initial_source_sync'
+                }));
+                observePageMutation();
+                expect(mod.restoreInitialLoadedState(loadedState).shouldUpgradeStorage).toBe(false);
+                for (let scan = 0; scan < 3; scan += 1) {
+                    observePageMutation();
+                    mod.scanAndSyncSources(null, false, COMPLETE);
+                }
+
+                const expectedChildren = [
+                    { type: 'source', key: keys.keyA },
+                    { type: 'source', key: keys.keyB },
+                    { type: 'source', key: keys.keyD }
+                ];
+                expect(mod.groupsById.get('keep-folder').children).toEqual(expectedChildren);
+                expect(mod.state.ungrouped).toEqual([keys.keyC, keys.keyE]);
+                expect(mod.sourcesByKey.get(keys.keyB)).toMatchObject({ isPendingNativeHydration: true });
+                expect(mod.sourcesByKey.get(keys.keyD)).toMatchObject({ isPendingNativeHydration: true });
+                const persisted = mod.buildPersistableState();
+                expect(persisted.sourceStateById[keys.keyB]).toBeDefined();
+                expect(persisted.sourceStateById[keys.keyD]).toBeDefined();
+                expect(persisted.groupsById['keep-folder'].children).toEqual(expectedChildren);
+            } finally {
+                global.setTimeout = timerBeforeTest;
+                dateNowSpy.mockRestore();
+            }
         });
 
-        it('drops the sources deleted elsewhere on the second identical first-load scan and asks for a save', () => {
-            const { rows, loadedState, keys } = buildStoredState();
+        it('lets the Ungrouped rule clear a missing foldered placeholder after the user moves it there and two identical scans agree with the header', () => {
+            const { rows, loadedState, keys } = buildStateMissingOnlyB();
             installFirstLoadDom([rows[0], rows[2], rows[4]], '3 sources');
-
-            scanFirstLoad(loadedState);
-            advanceNativeObservation();
-            expect(scanFirstLoad(loadedState)).toEqual(expect.objectContaining({
-                ok: true,
-                shouldUpgradeStorage: true
-            }));
-
-            expect(mod.groupsById.get('keep-folder').children).toEqual([
-                { type: 'source', key: keys.keyA }
-            ]);
-            expect(mod.state.ungrouped).toEqual([keys.keyC, keys.keyE]);
-            const persisted = mod.buildPersistableState();
-            expect(persisted.sourceStateById[keys.keyB]).toBeUndefined();
-            expect(persisted.sourceStateById[keys.keyD]).toBeUndefined();
-            expect(persisted.sourceStateById[keys.keyA]).toBeDefined();
-            expect(getEventCount('first_load_removal_pending')).toBe(1);
-            expect(getEventCount('first_load_removal_confirmed')).toBe(1);
-        });
-
-        it('stages placeholders on restore and drops them on the next independent scan', () => {
-            const { rows, loadedState, keys } = buildStoredState();
-            installFirstLoadDom([rows[0], rows[2], rows[4]], '3 sources');
-
-            // The restore-time merge scan runs on the same DOM as the first-load scan, so it is
-            // not a second confirmation.
-            expect(mod.restoreInitialLoadedState(loadedState).shouldUpgradeStorage).toBe(false);
-            expect(mod.groupsById.get('keep-folder').children).toHaveLength(2);
+            mod.restoreInitialLoadedState(loadedState);
+            mod.scanAndSyncSources(null, false, COMPLETE);
+            mod.scanAndSyncSources(null, false, COMPLETE);
             expect(mod.sourcesByKey.get(keys.keyB)).toMatchObject({ isPendingNativeHydration: true });
-            expect(mod.sourcesByKey.get(keys.keyD)).toMatchObject({ isPendingNativeHydration: true });
+            expect(mod.groupsById.get('keep-folder').children).toHaveLength(2);
 
-            // The first independent scan (the page changed since, enough time passed) records;
-            // a second one confirms.
-            advanceNativeObservation();
+            moveToUngrouped(keys.keyB);
+            expect(mod.state.ungrouped).toContain(keys.keyB);
+
             mod.scanAndSyncSources(null, false, COMPLETE);
-            advanceNativeObservation();
+            expect(mod.sourcesByKey.has(keys.keyB)).toBe(true);
             mod.scanAndSyncSources(null, false, COMPLETE);
 
-            expect(mod.groupsById.get('keep-folder').children).toEqual([
-                { type: 'source', key: keys.keyA }
-            ]);
-            expect(mod.state.ungrouped).toEqual([keys.keyC, keys.keyE]);
             expect(mod.sourcesByKey.has(keys.keyB)).toBe(false);
-            expect(mod.sourcesByKey.has(keys.keyD)).toBe(false);
-        });
-
-        it('does not drop when restore is followed by an immediate rescan of the same DOM', () => {
-            const { rows, loadedState, keys } = buildStoredState();
-            installFirstLoadDom([rows[0], rows[2], rows[4]], '3 sources');
-
-            mod.restoreInitialLoadedState(loadedState);
-            mod.scanAndSyncSources(null, false, COMPLETE);
-
-            expect(mod.groupsById.get('keep-folder').children).toHaveLength(2);
-            expect(mod.sourcesByKey.get(keys.keyB)).toMatchObject({ isPendingNativeHydration: true });
-            expect(mod.sourcesByKey.get(keys.keyD)).toMatchObject({ isPendingNativeHydration: true });
-            expect(getEventCount('first_load_removal_confirmed')).toBe(0);
-        });
-
-        it('does not drop on two scans in the same native generation, however far apart', () => {
-            const { rows, loadedState } = buildStoredState();
-            installFirstLoadDom([rows[0], rows[2], rows[4]], '3 sources');
-
-            scanFirstLoad(loadedState);
-            nowMs += 10 * MIN_INTERVAL_MS;
-
-            expect(scanFirstLoad(loadedState).ok).toBe(false);
-            expect(getEventCount('first_load_removal_confirmed')).toBe(0);
-
-            // The unchanged page never produced a new generation, so it still cannot confirm.
-            nowMs += 10 * MIN_INTERVAL_MS;
-            expect(scanFirstLoad(loadedState).ok).toBe(false);
-            expect(getEventCount('first_load_removal_confirmed')).toBe(0);
-        });
-
-        it('does not drop on two scans in different generations less than the minimum interval apart', () => {
-            const { rows, loadedState } = buildStoredState();
-            installFirstLoadDom([rows[0], rows[2], rows[4]], '3 sources');
-
-            scanFirstLoad(loadedState);
-            advanceNativeObservation(MIN_INTERVAL_MS - 1);
-
-            expect(scanFirstLoad(loadedState).ok).toBe(false);
-            expect(getEventCount('first_load_removal_confirmed')).toBe(0);
-        });
-
-        it('drops once a later generation and the minimum interval both hold', () => {
-            const { rows, loadedState } = buildStoredState();
-            installFirstLoadDom([rows[0], rows[2], rows[4]], '3 sources');
-
-            scanFirstLoad(loadedState);
-            advanceNativeObservation(MIN_INTERVAL_MS);
-
-            expect(scanFirstLoad(loadedState).ok).toBe(true);
-            expect(getEventCount('first_load_removal_confirmed')).toBe(1);
-        });
-
-        it('confirms on the first matching scan one interval after the first record when scans arrive every 300 ms', () => {
-            const { rows, loadedState } = buildStoredState();
-            installFirstLoadDom([rows[0], rows[2], rows[4]], '3 sources');
-
-            scanFirstLoad(loadedState);
-
-            // Each scan is a newer generation but too soon after the original record; none of
-            // them may move the clock, so the 1200 ms scan (>= 1000 ms after the first) confirms.
-            [300, 300, 300].forEach(() => {
-                advanceNativeObservation(300);
-                expect(scanFirstLoad(loadedState).ok).toBe(false);
-                expect(getEventCount('first_load_removal_confirmed')).toBe(0);
-            });
-            advanceNativeObservation(300);
-            expect(scanFirstLoad(loadedState).ok).toBe(true);
-
-            expect(getEventCount('first_load_removal_pending')).toBe(1);
-            expect(getEventCount('first_load_removal_confirmed')).toBe(1);
-        });
-
-        it('keeps waiting for a newer generation when matching scans in one generation outlast the interval', () => {
-            const { rows, loadedState } = buildStoredState();
-            installFirstLoadDom([rows[0], rows[2], rows[4]], '3 sources');
-
-            scanFirstLoad(loadedState);
-            nowMs += 600;
-            expect(scanFirstLoad(loadedState).ok).toBe(false);
-            nowMs += 600;
-            expect(scanFirstLoad(loadedState).ok).toBe(false);
-            expect(getEventCount('first_load_removal_confirmed')).toBe(0);
-
-            // The first scan from a newer generation is already more than the interval after the
-            // original record, so it confirms immediately.
-            advanceNativeObservation(0);
-            expect(scanFirstLoad(loadedState).ok).toBe(true);
-            expect(getEventCount('first_load_removal_pending')).toBe(1);
-            expect(getEventCount('first_load_removal_confirmed')).toBe(1);
-        });
-
-        it('restarts the interval clock after a mismatch in between', () => {
-            const { rows, loadedState } = buildStoredState();
-            const visibleRows = [rows[0], rows[2], rows[4]];
-            installFirstLoadDom(visibleRows, '3 sources');
-            scanFirstLoad(loadedState);
-
-            advanceNativeObservation(600);
-            expect(scanFirstLoad(loadedState).ok).toBe(false);
-
-            // A mismatch clears the record; the next matching scan records afresh at this time.
-            installFirstLoadDom(visibleRows, '4 sources');
-            expect(scanFirstLoad(loadedState).ok).toBe(false);
-            installFirstLoadDom(visibleRows, '3 sources');
-            expect(scanFirstLoad(loadedState).ok).toBe(false);
-            expect(getEventCount('first_load_removal_pending')).toBe(2);
-
-            // 1200 ms after the first record, but only 600 ms after the restarted one.
-            advanceNativeObservation(600);
-            expect(scanFirstLoad(loadedState).ok).toBe(false);
-            expect(getEventCount('first_load_removal_confirmed')).toBe(0);
-
-            advanceNativeObservation(400);
-            expect(scanFirstLoad(loadedState).ok).toBe(true);
-            expect(getEventCount('first_load_removal_confirmed')).toBe(1);
-        });
-
-        it('replaces the pending record when a valid header shows a different row set (A to B to A)', () => {
-            const { rows, loadedState } = buildStoredState();
-            const rowSetA = [rows[0], rows[2], rows[4]];
-            // Same '3 sources' header and the same count, but a different resolved row set
-            // (A, C, D): still a valid all-resolving scan with 2 unresolved stored refs.
-            const rowSetB = [rows[0], rows[2], rows[3]];
-            installFirstLoadDom(rowSetA, '3 sources');
-            scanFirstLoad(loadedState);
-            expect(getEventCount('first_load_removal_pending')).toBe(1);
-
-            // A valid but different evidence set does not confirm; it replaces the record.
-            advanceNativeObservation(300);
-            installFirstLoadDom(rowSetB, '3 sources');
-            expect(scanFirstLoad(loadedState).ok).toBe(false);
-            expect(getEventCount('first_load_removal_pending')).toBe(2);
-            expect(getEventCount('first_load_removal_confirmed')).toBe(0);
-
-            // 1200 ms after the original A record, but that record was replaced by B and then
-            // by this A scan, so the clock restarted and A cannot confirm yet.
-            advanceNativeObservation(900);
-            installFirstLoadDom(rowSetA, '3 sources');
-            expect(scanFirstLoad(loadedState).ok).toBe(false);
-            expect(getEventCount('first_load_removal_pending')).toBe(3);
-            expect(getEventCount('first_load_removal_confirmed')).toBe(0);
-
-            advanceNativeObservation(1000);
-            expect(scanFirstLoad(loadedState).ok).toBe(true);
-            expect(getEventCount('first_load_removal_confirmed')).toBe(1);
-        });
-
-        it('ignores mutations inside the extension root when counting native generations', () => {
-            const ownNode = { nodeName: 'DIV' };
-            const host = { contains: jest.fn((node) => node === host || node === ownNode) };
-            mod._setManagerRuntimeForTest({ extensionHost: host, shadowRoot: {} });
-            const before = mod._getNativeObservationGenerationForTest();
-
-            mod._noteNativeMutationsForTest([
-                { type: 'attributes', target: ownNode, addedNodes: [], removedNodes: [] },
-                { type: 'childList', target: { nodeName: 'ASIDE' }, addedNodes: [host], removedNodes: [] }
+            expect(mod.state.ungrouped).toEqual([keys.keyC, keys.keyE]);
+            expect(mod.groupsById.get('keep-folder').children).toEqual([
+                { type: 'source', key: keys.keyA }
             ]);
-            expect(mod._getNativeObservationGenerationForTest()).toBe(before);
-
-            mod._noteNativeMutationsForTest([
-                { type: 'childList', target: { nodeName: 'ASIDE' }, addedNodes: [{ nodeName: 'DIV' }], removedNodes: [] }
-            ]);
-            expect(mod._getNativeObservationGenerationForTest()).toBe(before + 1);
+            expect(mod.buildPersistableState().sourceStateById[keys.keyB]).toBeUndefined();
         });
 
-        it('does not record or confirm with a header that has not changed since the SPA route change', () => {
-            const { rows, loadedState } = buildStoredState();
-            const headerNode = {};
-            const visibleRows = [rows[0], rows[2], rows[4]];
-            // The previous notebook's header showed 3 and is still on screen after the switch.
-            installFirstLoadDom(visibleRows, '3 sources', headerNode);
-            mod._recordNativeSourceTotalAtRouteChangeForTest();
-            expect(mod._isNativeSourceTotalFreshForTest()).toBe(false);
-
-            expect(scanFirstLoad(loadedState).ok).toBe(false);
-            advanceNativeObservation();
-            expect(scanFirstLoad(loadedState).ok).toBe(false);
-            advanceNativeObservation();
-            expect(scanFirstLoad(loadedState).ok).toBe(false);
-
-            expect(getEventCount('first_load_removal_pending')).toBe(0);
-            expect(getEventCount('first_load_removal_confirmed')).toBe(0);
-        });
-
-        it('keeps placeholders when a stale header coincidentally matches after an SPA switch', () => {
-            const { rows, loadedState, keys } = buildStoredState();
-            const headerNode = {};
-            const visibleRows = [rows[0], rows[2], rows[4]];
-            installFirstLoadDom(visibleRows, '3 sources', headerNode);
-            mod._recordNativeSourceTotalAtRouteChangeForTest();
-
+        it('keeps a moved placeholder in Ungrouped while the header contradicts the parsed rows', () => {
+            const { rows, loadedState, keys } = buildStateMissingOnlyB();
+            installFirstLoadDom([rows[0], rows[2], rows[4]], '3 sources');
             mod.restoreInitialLoadedState(loadedState);
-            advanceNativeObservation();
-            mod.scanAndSyncSources(null, false, COMPLETE);
-            advanceNativeObservation();
-            mod.scanAndSyncSources(null, false, COMPLETE);
+            moveToUngrouped(keys.keyB);
 
-            expect(mod.groupsById.get('keep-folder').children).toHaveLength(2);
+            installFirstLoadDom([rows[0], rows[2], rows[4]], '4 sources');
+            for (let scan = 0; scan < 4; scan += 1) {
+                mod.scanAndSyncSources(null, false, COMPLETE);
+            }
+
             expect(mod.sourcesByKey.get(keys.keyB)).toMatchObject({ isPendingNativeHydration: true });
-        });
-
-        it('allows confirmation after an SPA switch once the header text changed', () => {
-            const { rows, loadedState } = buildStoredState();
-            const headerNode = {};
-            const visibleRows = [rows[0], rows[2], rows[4]];
-            installFirstLoadDom(visibleRows, '12 sources', headerNode);
-            mod._recordNativeSourceTotalAtRouteChangeForTest();
-            installFirstLoadDom(visibleRows, '3 sources', headerNode);
-            expect(mod._isNativeSourceTotalFreshForTest()).toBe(true);
-
-            scanFirstLoad(loadedState);
-            advanceNativeObservation();
-
-            expect(scanFirstLoad(loadedState).ok).toBe(true);
-            expect(getEventCount('first_load_removal_confirmed')).toBe(1);
-        });
-
-        it('allows confirmation after an SPA switch once the header is a different element', () => {
-            const { rows, loadedState } = buildStoredState();
-            const visibleRows = [rows[0], rows[2], rows[4]];
-            installFirstLoadDom(visibleRows, '3 sources');
-            mod._recordNativeSourceTotalAtRouteChangeForTest();
-            installFirstLoadDom(visibleRows, '3 sources');
-            expect(mod._isNativeSourceTotalFreshForTest()).toBe(true);
-
-            scanFirstLoad(loadedState);
-            advanceNativeObservation();
-
-            expect(scanFirstLoad(loadedState).ok).toBe(true);
-            expect(getEventCount('first_load_removal_confirmed')).toBe(1);
-        });
-
-        it('does not confirm when the header reads 1,234 sources with a single parsed row', () => {
-            const { rows, loadedState } = buildStoredState();
-            installFirstLoadDom([rows[0]], '1,234 sources');
-
-            scanFirstLoad(loadedState);
-            advanceNativeObservation();
-            expect(scanFirstLoad(loadedState).ok).toBe(false);
-            advanceNativeObservation();
-            expect(scanFirstLoad(loadedState).ok).toBe(false);
-
-            expect(getEventCount('first_load_removal_pending')).toBe(0);
-            expect(getEventCount('first_load_removal_confirmed')).toBe(0);
-        });
-
-        it('does not drop when the header total changes between the two scans', () => {
-            const { rows, loadedState } = buildStoredState();
-            const visibleRows = [rows[0], rows[2], rows[4]];
-            installFirstLoadDom(visibleRows, '3 sources');
-            scanFirstLoad(loadedState);
-
-            installFirstLoadDom(visibleRows, '4 sources');
-            expect(scanFirstLoad(loadedState).ok).toBe(false);
-
-            // The mismatch cleared the pending confirmation: this scan only records again.
-            installFirstLoadDom(visibleRows, '3 sources');
-            expect(scanFirstLoad(loadedState).ok).toBe(false);
-            expect(getEventCount('first_load_removal_pending')).toBe(2);
-            expect(getEventCount('first_load_removal_confirmed')).toBe(0);
-
-            advanceNativeObservation();
-            expect(scanFirstLoad(loadedState).ok).toBe(true);
-            expect(getEventCount('first_load_removal_confirmed')).toBe(1);
-        });
-
-        it('does not drop when the visible rows change between the two scans', () => {
-            const { rows, loadedState } = buildStoredState();
-            installFirstLoadDom([rows[0], rows[2], rows[4]], '3 sources');
-            scanFirstLoad(loadedState);
-
-            // Same count and same header, but a different row set (D instead of E).
-            installFirstLoadDom([rows[0], rows[2], rows[3]], '3 sources');
-            expect(scanFirstLoad(loadedState).ok).toBe(false);
-            expect(getEventCount('first_load_removal_confirmed')).toBe(0);
-        });
-
-        it('does not drop when the notebook context changes between the two scans', () => {
-            const { rows, loadedState } = buildStoredState();
-            installFirstLoadDom([rows[0], rows[2], rows[4]], '3 sources');
-            scanFirstLoad(loadedState);
-
-            mod._setProjectId('another-notebook');
-
-            expect(scanFirstLoad(loadedState)).toEqual(expect.objectContaining({
-                ok: false,
-                reason: 'partial_initial_source_sync'
-            }));
-            expect(getEventCount('first_load_removal_confirmed')).toBe(0);
-        });
-
-        it('does not drop on an incomplete second scan', () => {
-            const { rows, loadedState } = buildStoredState();
-            installFirstLoadDom([rows[0], rows[2], rows[4]], '3 sources');
-            scanFirstLoad(loadedState);
-
-            expect(mod.scanAndSyncSources(loadedState, true, { scanCompleteness: 'partial' }).ok).toBe(false);
-            expect(scanFirstLoad(loadedState).ok).toBe(false);
-            expect(getEventCount('first_load_removal_confirmed')).toBe(0);
+            expect(mod.state.ungrouped).toContain(keys.keyB);
+            expect(mod.buildPersistableState().sourceStateById[keys.keyB]).toBeDefined();
         });
 
         it('keeps the missing sources as placeholders when the header total is absent', () => {
@@ -8293,69 +8013,7 @@ describe('untrusted scan protection', () => {
             expect(mod.sourcesByKey.get(keys.keyD)).toMatchObject({ isPendingNativeHydration: true });
         });
 
-        it('counts a stored ref without a record among the removed ones', () => {
-            const { rows, loadedState, keys } = buildStoredState();
-            loadedState.ungrouped.push('ghost-ref');
-            installFirstLoadDom([rows[0], rows[2], rows[4]], '3 sources');
-
-            scanFirstLoad(loadedState);
-            advanceNativeObservation();
-            expect(scanFirstLoad(loadedState).shouldUpgradeStorage).toBe(true);
-
-            expect(mod.state.ungrouped).toEqual([keys.keyC, keys.keyE]);
-        });
-
-        it('drops a placed source on a later scan without a baseline after two identical confirmations', () => {
-            const rowA = createRow('Alpha Source', 'doc-a');
-            const rowB = createRow('Beta Source', 'doc-b');
-            const rowC = createRow('Gamma Source', 'doc-c');
-            showRows([rowA, rowB, rowC]);
-            mod.scanAndSyncSources(null, true, COMPLETE);
-            const keyA = keyOf(rowA);
-            placeInFolder('keep-folder', [keyA]);
-            // A new manager context has no accepted scan to measure a row-count drop against.
-            mod._setProjectId('another-notebook');
-            installFirstLoadDom([rowB, rowC], '2 sources');
-
-            mod.scanAndSyncSources(null, false, COMPLETE);
-            expect(mod.groupsById.get('keep-folder').children).toEqual([{ type: 'source', key: keyA }]);
-
-            advanceNativeObservation();
-            mod.scanAndSyncSources(null, false, COMPLETE);
-            expect(mod.groupsById.get('keep-folder').children).toEqual([]);
-            expect(mod.sourcesByKey.has(keyA)).toBe(false);
-        });
-
-        it('clears placeholders staged before the header appeared once later scans confirm them twice', () => {
-            const { rows, loadedState, keys } = buildStoredState();
-            // Only B (in the folder) was deleted elsewhere; D was never stored.
-            loadedState.ungrouped = [keys.keyC, keys.keyE];
-            delete loadedState.sourceStateById[keys.keyD];
-            installFirstLoadDom([rows[0], rows[2], rows[4]], null);
-            mod.restoreInitialLoadedState(loadedState);
-            expect(mod.sourcesByKey.get(keys.keyB)).toMatchObject({ isPendingNativeHydration: true });
-
-            // The placeholder survives scans while the header is still absent.
-            mod.scanAndSyncSources(null, false, COMPLETE);
-            expect(mod.sourcesByKey.has(keys.keyB)).toBe(true);
-
-            installFirstLoadDom([rows[0], rows[2], rows[4]], '3 sources');
-            mod.scanAndSyncSources(null, false, COMPLETE);
-            expect(mod.groupsById.get('keep-folder').children).toHaveLength(2);
-            expect(mod.sourcesByKey.has(keys.keyB)).toBe(true);
-            expect(getEventCount('first_load_removal_pending')).toBe(1);
-
-            advanceNativeObservation();
-            mod.scanAndSyncSources(null, false, COMPLETE);
-            expect(mod.groupsById.get('keep-folder').children).toEqual([
-                { type: 'source', key: keys.keyA }
-            ]);
-            expect(mod.state.ungrouped).toEqual([keys.keyC, keys.keyE]);
-            expect(mod.sourcesByKey.has(keys.keyB)).toBe(false);
-            expect(getEventCount('first_load_removal_confirmed')).toBe(1);
-        });
-
-        it('does not use the header path when a scan also leaves a newly unresolved placed ref', () => {
+        it('keeps the earlier placeholder when a later scan also removes another placed ref', () => {
             const { rows, loadedState, keys } = buildStoredState();
             // C joins the folder next to A and B; B and D were deleted elsewhere.
             loadedState.groupsById['keep-folder'].children.push({ type: 'source', key: keys.keyC });
@@ -8364,16 +8022,14 @@ describe('untrusted scan protection', () => {
             mod.restoreInitialLoadedState(loadedState);
             expect(mod.sourcesByKey.get(keys.keyB)).toMatchObject({ isPendingNativeHydration: true });
 
-            // C now vanishes as well: the header agrees with the two visible rows, but C is
-            // not a known placeholder, so the B2 rules decide (a pure one-row removal drops C
-            // and keeps the earlier placeholder B).
+            // C now vanishes as well: the header agrees with the two visible rows and the
+            // pure-removal rule drops C, while the earlier placeholder B stays.
             installFirstLoadDom([rows[0], rows[4]], '2 sources');
             // The first scan is held by the missing-source guard; the second sees the same
             // pure removal and applies it.
             mod.scanAndSyncSources(null, false, COMPLETE);
             mod.scanAndSyncSources(null, false, COMPLETE);
 
-            expect(getEventCount('first_load_removal_pending')).toBe(0);
             expect(mod.groupsById.get('keep-folder').children).toEqual([
                 { type: 'source', key: keys.keyA },
                 { type: 'source', key: keys.keyB }
@@ -8381,10 +8037,10 @@ describe('untrusted scan protection', () => {
             expect(mod.sourcesByKey.get(keys.keyB)).toMatchObject({ isPendingNativeHydration: true });
             expect(mod.sourcesByKey.has(keys.keyC)).toBe(false);
 
-            // With C settled, B is the only unresolved ref and is a known placeholder, so the
-            // header path takes over from the next scan on.
+            // Further identical scans never turn the remaining placeholder into a drop.
             mod.scanAndSyncSources(null, false, COMPLETE);
-            expect(getEventCount('first_load_removal_pending')).toBe(1);
+            mod.scanAndSyncSources(null, false, COMPLETE);
+            expect(mod.sourcesByKey.get(keys.keyB)).toMatchObject({ isPendingNativeHydration: true });
         });
 
         it('still keeps an already staged placeholder when a baseline exists, header or not', () => {

@@ -59,20 +59,6 @@
         const readNativeSourceTotal = typeof deps.readNativeSourceTotal === 'function'
             ? deps.readNativeSourceTotal
             : () => null;
-        // Header-confirmed removal needs two scans separated by a change the page itself made:
-        // the native observation generation counts mutations outside the extension's own root,
-        // and isNativeSourceTotalFresh() says the header was re-rendered for the current notebook.
-        // Without them (default deps) the confirmation can never complete.
-        const getNativeObservationGeneration = typeof deps.getNativeObservationGeneration === 'function'
-            ? deps.getNativeObservationGeneration
-            : () => 0;
-        const isNativeSourceTotalFresh = typeof deps.isNativeSourceTotalFresh === 'function'
-            ? deps.isNativeSourceTotalFresh
-            : () => false;
-        const getNow = typeof deps.now === 'function'
-            ? deps.now
-            : () => Date.now();
-        const HEADER_REMOVAL_MIN_INTERVAL_MS = 1000;
         const isSourcePanelRenderable = typeof deps.isSourcePanelRenderable === 'function'
             ? deps.isSourcePanelRenderable
             : () => false;
@@ -1709,8 +1695,7 @@
             parsedRowCount,
             previousSourceRecordsByKey,
             authorizedNativeDeleteKeys,
-            scanCompleteness,
-            headerConfirmedRemovedKeys = null
+            scanCompleteness
         ) {
             const placedKeys = Array.from(remappedState?.unresolvedPlacedKeys || []);
             if (placedKeys.length === 0) return [];
@@ -1750,140 +1735,8 @@
             return placedKeys.filter((storedKey) => (
                 !evidencedKeys.has(storedKey)
                 && !currentKeys.has(storedKey)
-                && !headerConfirmedRemovedKeys?.has?.(storedKey)
                 && (!pureRemoval || isKnownMissingPlaceholder(storedKey))
             ));
-        }
-
-        // Evidence of the last complete scan that could drop refs on Google's header total.
-        // The drop happens only when the next complete scan reproduces it exactly; any
-        // mismatch, context change or teardown clears it.
-        let pendingHeaderRemoval = null;
-
-        function resetPendingHeaderRemoval() {
-            pendingHeaderRemoval = null;
-        }
-
-        function isSameHeaderRemovalEvidence(left, right) {
-            return Boolean(
-                left
-                && right
-                && left.contextToken === right.contextToken
-                && left.headerTotal === right.headerTotal
-                && left.rowCount === right.rowCount
-                && left.resolvedRowKeys === right.resolvedRowKeys
-                && left.removedKeys === right.removedKeys
-            );
-        }
-
-        /**
-         * Pure-removal evidence from Google's own header total, which independently proves
-         * the list is complete. Used for a scan with no accepted-scan baseline of its own
-         * (first load or a new manager instance), where the row-count drop cannot be
-         * measured, and for a later scan when every unresolved stored ref is already a
-         * known-missing placeholder (placeholders staged before the header rendered).
-         * Candidate refs need a complete scan, a header total equal to the parsed row count,
-         * every row resolving to a stored record, and the unresolved stored refs equal to the
-         * stored set minus the parsed rows. A stale header from the previous notebook could
-         * coincide with a partially rendered list, so the same evidence (context, header
-         * total, row count, resolved row keys, unresolved refs) must repeat on two
-         * consecutive complete scans: the first only records it, the second returns the
-         * refs. The two scans must also be independent: they need different native
-         * observation generations (a change the page made outside the extension's own
-         * root happened in between) and at least HEADER_REMOVAL_MIN_INTERVAL_MS apart, so
-         * a rescan the extension triggers on the same DOM never confirms. While the evidence
-         * keeps matching, a too-early or same-generation scan leaves the original record
-         * (generation and recordedAt) untouched, so the first matching scan that is both
-         * newer and at least that interval later confirms. The header must be fresh for the
-         * current notebook (isNativeSourceTotalFresh), otherwise nothing is recorded or
-         * confirmed. A mismatch, non-fresh header or incomplete scan clears or replaces the
-         * record, returns an empty set, and the caller keeps its fail-closed behavior.
-         */
-        function findHeaderConfirmedRemovedRefs(
-            storedEntries,
-            currentSources,
-            parsedRowCount,
-            sourceLookup,
-            scanCompleteness
-        ) {
-            const removedKeys = new Set();
-            const contextToken = getScanContextToken();
-            const hasBaseline = Boolean(
-                lastAcceptedScan && lastAcceptedScan.contextToken === contextToken
-            );
-            const headerTotal = scanCompleteness?.completeness === 'complete'
-                && isNativeSourceTotalFresh()
-                ? readNativeSourceTotal()
-                : null;
-            if (
-                !Number.isSafeInteger(headerTotal)
-                || parsedRowCount <= 0
-                || headerTotal !== parsedRowCount
-                || storedEntries.length <= parsedRowCount
-            ) {
-                resetPendingHeaderRemoval();
-                return removedKeys;
-            }
-
-            const claimedRowKeys = new Set();
-            let ambiguous = false;
-            let newlyUnresolved = false;
-            storedEntries.forEach(({ key, record }) => {
-                const resolution = resolveStoredSourceKeyWithReason(key, sourceLookup, record);
-                if (resolution?.key) {
-                    claimedRowKeys.add(resolution.key);
-                    return;
-                }
-                if (resolution?.reason === 'ambiguous_weak_identity') ambiguous = true;
-                if (hasBaseline && !isKnownMissingPlaceholder(key)) newlyUnresolved = true;
-                removedKeys.add(key);
-            });
-            const unknownRowCount = currentSources.filter((source) => (
-                source?.key && !source.isPendingNativeHydration && !claimedRowKeys.has(source.key)
-            )).length;
-            const confirmed = !ambiguous
-                && !newlyUnresolved
-                && unknownRowCount === 0
-                && claimedRowKeys.size === parsedRowCount
-                && removedKeys.size > 0
-                && removedKeys.size === storedEntries.length - parsedRowCount;
-            if (!confirmed) {
-                resetPendingHeaderRemoval();
-                removedKeys.clear();
-                return removedKeys;
-            }
-
-            const evidence = {
-                contextToken,
-                headerTotal,
-                rowCount: parsedRowCount,
-                resolvedRowKeys: JSON.stringify(Array.from(claimedRowKeys).sort()),
-                removedKeys: JSON.stringify(Array.from(removedKeys).sort()),
-                generation: getNativeObservationGeneration(),
-                recordedAt: getNow()
-            };
-            if (isSameHeaderRemovalEvidence(pendingHeaderRemoval, evidence)) {
-                if (
-                    evidence.generation > pendingHeaderRemoval.generation
-                    && evidence.recordedAt - pendingHeaderRemoval.recordedAt >= HEADER_REMOVAL_MIN_INTERVAL_MS
-                ) {
-                    resetPendingHeaderRemoval();
-                    return removedKeys;
-                }
-                // Same page generation or too soon: an extension-triggered rescan of the same DOM
-                // is not a second observation. Keep the original record (and its clock) so scans
-                // arriving less than a second apart cannot postpone confirmation forever.
-                removedKeys.clear();
-                return removedKeys;
-            }
-            pendingHeaderRemoval = evidence;
-            developerLog('info', 'source_sync', 'first_load_removal_pending', {
-                count: removedKeys.size,
-                rowCount: parsedRowCount,
-                headerTotal
-            });
-            removedKeys.clear();
-            return removedKeys;
         }
 
         function applyNativeLabelGroupSelectionsToExistingSources(selectionMap) {
@@ -3000,11 +2853,8 @@
                 rawCurrentSources,
                 options.scanCompleteness || null
             );
-            // Stored refs Google's header total confirmed as deleted elsewhere (no baseline scan).
-            let headerConfirmedRemovedKeys = new Set();
             if (isFirstLoad && loadedState && typeof loadedState === 'object') {
                 const unresolvedStoredKeys = [];
-                const storedEntries = [];
                 collectPersistedSourceRefs(loadedState).forEach((storedKey) => {
                     const sourceRecord = loadedState.sourceStateById
                         && Object.prototype.hasOwnProperty.call(
@@ -3013,7 +2863,6 @@
                         )
                         ? loadedState.sourceStateById[storedKey]
                         : null;
-                    storedEntries.push({ key: storedKey, record: sourceRecord });
                     const resolution = resolveStoredSourceKeyWithReason(
                         storedKey,
                         sourceLookup,
@@ -3025,21 +2874,12 @@
                     unresolvedStoredKeys.length > 0
                     && (currentSources.length > 0 || sourceEntries.length > 0)
                 ) {
-                    headerConfirmedRemovedKeys = findHeaderConfirmedRemovedRefs(
-                        storedEntries,
-                        currentSources,
-                        rawCurrentSources.length,
-                        sourceLookup,
-                        scanCompleteness
-                    );
-                    if (headerConfirmedRemovedKeys.size === 0) {
-                        developerLog('warn', 'source_sync', 'scan_skipped_partial_initial_sync', {
-                            currentCount: currentSources.length,
-                            unresolvedPersistedCount: unresolvedStoredKeys.length,
-                            reason: 'partial_initial_source_sync'
-                        });
-                        return createScanResult(false, false, 'partial_initial_source_sync');
-                    }
+                    developerLog('warn', 'source_sync', 'scan_skipped_partial_initial_sync', {
+                        currentCount: currentSources.length,
+                        unresolvedPersistedCount: unresolvedStoredKeys.length,
+                        reason: 'partial_initial_source_sync'
+                    });
+                    return createScanResult(false, false, 'partial_initial_source_sync');
                 }
             }
             const transientRawUrlSourceCount = !isFirstLoad
@@ -3050,22 +2890,7 @@
                     count: transientRawUrlSourceCount
                 });
             }
-            // The restore-time merge scan runs right after the first-load scan on the same DOM,
-            // so it cannot be an independent confirmation; it neither records nor confirms.
-            if (!isFirstLoad && options.preserveMissingExistingSources !== true) {
-                headerConfirmedRemovedKeys = findHeaderConfirmedRemovedRefs(
-                    Array.from(previousSourceRecordsByKey, ([key, record]) => ({ key, record })),
-                    currentSources,
-                    rawCurrentSources.length,
-                    sourceLookup,
-                    scanCompleteness
-                );
-            }
-            if (
-                !isFirstLoad
-                && options.preserveMissingExistingSources === true
-                && headerConfirmedRemovedKeys.size === 0
-            ) {
+            if (!isFirstLoad && options.preserveMissingExistingSources === true) {
                 currentSources = supplementCurrentSourcesForPartialMerge(
                     currentSources,
                     sourceLookup,
@@ -3087,14 +2912,8 @@
                     });
                 });
             }
-            // The header-confirmed path skips shouldPreserveExistingSourcesDuringPartialSync,
-            // including its native-delete bookkeeping (it only fills authorizedNativeDeleteKeys).
-            // That is safe because confirmation needs the claimed row count to equal the raw
-            // parsed row count: a recently native-deleted row still in the DOM is filtered out
-            // of currentSources, so the count falls short and confirmation is impossible.
             if (
                 !isFirstLoad
-                && headerConfirmedRemovedKeys.size === 0
                 && shouldPreserveExistingSourcesDuringPartialSync(
                     currentSources,
                     sourceLookup,
@@ -3182,8 +3001,7 @@
                     rawCurrentSources.length,
                     previousSourceRecordsByKey,
                     authorizedNativeDeleteKeys,
-                    scanCompleteness,
-                    headerConfirmedRemovedKeys
+                    scanCompleteness
                 );
                 if (keepPlacedKeys.length > 0) {
                     // No removal evidence: keep the placements as missing placeholders (the
@@ -3372,11 +3190,6 @@
             }
 
             const pendingStorageUpgrade = isFirstLoad && getPendingStorageUpgrade();
-            if (headerConfirmedRemovedKeys.size > 0) {
-                developerLog('info', 'source_sync', 'first_load_removal_confirmed', {
-                    count: headerConfirmedRemovedKeys.size
-                });
-            }
             consumeNativeDeleteMarkersAfterSuccessfulSync(
                 pendingNativeDeleteSourceKeys,
                 pendingNativeDeleteIdentityKeys
@@ -3387,11 +3200,7 @@
                 groupCount: groupsById.size,
                 pendingStorageUpgrade
             });
-            // A first load that dropped confirmed-deleted refs must persist the smaller tree.
-            return createScanResult(
-                true,
-                Boolean(pendingStorageUpgrade || (isFirstLoad && headerConfirmedRemovedKeys.size > 0))
-            );
+            return createScanResult(true, pendingStorageUpgrade);
         }
 
         const createDebounced = typeof debounceFn === 'function'
@@ -3695,10 +3504,7 @@
             getFreshRowCache,
             setFreshRowCache,
             clearFreshRowCache: () => setFreshRowCache(null),
-            resetCompleteScanObservation: () => {
-                resetPendingHeaderRemoval();
-                return partialSyncResetCompleteScanObservation();
-            }
+            resetCompleteScanObservation: () => partialSyncResetCompleteScanObservation()
         };
     }
 
