@@ -50,6 +50,17 @@ test.describe('extension smoke', () => {
         }, projectId);
     }
 
+    // Polls the current manager root until the settings modal exists. The root can be replaced
+    // right after a reload, and a modal opened in a replaced root disappears with it.
+    async function openSettingsModal(notebookPage) {
+        await expect.poll(async () => notebookPage.evaluate(() => {
+            const root = document.querySelector('#sources-plus-root')?.shadowRoot;
+            if (root?.querySelector('#sp-settings-modal')) return true;
+            root?.getElementById('sp-settings-btn')?.click();
+            return false;
+        }), { timeout: 10_000 }).toBe(true);
+    }
+
     async function unlockDeveloperSettings(notebookPage) {
         const acceptPasswordPrompt = notebookPage.waitForEvent('dialog')
             .then((dialog) => dialog.accept('developer_mode'));
@@ -561,12 +572,7 @@ test.describe('extension smoke', () => {
         await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
 
         const bridgePage = await openExtensionPage(env.context, env.extensionId, 'src/popup/popup.html');
-        await notebookPage.evaluate(() => {
-            const root = document.querySelector('#sources-plus-root')?.shadowRoot;
-            const settingsButton = root?.getElementById('sp-settings-btn');
-            if (!settingsButton) throw new Error('Settings button missing.');
-            settingsButton.click();
-        });
+        await openSettingsModal(notebookPage);
         await unlockDeveloperSettings(notebookPage);
         await notebookPage.evaluate(() => {
             const root = document.querySelector('#sources-plus-root')?.shadowRoot;
@@ -583,12 +589,7 @@ test.describe('extension smoke', () => {
 
         await notebookPage.reload();
         await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
-        await notebookPage.evaluate(() => {
-            const root = document.querySelector('#sources-plus-root')?.shadowRoot;
-            const settingsButton = root?.getElementById('sp-settings-btn');
-            if (!settingsButton) throw new Error('Settings button missing after developer reload.');
-            settingsButton.click();
-        });
+        await openSettingsModal(notebookPage);
         await expect.poll(async () => notebookPage.evaluate(() => {
             const root = document.querySelector('#sources-plus-root')?.shadowRoot || null;
             const toggle = root?.querySelector('.sp-settings-developer-mode-toggle') || null;
@@ -620,12 +621,12 @@ test.describe('extension smoke', () => {
         });
         await notebookPage.reload();
         await expect(notebookPage.locator('#sources-plus-root')).toBeVisible({ timeout: 20_000 });
-        await notebookPage.evaluate(() => {
-            const root = document.querySelector('#sources-plus-root')?.shadowRoot;
-            const settingsButton = root?.getElementById('sp-settings-btn');
-            if (!settingsButton) throw new Error('Settings button missing after reload.');
-            settingsButton.click();
-        });
+        // The persisted label view is restored by clicking the native toggle, and the fixture
+        // answers with a full panel rebuild, so the manager mounted first is replaced once.
+        // Wait for the rebuilt panel before opening settings in the manager that stays.
+        await expect(notebookPage.locator('[data-testid="source-view-label-button"]'))
+            .toHaveAttribute('aria-pressed', 'true');
+        await openSettingsModal(notebookPage);
         await unlockDeveloperSettings(notebookPage);
         await expect.poll(async () => notebookPage.evaluate(() => {
             const toggle = document.querySelector('#sources-plus-root')?.shadowRoot?.querySelector('.sp-settings-developer-mode-toggle');
