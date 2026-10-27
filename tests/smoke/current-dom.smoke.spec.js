@@ -91,6 +91,45 @@ test.describe('current Gemini Notebook DOM (2026-10)', () => {
         expect(nativeClicks.rowButton).toBe(0);
     });
 
+    test('hides the native auto-label, sort and select-all row while keeping Add sources and search reachable', async () => {
+        const page = await env.context.newPage();
+        await page.goto(CURRENT_DOM_URL);
+        await expect(page.locator('#sources-list .source-item')).toHaveCount(FAKE_TITLES.length, { timeout: 20_000 });
+
+        const readReachable = () => page.evaluate(() => {
+            const isReachable = (selector) => {
+                const element = document.querySelector(selector);
+                const rect = element.getBoundingClientRect();
+                const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+                return getComputedStyle(element).visibility === 'visible' && Boolean(hit && element.contains(hit));
+            };
+            return {
+                addSources: isReachable('.add-source-button button'),
+                search: isReachable('.source-discovery-container input'),
+                autoLabel: isReachable('.label-auto-button'),
+                sort: isReachable('.source-sort-button'),
+                selectAll: isReachable('.select-checkbox-all-sources input')
+            };
+        });
+        await expect.poll(readReachable).toEqual({ addSources: true, search: true, autoLabel: false, sort: false, selectAll: false });
+
+        // A legacy label-view menu trigger keeps its row visible for the "Return to list view" flow,
+        // whether it carries aria-haspopup or only the Material menu-trigger class.
+        const setLegacyTrigger = (variant) => page.evaluate((nextVariant) => {
+            const button = document.querySelector('.label-auto-button');
+            button.removeAttribute('aria-haspopup');
+            button.classList.remove('mat-mdc-menu-trigger');
+            if (nextVariant === 'aria') button.setAttribute('aria-haspopup', 'menu');
+            if (nextVariant === 'class') button.classList.add('mat-mdc-menu-trigger');
+        }, variant);
+        for (const variant of ['aria', 'class']) {
+            await setLegacyTrigger(variant);
+            await expect.poll(readReachable).toEqual({ addSources: true, search: true, autoLabel: true, sort: true, selectAll: true });
+            await setLegacyTrigger('none');
+            await expect.poll(readReachable).toEqual({ addSources: true, search: true, autoLabel: false, sort: false, selectAll: false });
+        }
+    });
+
     test('picks up rows that render after mount and hides the native list once they are parsed', async () => {
         const page = await env.context.newPage();
         await page.goto(`${CURRENT_DOM_URL}&rows=deferred`);

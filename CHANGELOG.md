@@ -30,6 +30,9 @@
 ### Changed
 - **审核改由 Opus 5.5 UltraCode、桌面操作交给 Codex (Review by Opus 5.5 UltraCode, Desktop Computer Use by Codex)**: **影响**: 对扩展使用无可感知变化。按 2026-10-28 的分工调整，`AGENTS.md` 的 Agent Roles、`CLAUDE.md` 和 `docs/PROJECT_DIRECTORY.md` 改为：只在有代码改动的 PR 合并前（主线程自己发起，只审该 PR 的改动，main 原有问题记为原有问题、不卡合并；只改文档、注释、规则文件的 PR 不审）和用户明确要求时才在后台单独开只读的 Opus 5.5 UltraCode 审核，其他改动（包括小改动）不自动送审，深档改动可在汇报里建议审核；不再送 Codex 审核线程 `01a17ce4-d3bf-7c10-b322-e56d2d5585cf`（保留查历史）；分档、最多三轮、只审增量和意见格式不变。Mac 桌面应用的 computer use 交给 Codex（GPT-6.1 Terra、Max、Fast，每个任务新线程），浏览器和 iOS 模拟器仍由 Claude 做。
 
+### Fixed
+- **藏起管理器下方的原生自动分类、排序和全选 (Hide the Native Auto-Label, Sort and Select-All Row)**: **影响**: 插件打开时，管理器下方不再露出 Google 的“按主题自动分类”、“Sort sources”和“Select all”这一行；“添加来源”和网页搜索框照常显示。这一行是 Google 新版页面才有的（10 月 27 日现场核对时首次记录），原来的隐藏规则写于 4 月，没有覆盖到。来源少的时候它就露在管理器正下方，看着像插件自己的按钮：点“全选”会把 Gemini 里所有来源的勾选一起改掉，插件里的勾选却不变，两边就对不上了；点排序只改被藏起来的原生列表，看不到效果；点自动分类会直接让 Google 用 AI 重新分类。`src/content/styles.css` 新增一条单独规则，按已写进真实页面契约测试的 `.label-row` 隐藏这一行（aria-label 会随界面语言变化，所以不用它）；行里如果是旧版带菜单的标签视图入口则保留，旧版“返回列表视图”流程只会点可见的入口。需要用这几个原生控件时，在弹窗里关掉插件即可。
+
 ## [2026-10-27] [26.10.27]
 
 ### Added

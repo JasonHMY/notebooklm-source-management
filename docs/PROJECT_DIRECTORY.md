@@ -146,7 +146,7 @@ GeminiNotebook-Source-Management
 │   │   ├── content-template.js
 │   │   │   └── manager shell 模板；含 Undo/Redo 工具栏、保存/恢复状态区、延迟显示的原生勾选确认进度、来源 list 与精准排序 polite live region
 │   │   └── styles.css
-│   │       └── 原生 Gemini Notebook DOM 覆写（manifest content_scripts[0].css 注入，scoped 在 .sources-plus-manager-active；三套 CSS 之一）
+│   │       └── 原生 Gemini Notebook DOM 覆写（manifest content_scripts[0].css 注入，scoped 在 .sources-plus-manager-active；三套 CSS 之一）；隐藏原生来源列表和当前版自动分类/排序/全选工具行（`.label-row`，保留旧版带菜单的标签视图入口），添加来源和网页搜索保持可见
 │   ├── background/
 │   │   └── index.js
 │   │       └── service worker；storage 队列、LOAD-after-SAVE raw candidate 读取、revision guard、history、tab focus/open、偏好和日志消息

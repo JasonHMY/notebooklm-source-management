@@ -671,6 +671,7 @@ function renderCurrentDomHtml(notebookId, titles, options = {}) {
                             <div class="button-row">
                                 <nb-button class="add-source-button"><button type="button" aria-label="Add sources">Add sources</button></nb-button>
                             </div>
+                            <div class="source-discovery-container"><source-discovery-query-box><input type="search" aria-label="Search sources on the web"></source-discovery-query-box></div>
                             <div class="row label-row">
                                 <div class="label-row-start">
                                     <span>
