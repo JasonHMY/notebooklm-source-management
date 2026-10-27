@@ -241,6 +241,10 @@ const setupGlobalMocks = () => {
         i18n: { getMessage: (key) => key },
         runtime: {
             sendMessage: jest.fn((message, cb) => {
+                if (message?.type === 'GET_EXTENSION_ENABLED' && typeof cb === 'function') {
+                    cb({ success: true, enabled: true });
+                    return;
+                }
                 if (message?.type === 'SAVE_STATE' && typeof cb === 'function') {
                     cb({ success: true, saveRevision: (Number(message.baseRevision) || 0) + 1, savedAt: '2026-04-22T00:00:00.000Z' });
                     return;

@@ -37,12 +37,12 @@
 - **忽略本地覆盖率和代码索引 (Ignore Local Coverage and Code Index)**: 将 `coverage/` 和 `.codegraph/` 加入 `.gitignore`，避免 Jest 覆盖率报告和本机 codegraph 索引被误提交到公开仓库；项目地图同步列出这两个本地目录。
 - **校正 Claude 项目说明 (Correct Claude Project Notes)**: **影响**: 对扩展使用无可感知变化。`CLAUDE.md` 按当前代码改写：根层是 `state.root`，拖拽只走六点手柄的指针输入、smoke 用真实鼠标，页面匹配 notebook.google.com 和 notebooklm.google.com，模块清单以 manifest 为准；去掉不存在的 `update-checklist.md`，改指向 `AGENTS.md` 和项目地图。
 - **冒烟测试启动更稳 (Steadier Smoke Harness)**: **影响**: 对扩展使用无可感知变化。扩展 ID 改为从 MV3 service worker 取得，不再轮询注册而偶发超时；smoke 默认使用 Playwright 自带的 Chromium（可用 `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` 覆盖），启动时打印浏览器版本；9 个互不依赖的 `describe.serial` 改为普通 `describe`，一次环境失败不再连带跳过其余用例。
-- **发布包拦截冲突副本 (Reject Conflict Copies in Package)**: **影响**: 对扩展使用无可感知变化。打包时如果 `src/` 等打包目录里出现 Finder/iCloud 冲突副本（如 `index 2.js`、`icon 2.png`），会直接报错，避免重复或过期文件进入发布 zip。
+- **发布包拦截冲突副本 (Reject Conflict Copies in Package)**: **影响**: 对扩展使用无可感知变化。打包时如果 `src/` 等打包目录里出现 Finder/iCloud 冲突副本（如 `index 2.js`、`icon 2.png`，或 `content 2/` 这样的整个目录），会直接报错，避免重复或过期文件进入发布 zip。
 
 ### Fixed
 - **不再误点“按主题自动分类” (Never Click Auto-Label)**: **影响**: 打开笔记本或在弹窗切换标签视图时，插件不会再触发 Google 的 AI 自动分类。Gemini Notebook 现在的 “Auto-label your sources by topic” 按钮点下去就会执行，旧的视图切换逻辑会把它当成标签视图入口：保存的视图是标签视图时，每次打开笔记本都会自动点它，弹窗切换标签视图也会点到它。现在所有查找和点击入口都排除这类直接执行的按钮；找不到真正的视图切换时不点击、回退列表显示，弹窗提示当前笔记本没有标签视图切换。依赖菜单的旧版标签流程不受影响。
-- **关闭开关在所有入口生效 (Honor the Disable Toggle Everywhere)**: **影响**: 在弹窗里关闭插件后，从首页点进笔记本、或在其他窗口和标签页里的笔记本，都不会再显示管理器、隐藏原生列表或继续保存；重新打开后各标签页自动恢复。插件启动时在任何页面都读取开关，并监听 `chrome.storage` 变化。
-- **适配当前的来源行菜单按钮 (Match the Current Row More Button)**: **影响**: 查看详情、重命名、删除这些依赖来源行菜单的操作，在当前 Gemini Notebook 页面上能找对按钮。行菜单按钮的标签从 “More options” 改成了 “More”，顶部的自动分类按钮也带着同样的类名；现在优先按类名匹配并排除自动分类按钮，没有类型前缀的通用来源图标也能识别，查看详情不会再点到菜单按钮或它的图标。测试新增只读采集、已脱敏的真实页面结构样本和对应的 smoke 模式。
+- **关闭开关在所有入口生效 (Honor the Disable Toggle Everywhere)**: **影响**: 在弹窗里关闭插件后，从首页点进笔记本、或在其他窗口和标签页里的笔记本，都不会再显示管理器、隐藏原生列表或继续保存；重新打开后各标签页自动恢复。插件启动时在任何页面都读取开关，并监听 `chrome.storage` 变化；开关状态读到之前不挂载、不隐藏原生列表，启动时较慢返回的旧结果也不会覆盖期间新关掉的开关。
+- **适配当前的来源行菜单按钮 (Match the Current Row More Button)**: **影响**: 查看详情、重命名、删除这些依赖来源行菜单的操作，在当前 Gemini Notebook 页面上能找对按钮。行菜单按钮的标签从 “More options” 改成了 “More”，顶部的自动分类按钮也带着同样的类名；现在优先按类名匹配并排除自动分类按钮，没有类型前缀的通用来源图标也能识别；查看详情统一按同一套规则排除菜单按钮（类名、“More”/“More options” 标签、菜单弹出属性）及其图标，不会误开原生菜单还报成功。测试新增只读采集、已脱敏的真实页面结构样本和对应的 smoke 模式。
 - **从插件删除来源恢复可用 (Restore Deleting Sources From the Manager)**: **影响**: 在当前 Gemini Notebook 页面上，从插件里删除来源不再一律失败。删除前的完整性核对原来只读页面上的来源总数属性，而这些属性已经没有了；现在改读聊天区标题下 Google 自己显示的 “N sources”，和解析到的来源行数一致才允许删除，删除后总数必须正好少 1 才算成功。这个检查提前到打开原生菜单之前，拿不到总数或对不上时直接拒绝，不再闪一下菜单和确认框；提示改为“没有删除任何内容”。删除后无法确认时，提示“可能已经删除，请检查来源列表”，不再说“无法开始删除”。
 - **扫描不可信时不改 Gemini 的勾选 (Leave Gemini Selection Alone on Untrusted Scans)**: **影响**: 来源暂时认不出来、扫描没完成，或同一轮扫描改动了文件夹归属时，插件不再替你勾选或取消勾选 Gemini 里的来源，被你停用的来源不会被悄悄选回对话。被动扫描只有在可信时才按文件夹开关同步原生勾选；手动开关文件夹、导入和恢复等主动操作不受影响。
 - **没有删除证据时保留文件夹里的来源 (Keep Foldered Sources Without Removal Evidence)**: **影响**: 来源被改名、或在别处同时有增有删时，它在文件夹或根层级里的位置、标签和启用状态不会再被后续扫描悄悄删掉并保存。只有插件自己刚完成的原生删除，或来源行数正好减少且没有新出现的来源时，才会移除对应记录；其他情况保留为缺失占位，新出现的来源照旧进入“未分组”。未分组里的占位仍要连续两次相同的完整扫描才会移除。

@@ -661,6 +661,38 @@
             return false;
         }
 
+        // Selector for the row's More/menu control: the DEPS.moreBtn signals (class,
+        // aria-label "More options"/"More") plus aria-haspopup="menu".
+        function getNativeMoreControlSelector() {
+            const moreSelectors = Array.isArray(getDEPS().moreBtn) ? getDEPS().moreBtn : [];
+            return [...moreSelectors, '[aria-haspopup="menu"]'].join(', ');
+        }
+
+        // True for the row's More/menu control and for anything inside it (its icon). Shared
+        // by "view details" target selection so a click never opens the native menu.
+        function isNativeMoreControl(target) {
+            if (!target) return false;
+
+            const ariaLabel = String(target.getAttribute?.('aria-label') || '').trim().toLowerCase();
+            const ariaHasPopup = String(target.getAttribute?.('aria-haspopup') || '').toLowerCase();
+            const className = String(target.className || '').toLowerCase();
+            if (
+                ariaLabel === 'more options'
+                || ariaLabel === 'more'
+                || ariaHasPopup === 'menu'
+                || className.includes('source-item-more-button')
+            ) {
+                return true;
+            }
+
+            if (typeof target.closest !== 'function') return false;
+            try {
+                return Boolean(target.closest(getNativeMoreControlSelector()));
+            } catch (error) {
+                return false;
+            }
+        }
+
         function getNativeMoreButtonCandidateScore(candidate) {
             if (!candidate) return Number.NEGATIVE_INFINITY;
 
@@ -2051,26 +2083,23 @@
         function isSourceDetailsTargetCandidate(target) {
             if (!target) return false;
 
-            const ariaLabel = String(target.getAttribute?.('aria-label') || '').toLowerCase();
             const role = String(target.getAttribute?.('role') || '').toLowerCase();
             const type = String(target.getAttribute?.('type') || '').toLowerCase();
-            const className = String(target.className || '').toLowerCase();
 
             if (type === 'checkbox' || role === 'checkbox') return false;
-            if (ariaLabel === 'more options') return false;
-            if (className.includes('source-item-more-button')) return false;
-            // The More button's own icon sits inside the button; a click on it opens the native menu.
-            if (typeof target.closest === 'function' && target.closest('.source-item-more-button')) return false;
+            // The More/menu control and its icon open the native menu, never the details view.
+            if (isNativeMoreControl(target)) return false;
 
             return typeof target.click === 'function' || typeof target.dispatchEvent === 'function';
         }
 
         function collectSourceDetailsCandidates(row, titleElement) {
+            const moreControlSelector = getNativeMoreControlSelector();
             const selectors = [
                 'a[href]',
                 '[role="link"]',
-                'button:not([aria-label="More options"]):not(.source-item-more-button)',
-                '[role="button"]:not([aria-label="More options"]):not(.source-item-more-button)',
+                `button:not(${moreControlSelector})`,
+                `[role="button"]:not(${moreControlSelector})`,
                 '[jsaction]',
                 '[tabindex]:not([tabindex="-1"])',
                 '[data-testid="source-title"]',
@@ -2091,8 +2120,8 @@
                     [
                         'a[href]',
                         '[role="link"]',
-                        'button:not([aria-label="More options"]):not(.source-item-more-button)',
-                        '[role="button"]:not([aria-label="More options"]):not(.source-item-more-button)',
+                        `button:not(${moreControlSelector})`,
+                        `[role="button"]:not(${moreControlSelector})`,
                         '[jsaction]',
                         '[tabindex]:not([tabindex="-1"])'
                     ].join(', ')
@@ -2134,7 +2163,7 @@
             if (tagName === 'button' || role === 'button') score += 80;
             if (jsaction) score += 70;
             if (tabIndex && tabIndex !== '-1') score += 50;
-            if (ariaLabel && ariaLabel !== 'more options') score += 20;
+            if (ariaLabel) score += 20;
 
             return score;
         }

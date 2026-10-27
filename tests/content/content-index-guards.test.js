@@ -2,7 +2,8 @@ const {
     setupGlobalMocks,
     teardownGlobalMocks,
     loadContentModule,
-    createMockPanel
+    createMockPanel,
+    createInitShadowRoot
 } = require('../helpers/content-test-harness');
 
 const ACTIVE_CLASS = 'sources-plus-manager-active';
@@ -286,5 +287,163 @@ describe('extension enabled flag across SPA entry and tabs', () => {
         mod._destroyContentInstanceForTest();
 
         expect(global.chrome.storage.onChanged.removeListener).toHaveBeenCalledWith(onStorageChanged);
+    });
+});
+
+describe('extension enabled flag while the startup read is pending', () => {
+    afterEach(teardownGlobalMocks);
+
+    function loadWithPendingStartupRead(pathname) {
+        jest.resetModules();
+        setupGlobalMocks();
+        global.window.location.pathname = pathname;
+        let respond = null;
+        global.chrome.runtime.sendMessage.mockImplementation((message, cb) => {
+            if (typeof cb !== 'function') return;
+            if (message?.type === 'GET_EXTENSION_ENABLED') {
+                respond = (enabled) => cb({ success: true, enabled });
+                return;
+            }
+            cb({ success: true });
+        });
+        const mod = loadContentModule();
+        return {
+            mod,
+            respond: (enabled) => respond(enabled),
+            onStorageChanged: global.chrome.storage.onChanged.addListener.mock.calls[0][0]
+        };
+    }
+
+    // A panel the manager can really mount into; mounting shows up as the header insert.
+    function installMountablePanel() {
+        const { panel, header } = createMockPanel({ visible: true, contentVisible: true });
+        const initHarness = createInitShadowRoot();
+        let firstDiv = true;
+        panel.querySelectorAll = jest.fn(() => []);
+        global.document.querySelector = jest.fn((selector) => (
+            selector === '[data-testid="source-panel"]' || selector === '.source-panel' ? panel : null
+        ));
+        global.document.querySelectorAll = jest.fn(() => []);
+        global.document.createElement = jest.fn((tag) => {
+            if (tag === 'div' && firstDiv) {
+                firstDiv = false;
+                return {
+                    id: '',
+                    attachShadow: jest.fn(() => initHarness.shadowRoot),
+                    remove: jest.fn(),
+                    isConnected: true
+                };
+            }
+            return {
+                textContent: '',
+                appendChild: jest.fn(),
+                cloneNode: jest.fn(function cloneNode() { return this; }),
+                setAttribute: jest.fn(),
+                getAttribute: jest.fn(() => null),
+                addEventListener: jest.fn(),
+                remove: jest.fn(),
+                matches: jest.fn(() => false),
+                closest: jest.fn(() => null),
+                querySelector: jest.fn(() => null),
+                querySelectorAll: jest.fn(() => []),
+                dataset: {},
+                style: {},
+                classList: { add: jest.fn(), remove: jest.fn() }
+            };
+        });
+        return { panel, header };
+    }
+
+    it('keeps the extension disabled when a storage disable lands before the slow startup response', async () => {
+        const { mod, respond, onStorageChanged } = loadWithPendingStartupRead('/notebook/notebook-a');
+        const { header } = installMountablePanel();
+
+        onStorageChanged({ extensionEnabled: { oldValue: true, newValue: false } }, 'local');
+        expect(mod._getExtensionEnabledForTest()).toBe(false);
+
+        respond(true);
+        await flushPromises();
+
+        expect(mod._getExtensionEnabledForTest()).toBe(false);
+        expect(mod.getManagerStatus()).toEqual({ ready: false, reason: 'extension_disabled' });
+        expect(header.insertAdjacentElement).not.toHaveBeenCalled();
+        expect(global.document.documentElement.classList.add).not.toHaveBeenCalledWith(ACTIVE_CLASS);
+    });
+
+    it('keeps the extension disabled when a forwarded DISABLE_MANAGER lands before the startup response', async () => {
+        const { mod, respond } = loadWithPendingStartupRead('/notebook/notebook-a');
+        const { header } = installMountablePanel();
+
+        mod.handleManagerMessage({ type: 'DISABLE_MANAGER' }, {}, jest.fn());
+        respond(true);
+        await flushPromises();
+
+        expect(mod._getExtensionEnabledForTest()).toBe(false);
+        expect(header.insertAdjacentElement).not.toHaveBeenCalled();
+    });
+
+    it('does not mount or hide the native list during an SPA entry while the stored disabled flag is unread', async () => {
+        const { mod, respond } = loadWithPendingStartupRead('/');
+        const { header } = installMountablePanel();
+        await flushPromises();
+
+        global.window.location.pathname = '/notebook/notebook-b';
+        mod.handleRouteChanged();
+        mod.syncManagerWithPanelLifecycle();
+        await flushPromises();
+
+        expect(header.insertAdjacentElement).not.toHaveBeenCalled();
+        expect(global.document.documentElement.classList.add).not.toHaveBeenCalledWith(ACTIVE_CLASS);
+
+        respond(false);
+        await flushPromises();
+
+        expect(mod._getExtensionEnabledForTest()).toBe(false);
+        expect(mod.getManagerStatus()).toEqual({ ready: false, reason: 'extension_disabled' });
+        expect(header.insertAdjacentElement).not.toHaveBeenCalled();
+        expect(global.document.documentElement.classList.add).not.toHaveBeenCalledWith(ACTIVE_CLASS);
+        expect(mod._getAttachedSourcePanelForTest()).toBeNull();
+    });
+
+    it('mounts a notebook entered during the pending read once the stored flag turns out enabled', async () => {
+        const { mod, respond } = loadWithPendingStartupRead('/');
+        const { header } = installMountablePanel();
+        await flushPromises();
+
+        global.window.location.pathname = '/notebook/notebook-b';
+        mod.handleRouteChanged();
+        await flushPromises();
+        expect(header.insertAdjacentElement).not.toHaveBeenCalled();
+
+        respond(true);
+        await flushPromises();
+
+        expect(mod._getExtensionEnabledForTest()).toBe(true);
+        expect(header.insertAdjacentElement).toHaveBeenCalledTimes(1);
+    });
+
+    it('still mounts on a normal enabled startup once the read resolves', async () => {
+        const { respond, mod } = loadWithPendingStartupRead('/notebook/notebook-a');
+        const { header } = installMountablePanel();
+        await flushPromises();
+        expect(header.insertAdjacentElement).not.toHaveBeenCalled();
+
+        respond(true);
+        await flushPromises();
+
+        expect(mod._getExtensionEnabledForTest()).toBe(true);
+        expect(header.insertAdjacentElement).toHaveBeenCalledTimes(1);
+    });
+
+    it('ignores a late startup response after the content instance was destroyed', async () => {
+        const { mod, respond } = loadWithPendingStartupRead('/notebook/notebook-a');
+        const { header } = installMountablePanel();
+
+        mod._destroyContentInstanceForTest();
+        respond(true);
+        await flushPromises();
+
+        expect(header.insertAdjacentElement).not.toHaveBeenCalled();
+        expect(mod._getAttachedSourcePanelForTest()).toBeNull();
     });
 });

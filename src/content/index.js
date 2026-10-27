@@ -188,6 +188,11 @@
     let extensionHost = null;
     let managerStatusReason = 'manager_not_ready';
     let isExtensionEnabled = true;
+    // The stored flag is unknown until the startup read, a storage event or a forwarded
+    // ENABLE/DISABLE_MANAGER delivers it; until then nothing mounts or hides the native list.
+    // The generation bumps on every such update so a slower startup response never overrides it.
+    let isExtensionEnabledKnown = false;
+    let extensionEnabledUpdateGeneration = 0;
     let focusHighlightTimeout = null;
     let pendingStorageUpgrade = false;
     let activeRouteRecoveryToken = 0;
@@ -3302,9 +3307,15 @@
         syncManagerWithPanelLifecycle();
     }
 
+    function markExtensionEnabledUpdated() {
+        isExtensionEnabledKnown = true;
+        extensionEnabledUpdateGeneration += 1;
+    }
+
     // Single entry for stored-flag changes (startup read and storage events), so the
     // popup's forwarded message and the storage event never apply the same state twice.
     function applyExtensionEnabledState(enabled) {
+        markExtensionEnabledUpdated();
         if (enabled === isExtensionEnabled) return false;
         developerLog('info', 'lifecycle', 'extension_enabled_changed', { enabled });
         if (enabled) {
@@ -5259,10 +5270,14 @@
             GET_MANAGER_STATUS: () => getManagerStatus(),
             FOCUS_MANAGER: () => focusManagerPanel(),
             SWITCH_SOURCE_VIEW: (request) => switchNativeSourceView(request.viewKind),
-            DISABLE_MANAGER: () => (isExtensionEnabled
-                ? disableManagerRuntime()
-                : { success: true, disabled: true, saveStarted: false }),
+            DISABLE_MANAGER: () => {
+                markExtensionEnabledUpdated();
+                return isExtensionEnabled
+                    ? disableManagerRuntime()
+                    : { success: true, disabled: true, saveStarted: false };
+            },
             ENABLE_MANAGER: () => {
+                markExtensionEnabledUpdated();
                 enableManagerRuntime();
                 return {
                     success: true,
@@ -6267,6 +6282,7 @@
     function setNativeSourceListHidden(hidden) {
         const root = document.documentElement;
         if (!root || !root.classList) return;
+        if (hidden && !isExtensionEnabledKnown) return;
 
         lastNativeSourceListHidden = Boolean(hidden);
         lastNativeSourceListHiddenAt = new Date().toISOString();
@@ -6730,6 +6746,11 @@
     }
 
     function init(sourcePanel) {
+        if (!isExtensionEnabledKnown) {
+            managerStatusReason = 'manager_not_ready';
+            return;
+        }
+
         if (!isSourcePanelRenderable(sourcePanel)) {
             managerStatusReason = 'manager_not_ready';
             developerLog('warn', 'lifecycle', 'manager_mount_skipped', { reason: 'panel_not_renderable' });
@@ -6990,42 +7011,49 @@
 
     // Read the stored flag on every page (also the home page), so a later SPA entry
     // into a notebook respects it.
+    // The response is applied only while no newer update (storage event or forwarded
+    // message) arrived since the request was sent, and never after destroy.
+    const startupEnabledGeneration = extensionEnabledUpdateGeneration;
     const extensionEnabledStatus = requestExtensionEnabledStatus().then((enabled) => {
-        applyExtensionEnabledState(enabled);
-        return enabled;
+        if (contentInstance.destroyed) return false;
+        if (startupEnabledGeneration === extensionEnabledUpdateGeneration) {
+            applyExtensionEnabledState(enabled);
+        }
+        return isExtensionEnabled;
     });
 
-    if (projectId) {
-        extensionEnabledStatus.then((enabled) => {
-            if (!enabled) {
-                managerStatusReason = 'extension_disabled';
+    // projectId is read after the response: an SPA entry into a notebook while the
+    // read was pending was held back by the unknown-state gate and mounts here.
+    extensionEnabledStatus.then((enabled) => {
+        if (!projectId || contentInstance.destroyed) return;
+        if (!enabled) {
+            managerStatusReason = 'extension_disabled';
+            return;
+        }
+
+        return waitForElement(DEPS.panel).then(panel => {
+            if (!isExtensionEnabled || contentInstance.destroyed) return;
+            if (!panel) {
+                managerStatusReason = 'source_panel_missing';
+                showCrashBanner(getMessage('ui_crash_missing_panel'));
                 return;
             }
-
-            return waitForElement(DEPS.panel).then(panel => {
-                if (!isExtensionEnabled) return;
-                if (!panel) {
-                    managerStatusReason = 'source_panel_missing';
-                    showCrashBanner(getMessage('ui_crash_missing_panel'));
-                    return;
-                }
-                bindPanelLifecycleHooks(panel);
-                if (!isSourcePanelRenderable(panel)) {
-                    managerStatusReason = 'manager_not_ready';
-                    return;
-                }
-                if (getSourcePanelState(panel).state === 'detail') {
-                    managerStatusReason = 'source_detail_view';
-                    return;
-                }
-                init(panel);
-            }).catch(err => {
-                console.error("GeminiNotebook-Source-Management init error:", err);
+            bindPanelLifecycleHooks(panel);
+            if (!isSourcePanelRenderable(panel)) {
                 managerStatusReason = 'manager_not_ready';
-                showCrashBanner(getMessage('ui_crash_init_error'));
-            });
+                return;
+            }
+            if (getSourcePanelState(panel).state === 'detail') {
+                managerStatusReason = 'source_detail_view';
+                return;
+            }
+            init(panel);
+        }).catch(err => {
+            console.error("GeminiNotebook-Source-Management init error:", err);
+            managerStatusReason = 'manager_not_ready';
+            showCrashBanner(getMessage('ui_crash_init_error'));
         });
-    }
+    });
 
     // NotebookLM is a SPA — switching notebooks does NOT trigger a full reload.
     // On route change, the content script tears down + reinitializes in place
@@ -7505,7 +7533,10 @@
             _handleDropForTest: handleDrop,
             _handleDragEndForTest: handleDragEnd,
             _setShadowRootForTest: (val) => { shadowRoot = val; extensionHost = val && val.host ? val.host : null; },
-            _setExtensionEnabledForTest: (val) => { isExtensionEnabled = Boolean(val); },
+            _setExtensionEnabledForTest: (val) => {
+                isExtensionEnabled = Boolean(val);
+                isExtensionEnabledKnown = true;
+            },
             _setManagerRuntimeForTest: ({ extensionHost: nextHost = null, shadowRoot: nextShadowRoot = null } = {}) => {
                 extensionHost = nextHost;
                 shadowRoot = nextShadowRoot;
@@ -7585,6 +7616,7 @@
                 nextNativeSourceViewHandoffId = 1;
                 activeSourceViewSwitchRequestId = 0;
                 isExtensionEnabled = true;
+                isExtensionEnabledKnown = true;
                 setNativeSourceListHidden(false);
                 if (panelResizeObserver) {
                     panelResizeObserver.disconnect();

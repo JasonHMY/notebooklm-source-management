@@ -4076,6 +4076,112 @@ describe('triggerNativeSourceDetailsDirect', () => {
         expect(row.dispatchEvent).toHaveBeenCalled();
         expect(row.click).toHaveBeenCalledTimes(1);
     });
+
+    // Live 2026-10 row: the More button only carries aria-label "More" (no class), and its
+    // icon sits inside it. Neither may be clicked by "view details".
+    describe('with a class-less aria-label "More" button', () => {
+        function createMoreControls() {
+            const moreButton = {
+                tagName: 'BUTTON',
+                className: '',
+                dispatchEvent: jest.fn(),
+                click: jest.fn(),
+                getAttribute: jest.fn((attr) => (attr === 'aria-label' ? 'More' : null)),
+                closest: jest.fn((selector) => (
+                    String(selector).includes('[aria-label="More"]') ? moreButton : null
+                ))
+            };
+            const moreIcon = {
+                tagName: 'MAT-ICON',
+                className: 'mat-icon',
+                textContent: 'more_vert',
+                dispatchEvent: jest.fn(),
+                click: jest.fn(),
+                getAttribute: jest.fn((attr) => (attr === 'tabindex' ? '0' : null)),
+                closest: jest.fn((selector) => (
+                    String(selector).includes('[aria-label="More"]') ? moreButton : null
+                ))
+            };
+            return { moreButton, moreIcon };
+        }
+
+        function createRow({ moreButton, moreIcon, titleTarget = null }) {
+            return {
+                tagName: 'DIV',
+                className: 'single-source-container',
+                dispatchEvent: jest.fn(),
+                click: jest.fn(),
+                getAttribute: jest.fn(() => null),
+                closest: jest.fn(() => null),
+                querySelectorAll: jest.fn((selector) => {
+                    const value = String(selector);
+                    if (value.startsWith('button') || value.startsWith('[role="button"]')) return [moreButton];
+                    if (value === 'mat-icon') return [moreIcon];
+                    return [];
+                }),
+                querySelector: jest.fn((selector) => {
+                    if (titleTarget && mod.DEPS.title.includes(selector)) return titleTarget;
+                    if (mod.DEPS.icon.includes(selector)) return moreIcon;
+                    return null;
+                })
+            };
+        }
+
+        it('never clicks the More button or its icon, even when they are the only candidates', () => {
+            const { moreButton, moreIcon } = createMoreControls();
+            const row = createRow({ moreButton, moreIcon });
+            mod.sourcesByKey.set('source-1', { key: 'source-1', title: 'Source One', element: row });
+
+            expect(mod._triggerNativeSourceDetailsDirectForTest('source-1')).toBe(true);
+
+            expect(moreButton.click).not.toHaveBeenCalled();
+            expect(moreButton.dispatchEvent).not.toHaveBeenCalled();
+            expect(moreIcon.click).not.toHaveBeenCalled();
+            expect(moreIcon.dispatchEvent).not.toHaveBeenCalled();
+            expect(row.click).toHaveBeenCalledTimes(1);
+        });
+
+        it('keeps the real title target ahead of the More button', () => {
+            const { moreButton, moreIcon } = createMoreControls();
+            const titleTarget = {
+                tagName: 'BUTTON',
+                className: 'source-stretched-button',
+                dispatchEvent: jest.fn(),
+                click: jest.fn(),
+                getAttribute: jest.fn((attr) => (attr === 'tabindex' ? '0' : null)),
+                closest: jest.fn(() => null)
+            };
+            const row = createRow({ moreButton, moreIcon, titleTarget });
+            mod.sourcesByKey.set('source-1', { key: 'source-1', title: 'Source One', element: row });
+
+            expect(mod._triggerNativeSourceDetailsDirectForTest('source-1')).toBe(true);
+
+            expect(titleTarget.click).toHaveBeenCalledTimes(1);
+            expect(moreButton.click).not.toHaveBeenCalled();
+            expect(moreIcon.click).not.toHaveBeenCalled();
+            expect(row.click).not.toHaveBeenCalled();
+        });
+
+        it('also excludes an aria-haspopup="menu" control without a class or label', () => {
+            const menuButton = {
+                tagName: 'BUTTON',
+                className: '',
+                dispatchEvent: jest.fn(),
+                click: jest.fn(),
+                getAttribute: jest.fn((attr) => (attr === 'aria-haspopup' ? 'menu' : null)),
+                closest: jest.fn((selector) => (
+                    String(selector).includes('[aria-haspopup="menu"]') ? menuButton : null
+                ))
+            };
+            const row = createRow({ moreButton: menuButton, moreIcon: menuButton });
+            mod.sourcesByKey.set('source-1', { key: 'source-1', title: 'Source One', element: row });
+
+            expect(mod._triggerNativeSourceDetailsDirectForTest('source-1')).toBe(true);
+
+            expect(menuButton.click).not.toHaveBeenCalled();
+            expect(row.click).toHaveBeenCalledTimes(1);
+        });
+    });
 });
 
 describe('native source title dialog matching', () => {

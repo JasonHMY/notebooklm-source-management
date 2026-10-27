@@ -68,7 +68,14 @@ describe('package script', () => {
             { targetPath: '_locales/en/messages.json' }
         ];
 
-        ['src/content/index 2.js', 'src/assets/icons/icon 2.png', 'src/popup/popup 3'].forEach((targetPath) => {
+        [
+            'src/content/index 2.js',
+            'src/assets/icons/icon 2.png',
+            'src/popup/popup 3',
+            'src/content 2/index.js',
+            '_locales/en 2/messages.json',
+            'src/assets 3/icons/icon16.png'
+        ].forEach((targetPath) => {
             expect(() => assertPackageEntries([...baseEntries, { targetPath }]))
                 .toThrow(/forbidden entries/);
         });
