@@ -39,7 +39,7 @@ Read the relevant doc BEFORE making a change. Each doc is the source of truth fo
 
 ### Three independent runtime surfaces
 
-- **Content script** (`src/content/index.js` + ~45 helper modules) — injected into `https://notebooklm.google.com/*`. Mounts a Shadow-DOM manager (`#sources-plus-root`) into Gemini Notebook's source panel. 90% of the code lives here.
+- **Content script** (`src/content/index.js` plus the helper modules loaded before it; the authoritative list and order is `manifest.json` `content_scripts[0].js`, mapped in [docs/PROJECT_DIRECTORY.md](docs/PROJECT_DIRECTORY.md) §2) — injected into `https://notebook.google.com/*` (current) and `https://notebooklm.google.com/*` (compatibility). Mounts a Shadow-DOM manager (`#sources-plus-root`) into Gemini Notebook's source panel. 90% of the code lives here.
 - **Background service worker** (`src/background/index.js`) — owns `chrome.storage.local` writes via a queued + revision-guarded protocol; resolves tab focus/open requests from the popup.
 - **Toolbar popup** (`src/popup/index.js`) — launcher only. Enables/disables the manager and switches Gemini Notebook source view; the real UI lives in the content panel.
 
@@ -52,7 +52,7 @@ Content scripts are loaded sequentially per `manifest.json` `content_scripts[0].
 
 `src/content/index.js` is loaded last; it pulls every `NSM_CREATE_*` and assembles the factory graph by passing deps explicitly.
 
-**When adding a new content module, FOUR files must stay in sync** (the first two are enforced by `tests/manifest-loader-sync.test.js`; the third is per [AGENTS.md](AGENTS.md) line 22-26 and is easy to forget):
+**When adding a new content module, FOUR files must stay in sync** (the first two are enforced by `tests/manifest-loader-sync.test.js`; the third is required by [AGENTS.md](AGENTS.md) § Project-Specific Workflow Rules and is easy to forget):
 
 1. `manifest.json` — insert in load order
 2. `tests/helpers/load-content-module.js` — `require()` line + `delete globalThis.NSM_CREATE_*` in `clearContentGlobals()`
@@ -72,10 +72,10 @@ CSS lives in **three** places by scope:
 
 Persisted in `chrome.storage.local` under `sourcesPlusState_<projectId>` (current) and `sourcesPlusState_<projectId>__backup`.
 
-- `state.groups` is `string[]` — root-level group IDs (NOT group objects).
-- `groupsById: Map<id, group>` resolves IDs to `{ id, children, ... }`.
-- `group.children` is `{ type: 'source', key } | { type: 'group', id }`[] — object entries.
-- `state.ungrouped` is `string[]` — bare source keys at root level.
+- `state.root` is the ordered root layer: `({ type: 'group', id } | { type: 'source', key })[]`. Root folders and positioned root sources interleave in display order. It replaced the flat `groups: string[]` in schema v5; `state.groups` only appears as a legacy fallback for unmigrated data, so never write to it.
+- `groupsById: Map<id, group>` resolves IDs to `{ id, children, ... }` (a plain object in persisted JSON).
+- `group.children` uses the same object entries as `state.root`.
+- `state.ungrouped` is `string[]` — bare source keys in the bottom Ungrouped bin. A root-level source is in `state.root` (positioned) or `state.ungrouped` (bin), never both.
 - `state.isBatchMode: boolean` + `pendingBatchKeys: Set<sourceKey>` is the batch selection model. Group headers do not participate in batch selection.
 
 Background SW writes are revision-guarded; stale writes from content are rejected (smoke test "rejects stale saves without overwriting newer storage state").
@@ -106,15 +106,15 @@ A 2-arg call silently coerces level/category to fallback strings and discards yo
 
 - **Unit tests** (`tests/content/<module>.test.js`) — Jest, value-in/value-out, mocked DOM via `tests/helpers/load-content-module.js`. Each content module has a focused test file.
 - **Integration tests** (`tests/content/content-tree.test.js`, `content-lifecycle.test.js`, etc.) — wire multiple modules via `tests/helpers/content-test-harness.js`.
-- **Playwright smoke** (`tests/smoke/*.spec.js`) — real extension context in a Gemini Notebook-style fixture; default headless. For HTML5 DnD scenarios, dispatch synthetic `DragEvent`s via `page.evaluate` — Playwright's `dragTo` does NOT trigger native DataTransfer events. See `extension-smoke.spec.js` "restores an import backup..." and `batch-drag.smoke.spec.js` for the working pattern.
+- **Playwright smoke** (`tests/smoke/*.spec.js`) — real extension context in a Gemini Notebook-style fixture; default headless. Source and folder drags are pointer-only from the six-dot `.sp-drag-handle` in both drag modes (3px start threshold in `src/content/content-drag-pointer.js`), so drive them with real `page.mouse` down/move/up on the handle — not synthetic `DragEvent`s or `dragTo`. See `pointer-drag.smoke.spec.js` and `extension-smoke.spec.js` "restores an import backup and preserves dragged source ordering after reload" for the working pattern.
 
 ## Non-obvious gotchas
 
 - **Source-list scroll container** is `#sources-list` (`overflow-y: auto` in content-style-text.js). Access via `shadowRoot.getElementById('sources-list')`.
 - **Gemini Notebook is a single-page app.** Switching notebooks does NOT trigger a full reload. The content script tears down and rebuilds in place; a full reload is only the last-resort fallback after repeated retries fail.
-- **Do not hardcode Gemini Notebook-generated CSS class names.** They are obfuscated and rotate. Use aria attributes, roles, `data-*`, text signals (`label_auto`, "Return to list view"), and relative structure.
-- **`computeDropIntent` returns** `{ targetList, insertIndex, targetGroup }`. `targetList` is one of: `state.ungrouped` (string[]), some `group.children` (object[]), or `state.groups` (string[] of group IDs at root level). The entry shape differs — code that splices into `targetList` must handle both string and object entries, and must NOT splice source keys into `state.groups`.
-- **`runtime.activeDragGhost`** is set on multi-source dragstart and torn down on dragend (RAF-deferred so the browser finishes capturing the drag image). Cleanup paths: `handleDragEnd` + `clearDragFeedback` as backstop.
+- **Do not hardcode Gemini Notebook-generated CSS class names.** They are obfuscated and rotate. Use aria attributes, roles, `data-*`, text/icon signals (e.g. the `label_auto` view-switch icon), and relative structure.
+- **`computeDropIntent` returns** `{ targetList, insertIndex, targetGroup, ... }`. `targetList` is one of: `state.ungrouped` (string[] of source keys), some `group.children`, or `state.root` (both object entries). The entry shape differs — code that splices into `targetList` must insert bare keys into `state.ungrouped` and `{ type, ... }` objects into `state.root` / `group.children`.
+- **`runtime.activeDragGhost`** holds the ghost of the current pointer drag: `mountPointerGhost` sets it when a source or folder drag starts; `cancelDrag`, `applyPointerDropLanding` and `teardownDragInteractions` clear it, and `handleDragEnd` also does.
 - **Manifest version, package.json version, README badge, release zip name, and CHANGELOG version section must all match** on release. AGENTS.md enumerates this gate.
 
 ## Project conventions
@@ -122,4 +122,4 @@ A 2-arg call silently coerces level/category to fallback strings and discards yo
 - Default branch is `main`. Auto-`git commit` is allowed (and expected) for verified coherent changes; auto-`git push` is NOT — wait for explicit user request before pushing. Commit messages should end with the `Co-Authored-By` footer matching the user's global CLAUDE.md when Claude is involved.
 - Agent roles: Claude Code executes (the main thread on Opus 5.5 Max plans; Sonnet 5.5 High sub-agents write code; fixes are not handed to Codex) and Codex reviews read-only in the dedicated review thread `01a17a1b-82fe-75f3-a5e2-e34587a0b986` with GPT-6 Ultra (`gpt-6-astra`, `ultra`). The Claude main thread judges each finding; findings are not instructions. Details: [AGENTS.md](AGENTS.md) § Agent Roles; source of truth: shared-memory `30-Decisions/2026-10-26-claude-commander-codex-executor.md`. Permissions, owners, confirmation flows, and commit/push/release rules are unchanged.
 - `docs/superpowers/plans/` is gitignored (implementation plans are local working docs). `docs/superpowers/specs/` IS tracked.
-- Project-local memory at `~/.claude/projects/-Users-hmy-Desktop-notebooklm-source-management-main/memory/` holds tribal knowledge collected across sessions — `update-checklist.md` has the per-change file update checklist.
+- Per-change update checklist: [AGENTS.md](AGENTS.md) (Required Maintenance Rules, the content-helper sync list and the verification matrix) plus [docs/PROJECT_DIRECTORY.md](docs/PROJECT_DIRECTORY.md) for which map sections to update.

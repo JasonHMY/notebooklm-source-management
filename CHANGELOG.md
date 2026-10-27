@@ -34,6 +34,7 @@
 - **Agent 文档按任务读取 (Scope Agent Documentation Reads)**: **影响**: 对扩展使用无可感知变化。小范围文档任务按相关入口读取；旧式 GWS 技能中未提供的 helper 明确标为可选且不可自动安装，保留原有运行时验证与隐私要求。
 - **Agent 分工改为 Claude 执行、Codex 审核 (Claude Executes, Codex Reviews)**: **影响**: 对扩展使用无可感知变化。`AGENTS.md` 新增 Agent Roles，`CLAUDE.md` 同步摘要：Claude Code 主线程做计划、Sonnet 子代理写代码，Codex 指定线程只读审核，以共享记忆中的分工决定为准；权限、提交和发布规则不变。
 - **忽略本地覆盖率和代码索引 (Ignore Local Coverage and Code Index)**: 将 `coverage/` 和 `.codegraph/` 加入 `.gitignore`，避免 Jest 覆盖率报告和本机 codegraph 索引被误提交到公开仓库；项目地图同步列出这两个本地目录。
+- **校正 Claude 项目说明 (Correct Claude Project Notes)**: **影响**: 对扩展使用无可感知变化。`CLAUDE.md` 按当前代码改写：根层是 `state.root`，拖拽只走六点手柄的指针输入、smoke 用真实鼠标，页面匹配 notebook.google.com 和 notebooklm.google.com，模块清单以 manifest 为准；去掉不存在的 `update-checklist.md`，改指向 `AGENTS.md` 和项目地图。
 
 ## [2026-10-04] [26.10.4]
 
