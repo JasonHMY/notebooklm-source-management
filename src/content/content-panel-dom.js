@@ -107,18 +107,22 @@
             return findElement(SOURCE_PANEL_CONTENT_SELECTORS, panel);
         }
 
-        // Google's own source total ("53 sources" in the chat header). Digits only, so it is
-        // locale-agnostic; null when the header is absent (collapsed chat panel, some notebooks)
-        // or carries no integer. Callers must still compare it with the parsed row count.
+        // Google's own source total ("53 sources" in the chat header). Locale-agnostic: the whole
+        // number token is read -- plain ASCII digits, or groups of three joined by ',', '.',
+        // space, U+00A0 or U+202F ("1,234 sources" -> 1234). Anything else (a decimal, a
+        // malformed group, non-ASCII digit scripts) is null, as is an absent header (collapsed
+        // chat panel, some notebooks). Callers must still compare it with the parsed row count.
         function readNativeSourceHeaderTotal(parent = documentObj) {
             try {
                 const element = findElement(
                     Array.isArray(DEPS.sourceTotal) ? DEPS.sourceTotal : [],
                     parent
                 );
-                const match = /\d+/.exec(String(element?.textContent || ''));
+                const text = String(element?.textContent || '');
+                if (/(?![0-9])\p{Nd}/u.test(text)) return null;
+                const match = /^[^0-9]*?(\d{1,3}(?:[,.   ]\d{3})+|\d+)(?![,.   ]?\d)/.exec(text);
                 if (!match) return null;
-                const total = Number.parseInt(match[0], 10);
+                const total = Number.parseInt(match[1].replace(/\D/g, ''), 10);
                 return Number.isSafeInteger(total) && total >= 0 ? total : null;
             } catch (error) {
                 return null;

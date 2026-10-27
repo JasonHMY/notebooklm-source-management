@@ -447,3 +447,87 @@ describe('extension enabled flag while the startup read is pending', () => {
         expect(mod._getAttachedSourcePanelForTest()).toBeNull();
     });
 });
+
+describe('native observation generation and header freshness', () => {
+    let mod;
+
+    beforeEach(async () => {
+        jest.resetModules();
+        setupGlobalMocks();
+        global.window.location.pathname = '/notebook/notebook-a';
+        mod = loadContentModule();
+        await flushPromises();
+        // Keep route recovery from running timers while the route changes under test.
+        global.setTimeout = jest.fn(() => 1);
+    });
+
+    afterEach(teardownGlobalMocks);
+
+    function getBodyObserver() {
+        return global.__mutationObserverInstances.find((observer) => (
+            observer.observe.mock.calls.some(([target]) => target === global.document.body)
+        ));
+    }
+
+    function showHeader(element) {
+        const baseQuerySelector = global.document.querySelector;
+        global.document.querySelector = jest.fn((selector) => (
+            mod.DEPS.sourceTotal.includes(selector) ? element : baseQuerySelector(selector)
+        ));
+    }
+
+    it('advances the generation from the body observer only for mutations outside the extension root', () => {
+        const observer = getBodyObserver();
+        const ownNode = { nodeName: 'DIV' };
+        const host = { contains: jest.fn((node) => node === host || node === ownNode) };
+        mod._setManagerRuntimeForTest({ extensionHost: host, shadowRoot: {} });
+        const before = mod._getNativeObservationGenerationForTest();
+
+        observer.callback([{ type: 'attributes', target: ownNode }]);
+        observer.callback([{ type: 'childList', target: {}, addedNodes: [host], removedNodes: [] }]);
+        expect(mod._getNativeObservationGenerationForTest()).toBe(before);
+
+        observer.callback([{ type: 'childList', target: {}, addedNodes: [{}], removedNodes: [] }]);
+        expect(mod._getNativeObservationGenerationForTest()).toBe(before + 1);
+        // One callback is one observation, however many native records it carries.
+        observer.callback([{ type: 'attributes', target: {} }, { type: 'attributes', target: {} }]);
+        expect(mod._getNativeObservationGenerationForTest()).toBe(before + 2);
+    });
+
+    it('treats the header as fresh on a full page load without any route change', () => {
+        showHeader({ textContent: '3 sources' });
+
+        expect(mod._isNativeSourceTotalFreshForTest()).toBe(true);
+    });
+
+    it('records the header at each route change and calls an unchanged node and text stale', () => {
+        const headerNode = { textContent: '3 sources' };
+        showHeader(headerNode);
+
+        global.window.location.pathname = '/notebook/notebook-b';
+        mod.handleRouteChanged();
+
+        expect(mod._isNativeSourceTotalFreshForTest()).toBe(false);
+
+        headerNode.textContent = '5 sources';
+        expect(mod._isNativeSourceTotalFreshForTest()).toBe(true);
+
+        // A later route change snapshots the header again.
+        global.window.location.pathname = '/notebook/notebook-c';
+        mod.handleRouteChanged();
+        expect(mod._isNativeSourceTotalFreshForTest()).toBe(false);
+
+        showHeader({ textContent: '5 sources' });
+        expect(mod._isNativeSourceTotalFreshForTest()).toBe(true);
+    });
+
+    it('treats a header that appears after a route change with no header as fresh', () => {
+        showHeader(null);
+        global.window.location.pathname = '/notebook/notebook-b';
+        mod.handleRouteChanged();
+
+        showHeader({ textContent: '3 sources' });
+
+        expect(mod._isNativeSourceTotalFreshForTest()).toBe(true);
+    });
+});

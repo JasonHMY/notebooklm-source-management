@@ -6132,6 +6132,28 @@ describe('scanAndSyncSources', () => {
             );
         });
 
+        it.each([
+            ['53 sources', 53],
+            ['1,234 sources', 1234],
+            ['1.234 fuentes', 1234],
+            ['1 234 sources', 1234],
+            ['1 234 sources', 1234],
+            ['1 234 sources', 1234],
+            ['12,345,678 sources', 12345678],
+            ['0 sources', 0],
+            ['1,23 sources', null],
+            ['1.5 sources', null],
+            ['1,234,56 sources', null],
+            ['12 3 sources', null],
+            ['٥٣ sources', null],
+            ['٥3 sources', null],
+            ['No sources yet', null]
+        ])('reads the whole number token of the header text %j', (headerText, expectedTotal) => {
+            installInventoryDom(2, { headerText });
+
+            expect(mod._getNativeSourceInventorySnapshotForTest().totalHint).toBe(expectedTotal);
+        });
+
         it('keeps an existing total attribute ahead of the header total', () => {
             installInventoryDom(1, { headerText: '9 sources', panelTotalAttribute: 1 });
 
@@ -7593,6 +7615,139 @@ describe('untrusted scan protection', () => {
         expect(mod.groupsById.get('keep-folder').children).toEqual([{ type: 'source', key: keyA }]);
     });
 
+    describe('Google header total against the parsed rows', () => {
+        // The header text is read through the document, like the production reader does.
+        function showHeader(text) {
+            const baseQuerySelector = global.document.querySelector;
+            global.document.querySelector = jest.fn((selector) => {
+                if (mod.DEPS.sourceTotal.includes(selector)) {
+                    return text == null ? null : { textContent: text };
+                }
+                return baseQuerySelector(selector);
+            });
+        }
+
+        function acceptThreeRows() {
+            const rowA = createRow('Alpha Source', 'doc-a');
+            const rowB = createRow('Beta Source', 'doc-b');
+            const rowC = createRow('Gamma Source', 'doc-c');
+            showRows([rowA, rowB, rowC]);
+            mod.scanAndSyncSources(null, true, COMPLETE);
+            const keyA = keyOf(rowA);
+            placeInFolder('keep-folder', [keyA]);
+            return { rowA, rowB, rowC, keyA };
+        }
+
+        it('keeps a placed source when only two rows parse while the header still says 3 sources', () => {
+            const { rowB, rowC, keyA } = acceptThreeRows();
+            showHeader('3 sources');
+            showRows([rowB, rowC]);
+
+            for (let scan = 0; scan < 4; scan += 1) {
+                mod.scanAndSyncSources(null, false, COMPLETE);
+            }
+
+            expect(mod.groupsById.get('keep-folder').children).toEqual([{ type: 'source', key: keyA }]);
+            expect(mod.sourcesByKey.get(keyA)).toMatchObject({ isPendingNativeHydration: true });
+            expect(mod.buildPersistableState().sourceStateById[keyA]).toBeDefined();
+        });
+
+        it('keeps the record, tags and Ungrouped slot of a source when the header contradicts the parsed rows', () => {
+            const rowA = createRow('Alpha Source', 'doc-a');
+            const rowB = createRow('Beta Source', 'doc-b');
+            const rowC = createRow('Gamma Source', 'doc-c');
+            showRows([rowA, rowB, rowC]);
+            mod.scanAndSyncSources(null, true, COMPLETE);
+            const keyA = keyOf(rowA);
+            mod.sourceTagsById.set(keyA, new Set(['tag-1']));
+            showHeader('3 sources');
+            showRows([rowB, rowC]);
+
+            for (let scan = 0; scan < 4; scan += 1) {
+                mod.scanAndSyncSources(null, false, COMPLETE);
+            }
+
+            expect(mod.sourcesByKey.has(keyA)).toBe(true);
+            expect(mod.sourceTagsById.has(keyA)).toBe(true);
+            expect(mod.state.ungrouped).toContain(keyA);
+        });
+
+        it('keeps the Ungrouped record guard unchanged when the header is absent', () => {
+            const rowA = createRow('Alpha Source', 'doc-a');
+            const rowB = createRow('Beta Source', 'doc-b');
+            const rowC = createRow('Gamma Source', 'doc-c');
+            showRows([rowA, rowB, rowC]);
+            mod.scanAndSyncSources(null, true, COMPLETE);
+            const keyA = keyOf(rowA);
+            showHeader(null);
+            showRows([rowB, rowC]);
+
+            mod.scanAndSyncSources(null, false, COMPLETE);
+            expect(mod.sourcesByKey.has(keyA)).toBe(true);
+            mod.scanAndSyncSources(null, false, COMPLETE);
+
+            expect(mod.sourcesByKey.has(keyA)).toBe(false);
+        });
+
+        it('keeps a placed source when the header reads 1,234 sources next to two parsed rows', () => {
+            const { rowB, rowC, keyA } = acceptThreeRows();
+            showHeader('1,234 sources');
+            showRows([rowB, rowC]);
+
+            mod.scanAndSyncSources(null, false, COMPLETE);
+            mod.scanAndSyncSources(null, false, COMPLETE);
+
+            expect(mod.groupsById.get('keep-folder').children).toEqual([{ type: 'source', key: keyA }]);
+        });
+
+        it('still drops a pure removal when the header agrees with the parsed rows', () => {
+            const { rowB, rowC, keyA } = acceptThreeRows();
+            showHeader('2 sources');
+            showRows([rowB, rowC]);
+
+            mod.scanAndSyncSources(null, false, COMPLETE);
+            mod.scanAndSyncSources(null, false, COMPLETE);
+
+            expect(mod.groupsById.get('keep-folder').children).toEqual([]);
+            expect(mod.sourcesByKey.has(keyA)).toBe(false);
+        });
+
+        it('keeps the baseline rule unchanged when the header is absent or unreadable', () => {
+            const { rowB, rowC, keyA } = acceptThreeRows();
+            showRows([rowB, rowC]);
+            showHeader(null);
+
+            mod.scanAndSyncSources(null, false, COMPLETE);
+            mod.scanAndSyncSources(null, false, COMPLETE);
+
+            expect(mod.groupsById.get('keep-folder').children).toEqual([]);
+            expect(mod.sourcesByKey.has(keyA)).toBe(false);
+        });
+
+        it('keeps the baseline rule unchanged when the header text carries no usable number', () => {
+            const { rowB, rowC, keyA } = acceptThreeRows();
+            showRows([rowB, rowC]);
+            showHeader('1,23 sources');
+
+            mod.scanAndSyncSources(null, false, COMPLETE);
+            mod.scanAndSyncSources(null, false, COMPLETE);
+
+            expect(mod.groupsById.get('keep-folder').children).toEqual([]);
+            expect(mod.sourcesByKey.has(keyA)).toBe(false);
+        });
+
+        it('keeps a placed source when the header says 0 sources next to parsed rows', () => {
+            const { rowB, rowC, keyA } = acceptThreeRows();
+            showHeader('0 sources');
+            showRows([rowB, rowC]);
+
+            mod.scanAndSyncSources(null, false, COMPLETE);
+            mod.scanAndSyncSources(null, false, COMPLETE);
+
+            expect(mod.groupsById.get('keep-folder').children).toEqual([{ type: 'source', key: keyA }]);
+        });
+    });
+
     it('drops a placed source with the extension\'s own native-delete evidence even when a new row appeared', () => {
         const rowA = createRow('Alpha Source', 'doc-a');
         const rowB = createRow('Beta Source', 'doc-b');
@@ -7629,17 +7784,45 @@ describe('untrusted scan protection', () => {
     });
 
     describe('removal confirmed by Google\'s header total without a baseline scan', () => {
-        function installFirstLoadDom(rowMocks, headerText) {
+        const MIN_INTERVAL_MS = 1000;
+        let nowMs;
+        let dateNowSpy;
+
+        beforeEach(() => {
+            nowMs = 1000000;
+            dateNowSpy = jest.spyOn(Date, 'now').mockImplementation(() => nowMs);
+        });
+
+        afterEach(() => {
+            dateNowSpy.mockRestore();
+        });
+
+        // A change the page itself made (outside the extension root), then enough time for
+        // the second confirmation to count as independent.
+        function advanceNativeObservation(elapsedMs = MIN_INTERVAL_MS + 500) {
+            mod._noteNativeMutationsForTest([{
+                type: 'childList',
+                target: { nodeName: 'DIV' },
+                addedNodes: [],
+                removedNodes: []
+            }]);
+            nowMs += elapsedMs;
+        }
+
+        // `headerNode` lets a test keep one header element across installs (an SPA switch that
+        // re-renders text in place) instead of getting a fresh node every time.
+        function installFirstLoadDom(rowMocks, headerText, headerNode = null) {
             const { panel } = createMockPanel({ visible: true, contentVisible: true });
             const rowElements = rowMocks.map(({ row }) => row);
+            const header = headerText == null
+                ? null
+                : Object.assign(headerNode || {}, { textContent: headerText });
             panel.querySelectorAll = jest.fn((selector) => (
                 mod.DEPS.row.includes(selector) ? rowElements : []
             ));
             global.document.querySelector = jest.fn((selector) => {
                 if (mod.DEPS.panel.includes(selector)) return panel;
-                if (mod.DEPS.sourceTotal.includes(selector) && headerText != null) {
-                    return { textContent: headerText };
-                }
+                if (mod.DEPS.sourceTotal.includes(selector)) return header;
                 return null;
             });
             global.document.querySelectorAll = jest.fn((selector) => (
@@ -7713,6 +7896,7 @@ describe('untrusted scan protection', () => {
             installFirstLoadDom([rows[0], rows[2], rows[4]], '3 sources');
 
             scanFirstLoad(loadedState);
+            advanceNativeObservation();
             expect(scanFirstLoad(loadedState)).toEqual(expect.objectContaining({
                 ok: true,
                 shouldUpgradeStorage: true
@@ -7743,6 +7927,11 @@ describe('untrusted scan protection', () => {
             expect(mod.sourcesByKey.get(keys.keyB)).toMatchObject({ isPendingNativeHydration: true });
             expect(mod.sourcesByKey.get(keys.keyD)).toMatchObject({ isPendingNativeHydration: true });
 
+            // The first independent scan (the page changed since, enough time passed) records;
+            // a second one confirms.
+            advanceNativeObservation();
+            mod.scanAndSyncSources(null, false, COMPLETE);
+            advanceNativeObservation();
             mod.scanAndSyncSources(null, false, COMPLETE);
 
             expect(mod.groupsById.get('keep-folder').children).toEqual([
@@ -7751,6 +7940,161 @@ describe('untrusted scan protection', () => {
             expect(mod.state.ungrouped).toEqual([keys.keyC, keys.keyE]);
             expect(mod.sourcesByKey.has(keys.keyB)).toBe(false);
             expect(mod.sourcesByKey.has(keys.keyD)).toBe(false);
+        });
+
+        it('does not drop when restore is followed by an immediate rescan of the same DOM', () => {
+            const { rows, loadedState, keys } = buildStoredState();
+            installFirstLoadDom([rows[0], rows[2], rows[4]], '3 sources');
+
+            mod.restoreInitialLoadedState(loadedState);
+            mod.scanAndSyncSources(null, false, COMPLETE);
+
+            expect(mod.groupsById.get('keep-folder').children).toHaveLength(2);
+            expect(mod.sourcesByKey.get(keys.keyB)).toMatchObject({ isPendingNativeHydration: true });
+            expect(mod.sourcesByKey.get(keys.keyD)).toMatchObject({ isPendingNativeHydration: true });
+            expect(getEventCount('first_load_removal_confirmed')).toBe(0);
+        });
+
+        it('does not drop on two scans in the same native generation, however far apart', () => {
+            const { rows, loadedState, keys } = buildStoredState();
+            installFirstLoadDom([rows[0], rows[2], rows[4]], '3 sources');
+
+            scanFirstLoad(loadedState);
+            nowMs += 10 * MIN_INTERVAL_MS;
+
+            expect(scanFirstLoad(loadedState).ok).toBe(false);
+            expect(mod.sourcesByKey.has(keys.keyB)).toBe(false);
+            expect(getEventCount('first_load_removal_confirmed')).toBe(0);
+
+            // The unchanged page never produced a new generation, so it still cannot confirm.
+            nowMs += 10 * MIN_INTERVAL_MS;
+            expect(scanFirstLoad(loadedState).ok).toBe(false);
+            expect(getEventCount('first_load_removal_confirmed')).toBe(0);
+        });
+
+        it('does not drop on two scans in different generations less than the minimum interval apart', () => {
+            const { rows, loadedState } = buildStoredState();
+            installFirstLoadDom([rows[0], rows[2], rows[4]], '3 sources');
+
+            scanFirstLoad(loadedState);
+            advanceNativeObservation(MIN_INTERVAL_MS - 1);
+
+            expect(scanFirstLoad(loadedState).ok).toBe(false);
+            expect(getEventCount('first_load_removal_confirmed')).toBe(0);
+        });
+
+        it('drops once a later generation and the minimum interval both hold', () => {
+            const { rows, loadedState, keys } = buildStoredState();
+            installFirstLoadDom([rows[0], rows[2], rows[4]], '3 sources');
+
+            scanFirstLoad(loadedState);
+            advanceNativeObservation(MIN_INTERVAL_MS);
+
+            expect(scanFirstLoad(loadedState).ok).toBe(true);
+            expect(mod.sourcesByKey.has(keys.keyB)).toBe(false);
+            expect(getEventCount('first_load_removal_confirmed')).toBe(1);
+        });
+
+        it('ignores mutations inside the extension root when counting native generations', () => {
+            const ownNode = { nodeName: 'DIV' };
+            const host = { contains: jest.fn((node) => node === host || node === ownNode) };
+            mod._setManagerRuntimeForTest({ extensionHost: host, shadowRoot: {} });
+            const before = mod._getNativeObservationGenerationForTest();
+
+            mod._noteNativeMutationsForTest([
+                { type: 'attributes', target: ownNode, addedNodes: [], removedNodes: [] },
+                { type: 'childList', target: { nodeName: 'ASIDE' }, addedNodes: [host], removedNodes: [] }
+            ]);
+            expect(mod._getNativeObservationGenerationForTest()).toBe(before);
+
+            mod._noteNativeMutationsForTest([
+                { type: 'childList', target: { nodeName: 'ASIDE' }, addedNodes: [{ nodeName: 'DIV' }], removedNodes: [] }
+            ]);
+            expect(mod._getNativeObservationGenerationForTest()).toBe(before + 1);
+        });
+
+        it('does not record or confirm with a header that has not changed since the SPA route change', () => {
+            const { rows, loadedState, keys } = buildStoredState();
+            const headerNode = {};
+            const visibleRows = [rows[0], rows[2], rows[4]];
+            // The previous notebook's header showed 3 and is still on screen after the switch.
+            installFirstLoadDom(visibleRows, '3 sources', headerNode);
+            mod._recordNativeSourceTotalAtRouteChangeForTest();
+            expect(mod._isNativeSourceTotalFreshForTest()).toBe(false);
+
+            expect(scanFirstLoad(loadedState).ok).toBe(false);
+            advanceNativeObservation();
+            expect(scanFirstLoad(loadedState).ok).toBe(false);
+            advanceNativeObservation();
+            expect(scanFirstLoad(loadedState).ok).toBe(false);
+
+            expect(mod.sourcesByKey.has(keys.keyB)).toBe(false);
+            expect(getEventCount('first_load_removal_pending')).toBe(0);
+            expect(getEventCount('first_load_removal_confirmed')).toBe(0);
+        });
+
+        it('keeps placeholders when a stale header coincidentally matches after an SPA switch', () => {
+            const { rows, loadedState, keys } = buildStoredState();
+            const headerNode = {};
+            const visibleRows = [rows[0], rows[2], rows[4]];
+            installFirstLoadDom(visibleRows, '3 sources', headerNode);
+            mod._recordNativeSourceTotalAtRouteChangeForTest();
+
+            mod.restoreInitialLoadedState(loadedState);
+            advanceNativeObservation();
+            mod.scanAndSyncSources(null, false, COMPLETE);
+            advanceNativeObservation();
+            mod.scanAndSyncSources(null, false, COMPLETE);
+
+            expect(mod.groupsById.get('keep-folder').children).toHaveLength(2);
+            expect(mod.sourcesByKey.get(keys.keyB)).toMatchObject({ isPendingNativeHydration: true });
+        });
+
+        it('allows confirmation after an SPA switch once the header text changed', () => {
+            const { rows, loadedState, keys } = buildStoredState();
+            const headerNode = {};
+            const visibleRows = [rows[0], rows[2], rows[4]];
+            installFirstLoadDom(visibleRows, '12 sources', headerNode);
+            mod._recordNativeSourceTotalAtRouteChangeForTest();
+            installFirstLoadDom(visibleRows, '3 sources', headerNode);
+            expect(mod._isNativeSourceTotalFreshForTest()).toBe(true);
+
+            scanFirstLoad(loadedState);
+            advanceNativeObservation();
+
+            expect(scanFirstLoad(loadedState).ok).toBe(true);
+            expect(mod.sourcesByKey.has(keys.keyB)).toBe(false);
+            expect(getEventCount('first_load_removal_confirmed')).toBe(1);
+        });
+
+        it('allows confirmation after an SPA switch once the header is a different element', () => {
+            const { rows, loadedState } = buildStoredState();
+            const visibleRows = [rows[0], rows[2], rows[4]];
+            installFirstLoadDom(visibleRows, '3 sources');
+            mod._recordNativeSourceTotalAtRouteChangeForTest();
+            installFirstLoadDom(visibleRows, '3 sources');
+            expect(mod._isNativeSourceTotalFreshForTest()).toBe(true);
+
+            scanFirstLoad(loadedState);
+            advanceNativeObservation();
+
+            expect(scanFirstLoad(loadedState).ok).toBe(true);
+            expect(getEventCount('first_load_removal_confirmed')).toBe(1);
+        });
+
+        it('does not confirm when the header reads 1,234 sources with a single parsed row', () => {
+            const { rows, loadedState, keys } = buildStoredState();
+            installFirstLoadDom([rows[0]], '1,234 sources');
+
+            scanFirstLoad(loadedState);
+            advanceNativeObservation();
+            expect(scanFirstLoad(loadedState).ok).toBe(false);
+            advanceNativeObservation();
+            expect(scanFirstLoad(loadedState).ok).toBe(false);
+
+            expect(mod.sourcesByKey.has(keys.keyB)).toBe(false);
+            expect(getEventCount('first_load_removal_pending')).toBe(0);
+            expect(getEventCount('first_load_removal_confirmed')).toBe(0);
         });
 
         it('does not drop when the header total changes between the two scans', () => {
@@ -7769,6 +8113,7 @@ describe('untrusted scan protection', () => {
             expect(getEventCount('first_load_removal_pending')).toBe(2);
             expect(getEventCount('first_load_removal_confirmed')).toBe(0);
 
+            advanceNativeObservation();
             expect(scanFirstLoad(loadedState).ok).toBe(true);
             expect(getEventCount('first_load_removal_confirmed')).toBe(1);
         });
@@ -7853,6 +8198,7 @@ describe('untrusted scan protection', () => {
             installFirstLoadDom([rows[0], rows[2], rows[4]], '3 sources');
 
             scanFirstLoad(loadedState);
+            advanceNativeObservation();
             expect(scanFirstLoad(loadedState).shouldUpgradeStorage).toBe(true);
 
             expect(mod.sourcesByKey.has(keys.keyB)).toBe(false);
@@ -7875,6 +8221,7 @@ describe('untrusted scan protection', () => {
             mod.scanAndSyncSources(null, false, COMPLETE);
             expect(mod.groupsById.get('keep-folder').children).toEqual([{ type: 'source', key: keyA }]);
 
+            advanceNativeObservation();
             mod.scanAndSyncSources(null, false, COMPLETE);
             expect(mod.groupsById.get('keep-folder').children).toEqual([]);
             expect(mod.sourcesByKey.has(keyA)).toBe(false);
@@ -7899,6 +8246,7 @@ describe('untrusted scan protection', () => {
             expect(mod.sourcesByKey.has(keys.keyB)).toBe(true);
             expect(getEventCount('first_load_removal_pending')).toBe(1);
 
+            advanceNativeObservation();
             mod.scanAndSyncSources(null, false, COMPLETE);
             expect(mod.groupsById.get('keep-folder').children).toEqual([
                 { type: 'source', key: keys.keyA }

@@ -3317,6 +3317,18 @@ describe('source action menu', () => {
             expect(global.document.body.click).not.toHaveBeenCalled();
         });
 
+        it('refuses before the native menu opens when a grouped-thousands header only starts with the row count', async () => {
+            // "2,000 sources" must not be read as 2 and match the two parsed rows.
+            const fixture = setupHeaderTotalDelete({ readHeader: () => '2,000 sources' });
+
+            await expect(mod.deleteNativeSource('target')).resolves.toEqual({
+                deleted: false,
+                reason: 'native_delete_inventory_unverified'
+            });
+            expect(fixture.moreButton.click).not.toHaveBeenCalled();
+            expect(fixture.deleteMenuItem.click).not.toHaveBeenCalled();
+        });
+
         it('refuses before the native menu opens when the header is absent', async () => {
             const fixture = setupHeaderTotalDelete({ readHeader: () => null });
 

@@ -59,6 +59,20 @@
         const readNativeSourceTotal = typeof deps.readNativeSourceTotal === 'function'
             ? deps.readNativeSourceTotal
             : () => null;
+        // Header-confirmed removal needs two scans separated by a change the page itself made:
+        // the native observation generation counts mutations outside the extension's own root,
+        // and isNativeSourceTotalFresh() says the header was re-rendered for the current notebook.
+        // Without them (default deps) the confirmation can never complete.
+        const getNativeObservationGeneration = typeof deps.getNativeObservationGeneration === 'function'
+            ? deps.getNativeObservationGeneration
+            : () => 0;
+        const isNativeSourceTotalFresh = typeof deps.isNativeSourceTotalFresh === 'function'
+            ? deps.isNativeSourceTotalFresh
+            : () => false;
+        const getNow = typeof deps.now === 'function'
+            ? deps.now
+            : () => Date.now();
+        const HEADER_REMOVAL_MIN_INTERVAL_MS = 1000;
         const isSourcePanelRenderable = typeof deps.isSourcePanelRenderable === 'function'
             ? deps.isSourcePanelRenderable
             : () => false;
@@ -1685,8 +1699,9 @@
          * placement only with removal evidence: (a) the extension's own native-delete
          * markers for it, or (b) a pure removal -- the complete scan parsed exactly as
          * many fewer rows than the last accepted scan as there are newly unresolved
-         * stored refs, and no row is unknown to the stored records. Returns the stored
-         * keys without such evidence so the caller keeps them as missing placeholders.
+         * stored refs, no row is unknown to the stored records, and Google's header total
+         * (when readable) equals the parsed row count. Returns the stored keys without
+         * such evidence so the caller keeps them as missing placeholders.
          */
         function selectPlacedRefsToKeepWithoutRemovalEvidence(
             remappedState,
@@ -1716,8 +1731,15 @@
                 && !remappedState.seenSourceRefs.has(source.key)
                 && !remappedState.sourceStateById.has(source.key)
             )).length;
+            // A readable header total that disagrees with the parsed rows means the list is not
+            // what Google counts (rows missing from the parse, or a stale/unrelated header), so
+            // the row-count drop proves nothing; an absent header leaves the baseline rule as is.
+            const headerTotal = readNativeSourceTotal();
+            const headerContradictsRows = Number.isSafeInteger(headerTotal)
+                && headerTotal !== parsedRowCount;
             const pureRemoval = Boolean(
                 scanCompleteness?.completeness === 'complete'
+                && !headerContradictsRows
                 && lastAcceptedScan
                 && lastAcceptedScan.contextToken === getScanContextToken()
                 && unknownRowCount === 0
@@ -1766,8 +1788,13 @@
          * coincide with a partially rendered list, so the same evidence (context, header
          * total, row count, resolved row keys, unresolved refs) must repeat on two
          * consecutive complete scans: the first only records it, the second returns the
-         * refs. Anything else clears the record, returns an empty set, and the caller keeps
-         * its fail-closed behavior.
+         * refs. The two scans must also be independent: they need different native
+         * observation generations (a change the page made outside the extension's own
+         * root happened in between) and at least HEADER_REMOVAL_MIN_INTERVAL_MS apart, so
+         * a rescan the extension triggers on the same DOM never confirms. The header must
+         * be fresh for the current notebook (isNativeSourceTotalFresh), otherwise nothing is
+         * recorded or confirmed. Anything else clears or replaces the record, returns an
+         * empty set, and the caller keeps its fail-closed behavior.
          */
         function findHeaderConfirmedRemovedRefs(
             storedEntries,
@@ -1782,6 +1809,7 @@
                 lastAcceptedScan && lastAcceptedScan.contextToken === contextToken
             );
             const headerTotal = scanCompleteness?.completeness === 'complete'
+                && isNativeSourceTotalFresh()
                 ? readNativeSourceTotal()
                 : null;
             if (
@@ -1827,12 +1855,20 @@
                 headerTotal,
                 rowCount: parsedRowCount,
                 resolvedRowKeys: JSON.stringify(Array.from(claimedRowKeys).sort()),
-                removedKeys: JSON.stringify(Array.from(removedKeys).sort())
+                removedKeys: JSON.stringify(Array.from(removedKeys).sort()),
+                generation: getNativeObservationGeneration(),
+                recordedAt: getNow()
             };
-            if (isSameHeaderRemovalEvidence(pendingHeaderRemoval, evidence)) {
+            if (
+                isSameHeaderRemovalEvidence(pendingHeaderRemoval, evidence)
+                && evidence.generation > pendingHeaderRemoval.generation
+                && evidence.recordedAt - pendingHeaderRemoval.recordedAt >= HEADER_REMOVAL_MIN_INTERVAL_MS
+            ) {
                 resetPendingHeaderRemoval();
                 return removedKeys;
             }
+            // Same page generation or too soon: an extension-triggered rescan of the same DOM is
+            // not a second observation, so it replaces the record instead of confirming it.
             pendingHeaderRemoval = evidence;
             developerLog('info', 'source_sync', 'first_load_removal_pending', {
                 count: removedKeys.size,
@@ -2485,7 +2521,8 @@
             sourceLookup,
             previousSourceRecordsByKey,
             authorizedNativeDeleteKeys,
-            scanCompleteness
+            scanCompleteness,
+            parsedRowCount = currentSources.length
         ) {
             const recentNativeDeletedSourceKeys = runtime.recentNativeDeletedSourceKeys instanceof Set
                 ? runtime.recentNativeDeletedSourceKeys
@@ -2506,6 +2543,36 @@
                         guardedSourceRecordsByKey.set(storedKey, sourceRecord);
                     }
                 });
+            }
+            // Google's own count contradicting the parsed rows means the parse is not the whole
+            // list, so two identical scans prove nothing: hold (and restart the two-scan
+            // observation) while any Ungrouped stored record has no live row and no native-delete
+            // evidence (it carries the record and its tags). Placed refs are kept as pending
+            // placeholders by selectPlacedRefsToKeepWithoutRemovalEvidence. An absent or
+            // unreadable header leaves the guard as is.
+            const headerTotal = readNativeSourceTotal();
+            if (
+                scanCompleteness?.completeness === 'complete'
+                && currentSources.length > 0
+                && Number.isSafeInteger(headerTotal)
+                && headerTotal !== parsedRowCount
+            ) {
+                const currentKeys = new Set(currentSources.map((source) => source?.key).filter(Boolean));
+                let hasUnevidencedMissingRecord = false;
+                guardedSourceRecordsByKey?.forEach?.((sourceRecord, storedKey) => {
+                    if (hasUnevidencedMissingRecord || hasStoredPlacement(storedKey)) return;
+                    const resolution = resolveStoredSourceKeyWithReason(storedKey, sourceLookup, sourceRecord);
+                    if (resolution?.key && currentKeys.has(resolution.key)) return;
+                    hasUnevidencedMissingRecord = !hasNativeDeleteEvidenceForStoredRef(
+                        storedKey,
+                        sourceRecord,
+                        authorizedNativeDeleteKeys
+                    );
+                });
+                if (hasUnevidencedMissingRecord) {
+                    partialSyncResetCompleteScanObservation();
+                    return true;
+                }
             }
             const shouldPreserve = partialSyncShouldPreserveExistingSources(
                 currentSources,
@@ -3026,7 +3093,8 @@
                     sourceLookup,
                     previousSourceRecordsByKey,
                     authorizedNativeDeleteKeys,
-                    scanCompleteness
+                    scanCompleteness,
+                    rawCurrentSources.length
                 )
             ) {
                 const transientLoadingSourceCount = mergeVisibleLoadingSourcesDuringPartialSync(

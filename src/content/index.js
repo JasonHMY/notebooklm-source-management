@@ -225,6 +225,14 @@
     let panelLifecycleAnimationFrame = null;
     let panelLifecycleTimeout = null;
     let panelLifecycleObserver = null;
+    // Counts page mutations outside the extension's own root (bumped by the body observer);
+    // header-confirmed removal needs two scans from different generations.
+    let nativeObservationGeneration = 0;
+    // The chat-header source count element and text as they stood at the last SPA route
+    // change (null when absent). Before the first route change (a full page load) there is no
+    // earlier notebook whose header could go stale.
+    let hasRouteChangedSinceStart = false;
+    let routeNativeSourceTotalSnapshot = null;
     let nativeDocumentListenersBound = false;
     let nativeRenameWatcherTimeout = null;
     let nativeRenameWatcherResolve = null;
@@ -975,6 +983,8 @@
         findElement: (...args) => findElement(...args),
         findSourcePanel: (...args) => findSourcePanel(...args),
         readNativeSourceTotal: () => readNativeSourceHeaderTotal(),
+        getNativeObservationGeneration: () => nativeObservationGeneration,
+        isNativeSourceTotalFresh: () => isNativeSourceTotalFresh(),
         isSourcePanelRenderable: (...args) => isSourcePanelRenderable(...args),
         isManageableSourceIdentity,
         hasPreservableManagerSnapshot: (...args) => hasPreservableManagerSnapshot(...args),
@@ -3578,6 +3588,59 @@
         if (isInsideNativeSourceRow(element)) return false;
         if (!isElementWithinNativeSourcePanel(element, sourcePanel)) return false;
         return getSourceViewInfo(sourcePanel)?.kind === SOURCE_VIEW_LABEL;
+    }
+
+    function isExtensionOwnedMutation(mutation) {
+        const host = extensionHost;
+        if (!host) return false;
+        const isOwnNode = (node) => node === host
+            || (typeof host.contains === 'function' && host.contains(node));
+        if (isOwnNode(mutation?.target)) return true;
+        if (mutation?.type !== 'childList') return false;
+        const changedNodes = [
+            ...Array.from(mutation.addedNodes || []),
+            ...Array.from(mutation.removedNodes || [])
+        ];
+        return changedNodes.length > 0 && changedNodes.every(isOwnNode);
+    }
+
+    // Called from the existing body observer: only a change the page itself made advances the
+    // generation, so the extension's own re-renders and rescans never look like new evidence.
+    function noteNativeMutations(mutations) {
+        for (const mutation of Array.from(mutations || [])) {
+            if (!isExtensionOwnedMutation(mutation)) {
+                nativeObservationGeneration += 1;
+                return;
+            }
+        }
+    }
+
+    function getNativeSourceTotalElement() {
+        try {
+            return findElement(Array.isArray(DEPS.sourceTotal) ? DEPS.sourceTotal : [], document) || null;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function snapshotNativeSourceTotal() {
+        const element = getNativeSourceTotalElement();
+        return element ? { element, text: String(element.textContent || '') } : null;
+    }
+
+    function recordNativeSourceTotalAtRouteChange() {
+        hasRouteChangedSinceStart = true;
+        routeNativeSourceTotalSnapshot = snapshotNativeSourceTotal();
+    }
+
+    // The header count belongs to the current notebook once it was re-rendered after the last
+    // route change: a different element or different text than the previous notebook's.
+    function isNativeSourceTotalFresh() {
+        if (!hasRouteChangedSinceStart) return true;
+        const current = snapshotNativeSourceTotal();
+        if (!current) return true;
+        const previous = routeNativeSourceTotalSnapshot;
+        return !previous || current.element !== previous.element || current.text !== previous.text;
     }
 
     function getLiveSourceSyncContextToken() {
@@ -6654,6 +6717,7 @@
     }
 
     function handleRouteChanged() {
+        recordNativeSourceTotalAtRouteChange();
         currentUrl = getCurrentLocationHref();
         const newProjectId = getProjectId();
         if (!newProjectId) {
@@ -7085,7 +7149,8 @@
     window.addEventListener('hashchange', onRouteChange);
 
     // Observe a stable root so route-driven NotebookLM body swaps still trigger recovery.
-    panelLifecycleObserver = new MutationObserver(() => {
+    panelLifecycleObserver = new MutationObserver((mutations) => {
+        noteNativeMutations(mutations);
         onRouteChange();
         schedulePanelLifecycleSync();
     });
@@ -7503,6 +7568,10 @@
                 }
                 currentUrl = getCurrentLocationHref();
             },
+            _noteNativeMutationsForTest: noteNativeMutations,
+            _recordNativeSourceTotalAtRouteChangeForTest: recordNativeSourceTotalAtRouteChange,
+            _getNativeObservationGenerationForTest: () => nativeObservationGeneration,
+            _isNativeSourceTotalFreshForTest: isNativeSourceTotalFresh,
             _setAwaitingInitialStateLoadForTest: (val) => { isAwaitingInitialStateLoad = Boolean(val); },
             _restorePersistedSourceViewDisplayKindForTest: restorePersistedSourceViewDisplayKind,
             _setViewSwitchInProgressForTest: (val) => { viewSwitchInProgress = Boolean(val); },
