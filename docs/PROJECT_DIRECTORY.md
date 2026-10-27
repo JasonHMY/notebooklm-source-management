@@ -248,6 +248,7 @@ GeminiNotebook-Source-Management
 └── 可生成/本地可选的 ignored 路径
     ├── release/    # npm run package 生成；清理后可以不存在
     ├── output/     # Playwright/调试输出；清理后可以不存在
+    ├── coverage/   # Jest 覆盖率输出；清理后可以不存在
     └── 旧版本zip/  # 本地旧包归档；不是项目源码，清理后可以不存在
 ```
 
@@ -256,6 +257,7 @@ GeminiNotebook-Source-Management
 ```text
 .agent/
 .agents/
+.codegraph/
 .cursor/
 .superpowers/
 ```

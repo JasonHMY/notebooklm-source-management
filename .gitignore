@@ -21,6 +21,7 @@ always_update_changelog.md
 # AI Agent folders
 .agents/
 .agent/
+.codegraph/
 .cursor/
 .superpowers/
 docs/superpowers/plans/
@@ -30,6 +31,9 @@ PLAN.md
 
 # Local credentials and session files
 cookies.json
+
+# Test coverage
+coverage/
 
 # Dependencies
 node_modules/
