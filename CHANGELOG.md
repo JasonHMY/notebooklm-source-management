@@ -28,7 +28,7 @@
 ## [Unreleased] (未发布)
 
 ### Changed
-- **审核改由 Opus 5.5 UltraCode、桌面操作交给 Codex (Review by Opus 5.5 UltraCode, Desktop Computer Use by Codex)**: **影响**: 对扩展使用无可感知变化。按 2026-10-28 的分工调整，`AGENTS.md` 的 Agent Roles、`CLAUDE.md` 和 `docs/PROJECT_DIRECTORY.md` 改为：只在有代码改动的 PR 合并前（主线程自己发起，只审该 PR 的改动，main 原有问题记为原有问题、不卡合并；只改文档、注释、规则文件的 PR 不审）和用户明确要求时才在后台单独开只读的 Opus 5.5 UltraCode 审核，其他改动（包括小改动）不自动送审，深档改动可在汇报里建议审核；不再送 Codex 审核线程 `01a17ce4-d3bf-7c10-b322-e56d2d5585cf`（保留查历史）；分档、最多三轮、只审增量和意见格式不变。Mac 桌面应用的 computer use 交给 Codex（GPT-6.1 Terra、Max、Fast，每个任务新线程），浏览器和 iOS 模拟器仍由 Claude 做。
+- **只在重大节点前审核、桌面操作交给 Codex (Review Only at Major Milestones, Desktop Computer Use by Codex)**: **影响**: 对扩展使用无可感知变化。按 2026-10-28 的分工调整，`AGENTS.md` 的 Agent Roles、`CLAUDE.md` 和 `docs/PROJECT_DIRECTORY.md` 改为：只在大功能准备合并进 main、发布这类重大节点前（只审上次审核以来的改动，更早的问题记为原有问题、不卡节点）和用户明确要求时才在后台单独开只读的 Opus 5.5 high 审核（不开 UltraCode），小功能、普通 PR 和只改文档、注释、规则文件的改动不审，由主线程看子代理的实际测试和构建结果后合并，深档改动可在汇报里建议审核；不再送 Codex 审核线程 `01a17ce4-d3bf-7c10-b322-e56d2d5585cf`（保留查历史）；分档、最多三轮、只审增量和意见格式不变。Mac 桌面应用的 computer use 交给 Codex（GPT-6.1 Terra、Max、Fast，每个任务新线程），浏览器和 iOS 模拟器仍由 Claude 做。
 - **商店描述改用 Gemini Notebook 名称 (Rename the Store Listing Description)**: **影响**: Chrome 商店页面的介绍改用 Gemini Notebook 的叫法，扩展本身没有变化。2026-10-28 在开发者后台把英文、简体中文和西班牙文三份描述换成新稿（西班牙文沿用新英文稿）：去掉 “NotebookLM Source Management … inside NotebookLM” 这类旧称并注明原名 NotebookLM，功能列表按 README 现有功能补上搜索和筛选、撤销和重做、导出导入和还原点、三种界面语言以及新旧两个网址，隐私说法不变。已提交审核，后台状态为 Pending review，通过后自动发布。
 
 ### Fixed
