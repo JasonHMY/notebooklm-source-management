@@ -28,7 +28,7 @@
 ## [Unreleased] (未发布)
 
 ### Changed
-- **审核改由 Opus 5.5 UltraCode、桌面操作交给 Codex (Review by Opus 5.5 UltraCode, Desktop Computer Use by Codex)**: **影响**: 对扩展使用无可感知变化。按 2026-10-28 的分工调整，`AGENTS.md` 的 Agent Roles、`CLAUDE.md` 和 `docs/PROJECT_DIRECTORY.md` 改为：只在用户明确要求时才在后台单独开只读的 Opus 5.5 UltraCode 审核，改动（包括小改动）不再自动送审，深档改动可在汇报里建议审核；不再送 Codex 审核线程 `01a17ce4-d3bf-7c10-b322-e56d2d5585cf`（保留查历史）；分档、最多三轮、只审增量和意见格式不变。Mac 桌面应用的 computer use 交给 Codex（GPT-6.1 Terra、Max、Fast，每个任务新线程），浏览器和 iOS 模拟器仍由 Claude 做。
+- **审核改由 Opus 5.5 UltraCode、桌面操作交给 Codex (Review by Opus 5.5 UltraCode, Desktop Computer Use by Codex)**: **影响**: 对扩展使用无可感知变化。按 2026-10-28 的分工调整，`AGENTS.md` 的 Agent Roles、`CLAUDE.md` 和 `docs/PROJECT_DIRECTORY.md` 改为：只在 PR 合并前（主线程自己发起，只审该 PR 的改动，main 原有问题记为原有问题、不卡合并）和用户明确要求时才在后台单独开只读的 Opus 5.5 UltraCode 审核，其他改动（包括小改动）不自动送审，深档改动可在汇报里建议审核；不再送 Codex 审核线程 `01a17ce4-d3bf-7c10-b322-e56d2d5585cf`（保留查历史）；分档、最多三轮、只审增量和意见格式不变。Mac 桌面应用的 computer use 交给 Codex（GPT-6.1 Terra、Max、Fast，每个任务新线程），浏览器和 iOS 模拟器仍由 Claude 做。
 
 ## [2026-10-27] [26.10.27]
 
