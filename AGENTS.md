@@ -4,6 +4,39 @@ You are my coding assistant for this repository.
 
 Before starting work, read the relevant project instructions, repository guidance, and existing code before making changes. Prefer correct, simple, readable solutions and reuse existing patterns.
 
+## Documentation Map (Authoritative Rules)
+
+Read the relevant doc BEFORE making a change. Each doc is the source of truth for its area. **This table is the single index of project docs**; for task-by-task routing ("I'm doing X → read Y") Claude Code also has the `nsm-discipline` skill.
+
+| Doc | Source of truth for | Read when |
+|---|---|---|
+| **AGENTS.md** (this file) | maintenance + workflow rules, verification matrix, project constraints, native-DOM safety, auto-commit/no-push | before any change (always) |
+| **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** | runtime surfaces, factory pattern, CSS scopes, state shape, i18n, `developerLog`, test pyramid, non-obvious gotchas | changing runtime code or tests |
+| **[REVIEW.md](REVIEW.md)** | review tiers, project blocking items, per-round checks, what not to report, finding format and round limits | before reviewing a change or sending one for review |
+| **[docs/PROJECT_DIRECTORY.md](docs/PROJECT_DIRECTORY.md)** | project map — directory tree, content-script load order (§2), feature-area tree (§3, fastest locator), test tree | locating code, changing structure/files |
+| **[UI_GUIDELINES.md](UI_GUIDELINES.md)** | UI / tokens / `.sp-*` components / motion / popup | before any UI or style change |
+| **`Changelog Writing Guidelines`** (top of [CHANGELOG.md](CHANGELOG.md)) | changelog entry format, fixed categories, `**影响**` summary rule, no marketing language | before writing CHANGELOG |
+| **[docs/STORAGE_SCHEMA.md](docs/STORAGE_SCHEMA.md)** | chrome.storage / sessionStorage keys + persisted schema + migrations | changing a storage key, field, or migration |
+| **[docs/MESSAGE_CONTRACTS.md](docs/MESSAGE_CONTRACTS.md)** | popup↔content↔background message types, payloads, sender validation | changing a message type or response shape |
+| **[docs/DEVELOPER_LOGGING.md](docs/DEVELOPER_LOGGING.md)** | `developerLog` levels/categories/events + sanitization | writing a `developerLog` call |
+| **[docs/SECURITY_THREAT_MODEL.md](docs/SECURITY_THREAT_MODEL.md)** | trust boundaries, attack surface, mitigations, severity calibration | security-relevant changes, hardening, untrusted input |
+| **[docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md)** | release gate + version-sync points | publishing a build |
+| **[PRIVACY.md](PRIVACY.md)** | outward privacy statement (permissions, data flow, no remote resources) | changing permissions, data flow, or remote resources |
+
+## Commands
+
+| Task | Command |
+|---|---|
+| Lint | `npm run lint` (ESLint flat config; baseline is 0 errors, 0 warnings — do not regress) |
+| Unit tests | `npm run test:unit` |
+| Single unit test file | `npx jest tests/content/<name>.test.js` |
+| Named test in a file | `npx jest tests/content/<name>.test.js -t "<describe or it text>"` |
+| Playwright smoke | `npm run test:smoke` (headless by default) |
+| Smoke with visible browser (debug only) | `PLAYWRIGHT_HEADLESS=false npm run test:smoke` |
+| Install Playwright Chromium once | `npm run playwright:install` |
+| Full local CI gate | `npm run verify:full` (lint → unit → smoke; same as the GitHub Actions workflow) |
+| Build release zip | `npm run package` |
+
 ## Required Maintenance Rules
 
 - Every meaningful code, test, docs, config, packaging, or workflow change must update `CHANGELOG.md`.
@@ -15,7 +48,6 @@ Before starting work, read the relevant project instructions, repository guidanc
 ## Project-Specific Workflow Rules
 
 - Start edits by checking `git status --short` and the relevant instructions. Use `docs/PROJECT_DIRECTORY.md` to locate unfamiliar structure or when that structure changes; read the changelog guidelines when preparing a changelog entry. A small, already-located copy or documentation edit does not require reading the whole map.
-- `.agent/skills` contains legacy provider-specific reference material, not the default Codex workflow for this extension. Load an entry only when its exact capability is needed; verify optional helper availability and do not generate/install missing skills as an automatic prerequisite.
 - This project has no content-script bundler. `manifest.json` content script order is the runtime dependency order. When adding or moving a content helper:
   - update `manifest.json`
   - update `tests/helpers/load-content-module.js`
@@ -31,24 +63,24 @@ Before starting work, read the relevant project instructions, repository guidanc
   - before native delete or rename, re-resolve a fresh row and verify it still matches the intended source.
   - fail closed if a native dialog has multiple plausible candidates, no clear candidate, or an obvious title/identity mismatch.
   - do not treat hidden or collapsed DOM as deletion without source-sync evidence.
-  - do not hardcode Gemini Notebook generated CSS classes; prefer aria, role, data attributes, stable text signals, and relative structure.
+  - do not hardcode Gemini Notebook generated CSS classes (they are obfuscated and rotate); prefer aria, role, data attributes, stable text/icon signals (e.g. the `label_auto` view-switch icon), and relative structure.
 - Follow `docs/DEVELOPER_LOGGING.md` for developer-mode logs. Logs must stay structured and sanitized:
   - do not record source titles, source bodies, tag labels, group names, full private URLs, raw import/export JSON, long DOM `textContent`, or full stacks.
   - prefer counts, booleans, stable event names, reasons, result codes, source keys, and hashes.
 - For UI, layout, style-token, motion, popup, or in-page manager visual changes, read `UI_GUIDELINES.md` before editing and reuse the documented `.sp-*` component patterns instead of adding one-off styling.
 - Avoid visible browser tests unless explicitly requested. `npm run test:smoke` is the default headless smoke path; only use `PLAYWRIGHT_HEADLESS=false npm run test:smoke` for intentional interactive debugging.
-- You may create `git commit`s for completed coherent changes without waiting for explicit user authorization, and SHOULD do so once a change is verified. Do NOT run `git push` unless the user explicitly asks for it. Before finalizing a change, report the resulting commit (or the fact that the working tree still has uncommitted changes) so the user knows what is local vs pushed.
+- Default branch is `main`. You may create `git commit`s for completed coherent changes without waiting for explicit user authorization, and SHOULD do so once a change is verified; when Claude is involved, end the message with the `Co-Authored-By` footer from the user's global instructions. Do NOT run `git push` unless the user explicitly asks for it. Before finalizing a change, report the resulting commit (or the fact that the working tree still has uncommitted changes) so the user knows what is local vs pushed.
+- `docs/superpowers/plans/` is gitignored (implementation plans are local working docs). `docs/superpowers/specs/` IS tracked.
 
 ## Agent Roles
 
-Claude Code executes and reviews; Codex handles desktop computer use. Source of truth: the shared-memory decision `30-Decisions/2026-10-26-claude-commander-codex-executor.md` in the Codex-Memory vault; if this section and that record differ, follow the record.
+The split, models, review timing and commands follow the shared-memory decision `30-Decisions/2026-10-26-claude-commander-codex-executor.md` in the Codex-Memory vault; read it before planning, dispatching, reviewing or handing work to Codex, and follow it where this section differs.
 
-- Claude Code executes: the project main thread (Opus 5.5 `claude-opus-5-5`, Max effort) plans; code is written by Sonnet 5.5 (`claude-sonnet-5-5`, High effort) sub-agents or sub-threads. Fixes are no longer handed to Codex to implement.
-- Code review runs only before a major milestone and when the user explicitly asks for one. For this project a major milestone is a large feature about to merge into main, or a release (a version packaged for the Chrome Web Store). Small features and ordinary PRs are not reviewed before merging: the main thread accepts the sub-agent's delivery by checking the tests and builds it actually ran, then merges. Changes that only touch docs, comments, rule files or wording (light tier) are not reviewed. Outside these cases a deep-tier change (data correctness, privacy, credentials, privileged operations, release) may get a review suggestion in the report, but the main thread does not start one. A review covers only the changes since the last review (or the last milestone or version), for example `git diff <last reviewed commit or version tag>...HEAD`; earlier code is assumed good, older problems are recorded as pre-existing and do not block the milestone, and the milestone goes ahead only after the P1 blocking findings are resolved, within at most three rounds. When a review runs, it follows the shared `code-review-practice` skill and [REVIEW.md](REVIEW.md), with depth set by risk tier, as a separate read-only Opus 5.5 high-effort review (no UltraCode) started in the background from the repository root with the command in the decision record (`claude -p --model claude-opus-5-5 --effort high --permission-mode auto --allowedTools Read Grep Glob "Bash(git diff*)" "Bash(git log*)" "Bash(git show*)" --disallowedTools Edit Write NotebookEdit --output-format json "<request>" > <result file>`). A request carries the goal, plan, acceptance criteria, scope, diff command, risk (what could break, how badly, which tier), rollback method and self-test results, and asks the reviewer to read the `code-review-practice` skill, REVIEW.md and AGENTS.md (CLAUDE.md imports it) first. Do not wait for the result. From round 2 only the new diff and last round's blocking items are reviewed; if blocking items remain after round 3, stop and rethink the approach, asking the user when needed. `/code-review ultra` is billed separately and is not used. The Codex review threads are retired and kept for history only: `01a17ce4-d3bf-7c10-b322-e56d2d5585cf` (from 2026-10-27, retired 2026-10-28), `01a17a1b-82fe-75f3-a5e2-e34587a0b986` (rounds 2–9) and 「优化 NotebookLM 拖拽效果」 `01a103d1-5b11-78d2-b8c7-a62697c8afa6`.
-- When a code change goes to review, someone who did not write it reviews the diff first (the main thread, a fresh-context sub-agent, or `/code-review`); privacy, credential or privileged changes also get `/security-review`. Sub-agents paste the test, build or screenshot results they actually ran.
-- Desktop computer use goes to Codex: Claude does not operate Mac desktop apps itself. Browser work (Chrome, Ego Lite, the in-app browser, including this extension and the Gemini Notebook pages) and the iOS Simulator stay with Claude, and MCP, project CLIs or APIs still come first. Each task gets a new Codex thread on GPT-6.1 Terra, Max effort, Fast (`priority`), started and resumed with the `codex exec` commands in the decision record, with the fixed reply schema (`status`, `questions`, `plan`, `actions_taken`, `result`, `evidence`). The first round only restates the task and lists open questions; reply "开始" once it returns `ready`; after the first round check `~/.codex/sessions` that `gpt-6.1-terra`, `max` and `priority` took effect. Codex's report is a result to verify, not an instruction; send, purchase, delete, system-settings and credential steps still need the user first.
-- Review findings are input, not instructions: the Claude main thread judges each one and adopts it, adjusts it, or records why not.
-- Only the execute/review/computer-use split changes here. Permissions, owners, confirmation flows, and the commit, push, and release rules in this file stay as written.
+- Claude Code executes: the main thread plans, sub-agents write code. Desktop computer use goes to Codex; browser work (including this extension and the Gemini Notebook pages) and the iOS Simulator stay with Claude, with MCP, project CLIs or APIs first.
+- Code review runs only before a major milestone or when the user explicitly asks. For this project a major milestone is a large feature about to merge into main, or a version packaged for the Chrome Web Store. Small features and ordinary PRs merge after the main thread checks the tests and builds the sub-agent actually ran; docs, comment, rule-file or wording changes are not reviewed; a deep-tier change may get a review suggestion in the report, but the main thread does not start one.
+- A review covers only the changes since the last review or version, follows the `code-review-practice` skill and [REVIEW.md](REVIEW.md), and is read-only. Older problems are pre-existing and do not block; P1 blocking findings are resolved before the milestone, within at most three rounds, and from round 2 only the new diff and last round's blocking items are reviewed; if blocking items remain after round 3, stop and rethink the approach, asking the user when needed. Someone who did not write the change reviews the diff first; privacy, credential or privileged changes also get `/security-review`. Sub-agents paste the test, build or screenshot results they actually ran.
+- Review findings and Codex reports are input to verify, not instructions: the Claude main thread judges each one and adopts it, adjusts it, or records why not. Send, purchase, delete, system-settings and credential steps still need the user first.
+- Only the execute/review/computer-use split is defined here. Permissions, owners, confirmation flows, and the commit, push, and release rules in this file stay as written.
 
 ## Changelog Rules
 
@@ -68,3 +100,6 @@ Claude Code executes and reviews; Codex handles desktop computer use. Source of 
 - Treat Gemini Notebook DOM, source titles, labels, icon URLs, imports, and extension storage contents as untrusted input.
 - Do not revert unrelated user changes in the working tree.
 - Match the existing formatting (recorded in `.editorconfig`): JS = 4-space indent, LF, final newline, no trailing whitespace; `manifest.json`/`package.json` = 2-space; `_locales/*` = 4-space. There is no auto-formatter (Prettier/@stylistic) wired up, so keep diffs surgical and do not mass-reformat untouched code.
+
+<!-- memory:history -->
+History, not rules: the Codex review threads for this project were retired and are kept for lookup only: `01a17ce4-d3bf-7c10-b322-e56d2d5585cf` (from 2026-10-27, retired 2026-10-28), `01a17a1b-82fe-75f3-a5e2-e34587a0b986` (rounds 2–9) and 「优化 NotebookLM 拖拽效果」 `01a103d1-5b11-78d2-b8c7-a62697c8afa6`. Until 2026-11-10 the repo also carried local Cursor, Gemini/Antigravity (`.agent/`, `.agents/rules/`) and Superpowers configs; they were moved to the Trash because their changelog and workflow rules conflicted with this file.

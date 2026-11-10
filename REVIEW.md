@@ -1,6 +1,6 @@
 # Review instructions
 
-Read this before reviewing any change in this repository. Use the shared `code-review-practice` skill (`~/.agents/skills/code-review-practice`) for the general method: tiers, finding format, round limits and answering findings. This file adds only what is specific to this project; the project rules are in [AGENTS.md](AGENTS.md) and [CLAUDE.md](CLAUDE.md), and both override the skill.
+Read this before reviewing any change in this repository. Use the shared `code-review-practice` skill (`~/.agents/skills/code-review-practice`) for the general method: tiers, finding format, round limits and answering findings. This file adds only what is specific to this project; the project rules are in [AGENTS.md](AGENTS.md) (CLAUDE.md only imports it) and override the skill.
 
 ## Deep tier here
 

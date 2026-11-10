@@ -5,7 +5,7 @@
 ## Agent 工作流入口
 
 - `AGENTS.md` 定义当前仓库的修改、隐私和验证边界。按本次任务读取相关目录与 changelog 指南，不把整个目录地图当作每次必读内容。
-- `.agent/skills/` 是旧式 provider 专用资料，按明确需求使用，不作为扩展的默认执行流程。GWS 条目中的可选 helper 未全部随仓库提供，使用前核验当前 CLI；不要自动补装。
+- `AGENTS.md` 也是唯一的文档索引和命令表；`CLAUDE.md` 只用 `@AGENTS.md` 导入它；架构、state、i18n、日志、测试金字塔和坑点在 `docs/ARCHITECTURE.md`，改 runtime 代码时按需读。
 - 执行与审核分工见 `AGENTS.md` 的 Agent Roles：Claude Code 执行；只在大功能准备合并进 main、发布这类重大节点前（只审上次审核以来的改动，更早的问题记为原有问题）和用户明确要求时，才单独开只读的 Opus 5.5 high 审核（不开 UltraCode；按根目录 `REVIEW.md` 的风险分档决定审多细，最多三轮）；小功能和普通 PR 由主线程看子代理的实际测试和构建结果后合并，只改文档、注释、规则文件的改动不审；Mac 桌面应用的 computer use 交给 Codex，浏览器和 iOS 模拟器仍由 Claude 做。
 - `REVIEW.md` 只写本项目审核特有的部分：深档范围、阻断项、每轮必查、不用报的内容、小意见上限；通用审核方法见共享 skill `code-review-practice`；两边都要遵守的项目规则仍在 `AGENTS.md`（`CLAUDE.md` 用 `@AGENTS.md` 引入，`/code-review` 也能读到）。
 
@@ -194,6 +194,8 @@ GeminiNotebook-Source-Management
 │   └── utils.test.js
 ├── docs/
 │   ├── PROJECT_DIRECTORY.md
+│   ├── ARCHITECTURE.md
+│   │   └── 运行面、factory 注册、CSS 作用域、state 结构、i18n、developerLog、测试金字塔和坑点；按需读
 │   ├── DRAG_PERFORMANCE_BASELINE.md
 │   │   └── opt-in 100/500 行 reflow 拖拽 Before/After 基线、验收门槛与重复稳定性结果；不进入发布包
 │   ├── DRAG_REFLOW_STABILITY.md
@@ -243,9 +245,9 @@ GeminiNotebook-Source-Management
 │   └── CI: install -> unit -> smoke -> package -> artifact
 ├── README.md
 ├── CLAUDE.md
-│   └── Claude Code 项目向导；指向 AGENTS.md 等权威规则，并补充 AGENTS.md 未成文的项目惯例（factory 注册模式、Shadow vs global token 边界、locale 命名、developerLog 4 参数签名等）
+│   └── Claude Code 薄入口；只用 `@AGENTS.md` 导入仓库规则
 ├── AGENTS.md
-│   └── 仓库级 agent 指令；每次变更前应读取，要求同步维护 CHANGELOG、本目录文件和 changelog 写作规范
+│   └── 仓库级 agent 指令和唯一文档索引、命令表；每次变更前应读取，要求同步维护 CHANGELOG、本目录文件和 changelog 写作规范
 ├── PRIVACY.md
 ├── UI_GUIDELINES.md
 │   └── 当前 UI 实现事实与后续 UI 变更规范；覆盖 content manager、popup、样式 token、动效和 `.sp-*`/`.popup-*` 组件模式
@@ -262,14 +264,11 @@ GeminiNotebook-Source-Management
 本地 agent/编辑器目录：
 
 ```text
-.agent/
-.agents/
+.claude/
 .codegraph/
-.cursor/
-.superpowers/
 ```
 
-这些目录不是扩展 runtime，通常被 `.gitignore` 或发布脚本排除；只作为本机维护规则或 agent 状态参考。
+这些目录不是扩展 runtime，`.claude/` 未纳入 git、`.codegraph/` 被 `.gitignore` 忽略，发布脚本也不打包；`.claude/` 放 Claude Code 的本地设置、hookify 提醒和 `nsm-discipline` skill。旧的 Cursor、Gemini/Antigravity（`.agent/`、`.agents/`）和 Superpowers 本机配置已于 2026-11-10 移到废纸篓。
 
 ## 2. Runtime 加载树
 
@@ -1124,6 +1123,10 @@ CI: .github/workflows/ci.yml
 │   └── 仓库级 agent 指令；要求每次变更同步检查 CHANGELOG、docs/PROJECT_DIRECTORY.md、content helper 装配、验证矩阵、Gemini Notebook 原生自动化安全和开发者日志脱敏规则
 ├── README.md
 │   └── 用户和开发者入口说明
+├── CLAUDE.md
+│   └── Claude Code 薄入口，只导入 AGENTS.md
+├── docs/ARCHITECTURE.md
+│   └── 架构说明和坑点，改 runtime 代码时按需读
 ├── PRIVACY.md
 │   └── 隐私说明
 ├── UI_GUIDELINES.md
@@ -1160,10 +1163,6 @@ CI: .github/workflows/ci.yml
 │       └── 2026-10-27 只读现场 DOM 核对记录（精选笔记本与自有笔记本分开记录）
 ├── marketing/
 │   └── 宣传资料工作区；记录社媒账号矩阵、内容日历、平台打法、素材清单和 X 本地发布工具，不属于扩展 runtime
-├── CHANGELOG.md
-│   └── 更新日志和写作规范；agent 写入前必须先读顶部规则
-├── .agents/rules/code-style-guide.md
-│   └── 本地 agent 维护规则，不属于发布包
-└── .agent/workflows/always_update_changelog.md
-    └── 本地 changelog 更新规则，不属于发布包
+└── CHANGELOG.md
+    └── 更新日志和写作规范；agent 写入前必须先读顶部规则
 ```
