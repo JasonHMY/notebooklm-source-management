@@ -194,6 +194,10 @@ GeminiNotebook-Source-Management
 │   └── utils.test.js
 ├── docs/
 │   ├── PROJECT_DIRECTORY.md
+│   ├── MAIN_THREAD.md
+│   │   └── 主线程入口：负责和不负责的事、派活和验收、规则在哪、定时任务、接手顺序
+│   ├── PROGRESS.md
+│   │   └── 唯一的进度记录：正在做、暂停及原因、等 Jason 的事、最近一次发布；每做完一件事就更新
 │   ├── ARCHITECTURE.md
 │   │   └── 运行面、factory 注册、CSS 作用域、state 结构、i18n、developerLog、测试金字塔和坑点；按需读
 │   ├── DRAG_PERFORMANCE_BASELINE.md
@@ -1125,6 +1129,10 @@ CI: .github/workflows/ci.yml
 │   └── 用户和开发者入口说明
 ├── CLAUDE.md
 │   └── Claude Code 薄入口，只导入 AGENTS.md
+├── docs/MAIN_THREAD.md
+│   └── 主线程入口，换线程时新线程先读它，再读 docs/PROGRESS.md
+├── docs/PROGRESS.md
+│   └── 唯一的进度记录，每做完一件事就更新
 ├── docs/ARCHITECTURE.md
 │   └── 架构说明和坑点，改 runtime 代码时按需读
 ├── PRIVACY.md

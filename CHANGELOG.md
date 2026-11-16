@@ -27,6 +27,9 @@
 
 ## [Unreleased] (未发布)
 
+### Added
+- **主线程入口和进度文件 (Main Thread Entry and Progress File)**: **影响**: 对扩展使用无可感知变化。按 2026-11-16 起的「上下文落到文件」试点（Jason 2026-11-17 同意铺到所有项目），新建 `docs/MAIN_THREAD.md`，写主线程负责和不负责的事、派活和验收顺序、规则在哪、定时任务（没有）和接手顺序；新建 `docs/PROGRESS.md` 作为唯一的进度记录，写正在做、暂停及原因、等 Jason 的事和最近一次发布，每做完一件事就更新。换线程时新线程读这两份文件就能接手，不再写交接。`docs/PROJECT_DIRECTORY.md` 同步加了这两份文件。
+
 ### Changed
 - **CLAUDE.md 改成只导入 AGENTS.md 的薄入口 (Thin CLAUDE.md Entry)**: **影响**: 对扩展使用无可感知变化。`CLAUDE.md` 从 14KB 缩到只剩一行 `@AGENTS.md` 导入；文档索引和命令表并进 `AGENTS.md`，架构、state 结构、i18n、日志、测试金字塔和坑点搬到新的 `docs/ARCHITECTURE.md` 按需读；原来两边重复的 CSS 类名、版本号一致、自动提交不推送和 Agent 分工各只留 `AGENTS.md` 一处，分工细节改为指向共享决定记录，退役的 Codex 审核线程 ID 移到文件末尾的历史行。旧 changelog 规则与 `AGENTS.md` 冲突的地方以 `AGENTS.md` 为准；本机遗留的 Cursor、Gemini/Antigravity（`.agent/`、`.agents/`）、Superpowers 配置、不再使用的 `cookies.json`、会重建 `.agent/skills` 链接的 `copySkills.js` 和已合并的旧 worktree `trusting-antonelli-2056bb` 已移到废纸篓，`docs/PROJECT_DIRECTORY.md`、`REVIEW.md` 的引用同步更新。
 - **只在重大节点前审核、桌面操作交给 Codex (Review Only at Major Milestones, Desktop Computer Use by Codex)**: **影响**: 对扩展使用无可感知变化。按 2026-10-28 的分工调整，`AGENTS.md` 的 Agent Roles、`CLAUDE.md` 和 `docs/PROJECT_DIRECTORY.md` 改为：只在大功能准备合并进 main、发布这类重大节点前（只审上次审核以来的改动，更早的问题记为原有问题、不卡节点）和用户明确要求时才在后台单独开只读的 Opus 5.5 high 审核（不开 UltraCode），小功能、普通 PR 和只改文档、注释、规则文件的改动不审，由主线程看子代理的实际测试和构建结果后合并，深档改动可在汇报里建议审核；不再送 Codex 审核线程 `01a17ce4-d3bf-7c10-b322-e56d2d5585cf`（保留查历史）；分档、最多三轮、只审增量和意见格式不变。Mac 桌面应用的 computer use 交给 Codex（GPT-6.1 Terra、Max、Fast，每个任务新线程），浏览器和 iOS 模拟器仍由 Claude 做。
