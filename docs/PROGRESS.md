@@ -10,7 +10,7 @@
 - 本地 `main` 比 `origin/main` 多三个提交，都已完成、还没推送：
   - `654e15c`：`CLAUDE.md` 改成只导入 `AGENTS.md` 的薄入口，新建 `docs/ARCHITECTURE.md`，清掉本机遗留的 Cursor、Gemini/Antigravity、Superpowers 配置和 `cookies.json`。
   - `4a1aed9`：删除 `copySkills.js`，把已合并的旧 worktree `trusting-antonelli-2056bb` 移到废纸篓。
-  - `docs: Add main thread entry and progress file`（2026-11-17）：新建这份文件和 `MAIN_THREAD.md`；之后修这两份文件的提交也只在本地。
+  - `docs: Add main thread entry and progress file`（2026-11-17）：新建这份文件和 `MAIN_THREAD.md`；之后修这两份文件、在 `AGENTS.md` 文档索引加入口那一行的提交也只在本地。
 
 ## 暂停的事和原因
 
@@ -19,12 +19,11 @@
 
 ## 等 Jason 的事
 
-- 要不要把上面这三个本地提交推到 `origin/main`。推完看 CI。
+- 要不要把上面这些本地提交推到 `origin/main`。推完看 CI。截至 2026-11-17 他还没表态。
 - 三项可选清理，还没问过他：
   - 删除分支 `claude/trusting-antonelli-2056bb`（已合并，还在）。
   - 移除 Ego Lite 里的旧开发版扩展（ID `ioigjphnbifadmailejddedbnpkhajae`），它指向已经删掉的桌面旧目录。
   - 移除 Codex 浏览器分区里的另一份旧开发版扩展，同样指向桌面旧目录。
-- 要不要在 `AGENTS.md` 的文档索引里加一行指向 `docs/MAIN_THREAD.md`。改 `AGENTS.md` 要他在本线程确认，所以这次只新增了文件。总指挥已说会转告他。
 
 ## 最近一次发布
 
@@ -34,6 +33,7 @@
 
 ## 最近完成
 
+- 2026-11-17：Jason 经总指挥转达同意（“都可以”），在 `AGENTS.md` 文档索引加了一行指向 `docs/MAIN_THREAD.md`，改前备份在 `.claude/backups/2026-11-17/AGENTS.md`。
 - 2026-11-17：按「上下文落到文件」试点，新建 `docs/MAIN_THREAD.md` 和这份进度文件；总指挥的接手测试通过，按它指出的问题修正了这份文件和 `CHANGELOG.md` 里商店描述的状态。
 - 2026-11-16：线程从旧电脑的 Claude 桌面应用迁到 T3 Code。迁移交接在库外 `~/.local/share/agent-sync/handoff/t3-migration-20261116/claude-notebooklm.md`，只作历史参考，现状以这份文件为准。
 - 2026-11-10：`654e15c`、`4a1aed9`（见上）。

@@ -11,6 +11,7 @@ Read the relevant doc BEFORE making a change. Each doc is the source of truth fo
 | Doc | Source of truth for | Read when |
 |---|---|---|
 | **AGENTS.md** (this file) | maintenance + workflow rules, verification matrix, project constraints, native-DOM safety, auto-commit/no-push | before any change (always) |
+| **[docs/MAIN_THREAD.md](docs/MAIN_THREAD.md)** | main-thread role, dispatch and acceptance, scheduled tasks, takeover order; progress lives only in [docs/PROGRESS.md](docs/PROGRESS.md) | taking over this project in a new thread; update PROGRESS.md after each finished task |
 | **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** | runtime surfaces, factory pattern, CSS scopes, state shape, i18n, `developerLog`, test pyramid, non-obvious gotchas | changing runtime code or tests |
 | **[REVIEW.md](REVIEW.md)** | review tiers, project blocking items, per-round checks, what not to report, finding format and round limits | before reviewing a change or sending one for review |
 | **[docs/PROJECT_DIRECTORY.md](docs/PROJECT_DIRECTORY.md)** | project map — directory tree, content-script load order (§2), feature-area tree (§3, fastest locator), test tree | locating code, changing structure/files |
