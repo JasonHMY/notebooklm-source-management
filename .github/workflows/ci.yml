@@ -16,15 +16,23 @@ jobs:
           node-version: 20
           cache: npm
 
-      - run: npm ci
+      - id: deps
+        run: npm ci
 
+      # Each check runs even if an earlier one failed, so one failure does not hide
+      # the others; the job is still marked failed. Only a real prerequisite gates a step.
       - run: npm run lint
-
-      - run: npx playwright install --with-deps chromium
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
 
       - run: npm run test:unit
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+
+      - id: browsers
+        run: npx playwright install --with-deps chromium
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
 
       - run: npm run test:smoke
+        if: ${{ !cancelled() && steps.browsers.outcome == 'success' }}
         env:
           CI: true
           PLAYWRIGHT_HEADLESS: true

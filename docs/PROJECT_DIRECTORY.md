@@ -929,11 +929,11 @@ release zip
 CI: .github/workflows/ci.yml
 ├── checkout
 ├── setup Node 20
-├── npm ci
-├── npm run lint
-├── npx playwright install --with-deps chromium
+├── npm ci（失败时后面的检查都不跑）
+├── npm run lint（以下各项互不阻挡：前一项失败，后面照样跑，job 仍标失败）
 ├── npm run test:unit
-├── npm run test:smoke
+├── npx playwright install --with-deps chromium
+├── npm run test:smoke（只在浏览器装好时跑）
 │   └── env PLAYWRIGHT_HEADLESS=true
 ├── failure 时上传 output/playwright 和 test-results
 ├── always run npm run package

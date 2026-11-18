@@ -11,7 +11,7 @@
     "benchmark:manager": "MANAGER_BENCHMARK=1 playwright test tests/smoke/manager-performance.smoke.spec.js",
     "lint": "eslint src tests scripts eslint.config.js",
     "verify": "npm test -- --runInBand",
-    "verify:full": "npm run lint && npm run test:unit && npm run test:smoke",
+    "verify:full": "s=0; npm run lint || s=1; npm run test:unit || s=1; npm run test:smoke || s=1; exit $s",
     "playwright:install": "playwright install chromium",
     "package": "node scripts/package.js"
   },
