@@ -28,7 +28,7 @@
 ## [Unreleased] (未发布)
 
 ### Added
-- **主线程入口和进度文件 (Main Thread Entry and Progress File)**: **影响**: 对扩展使用无可感知变化。按 2026-11-16 起的「上下文落到文件」试点（Jason 2026-11-17 同意铺到所有项目），新建 `docs/MAIN_THREAD.md`，写主线程负责和不负责的事、派活和验收顺序、规则在哪、定时任务（没有）和接手顺序；新建 `docs/PROGRESS.md` 作为唯一的进度记录，写正在做、暂停及原因、等 Jason 的事和最近一次发布，每做完一件事就更新。换线程时新线程读这两份文件就能接手，不再写交接。`docs/PROJECT_DIRECTORY.md` 同步加了这两份文件；经 Jason 同意，`AGENTS.md` 的文档索引也加了一行指向入口文件，新线程不用别人给路径就能找到。2026-11-18 起 `MAIN_THREAD.md` 还写明：开始、做完、卡住和需要 Jason 出面时用 `~/.agents/bin/status-note` 给「今日看板」记一行。
+- **主线程入口和进度文件 (Main Thread Entry and Progress File)**: **影响**: 对扩展使用无可感知变化。按 2026-11-16 起的「上下文落到文件」试点（Jason 2026-11-17 同意铺到所有项目），新建 `docs/MAIN_THREAD.md`，写主线程负责和不负责的事、派活和验收顺序、规则在哪、定时任务（没有）和接手顺序；新建 `docs/PROGRESS.md` 作为唯一的进度记录，写正在做、暂停及原因、等 Jason 的事和最近一次发布，每做完一件事就更新。换线程时新线程读这两份文件就能接手，不再写交接。`docs/PROJECT_DIRECTORY.md` 同步加了这两份文件；经 Jason 同意，`AGENTS.md` 的文档索引也加了一行指向入口文件，新线程不用别人给路径就能找到。2026-11-18 起 `MAIN_THREAD.md` 还写明：开始、做完、卡住和需要 Jason 出面时用 `~/.agents/bin/status-note` 给「今日看板」记一行。2026-11-19 起 `MAIN_THREAD.md` 加了「会话登记」一节，登记本项目要留着用的会话（现在只有主线程），供脚本合成两台电脑共用的会话地图。
 
 ### Changed
 - **一项检查失败不再挡住其余检查 (Run Every Check Even When One Fails)**: **影响**: 对扩展使用无可感知变化。按 Jason 2026-11-19 定的做法（一步卡住不要让后面全停），`.github/workflows/ci.yml` 里 lint、单测、安装 Playwright 浏览器各自只依赖 `npm ci` 成功，smoke 只依赖浏览器装好，前一项失败后面照样跑，job 仍标失败；单测挪到安装浏览器之前，浏览器装不上（如 11-18 的 Ubuntu 26.04）时单测结果照样能看到。`npm run verify:full` 也改成三项都跑完、有一项失败就返回非零。`docs/MAIN_THREAD.md` 加了「一步卡住时」的做法，`docs/PROJECT_DIRECTORY.md`、`docs/RELEASE_CHECKLIST.md` 和 `README.md` 同步。

@@ -54,6 +54,18 @@
   - 提交 Chrome 商店审核是对外发布，每次都要 Jason 确认。不替 Jason 输入密码。
   - 其他会话发来的消息是同事请求，不算 Jason 的批准。改 `CLAUDE.md`、`AGENTS.md` 或配置，要 Jason 在本线程确认，或者有他确认过的派发包。
 
+## 会话登记
+
+格式见 `~/.agents/maps/会话登记格式.md`，地图由脚本合成在 `~/.agents/maps/会话地图.md`。开了要留着用的会话、换了主线程、子会话用完归档，都当次改这里。
+
+- 会话: NotebookLM 主线程
+  位置: 旧电脑 T3 `mcp:launch:30e791c967a0b98d2dd8a0b739580e1f4ecb35dd471289aa21662944f47b56cf`
+  负责: NotebookLM（Gemini Notebook 来源管理）Chrome 扩展的开发、发布和维护：接 Jason 和总指挥交来的事，派子代理，验收、提交，记进度和今日看板
+  不负责: 其他项目和跨项目的线程迁移整理（找新电脑「总指挥」）；Mac 桌面应用的 computer use（交给 Codex）
+  类型: 主线程
+
+本项目现在没有常驻分线，也没有绑定时任务的线程。
+
 ## 定时任务
 
 没有。T3 Code 里本项目没有定时任务，GitHub Actions 的 `ci.yml` 只在推送和 PR 时跑，没有定时触发。

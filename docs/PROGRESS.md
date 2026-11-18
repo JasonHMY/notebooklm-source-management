@@ -26,6 +26,7 @@
 
 ## 最近完成
 
+- 2026-11-19：按总指挥转来的会话地图做法，在 `MAIN_THREAD.md` 加了「会话登记」，登记主线程一个会话（本项目没有常驻分线和定时线程）；用 `codex archive` 归档了旧电脑 Codex 里用完的审核线程 `01a17ce4-d3bf-7c10-b322-e56d2d5585cf`（可恢复）。刷新后地图里本项目没有 [找不到]，待清理里也没有本项目的会话。
 - 2026-11-19：按 Jason 定的「一步卡住不要让后面全停」，过了一遍流程、CI 和脚本。CI 里 lint、单测、装浏览器只依赖 `npm ci`，smoke 只依赖浏览器装好，单测挪到装浏览器之前；`npm run verify:full` 三项都跑完再报失败；`MAIN_THREAD.md` 加了「一步卡住时」，发布清单写明检查失败也要把其余检查跑完。`package.js` 打包前的内容检查失败就不出 zip，这是该挡的，没改；`.claude/hookify.*` 规则都只提醒不拦截。新电脑第一次跑 smoke 时缺 Playwright 的 Chromium：用默认的 Node 26 跑 `npm run playwright:install` 两次都卡住（第二次下载到 100% 后七分钟没动静），改用 `PATH=/opt/homebrew/opt/node@24/bin:$PATH npx playwright install chromium` 一次装好，原因没再深查。
 - 2026-11-18：Jason 在今日看板同意后推送 CI 修复（`ci.yml` 运行环境固定为 `ubuntu-24.04`）和进度更新，CI run `44282847787` 恢复通过。之前推到 `d935552` 时 run `44271750042` 失败，原因是 `ubuntu-latest` 升到 26.04 后 Playwright 装不了 Chromium。
 - 2026-11-18：核对旧开发版扩展 `ioigjphnbifadmailejddedbnpkhajae`：新旧两台电脑的 Ego Lite 和旧电脑的 Codex 浏览器分区里都已经没有注册，不用移除。旧电脑上只剩两个本地存储数据目录（Ego Lite `Profile 1/Local Extension Settings/` 和 Codex `Partitions/codex-browser-app/Local Extension Settings/` 下同名目录），是死数据，没动。
