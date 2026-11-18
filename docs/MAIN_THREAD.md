@@ -52,3 +52,16 @@
 ## 进度怎么记
 
 进度只记在 [PROGRESS.md](PROGRESS.md) 一处。每做完一件事就更新它，不另建待办或交接文件，也不加钩子。
+
+## 给今日看板记工作状态
+
+Jason 不再收通知，只看「今日看板」。主线程在开始一件事、做完、卡住、需要 Jason 出面这四个时刻，各记一行（Jason 直接在本线程说的事也记）：
+
+```sh
+~/.agents/bin/status-note NotebookLM <doing|follow|you|hold|done> "<做什么>" --note "<一句话>" --thread "notebooklm-source-management-main" --id <固定的键>
+```
+
+- 需要 Jason 出面的 `you` 必须带 `--ask`（没看过前文也能懂的问题）和 `--suggest`（他点一下就能采用的具体答案）。几个独立决定拆成几条。
+- 同一件事沿用同一个 `--id`，以最后一次记录为准；搁置只记一次 `hold`，写清原因和在等什么。子代理不记，由主线程记。
+- 不写凭据。`--list NotebookLM` 可以看当前记录。
+- 完整规则在共享记忆 `10-Profile/Preferences/work-status-notes.md`。这一行只给全局视图用，PROGRESS.md 照旧维护。
