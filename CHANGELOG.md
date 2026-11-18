@@ -36,6 +36,7 @@
 - **商店描述改用 Gemini Notebook 名称 (Rename the Store Listing Description)**: **影响**: Chrome 商店页面的介绍改用 Gemini Notebook 的叫法，扩展本身没有变化。2026-10-28 在开发者后台把英文、简体中文和西班牙文三份描述换成新稿（西班牙文沿用新英文稿）：去掉 “NotebookLM Source Management … inside NotebookLM” 这类旧称并注明原名 NotebookLM，功能列表按 README 现有功能补上搜索和筛选、撤销和重做、导出导入和还原点、三种界面语言以及新旧两个网址，隐私说法不变。已提交审核，审核通过后已发布，Jason 已确认。
 
 ### Fixed
+- **CI 固定在 Ubuntu 24.04 上跑 (Pin CI to Ubuntu 24.04)**: **影响**: 对扩展使用无可感知变化。GitHub 的 `ubuntu-latest` 已升到 26.04，当前 Playwright 不支持在上面安装 Chromium，CI 在安装浏览器这一步就失败（run `44271750042`）。`.github/workflows/ci.yml` 的 `runs-on` 改成 `ubuntu-24.04`。
 - **藏起管理器下方的原生自动分类、排序和全选 (Hide the Native Auto-Label, Sort and Select-All Row)**: **影响**: 插件打开时，管理器下方不再露出 Google 的“按主题自动分类”、“Sort sources”和“Select all”这一行；“添加来源”和网页搜索框照常显示。这一行是 Google 新版页面才有的（10 月 27 日现场核对时首次记录），原来的隐藏规则写于 4 月，没有覆盖到。来源少的时候它就露在管理器正下方，看着像插件自己的按钮：点“全选”会把 Gemini 里所有来源的勾选一起改掉，插件里的勾选却不变，两边就对不上了；点排序只改被藏起来的原生列表，看不到效果；点自动分类会直接让 Google 用 AI 重新分类。`src/content/styles.css` 新增一条单独规则，按已写进真实页面契约测试的 `.label-row` 隐藏这一行（aria-label 会随界面语言变化，所以不用它）；行里如果是旧版带菜单的标签视图入口则保留，旧版“返回列表视图”流程只会点可见的入口。需要用这几个原生控件时，在弹窗里关掉插件即可。
 
 ## [2026-10-27] [26.10.27]

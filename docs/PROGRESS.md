@@ -7,10 +7,8 @@
 ## 正在做
 
 - 没有进行中的开发工作。
-- 本地 `main` 比 `origin/main` 多三个提交，都已完成、还没推送：
-  - `654e15c`：`CLAUDE.md` 改成只导入 `AGENTS.md` 的薄入口，新建 `docs/ARCHITECTURE.md`，清掉本机遗留的 Cursor、Gemini/Antigravity、Superpowers 配置和 `cookies.json`。
-  - `4a1aed9`：删除 `copySkills.js`，把已合并的旧 worktree `trusting-antonelli-2056bb` 移到废纸篓。
-  - `docs: Add main thread entry and progress file`（2026-11-17）：新建这份文件和 `MAIN_THREAD.md`；之后修这两份文件、在 `AGENTS.md` 文档索引加入口那一行的提交也只在本地。
+- 旧电脑（MacBook Pro）上的两份旧开发版扩展正在移除：Jason 2026-11-18 同意，已派给旧电脑上的 Claude 子任务（Sonnet 5.5 high），等它交回结果。这两份扩展只在旧电脑上，新电脑的 Ego Lite 里没有（只有停用的商店版）。
+- CI 修复只在本地：2026-11-18 推送后 CI 失败，原因是 `ubuntu-latest` 已升到 26.04，Playwright 不支持在上面装 Chromium，和推送的文档改动无关。已把 `.github/workflows/ci.yml` 的运行环境固定为 `ubuntu-24.04`，等 Jason 同意再推送验证。
 
 ## 暂停的事和原因
 
@@ -19,23 +17,20 @@
 
 ## 等 Jason 的事
 
-- 要不要把上面这些本地提交推到 `origin/main`。推完看 CI。截至 2026-11-17 他还没表态。
-- 三项可选清理，还没问过他：
-  - 删除分支 `claude/trusting-antonelli-2056bb`（已合并，还在）。
-  - 移除 Ego Lite 里的旧开发版扩展（ID `ioigjphnbifadmailejddedbnpkhajae`），它指向已经删掉的桌面旧目录。
-  - 移除 Codex 浏览器分区里的另一份旧开发版扩展，同样指向桌面旧目录。
+- 要不要推送 CI 修复（固定 `ubuntu-24.04`），推完看 CI 是否恢复通过。
 
 ## 最近一次发布
 
 - 26.10.27 版：2026-10-27 打包提交 Chrome 商店（提交 `e3fcdbe`），审核通过并已上线。
 - 2026-10-28 商店描述改用 Gemini Notebook 名称（英文、简体中文、西班牙文），审核通过，Jason 已确认发布成功。这次没有改扩展本身。
-- 之后推送到 `origin/main` 的顺序：`3a31fbc`（隐藏原生的自动分类、排序和全选那一行，代码修复，记在 `CHANGELOG.md` 的 Unreleased 里，还没发版）→ `ec51e03`（记录商店描述更新）→ `38f4da9`（审核规则，最近一次推送，CI run `40661715212` 通过）。
+- `3a31fbc`（隐藏原生的自动分类、排序和全选那一行，代码修复）已推送，记在 `CHANGELOG.md` 的 Unreleased 里，还没发版。
+- 最近一次推送：2026-11-18 推到 `d935552`，CI run `44271750042` 因运行环境失败（见上）。上一次通过的 CI 是 `38f4da9` 的 run `40661715212`。
 
 ## 最近完成
 
-- 2026-11-18：`MAIN_THREAD.md` 加了给今日看板记工作状态的做法，并把下面开着的事各记了一行 `status-note`。
-
+- 2026-11-18：Jason 在今日看板同意后，把本地 6 个提交推到 `origin/main`；删除旧分支 `claude/trusting-antonelli-2056bb`，删前核对过它唯一的提交 `5cbdca7` 和 main 上的 `3a31fbc` 改动逐行相同。
+- 2026-11-18：`MAIN_THREAD.md` 加了给今日看板记工作状态的做法，并把开着的事各记了一行 `status-note`。
 - 2026-11-17：Jason 经总指挥转达同意（“都可以”），在 `AGENTS.md` 文档索引加了一行指向 `docs/MAIN_THREAD.md`，改前备份在 `.claude/backups/2026-11-17/AGENTS.md`。
 - 2026-11-17：按「上下文落到文件」试点，新建 `docs/MAIN_THREAD.md` 和这份进度文件；总指挥的接手测试通过，按它指出的问题修正了这份文件和 `CHANGELOG.md` 里商店描述的状态。
 - 2026-11-16：线程从旧电脑的 Claude 桌面应用迁到 T3 Code。迁移交接在库外 `~/.local/share/agent-sync/handoff/t3-migration-20261116/claude-notebooklm.md`，只作历史参考，现状以这份文件为准。
-- 2026-11-10：`654e15c`、`4a1aed9`（见上）。
+- 2026-11-10：`654e15c`（`CLAUDE.md` 改成薄入口、新建 `docs/ARCHITECTURE.md`、清掉遗留配置）、`4a1aed9`（删除 `copySkills.js` 和已合并的旧 worktree）。
