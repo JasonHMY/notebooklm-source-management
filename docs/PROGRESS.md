@@ -7,7 +7,6 @@
 ## 正在做
 
 - 没有进行中的开发工作。
-- 旧电脑（MacBook Pro）上的两份旧开发版扩展正在移除：Jason 2026-11-18 同意，已派给旧电脑上的 Claude 子任务（Sonnet 5.5 high），等它交回结果。这两份扩展只在旧电脑上，新电脑的 Ego Lite 里没有（只有停用的商店版）。
 - CI 修复只在本地：2026-11-18 推送后 CI 失败，原因是 `ubuntu-latest` 已升到 26.04，Playwright 不支持在上面装 Chromium，和推送的文档改动无关。已把 `.github/workflows/ci.yml` 的运行环境固定为 `ubuntu-24.04`，等 Jason 同意再推送验证。
 
 ## 暂停的事和原因
@@ -27,6 +26,8 @@
 - 最近一次推送：2026-11-18 推到 `d935552`，CI run `44271750042` 因运行环境失败（见上）。上一次通过的 CI 是 `38f4da9` 的 run `40661715212`。
 
 ## 最近完成
+
+- 2026-11-18：核对旧开发版扩展 `ioigjphnbifadmailejddedbnpkhajae`：新旧两台电脑的 Ego Lite 和旧电脑的 Codex 浏览器分区里都已经没有注册，不用移除。旧电脑上只剩两个本地存储数据目录（Ego Lite `Profile 1/Local Extension Settings/` 和 Codex `Partitions/codex-browser-app/Local Extension Settings/` 下同名目录），是死数据，没动。
 
 - 2026-11-18：Jason 在今日看板同意后，把本地 6 个提交推到 `origin/main`；删除旧分支 `claude/trusting-antonelli-2056bb`，删前核对过它唯一的提交 `5cbdca7` 和 main 上的 `3a31fbc` 改动逐行相同。
 - 2026-11-18：`MAIN_THREAD.md` 加了给今日看板记工作状态的做法，并把开着的事各记了一行 `status-note`。
