@@ -7,7 +7,6 @@
 ## 正在做
 
 - 没有进行中的开发工作。
-- CI 修复只在本地：2026-11-18 推送后 CI 失败，原因是 `ubuntu-latest` 已升到 26.04，Playwright 不支持在上面装 Chromium，和推送的文档改动无关。已把 `.github/workflows/ci.yml` 的运行环境固定为 `ubuntu-24.04`，等 Jason 同意再推送验证。
 
 ## 暂停的事和原因
 
@@ -16,17 +15,18 @@
 
 ## 等 Jason 的事
 
-- 要不要推送 CI 修复（固定 `ubuntu-24.04`），推完看 CI 是否恢复通过。
+- 没有。
 
 ## 最近一次发布
 
 - 26.10.27 版：2026-10-27 打包提交 Chrome 商店（提交 `e3fcdbe`），审核通过并已上线。
 - 2026-10-28 商店描述改用 Gemini Notebook 名称（英文、简体中文、西班牙文），审核通过，Jason 已确认发布成功。这次没有改扩展本身。
 - `3a31fbc`（隐藏原生的自动分类、排序和全选那一行，代码修复）已推送，记在 `CHANGELOG.md` 的 Unreleased 里，还没发版。
-- 最近一次推送：2026-11-18 推到 `d935552`，CI run `44271750042` 因运行环境失败（见上）。上一次通过的 CI 是 `38f4da9` 的 run `40661715212`。
+- 最近一次推送：2026-11-18 推到 `b2e8598`，CI run `44282847787` 通过。
 
 ## 最近完成
 
+- 2026-11-18：Jason 在今日看板同意后推送 CI 修复（`ci.yml` 运行环境固定为 `ubuntu-24.04`）和进度更新，CI run `44282847787` 恢复通过。之前推到 `d935552` 时 run `44271750042` 失败，原因是 `ubuntu-latest` 升到 26.04 后 Playwright 装不了 Chromium。
 - 2026-11-18：核对旧开发版扩展 `ioigjphnbifadmailejddedbnpkhajae`：新旧两台电脑的 Ego Lite 和旧电脑的 Codex 浏览器分区里都已经没有注册，不用移除。旧电脑上只剩两个本地存储数据目录（Ego Lite `Profile 1/Local Extension Settings/` 和 Codex `Partitions/codex-browser-app/Local Extension Settings/` 下同名目录），是死数据，没动。
 
 - 2026-11-18：Jason 在今日看板同意后，把本地 6 个提交推到 `origin/main`；删除旧分支 `claude/trusting-antonelli-2056bb`，删前核对过它唯一的提交 `5cbdca7` 和 main 上的 `3a31fbc` 改动逐行相同。
